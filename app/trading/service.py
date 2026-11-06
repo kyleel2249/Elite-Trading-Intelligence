@@ -1,6 +1,7 @@
 """
 Trading service — single entry point for paper and live orders.
 Every order must pass RiskEngine before any provider submission.
+Paper fills update portfolio + journal (Claire Bennett audit trail).
 """
 from __future__ import annotations
 
@@ -8,18 +9,22 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from sqlalchemy.orm import Session
+
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
+from app.trading.portfolio import PortfolioService
 
 
 class TradingService:
-    def __init__(self, settings: Optional[Settings] = None):
+    def __init__(self, settings: Optional[Settings] = None, db: Optional[Session] = None):
         self.settings = settings or get_settings()
         self.risk = RiskEngine(self.settings)
         self.alpaca = AlpacaClient(self.settings)
         self.binance = BinanceClient(self.settings)
+        self.db = db
 
     def _client_order_id(self) -> str:
         return f"eti-{uuid.uuid4().hex[:20]}"
@@ -41,12 +46,10 @@ class TradingService:
         data_age_seconds: Optional[float] = None,
         data_status: str = "unknown",
         estimated_risk_amount: Optional[float] = None,
+        fill_price_hint: Optional[float] = None,
+        thesis: Optional[str] = None,
+        council_action: Optional[str] = None,
     ) -> dict[str, Any]:
-        """
-        Risk-gated order placement.
-
-        environment: paper | testnet | live
-        """
         client_order_id = self._client_order_id()
         proposal = OrderProposal(
             provider=provider.lower(),
@@ -68,23 +71,36 @@ class TradingService:
 
         decision: RiskDecision = self.risk.evaluate(proposal)
         if not decision.approved:
-            return {
+            result = {
                 "status": "rejected",
                 "client_order_id": client_order_id,
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
                     "notes": decision.notes,
+                    "officer": "Helena Frost",
                 },
                 "provider_response": None,
             }
+            if self.db is not None:
+                PortfolioService(self.db).record_order_event(
+                    client_order_id=client_order_id,
+                    provider=provider,
+                    environment=environment,
+                    symbol=symbol,
+                    side=side,
+                    qty=qty,
+                    status="rejected",
+                    risk_approved=False,
+                    risk_notes=decision.notes,
+                    thesis=thesis,
+                    council_action=council_action,
+                )
+            return result
 
-        # Submit only after risk approval
         try:
             if provider.lower() == "alpaca":
-                # Force paper client when environment is paper
                 if environment.lower() == "paper" and not self.settings.alpaca_paper:
-                    # Safety: do not accidentally hit live Alpaca when caller asked for paper
                     return {
                         "status": "rejected",
                         "client_order_id": client_order_id,
@@ -92,6 +108,7 @@ class TradingService:
                             "decision": "REJECTED",
                             "reasons": ["Alpaca live credentials configured but paper environment requested"],
                             "notes": "Mismatch between environment and ALPACA_PAPER",
+                            "officer": "Helena Frost",
                         },
                         "provider_response": None,
                     }
@@ -103,16 +120,29 @@ class TradingService:
                     limit_price=limit_price,
                     client_order_id=client_order_id,
                 )
+                fill_price = fill_price_hint
             elif provider.lower() == "binance":
                 use_testnet = environment.lower() in ("paper", "testnet")
-                client = BinanceClient(self.settings, use_testnet=use_testnet)
-                resp = await client.submit_order(
-                    symbol=symbol,
-                    side=side,
-                    qty=qty,
-                    order_type=order_type.upper(),
-                    client_order_id=client_order_id,
-                )
+                # Paper without keys: simulate fill for journal/positions
+                if use_testnet and not self.binance.configured and fill_price_hint is not None:
+                    resp = {
+                        "simulated": True,
+                        "symbol": symbol.upper(),
+                        "side": side.upper(),
+                        "executedQty": str(qty),
+                        "status": "FILLED",
+                    }
+                    fill_price = fill_price_hint
+                else:
+                    client = BinanceClient(self.settings, use_testnet=use_testnet)
+                    resp = await client.submit_order(
+                        symbol=symbol,
+                        side=side,
+                        qty=qty,
+                        order_type=order_type.upper(),
+                        client_order_id=client_order_id,
+                    )
+                    fill_price = fill_price_hint
             else:
                 return {
                     "status": "rejected",
@@ -121,11 +151,12 @@ class TradingService:
                         "decision": "REJECTED",
                         "reasons": [f"Unknown provider: {provider}"],
                         "notes": "",
+                        "officer": "Helena Frost",
                     },
                     "provider_response": None,
                 }
 
-            return {
+            result = {
                 "status": "submitted",
                 "client_order_id": client_order_id,
                 "environment": environment,
@@ -133,10 +164,32 @@ class TradingService:
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
                     "notes": decision.notes,
+                    "officer": "Helena Frost",
                 },
                 "provider_response": resp,
                 "submitted_at": datetime.now(timezone.utc).isoformat(),
             }
+
+            if self.db is not None:
+                # For paper/sim: treat as filled when we have a price hint
+                status = "filled" if fill_price is not None and environment.lower() in ("paper", "testnet") else "submitted"
+                PortfolioService(self.db).record_order_event(
+                    client_order_id=client_order_id,
+                    provider=provider,
+                    environment=environment,
+                    symbol=symbol,
+                    side=side,
+                    qty=qty,
+                    status=status,
+                    fill_price=fill_price,
+                    risk_approved=True,
+                    risk_notes=decision.notes,
+                    thesis=thesis,
+                    council_action=council_action,
+                    provider_order_id=str(resp.get("orderId") or resp.get("id") or "") or None,
+                )
+
+            return result
         except Exception as e:
             return {
                 "status": "error",
@@ -145,6 +198,7 @@ class TradingService:
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
                     "notes": decision.notes,
+                    "officer": "Helena Frost",
                 },
                 "error": str(e),
                 "provider_response": None,

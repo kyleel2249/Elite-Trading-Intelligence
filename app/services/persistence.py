@@ -1,4 +1,4 @@
-"""Persist market snapshots, orders, and council decisions."""
+"""Persist market snapshots, orders, council decisions, forecasts."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import MarketSnapshot, OrderRecord, RiskEvent, CouncilDecisionRecord
+from app.models import MarketSnapshot, OrderRecord, RiskEvent, CouncilDecisionRecord, ForecastRecord
 
 
 def save_snapshot(db: Session, snap: dict[str, Any]) -> MarketSnapshot:
@@ -39,8 +39,14 @@ def save_order(db: Session, payload: dict[str, Any]) -> OrderRecord:
         order_type=payload.get("order_type", "market"),
         qty=float(payload.get("qty") or 0),
         limit_price=payload.get("limit_price"),
+        fill_price=payload.get("fill_price"),
         status=payload.get("status", "unknown"),
-        provider_order_id=str((payload.get("provider_response") or {}).get("orderId") or (payload.get("provider_response") or {}).get("id") or "") or None,
+        provider_order_id=str(
+            (payload.get("provider_response") or {}).get("orderId")
+            or (payload.get("provider_response") or {}).get("id")
+            or ""
+        )
+        or None,
         risk_approved=bool(risk.get("decision") == "APPROVED"),
         risk_notes=str(risk.get("notes") or risk.get("reasons") or ""),
     )
@@ -50,7 +56,7 @@ def save_order(db: Session, payload: dict[str, Any]) -> OrderRecord:
     return row
 
 
-def save_council_decision(db: Session, symbol: str, provider: str, decision: dict[str, Any]) -> "CouncilDecisionRecord":
+def save_council_decision(db: Session, symbol: str, provider: str, decision: dict[str, Any]) -> CouncilDecisionRecord:
     row = CouncilDecisionRecord(
         symbol=symbol,
         provider=provider,
@@ -67,7 +73,30 @@ def save_council_decision(db: Session, symbol: str, provider: str, decision: dic
     return row
 
 
-def log_risk_event(db: Session, event_type: str, severity: str, message: str, context: Optional[dict] = None) -> RiskEvent:
+def save_forecast(db: Session, forecast: dict[str, Any]) -> ForecastRecord:
+    scenarios = forecast.get("scenarios") or {}
+    row = ForecastRecord(
+        symbol=forecast.get("symbol", ""),
+        provider=forecast.get("provider", ""),
+        horizon=forecast.get("horizon", "intraday"),
+        model_version=forecast.get("model_version", "v0-scaffold"),
+        analyst=forecast.get("analyst", "Lars Hagen"),
+        bull_price=scenarios.get("bull"),
+        base_price=scenarios.get("base"),
+        bear_price=scenarios.get("bear"),
+        expected_vol=forecast.get("expected_vol"),
+        confidence=float(forecast.get("confidence") or 0),
+        payload=forecast,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def log_risk_event(
+    db: Session, event_type: str, severity: str, message: str, context: Optional[dict] = None
+) -> RiskEvent:
     row = RiskEvent(event_type=event_type, severity=severity, message=message, context=context)
     db.add(row)
     db.commit()
