@@ -1,6 +1,6 @@
 """
-AI Trading Council — evidence-based specialists + Risk Officer veto.
-Does not generate recommendations from a single price tick.
+AI Trading Council — elite named specialists + Risk Officer veto.
+Evidence-weighted aggregation; never a blind vote count.
 """
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
+
+from app.intelligence.traders import ELITE_TRADERS, EliteTraderProfile
 
 
 class Action(str, Enum):
@@ -23,10 +25,13 @@ class Action(str, Enum):
 @dataclass
 class SpecialistReport:
     role: str
+    trader_name: str
+    trader_id: str
     analysis: str
     bias: str  # bullish | bearish | neutral
-    confidence: float  # 0-1
+    confidence: float
     evidence: list[str] = field(default_factory=list)
+    methods_applied: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -40,31 +45,15 @@ class CouncilDecision:
     specialist_reports: list[SpecialistReport]
     risk_veto: bool
     risk_notes: list[str]
+    risk_officer: str
     contradictory_signals: list[str]
     data_quality: str
+    methodology_notes: list[str]
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 class TradingCouncil:
-    """
-    12-role council. Aggregation is evidence-weighted, not simple majority vote.
-    Risk Management Officer has veto.
-    """
-
-    ROLES = [
-        "Chief Investment Strategist",
-        "Technical Analysis Specialist",
-        "Fundamental Analysis Specialist",
-        "Macroeconomic Analyst",
-        "Quantitative Researcher",
-        "Market Structure Analyst",
-        "Liquidity Analyst",
-        "News and Sentiment Analyst",
-        "Predictive Intelligence Analyst",
-        "Risk Management Officer",
-        "Execution Analyst",
-        "Portfolio Auditor",
-    ]
+    """12 elite specialists. Helena Frost (Risk) has absolute veto."""
 
     def analyse(
         self,
@@ -81,112 +70,137 @@ class TradingCouncil:
     ) -> CouncilDecision:
         context = context or {}
         reports: list[SpecialistReport] = []
+        methodology_notes = [
+            "Aggregation is evidence-weighted confidence, not headcount voting",
+            "Risk Management Officer (Helena Frost) holds veto authority",
+            "Venue and quote-currency identity are preserved; no silent cross-venue substitution",
+        ]
 
-        # --- Insufficient data gate ---
         if price is None or data_status in ("unavailable", "invalid") or not data_status:
+            risk = ELITE_TRADERS["risk"]
             return CouncilDecision(
                 action=Action.INSUFFICIENT_DATA,
                 confidence=0.0,
-                summary="Essential market data missing or invalid; no actionable recommendation.",
+                summary="Essential market data missing or invalid; council abstains.",
                 specialist_reports=[],
                 risk_veto=True,
-                risk_notes=["Insufficient data"],
+                risk_notes=["Insufficient data — veto by Risk Management Officer"],
+                risk_officer=f"{risk.name} ({risk.title})",
                 contradictory_signals=[],
                 data_quality=data_status or "unavailable",
+                methodology_notes=methodology_notes,
             )
 
-        if data_status in ("stale", "incomplete"):
-            # Still produce analysis but force WAIT / NO_TRADE path later
-            pass
-
-        # Technical
-        tech_bias, tech_conf, tech_ev = self._technical(klines, price)
+        # Elena Varga — Technical
+        ta = ELITE_TRADERS["ta"]
+        tech_bias, tech_conf, tech_ev, tech_methods = self._technical(klines, price, ta)
         reports.append(
             SpecialistReport(
-                role="Technical Analysis Specialist",
-                analysis=f"Trend/momentum assessment for {symbol}",
+                role=ta.title,
+                trader_name=ta.name,
+                trader_id=ta.id,
+                analysis=f"{ta.mandate} Applied to {symbol} @ {price}",
                 bias=tech_bias,
                 confidence=tech_conf,
                 evidence=tech_ev,
-                assumptions=["OHLCV series is continuous and correctly timestamped"],
-                limitations=["No multi-timeframe confluence yet"],
+                methods_applied=tech_methods,
+                assumptions=["OHLCV continuity", "Timestamps normalized to UTC"],
+                limitations=["Single primary timeframe unless multi-series supplied"],
             )
         )
 
-        # Liquidity / structure from order book
-        liq_bias, liq_conf, liq_ev = self._liquidity(order_book)
+        # Jamal Reed — Liquidity
+        liq = ELITE_TRADERS["liquidity"]
+        liq_bias, liq_conf, liq_ev, liq_methods = self._liquidity(order_book, liq)
         reports.append(
             SpecialistReport(
-                role="Liquidity Analyst",
-                analysis="Order-book imbalance and spread assessment",
+                role=liq.title,
+                trader_name=liq.name,
+                trader_id=liq.id,
+                analysis=liq.mandate,
                 bias=liq_bias,
                 confidence=liq_conf,
                 evidence=liq_ev,
-                assumptions=["Book snapshot is representative of near-term liquidity"],
-                limitations=["Single snapshot; no hidden liquidity"],
+                methods_applied=liq_methods,
+                assumptions=["Book snapshot approximates near-term liquidity"],
+                limitations=["No hidden liquidity; single snapshot"],
             )
         )
 
+        # Nadia Petrova — Structure
+        st = ELITE_TRADERS["structure"]
         reports.append(
             SpecialistReport(
-                role="Market Structure Analyst",
-                analysis="Venue and microstructure notes",
+                role=st.title,
+                trader_name=st.name,
+                trader_id=st.id,
+                analysis=st.mandate,
                 bias="neutral",
-                confidence=0.4,
-                evidence=[f"Provider={provider}", f"Data status={data_status}"],
+                confidence=0.45,
+                evidence=[
+                    f"Provider={provider}",
+                    f"Data status={data_status}",
+                    "Quote identity preserved (no auto USD/USDT conversion)",
+                ],
+                methods_applied=st.methods[:3],
                 assumptions=[],
-                limitations=["Cross-venue comparison not yet active"],
+                limitations=["Cross-venue microstructure comparison pending fuller feeds"],
             )
         )
 
-        # Placeholders for roles that need more data feeds (honest about limits)
-        for role in [
-            "Fundamental Analysis Specialist",
-            "Macroeconomic Analyst",
-            "News and Sentiment Analyst",
-            "Predictive Intelligence Analyst",
-            "Quantitative Researcher",
-            "Chief Investment Strategist",
-            "Execution Analyst",
-            "Portfolio Auditor",
-        ]:
+        # Roles that require additional feeds — honest abstention with profile methods listed
+        for key in ("fa", "macro", "sentiment", "predictive", "quant", "cis", "execution", "auditor"):
+            t = ELITE_TRADERS[key]
             reports.append(
                 SpecialistReport(
-                    role=role,
-                    analysis="Insufficient specialized inputs for full analysis in this version",
+                    role=t.title,
+                    trader_name=t.name,
+                    trader_id=t.id,
+                    analysis=(
+                        f"{t.mandate} "
+                        "Specialized inputs incomplete in this run; stance remains neutral per evidence standards."
+                    ),
                     bias="neutral",
                     confidence=0.2,
                     evidence=[],
+                    methods_applied=t.methods[:2],
                     assumptions=[],
-                    limitations=["Required data feed or model not yet connected"],
+                    limitations=t.evidence_standards + ["Required feed or model not fully connected in this build"],
                 )
             )
 
-        # Risk officer
+        # Helena Frost — Risk (veto)
+        risk = ELITE_TRADERS["risk"]
         risk_notes: list[str] = []
         risk_veto = False
         if data_status in ("stale", "delayed", "invalid", "incomplete"):
             risk_notes.append(f"Data quality concern: {data_status}")
-            risk_veto = True
+            if data_status in ("stale", "invalid", "incomplete"):
+                risk_veto = True
         if order_book and order_book.get("spread_bps") is not None and order_book["spread_bps"] > 50:
-            risk_notes.append(f"Wide spread: {order_book['spread_bps']:.1f} bps")
+            risk_notes.append(f"Wide spread: {order_book['spread_bps']:.1f} bps — execution risk elevated")
         if context.get("daily_realized_pnl_pct", 0) <= -3:
-            risk_notes.append("Daily loss limit proximity")
+            risk_notes.append("Daily loss limit proximity — veto")
+            risk_veto = True
+        if context.get("current_drawdown_pct", 0) >= 10:
+            risk_notes.append("Portfolio drawdown limit — veto")
             risk_veto = True
 
         reports.append(
             SpecialistReport(
-                role="Risk Management Officer",
-                analysis="Risk veto evaluation",
+                role=risk.title,
+                trader_name=risk.name,
+                trader_id=risk.id,
+                analysis=risk.mandate,
                 bias="neutral",
-                confidence=0.9,
-                evidence=risk_notes or ["No hard risk breach detected from available inputs"],
+                confidence=0.95,
+                evidence=risk_notes or ["No hard risk breach from available inputs"],
+                methods_applied=risk.methods,
                 assumptions=[],
                 limitations=[],
             )
         )
 
-        # Aggregation (not majority vote)
         bull = sum(r.confidence for r in reports if r.bias == "bullish")
         bear = sum(r.confidence for r in reports if r.bias == "bearish")
         total = bull + bear + 1e-9
@@ -194,24 +208,28 @@ class TradingCouncil:
 
         contradictory = []
         if bull > 0.3 and bear > 0.3:
-            contradictory.append("Mixed technical vs liquidity signals")
+            contradictory.append("Mixed technical vs liquidity evidence")
 
-        if risk_veto or data_status in ("stale", "invalid", "incomplete"):
-            action = Action.NO_TRADE if risk_veto else Action.WAIT
+        if risk_veto:
+            action = Action.NO_TRADE
+            conf = 0.25
+            summary = f"Risk veto by {risk.name}. No actionable recommendation."
+        elif data_status in ("stale", "delayed"):
+            action = Action.WAIT
             conf = 0.3
-            summary = "Risk or data quality blocks actionable recommendation."
+            summary = "Data not fresh enough for aggressive action; wait."
         elif net > 0.45:
             action = Action.BUY if net < 0.7 else Action.STRONG_BUY
             conf = min(0.85, abs(net))
-            summary = f"Evidence leans bullish (net score {net:.2f})."
+            summary = f"Evidence-weighted stance bullish (net {net:.2f}). Strategist synthesis pending fuller desks."
         elif net < -0.45:
             action = Action.SELL if net > -0.7 else Action.STRONG_SELL
             conf = min(0.85, abs(net))
-            summary = f"Evidence leans bearish (net score {net:.2f})."
+            summary = f"Evidence-weighted stance bearish (net {net:.2f})."
         else:
             action = Action.WAIT
             conf = 0.4
-            summary = "No clear edge after evidence aggregation."
+            summary = "No clear edge after evidence aggregation across desks."
 
         return CouncilDecision(
             action=action,
@@ -220,31 +238,42 @@ class TradingCouncil:
             specialist_reports=reports,
             risk_veto=risk_veto,
             risk_notes=risk_notes,
+            risk_officer=f"{risk.name} ({risk.title})",
             contradictory_signals=contradictory,
             data_quality=data_status,
+            methodology_notes=methodology_notes,
         )
 
     def _technical(
-        self, klines: Optional[list[dict[str, Any]]], price: float
-    ) -> tuple[str, float, list[str]]:
+        self,
+        klines: Optional[list[dict[str, Any]]],
+        price: float,
+        profile: EliteTraderProfile,
+    ) -> tuple[str, float, list[str], list[str]]:
+        methods = ["Moving-average structure and slope", "Momentum (rate of change)"]
         if not klines or len(klines) < 5:
-            return "neutral", 0.25, ["Insufficient candles for trend"]
+            return "neutral", 0.25, ["Insufficient candles for structure"], methods
         closes = [k["close"] for k in klines if k.get("data_status") != "invalid"]
         if len(closes) < 5:
-            return "neutral", 0.25, ["Valid closes insufficient"]
+            return "neutral", 0.25, ["Valid closes insufficient"], methods
         sma = sum(closes[-5:]) / 5
         prev = closes[-5]
         chg = (closes[-1] - prev) / prev if prev else 0
-        evidence = [f"5-period SMA={sma:.4f}", f"Price={price:.4f}", f"5-bar change={chg:.2%}"]
+        evidence = [f"5-period SMA={sma:.6g}", f"Price={price:.6g}", f"5-bar change={chg:.2%}"]
         if price > sma and chg > 0.01:
-            return "bullish", 0.55, evidence
+            return "bullish", 0.55, evidence, methods
         if price < sma and chg < -0.01:
-            return "bearish", 0.55, evidence
-        return "neutral", 0.35, evidence
+            return "bearish", 0.55, evidence, methods
+        return "neutral", 0.35, evidence, methods
 
-    def _liquidity(self, book: Optional[dict[str, Any]]) -> tuple[str, float, list[str]]:
+    def _liquidity(
+        self,
+        book: Optional[dict[str, Any]],
+        profile: EliteTraderProfile,
+    ) -> tuple[str, float, list[str], list[str]]:
+        methods = ["Top-of-book and depth imbalance", "Spread in bps"]
         if not book:
-            return "neutral", 0.2, ["No order book"]
+            return "neutral", 0.2, ["No order book"], methods
         imb = book.get("imbalance") or 0
         spread_bps = book.get("spread_bps")
         evidence = [
@@ -254,7 +283,7 @@ class TradingCouncil:
             f"AskVol={book.get('ask_volume')}",
         ]
         if imb > 0.25:
-            return "bullish", 0.5, evidence
+            return "bullish", 0.5, evidence, methods
         if imb < -0.25:
-            return "bearish", 0.5, evidence
-        return "neutral", 0.35, evidence
+            return "bearish", 0.5, evidence, methods
+        return "neutral", 0.35, evidence, methods

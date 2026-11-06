@@ -1,4 +1,12 @@
 from app.intelligence.council import TradingCouncil, Action
+from app.intelligence.traders import ELITE_TRADERS, list_trader_profiles
+
+
+def test_twelve_elite_traders():
+    assert len(ELITE_TRADERS) == 12
+    assert len(list_trader_profiles()) == 12
+    assert ELITE_TRADERS["risk"].veto_power is True
+    assert ELITE_TRADERS["risk"].name == "Helena Frost"
 
 
 def test_insufficient_data():
@@ -13,6 +21,7 @@ def test_insufficient_data():
     )
     assert d.action == Action.INSUFFICIENT_DATA
     assert d.risk_veto
+    assert "Helena Frost" in d.risk_officer
 
 
 def test_stale_data_blocks():
@@ -29,7 +38,7 @@ def test_stale_data_blocks():
     assert d.risk_veto or d.data_quality == "stale"
 
 
-def test_council_with_book_and_klines():
+def test_council_named_specialists():
     c = TradingCouncil()
     klines = [
         {"open": 1, "high": 1.1, "low": 0.9, "close": 1.05, "data_status": "valid"},
@@ -50,4 +59,8 @@ def test_council_with_book_and_klines():
         klines=klines,
     )
     assert d.action != Action.INSUFFICIENT_DATA
-    assert len(d.specialist_reports) >= 10
+    names = {r.trader_name for r in d.specialist_reports}
+    assert "Elena Varga" in names
+    assert "Jamal Reed" in names
+    assert "Helena Frost" in names
+    assert any(r.methods_applied for r in d.specialist_reports)

@@ -7,11 +7,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app import __version__
 from app.config import get_settings, Settings
-from app.database import init_db
+from app.database import init_db, get_db
 from app.schemas import HealthResponse
 from app.risk.engine import RiskEngine, OrderProposal
 from app.integrations.alpaca import AlpacaClient
@@ -19,12 +20,23 @@ from app.integrations.binance import BinanceClient
 from app.trading.service import TradingService
 from app.market.service import MarketService
 from app.intelligence.council import TradingCouncil
+from app.intelligence.traders import list_trader_profiles
+from app.streaming.manager import stream_hub
+from app.services.persistence import save_snapshot, save_council_decision, save_order
+from app.models import CouncilDecisionRecord, OrderRecord, MarketSnapshot
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Start public Binance streams; Alpaca only if configured
+    try:
+        await stream_hub.start(["btcusdt", "ethusdt"])
+    except Exception:
+        # Non-fatal: REST paths still work
+        pass
     yield
+    await stream_hub.stop()
 
 
 app = FastAPI(
@@ -91,18 +103,34 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "alpaca": await alpaca.health(),
         "binance": await binance.health(),
         "live_trading_enabled": settings.live_trading_enabled,
+        "streams": stream_hub.status(),
     }
+
+
+@app.get("/api/providers/binance/stream/status")
+async def binance_stream_status():
+    return stream_hub.binance.status()
+
+
+@app.get("/api/providers/alpaca/stream/status")
+async def alpaca_stream_status():
+    return stream_hub.alpaca.status()
 
 
 @app.get("/api/market/snapshot")
 async def market_snapshot(
     provider: str = "binance",
     symbol: str = "BTCUSDT",
+    persist: bool = True,
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
 ):
     svc = MarketService(settings)
     try:
-        return await svc.get_snapshot(provider, symbol)
+        snap = await svc.get_snapshot(provider, symbol)
+        if persist and snap.get("price") is not None:
+            save_snapshot(db, snap)
+        return snap
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -135,11 +163,19 @@ async def market_history(
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/api/intelligence/traders")
+async def intelligence_traders():
+    """Named elite trader profiles and methodologies."""
+    return {"traders": list_trader_profiles()}
+
+
 @app.get("/api/intelligence/council")
 async def run_council(
     symbol: str = "BTCUSDT",
     provider: str = "binance",
+    persist: bool = True,
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
 ):
     mkt = MarketService(settings)
     try:
@@ -160,29 +196,63 @@ async def run_council(
             order_book=book,
             klines=klines,
         )
-        return {
+        payload = {
             "action": decision.action.value,
             "confidence": decision.confidence,
             "summary": decision.summary,
             "risk_veto": decision.risk_veto,
             "risk_notes": decision.risk_notes,
+            "risk_officer": decision.risk_officer,
             "contradictory_signals": decision.contradictory_signals,
             "data_quality": decision.data_quality,
+            "methodology_notes": decision.methodology_notes,
             "timestamp": decision.timestamp,
             "specialists": [
                 {
+                    "trader_id": r.trader_id,
+                    "trader_name": r.trader_name,
                     "role": r.role,
                     "bias": r.bias,
                     "confidence": r.confidence,
                     "analysis": r.analysis,
                     "evidence": r.evidence,
+                    "methods_applied": r.methods_applied,
                     "limitations": r.limitations,
                 }
                 for r in decision.specialist_reports
             ],
         }
+        if persist:
+            save_council_decision(db, symbol, provider, payload)
+            if snap.get("price") is not None:
+                save_snapshot(db, snap)
+        return payload
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/intelligence/decisions")
+async def list_decisions(limit: int = 20, db: Session = Depends(get_db)):
+    rows = (
+        db.query(CouncilDecisionRecord)
+        .order_by(CouncilDecisionRecord.created_at.desc())
+        .limit(min(limit, 100))
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "symbol": r.symbol,
+            "provider": r.provider,
+            "action": r.action,
+            "confidence": r.confidence,
+            "summary": r.summary,
+            "risk_veto": r.risk_veto,
+            "data_quality": r.data_quality,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
 
 
 @app.get("/api/risk/evaluate")
@@ -218,9 +288,13 @@ async def evaluate_risk_demo(
 
 
 @app.post("/api/trading/order")
-async def place_order(req: OrderRequest, settings: Settings = Depends(get_settings)):
+async def place_order(
+    req: OrderRequest,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
     service = TradingService(settings)
-    return await service.place_order(
+    result = await service.place_order(
         provider=req.provider,
         environment=req.environment,
         symbol=req.symbol,
@@ -235,3 +309,41 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
         data_age_seconds=req.data_age_seconds,
         data_status=req.data_status,
     )
+    # Persist attempt
+    try:
+        save_order(
+            db,
+            {
+                **result,
+                "provider": req.provider,
+                "environment": req.environment,
+                "symbol": req.symbol,
+                "side": req.side,
+                "qty": req.qty,
+                "order_type": req.order_type,
+                "limit_price": req.limit_price,
+            },
+        )
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/api/paper-trading/history")
+async def paper_history(limit: int = 50, db: Session = Depends(get_db)):
+    rows = db.query(OrderRecord).order_by(OrderRecord.created_at.desc()).limit(min(limit, 200)).all()
+    return [
+        {
+            "client_order_id": r.client_order_id,
+            "provider": r.provider,
+            "environment": r.environment,
+            "symbol": r.symbol,
+            "side": r.side,
+            "qty": r.qty,
+            "status": r.status,
+            "risk_approved": r.risk_approved,
+            "risk_notes": r.risk_notes,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]

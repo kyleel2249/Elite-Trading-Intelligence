@@ -24,13 +24,13 @@
     .card h2 { margin: 0 0 .45rem; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
     .muted { color: var(--muted); font-size: .85rem; }
     .ok { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
-    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-    th, td { text-align: left; padding: .4rem .3rem; border-bottom: 1px solid var(--border); }
     input, select { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: .4rem .55rem; border-radius: 8px; }
     .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
     .panel { display: none; } .panel.active { display: block; }
     footer { margin-top: 1.5rem; padding: 1rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--border); }
-    pre { background: #0f172a; padding: .75rem; border-radius: 8px; overflow: auto; font-size: .78rem; }
+    pre { background: #0f172a; padding: .75rem; border-radius: 8px; overflow: auto; font-size: .78rem; max-height: 420px; }
+    .trader { border-left: 3px solid var(--accent); padding-left: .75rem; margin: .6rem 0; }
+    .trader strong { display: block; }
   </style>
 </head>
 <body>
@@ -44,6 +44,7 @@
       <button data-panel="overview" class="active">Overview</button>
       <button data-panel="market">Market</button>
       <button data-panel="council">Council</button>
+      <button data-panel="traders">Elite Desk</button>
       <button data-panel="risk">Risk</button>
       <button data-panel="providers">Providers</button>
     </nav>
@@ -51,10 +52,10 @@
   <main>
     <section id="overview" class="panel active">
       <div class="grid">
-        <div class="card"><h2>System</h2><p class="ok" id="sys-status">Loading…</p><p class="muted">Risk engine has final veto</p></div>
+        <div class="card"><h2>System</h2><p class="ok" id="sys-status">Loading…</p><p class="muted">Helena Frost — Risk veto authority</p></div>
         <div class="card"><h2>Alpaca</h2><p id="alpaca-status">—</p></div>
         <div class="card"><h2>Binance</h2><p id="binance-status">—</p></div>
-        <div class="card"><h2>Live Trading</h2><p>{% if live_trading_enabled %}<span class="ok">Enabled (gated)</span>{% else %}<span class="warn">Disabled</span>{% endif %}</p></div>
+        <div class="card"><h2>Streams</h2><p id="stream-status">—</p></div>
       </div>
     </section>
 
@@ -76,9 +77,16 @@
       <div class="card">
         <div class="row">
           <input id="c-symbol" value="BTCUSDT" />
-          <button id="c-run">Run Council</button>
+          <button id="c-run">Run Full Council</button>
         </div>
         <pre id="c-out">—</pre>
+      </div>
+    </section>
+
+    <section id="traders" class="panel">
+      <div class="card">
+        <h2>Elite Trading Desk — Profiles &amp; Methods</h2>
+        <div id="traders-list" class="muted">Loading profiles…</div>
       </div>
     </section>
 
@@ -96,10 +104,10 @@
     </section>
 
     <section id="providers" class="panel">
-      <div class="card"><h2>Provider Diagnostics</h2><pre id="p-out">—</pre></div>
+      <div class="card"><h2>Provider &amp; Stream Diagnostics</h2><pre id="p-out">—</pre></div>
     </section>
   </main>
-  <footer>Research &amp; trading software. Live trading is risk-gated. No fabricated prices.</footer>
+  <footer>Research &amp; trading software. Live trading is risk-gated. Elite desk methods are evidence-bound.</footer>
   <script>
     const $ = (id) => document.getElementById(id);
     document.querySelectorAll('nav button').forEach(btn => {
@@ -119,10 +127,30 @@
         const p = await (await fetch('/api/providers/status')).json();
         $('alpaca-status').textContent = (p.alpaca && p.alpaca.status) || '—';
         $('binance-status').textContent = (p.binance && p.binance.status) || '—';
+        const st = p.streams || {};
+        const b = st.binance || {};
+        $('stream-status').textContent = b.connected ? ('Binance WS connected (' + (b.subscriptions||[]).length + ' streams)') : 'Binance WS offline';
+        $('stream-status').className = b.connected ? 'ok' : 'warn';
         $('p-out').textContent = JSON.stringify(p, null, 2);
       } catch (e) {
         $('sys-status').textContent = 'Error';
         $('sys-status').className = 'bad';
+      }
+    }
+
+    async function loadTraders() {
+      try {
+        const r = await (await fetch('/api/intelligence/traders')).json();
+        const el = $('traders-list');
+        el.innerHTML = (r.traders || []).map(t => `
+          <div class="trader">
+            <strong>${t.name} — ${t.title}${t.veto_power ? ' (VETO)' : ''}</strong>
+            <div class="muted">${t.mandate}</div>
+            <div class="muted"><em>Methods:</em> ${(t.methods||[]).join('; ')}</div>
+            <div class="muted"><em>Horizon:</em> ${t.typical_horizon} · <em>Posture:</em> ${t.risk_posture}</div>
+          </div>`).join('');
+      } catch (e) {
+        $('traders-list').textContent = String(e);
       }
     }
 
@@ -150,7 +178,7 @@
 
     $('c-run').onclick = async () => {
       const sym = $('c-symbol').value.trim();
-      $('c-out').textContent = 'Running council…';
+      $('c-out').textContent = 'Convening elite desk…';
       try {
         const r = await (await fetch(`/api/intelligence/council?symbol=${encodeURIComponent(sym)}`)).json();
         $('c-out').textContent = JSON.stringify(r, null, 2);
@@ -170,7 +198,8 @@
     };
 
     refreshOverview();
-    setInterval(refreshOverview, 30000);
+    loadTraders();
+    setInterval(refreshOverview, 15000);
   </script>
 </body>
 </html>

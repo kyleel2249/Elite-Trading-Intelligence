@@ -53,7 +53,7 @@ class OrderRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     client_order_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     provider: Mapped[str] = mapped_column(String(32), index=True)
-    environment: Mapped[str] = mapped_column(String(16))  # paper | testnet | live
+    environment: Mapped[str] = mapped_column(String(16))
     symbol: Mapped[str] = mapped_column(String(64))
     side: Mapped[str] = mapped_column(String(8))
     order_type: Mapped[str] = mapped_column(String(16))
@@ -76,3 +76,18 @@ class RiskEvent(Base):
     message: Mapped[str] = mapped_column(Text)
     context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class CouncilDecisionRecord(Base):
+    __tablename__ = "council_decisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    action: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    risk_veto: Mapped[bool] = mapped_column(Boolean, default=False)
+    data_quality: Mapped[str] = mapped_column(String(32), default="unknown")
+    payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
