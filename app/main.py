@@ -26,11 +26,13 @@ from app.intelligence.traders import list_trader_profiles
 from app.intelligence.predictive import PredictiveEngine
 from app.intelligence.forecast_accuracy import ForecastAccuracyService
 from app.intelligence.feeds import fetch_fred_series, fetch_news_headlines
+from app.knowledge.registry import attribution_for_decision
 from app.streaming.manager import stream_hub
 from app.jobs.mark_to_market import mtm_job
 from app.jobs.reconcile import reconcile_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
 from app.models import CouncilDecisionRecord
+from app.api.knowledge import router as knowledge_router
 
 
 @asynccontextmanager
@@ -63,6 +65,8 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+app.include_router(knowledge_router)
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -226,6 +230,7 @@ async def market_history(
 
 @app.get("/api/intelligence/traders")
 async def intelligence_traders():
+    """Live ETI desk (Adrian Cole, Helena Frost, etc.)."""
     return {"traders": list_trader_profiles()}
 
 
@@ -246,7 +251,6 @@ async def run_council(
             book = await mkt.get_order_book(symbol, depth=20)
             klines = await mkt.get_history("binance", symbol, interval="1h", limit=48)
 
-        # Optional external desks
         fred = await fetch_fred_series(settings=settings)
         news = await fetch_news_headlines(query=f"{symbol} OR markets", settings=settings)
         context = {"fred": fred, "news": news}
@@ -265,6 +269,12 @@ async def run_council(
             klines=klines,
             context=context,
         )
+        evidence_blob = []
+        for r in decision.specialist_reports:
+            evidence_blob.extend(r.evidence or [])
+            evidence_blob.extend(r.methods_applied or [])
+        attribution = attribution_for_decision(decision.summary, evidence_blob)
+
         payload = {
             "action": decision.action.value,
             "confidence": decision.confidence,
@@ -277,6 +287,7 @@ async def run_council(
             "methodology_notes": decision.methodology_notes,
             "timestamp": decision.timestamp,
             "feeds": {"fred_status": fred.get("status"), "news_status": news.get("status")},
+            "strategy_attribution": attribution,
             "specialists": [
                 {
                     "trader_id": r.trader_id,
