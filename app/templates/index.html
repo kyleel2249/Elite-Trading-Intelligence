@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETI — Elite Trading Intelligence</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --card: #121821;
+      --text: #e8eef6;
+      --muted: #8b9bb0;
+      --accent: #3d8bfd;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 650; }
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      background: #1e293b;
+      color: var(--muted);
+    }
+    .badge.live { background: #14532d; color: #86efac; }
+    main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 1.1rem 1.25rem;
+    }
+    .card h2 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--muted); font-weight: 600; }
+    .card p { margin: 0; font-size: 0.95rem; }
+    .status-ok { color: var(--good); }
+    .status-warn { color: var(--warn); }
+    footer {
+      margin-top: 2rem;
+      padding: 1rem 1.5rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid #1e293b;
+    }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ETI — Elite Trading Intelligence</h1>
+    <div>
+      <span class="badge">v{{ version }}</span>
+      {% if live_trading_enabled %}
+      <span class="badge live">LIVE PATH ENABLED (risk-gated)</span>
+      {% else %}
+      <span class="badge">Live trading disabled</span>
+      {% endif %}
+    </div>
+  </header>
+  <main>
+    <div class="grid">
+      <div class="card">
+        <h2>System</h2>
+        <p class="status-ok">Core online</p>
+        <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
+          Risk engine active · Final veto authority
+        </p>
+      </div>
+      <div class="card">
+        <h2>Alpaca</h2>
+        <p>{% if alpaca_paper %}Paper mode{% else %}Live mode configured{% endif %}</p>
+      <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
+          Credentials via environment only
+        </p>
+      </div>
+      <div class="card">
+        <h2>Binance</h2>
+        <p>{% if binance_testnet %}Testnet preferred{% else %}Production path available{% endif %}</p>
+        <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
+          Public data + authenticated when configured
+        </p>
+      </div>
+      <div class="card">
+        <h2>Risk</h2>
+        <p>1% default risk per trade</p>
+        <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
+          Daily loss, drawdown, position limits enforced
+        </p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <h2>API</h2>
+      <p><a href="/api/system/health">/api/system/health</a></p>
+      <p><a href="/api/risk/evaluate?symbol=BTCUSDT&side=buy&qty=0.01&environment=paper&equity=10000">/api/risk/evaluate</a> (demo)</p>
+      <p style="margin-top:0.75rem;color:var(--muted);font-size:0.85rem">
+        OpenAPI docs at <a href="/docs">/docs</a>
+      </p>
+    </div>
+  </main>
+  <footer>
+    Research &amp; trading software. Live trading is risk-gated. Use at your own risk.
+  </footer>
+</body>
+</html>
