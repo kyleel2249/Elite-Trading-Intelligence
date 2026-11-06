@@ -25,8 +25,10 @@ from app.intelligence.council import TradingCouncil
 from app.intelligence.traders import list_trader_profiles
 from app.intelligence.predictive import PredictiveEngine
 from app.intelligence.forecast_accuracy import ForecastAccuracyService
+from app.intelligence.feeds import fetch_fred_series, fetch_news_headlines
 from app.streaming.manager import stream_hub
 from app.jobs.mark_to_market import mtm_job
+from app.jobs.reconcile import reconcile_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
 from app.models import CouncilDecisionRecord
 
@@ -34,6 +36,9 @@ from app.models import CouncilDecisionRecord
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    settings = get_settings()
+    mtm_job.interval_seconds = settings.mtm_interval_seconds
+    reconcile_job.interval_seconds = settings.reconcile_interval_seconds
     try:
         await stream_hub.start(["btcusdt", "ethusdt"])
     except Exception:
@@ -42,7 +47,12 @@ async def lifespan(app: FastAPI):
         await mtm_job.start()
     except Exception:
         pass
+    try:
+        await reconcile_job.start()
+    except Exception:
+        pass
     yield
+    await reconcile_job.stop()
     await mtm_job.stop()
     await stream_hub.stop()
 
@@ -83,7 +93,7 @@ class OrderRequest(BaseModel):
 class ForecastScoreRequest(BaseModel):
     symbol: str = "BTCUSDT"
     provider: str = "binance"
-    realized_price: Optional[float] = None  # if omitted, fetch latest snapshot
+    realized_price: Optional[float] = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -122,6 +132,16 @@ async def mtm_run():
     return {"marked": n, **mtm_job.status()}
 
 
+@app.get("/api/system/reconcile-status")
+async def reconcile_status():
+    return reconcile_job.status()
+
+
+@app.post("/api/system/reconcile-run")
+async def reconcile_run():
+    return await reconcile_job.run_once()
+
+
 @app.get("/api/providers/status")
 async def providers_status(settings: Settings = Depends(get_settings)):
     alpaca = AlpacaClient(settings)
@@ -132,6 +152,9 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "live_trading_enabled": settings.live_trading_enabled,
         "streams": stream_hub.status(),
         "mtm": mtm_job.status(),
+        "reconcile": reconcile_job.status(),
+        "fred_configured": settings.fred_configured,
+        "news_configured": settings.news_configured,
     }
 
 
@@ -143,6 +166,16 @@ async def binance_stream_status():
 @app.get("/api/providers/alpaca/stream/status")
 async def alpaca_stream_status():
     return stream_hub.alpaca.status()
+
+
+@app.get("/api/feeds/fred")
+async def feeds_fred(series_id: str = "DFF", settings: Settings = Depends(get_settings)):
+    return await fetch_fred_series(series_id=series_id, settings=settings)
+
+
+@app.get("/api/feeds/news")
+async def feeds_news(q: str = "markets OR bitcoin OR federal reserve", settings: Settings = Depends(get_settings)):
+    return await fetch_news_headlines(query=q, settings=settings)
 
 
 @app.get("/api/market/snapshot")
@@ -212,6 +245,14 @@ async def run_council(
         if provider == "binance":
             book = await mkt.get_order_book(symbol, depth=20)
             klines = await mkt.get_history("binance", symbol, interval="1h", limit=48)
+
+        # Optional external desks
+        fred = await fetch_fred_series(settings=settings)
+        news = await fetch_news_headlines(query=f"{symbol} OR markets", settings=settings)
+        context = {"fred": fred, "news": news}
+        if news.get("status") == "ok" and news.get("sentiment_score") is not None:
+            context["sentiment_score"] = news["sentiment_score"]
+
         council = TradingCouncil()
         decision = council.analyse(
             symbol=symbol,
@@ -222,6 +263,7 @@ async def run_council(
             data_status=snap.get("data_status", "unknown"),
             order_book=book,
             klines=klines,
+            context=context,
         )
         payload = {
             "action": decision.action.value,
@@ -234,6 +276,7 @@ async def run_council(
             "data_quality": decision.data_quality,
             "methodology_notes": decision.methodology_notes,
             "timestamp": decision.timestamp,
+            "feeds": {"fred_status": fred.get("status"), "news_status": news.get("status")},
             "specialists": [
                 {
                     "trader_id": r.trader_id,
@@ -314,7 +357,6 @@ async def forecast_score(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
-    """Score pending Lars Hagen forecasts against realized price (walk-forward store)."""
     price = body.realized_price
     if price is None:
         snap = await MarketService(settings).get_snapshot(body.provider, body.symbol)
@@ -411,7 +453,6 @@ async def trading_reconcile(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
-    """Idempotent reconciliation of open/submitted orders (Omar Diallo / Claire Bennett)."""
     return await OrderReconciler(db, settings).reconcile_open(limit=limit)
 
 

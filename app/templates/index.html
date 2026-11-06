@@ -15,22 +15,23 @@
     h1 { margin: 0; font-size: 1.15rem; }
     .badge { font-size: .72rem; padding: .2rem .55rem; border-radius: 999px; background: #1e293b; color: var(--muted); }
     .badge.live { background: #14532d; color: #86efac; }
-    nav { display: flex; gap: .45rem; flex-wrap: wrap; }
-    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .65rem; border-radius: 8px; cursor: pointer; font-size: .78rem; }
+    nav { display: flex; gap: .4rem; flex-wrap: wrap; }
+    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .6rem; border-radius: 8px; cursor: pointer; font-size: .75rem; }
     nav button.active { background: var(--accent); border-color: var(--accent); }
     main { padding: 1.1rem; max-width: 1200px; margin: 0 auto; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .85rem; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.1rem; }
-    .card h2 { margin: 0 0 .45rem; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .card h2 { margin: 0 0 .45rem; font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
     .muted { color: var(--muted); font-size: .85rem; }
     .ok { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
-    input, select { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: .4rem .55rem; border-radius: 8px; }
+    input, select, button.action { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: .4rem .55rem; border-radius: 8px; }
+    button.action { cursor: pointer; background: #1e293b; }
+    button.action:hover { border-color: var(--accent); }
     .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
     .panel { display: none; } .panel.active { display: block; }
     footer { margin-top: 1.5rem; padding: 1rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--border); }
-    pre { background: #0f172a; padding: .75rem; border-radius: 8px; overflow: auto; font-size: .78rem; max-height: 420px; }
-    .trader { border-left: 3px solid var(--accent); padding-left: .75rem; margin: .6rem 0; }
-    .trader strong { display: block; }
+    pre { background: #0f172a; padding: .75rem; border-radius: 8px; overflow: auto; font-size: .76rem; max-height: 380px; }
+    .trader { border-left: 3px solid var(--accent); padding-left: .75rem; margin: .55rem 0; }
   </style>
 </head>
 <body>
@@ -42,6 +43,7 @@
     </div>
     <nav>
       <button data-panel="overview" class="active">Overview</button>
+      <button data-panel="ops">Ops</button>
       <button data-panel="market">Market</button>
       <button data-panel="council">Council</button>
       <button data-panel="forecast">Forecast</button>
@@ -61,12 +63,63 @@
       </div>
     </section>
 
+    <section id="ops" class="panel">
+      <div class="grid">
+        <div class="card">
+          <h2>Mark-to-Market</h2>
+          <div class="row">
+            <button class="action" id="mtm-run">Run MTM Now</button>
+            <button class="action" id="mtm-refresh">Refresh Status</button>
+          </div>
+          <pre id="mtm-out">—</pre>
+        </div>
+        <div class="card">
+          <h2>Reconcile (Omar Diallo)</h2>
+          <div class="row">
+            <button class="action" id="rec-run">Run Reconcile</button>
+            <button class="action" id="rec-refresh">Refresh Status</button>
+          </div>
+          <pre id="rec-out">—</pre>
+        </div>
+        <div class="card">
+          <h2>Forecast Accuracy (Lars Hagen)</h2>
+          <div class="row">
+            <input id="acc-symbol" value="BTCUSDT" />
+            <button class="action" id="acc-score">Score Pending</button>
+            <button class="action" id="acc-refresh">Summary</button>
+          </div>
+          <pre id="acc-out">—</pre>
+        </div>
+      </div>
+      <div class="card" style="margin-top:.85rem">
+        <h2>Journal Filters (Claire Bennett)</h2>
+        <div class="row">
+          <input id="j-symbol" placeholder="symbol" />
+          <select id="j-event">
+            <option value="">any event</option>
+            <option value="filled">filled</option>
+            <option value="submitted">submitted</option>
+            <option value="rejected">rejected</option>
+            <option value="closed">closed</option>
+          </select>
+          <select id="j-env">
+            <option value="">any env</option>
+            <option value="paper">paper</option>
+            <option value="testnet">testnet</option>
+            <option value="live">live</option>
+          </select>
+          <button class="action" id="j-load">Load Journal</button>
+        </div>
+        <pre id="j-out">—</pre>
+      </div>
+    </section>
+
     <section id="market" class="panel">
       <div class="card">
         <div class="row">
           <input id="m-symbol" value="BTCUSDT" />
           <select id="m-provider"><option value="binance">Binance</option><option value="alpaca">Alpaca</option></select>
-          <button id="m-load">Load Snapshot + Book</button>
+          <button class="action" id="m-load">Load Snapshot + Book</button>
         </div>
         <div class="grid">
           <div class="card"><h2>Snapshot</h2><pre id="m-snapshot">—</pre></div>
@@ -79,7 +132,7 @@
       <div class="card">
         <div class="row">
           <input id="c-symbol" value="BTCUSDT" />
-          <button id="c-run">Run Full Council</button>
+          <button class="action" id="c-run">Run Full Council</button>
         </div>
         <pre id="c-out">—</pre>
       </div>
@@ -95,7 +148,7 @@
             <option value="swing">swing</option>
             <option value="position">position</option>
           </select>
-          <button id="f-run">Run Forecast (Lars Hagen)</button>
+          <button class="action" id="f-run">Run Forecast (Lars Hagen)</button>
         </div>
         <p class="muted">Probabilistic scenarios only — not guarantees.</p>
         <pre id="f-out">—</pre>
@@ -105,15 +158,15 @@
     <section id="portfolio" class="panel">
       <div class="card">
         <div class="row">
-          <button id="p-refresh">Refresh Portfolio + Journal</button>
+          <button class="action" id="p-refresh">Refresh Portfolio</button>
           <input id="p-symbol" value="BTCUSDT" />
           <input id="p-qty" type="number" step="0.001" value="0.01" />
           <select id="p-side"><option value="buy">buy</option><option value="sell">sell</option></select>
-          <button id="p-paper">Paper Order (risk-gated)</button>
+          <button class="action" id="p-paper">Paper Order</button>
         </div>
         <div class="grid">
-          <div class="card"><h2>Portfolio (Claire Bennett)</h2><pre id="p-summary">—</pre></div>
-          <div class="card"><h2>Journal</h2><pre id="p-journal">—</pre></div>
+          <div class="card"><h2>Portfolio</h2><pre id="p-summary">—</pre></div>
+          <div class="card"><h2>Recent Journal</h2><pre id="p-journal">—</pre></div>
         </div>
       </div>
     </section>
@@ -132,17 +185,17 @@
           <select id="r-env"><option value="paper">paper</option><option value="testnet">testnet</option><option value="live">live</option></select>
           <input id="r-qty" type="number" step="0.001" value="0.01" />
           <input id="r-equity" type="number" value="10000" />
-          <button id="r-eval">Evaluate Risk</button>
+          <button class="action" id="r-eval">Evaluate Risk</button>
         </div>
         <pre id="r-out">—</pre>
       </div>
     </section>
 
     <section id="providers" class="panel">
-      <div class="card"><h2>Provider &amp; Stream Diagnostics</h2><pre id="prov-out">—</pre></div>
+      <div class="card"><h2>Provider, Stream &amp; Feed Diagnostics</h2><pre id="prov-out">—</pre></div>
     </section>
   </main>
-  <footer>Research software. Live trading risk-gated by Helena Frost. Forecasts by Lars Hagen are probabilistic only.</footer>
+  <footer>Research software. Risk-gated by Helena Frost. Forecasts by Lars Hagen are probabilistic only.</footer>
   <script>
     const $ = (id) => document.getElementById(id);
     document.querySelectorAll('nav button').forEach(btn => {
@@ -180,10 +233,30 @@
             <strong>${t.name} — ${t.title}${t.veto_power ? ' (VETO)' : ''}</strong>
             <div class="muted">${t.mandate}</div>
             <div class="muted"><em>Methods:</em> ${(t.methods||[]).join('; ')}</div>
-            <div class="muted"><em>Horizon:</em> ${t.typical_horizon} · <em>Posture:</em> ${t.risk_posture}</div>
           </div>`).join('');
       } catch (e) { $('traders-list').textContent = String(e); }
     }
+
+    $('mtm-refresh').onclick = async () => { $('mtm-out').textContent = JSON.stringify(await (await fetch('/api/system/mtm-status')).json(), null, 2); };
+    $('mtm-run').onclick = async () => { $('mtm-out').textContent = JSON.stringify(await (await fetch('/api/system/mtm-run', {method:'POST'})).json(), null, 2); };
+    $('rec-refresh').onclick = async () => { $('rec-out').textContent = JSON.stringify(await (await fetch('/api/system/reconcile-status')).json(), null, 2); };
+    $('rec-run').onclick = async () => { $('rec-out').textContent = JSON.stringify(await (await fetch('/api/system/reconcile-run', {method:'POST'})).json(), null, 2); };
+    $('acc-refresh').onclick = async () => {
+      const s = $('acc-symbol').value.trim();
+      $('acc-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast/accuracy?symbol=' + encodeURIComponent(s))).json(), null, 2);
+    };
+    $('acc-score').onclick = async () => {
+      const body = { symbol: $('acc-symbol').value.trim(), provider: 'binance' };
+      $('acc-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast/score', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})).json(), null, 2);
+    };
+    $('j-load').onclick = async () => {
+      const q = new URLSearchParams();
+      if ($('j-symbol').value.trim()) q.set('symbol', $('j-symbol').value.trim());
+      if ($('j-event').value) q.set('event', $('j-event').value);
+      if ($('j-env').value) q.set('environment', $('j-env').value);
+      q.set('limit', '40');
+      $('j-out').textContent = JSON.stringify(await (await fetch('/api/paper-trading/journal?' + q)).json(), null, 2);
+    };
 
     $('m-load').onclick = async () => {
       const sym = $('m-symbol').value.trim();
@@ -207,36 +280,22 @@
     };
 
     $('f-run').onclick = async () => {
-      $('f-out').textContent = 'Lars Hagen computing scenarios…';
       const q = new URLSearchParams({ symbol: $('f-symbol').value.trim(), horizon: $('f-horizon').value });
-      try {
-        const r = await (await fetch('/api/intelligence/forecast?' + q)).json();
-        $('f-out').textContent = JSON.stringify(r, null, 2);
-      } catch (e) { $('f-out').textContent = String(e); }
+      $('f-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast?' + q)).json(), null, 2);
     };
 
     async function refreshPortfolio() {
-      const sum = await (await fetch('/api/paper-trading/portfolio')).json();
-      const jou = await (await fetch('/api/paper-trading/journal?limit=30')).json();
-      $('p-summary').textContent = JSON.stringify(sum, null, 2);
-      $('p-journal').textContent = JSON.stringify(jou, null, 2);
+      $('p-summary').textContent = JSON.stringify(await (await fetch('/api/paper-trading/portfolio')).json(), null, 2);
+      $('p-journal').textContent = JSON.stringify(await (await fetch('/api/paper-trading/journal?limit=20')).json(), null, 2);
     }
     $('p-refresh').onclick = () => refreshPortfolio().catch(e => $('p-summary').textContent = String(e));
-
     $('p-paper').onclick = async () => {
       const body = {
-        provider: 'binance',
-        environment: 'paper',
-        symbol: $('p-symbol').value.trim(),
-        side: $('p-side').value,
-        qty: parseFloat($('p-qty').value),
-        equity: 10000,
-        data_status: 'fresh',
-        data_age_seconds: 5,
-        thesis: 'Manual paper ticket from dashboard',
+        provider: 'binance', environment: 'paper', symbol: $('p-symbol').value.trim(),
+        side: $('p-side').value, qty: parseFloat($('p-qty').value), equity: 10000,
+        data_status: 'fresh', data_age_seconds: 5, thesis: 'Manual paper ticket',
       };
-      const r = await (await fetch('/api/trading/order', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })).json();
-      $('p-summary').textContent = JSON.stringify(r, null, 2);
+      $('p-summary').textContent = JSON.stringify(await (await fetch('/api/trading/order', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })).json(), null, 2);
       await refreshPortfolio();
     };
 
