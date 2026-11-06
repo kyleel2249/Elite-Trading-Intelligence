@@ -18,22 +18,22 @@ from app.risk.engine import RiskEngine, OrderProposal
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
 from app.trading.service import TradingService
+from app.trading.portfolio import PortfolioService
 from app.market.service import MarketService
 from app.intelligence.council import TradingCouncil
 from app.intelligence.traders import list_trader_profiles
+from app.intelligence.predictive import PredictiveEngine
 from app.streaming.manager import stream_hub
-from app.services.persistence import save_snapshot, save_council_decision, save_order
-from app.models import CouncilDecisionRecord, OrderRecord, MarketSnapshot
+from app.services.persistence import save_snapshot, save_council_decision, save_forecast
+from app.models import CouncilDecisionRecord, ForecastRecord
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # Start public Binance streams; Alpaca only if configured
     try:
         await stream_hub.start(["btcusdt", "ethusdt"])
     except Exception:
-        # Non-fatal: REST paths still work
         pass
     yield
     await stream_hub.stop()
@@ -68,6 +68,8 @@ class OrderRequest(BaseModel):
     current_drawdown_pct: float = 0.0
     data_age_seconds: Optional[float] = 10.0
     data_status: str = "fresh"
+    thesis: Optional[str] = None
+    council_action: Optional[str] = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -165,7 +167,6 @@ async def market_history(
 
 @app.get("/api/intelligence/traders")
 async def intelligence_traders():
-    """Named elite trader profiles and methodologies."""
     return {"traders": list_trader_profiles()}
 
 
@@ -255,6 +256,33 @@ async def list_decisions(limit: int = 20, db: Session = Depends(get_db)):
     ]
 
 
+@app.get("/api/intelligence/forecast")
+async def intelligence_forecast(
+    symbol: str = "BTCUSDT",
+    provider: str = "binance",
+    horizon: str = "intraday",
+    persist: bool = True,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
+    """Lars Hagen — probabilistic scenarios only."""
+    mkt = MarketService(settings)
+    try:
+        klines = await mkt.get_history(provider, symbol, interval="1h", limit=48)
+        engine = PredictiveEngine()
+        fc = engine.forecast(symbol=symbol, provider=provider, klines=klines, horizon=horizon)
+        if fc is None:
+            raise HTTPException(status_code=422, detail="Insufficient history for forecast scaffold")
+        payload = fc.to_dict()
+        if persist:
+            save_forecast(db, payload)
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/api/risk/evaluate")
 async def evaluate_risk_demo(
     symbol: str = "BTCUSDT",
@@ -284,6 +312,7 @@ async def evaluate_risk_demo(
         "reasons": decision.reasons,
         "risk_per_trade_pct": decision.risk_per_trade_pct,
         "notes": decision.notes,
+        "officer": "Helena Frost",
     }
 
 
@@ -293,7 +322,16 @@ async def place_order(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
-    service = TradingService(settings)
+    # Mark price hint for paper simulation / journal
+    fill_hint = None
+    if req.environment.lower() in ("paper", "testnet"):
+        try:
+            snap = await MarketService(settings).get_snapshot(req.provider, req.symbol)
+            fill_hint = snap.get("price")
+        except Exception:
+            fill_hint = req.limit_price
+
+    service = TradingService(settings, db=db)
     result = await service.place_order(
         provider=req.provider,
         environment=req.environment,
@@ -308,29 +346,72 @@ async def place_order(
         current_drawdown_pct=req.current_drawdown_pct,
         data_age_seconds=req.data_age_seconds,
         data_status=req.data_status,
+        fill_price_hint=fill_hint,
+        thesis=req.thesis,
+        council_action=req.council_action,
     )
-    # Persist attempt
-    try:
-        save_order(
-            db,
-            {
-                **result,
-                "provider": req.provider,
-                "environment": req.environment,
-                "symbol": req.symbol,
-                "side": req.side,
-                "qty": req.qty,
-                "order_type": req.order_type,
-                "limit_price": req.limit_price,
-            },
-        )
-    except Exception:
-        pass
     return result
+
+
+@app.get("/api/paper-trading/positions")
+async def paper_positions(
+    environment: str = "paper",
+    status: str = "open",
+    db: Session = Depends(get_db),
+):
+    svc = PortfolioService(db)
+    rows = svc.list_positions(environment=environment, status=status)
+    return [
+        {
+            "symbol": p.symbol,
+            "side": p.side,
+            "qty": p.qty,
+            "avg_entry": p.avg_entry,
+            "mark_price": p.mark_price,
+            "unrealized_pnl": p.unrealized_pnl,
+            "realized_pnl": p.realized_pnl,
+            "status": p.status,
+            "provider": p.provider,
+            "environment": p.environment,
+        }
+        for p in rows
+    ]
+
+
+@app.get("/api/paper-trading/portfolio")
+async def paper_portfolio(environment: str = "paper", db: Session = Depends(get_db)):
+    return PortfolioService(db).portfolio_summary(environment)
+
+
+@app.get("/api/paper-trading/journal")
+async def paper_journal(limit: int = 50, db: Session = Depends(get_db)):
+    rows = PortfolioService(db).list_journal(limit=limit)
+    return [
+        {
+            "id": r.id,
+            "client_order_id": r.client_order_id,
+            "provider": r.provider,
+            "environment": r.environment,
+            "symbol": r.symbol,
+            "side": r.side,
+            "qty": r.qty,
+            "price": r.price,
+            "event": r.event,
+            "pnl": r.pnl,
+            "thesis": r.thesis,
+            "council_action": r.council_action,
+            "risk_officer": r.risk_officer,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
 
 
 @app.get("/api/paper-trading/history")
 async def paper_history(limit: int = 50, db: Session = Depends(get_db)):
+    """Order history (legacy path). Prefer /journal for audit trail."""
+    from app.models import OrderRecord
+
     rows = db.query(OrderRecord).order_by(OrderRecord.created_at.desc()).limit(min(limit, 200)).all()
     return [
         {
@@ -340,6 +421,7 @@ async def paper_history(limit: int = 50, db: Session = Depends(get_db)):
             "symbol": r.symbol,
             "side": r.side,
             "qty": r.qty,
+            "fill_price": r.fill_price,
             "status": r.status,
             "risk_approved": r.risk_approved,
             "risk_notes": r.risk_notes,

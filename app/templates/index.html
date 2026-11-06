@@ -15,8 +15,8 @@
     h1 { margin: 0; font-size: 1.15rem; }
     .badge { font-size: .72rem; padding: .2rem .55rem; border-radius: 999px; background: #1e293b; color: var(--muted); }
     .badge.live { background: #14532d; color: #86efac; }
-    nav { display: flex; gap: .5rem; flex-wrap: wrap; }
-    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .7rem; border-radius: 8px; cursor: pointer; font-size: .8rem; }
+    nav { display: flex; gap: .45rem; flex-wrap: wrap; }
+    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .65rem; border-radius: 8px; cursor: pointer; font-size: .78rem; }
     nav button.active { background: var(--accent); border-color: var(--accent); }
     main { padding: 1.1rem; max-width: 1200px; margin: 0 auto; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .85rem; }
@@ -40,10 +40,12 @@
       <span class="badge">v{{ version }}</span>
       {% if live_trading_enabled %}<span class="badge live">LIVE PATH (risk-gated)</span>{% endif %}
     </div>
-    <nav id="nav">
+    <nav>
       <button data-panel="overview" class="active">Overview</button>
       <button data-panel="market">Market</button>
       <button data-panel="council">Council</button>
+      <button data-panel="forecast">Forecast</button>
+      <button data-panel="portfolio">Portfolio</button>
       <button data-panel="traders">Elite Desk</button>
       <button data-panel="risk">Risk</button>
       <button data-panel="providers">Providers</button>
@@ -52,7 +54,7 @@
   <main>
     <section id="overview" class="panel active">
       <div class="grid">
-        <div class="card"><h2>System</h2><p class="ok" id="sys-status">Loading…</p><p class="muted">Helena Frost — Risk veto authority</p></div>
+        <div class="card"><h2>System</h2><p class="ok" id="sys-status">Loading…</p><p class="muted">Helena Frost — Risk veto</p></div>
         <div class="card"><h2>Alpaca</h2><p id="alpaca-status">—</p></div>
         <div class="card"><h2>Binance</h2><p id="binance-status">—</p></div>
         <div class="card"><h2>Streams</h2><p id="stream-status">—</p></div>
@@ -62,13 +64,13 @@
     <section id="market" class="panel">
       <div class="card">
         <div class="row">
-          <input id="m-symbol" value="BTCUSDT" placeholder="Symbol" />
+          <input id="m-symbol" value="BTCUSDT" />
           <select id="m-provider"><option value="binance">Binance</option><option value="alpaca">Alpaca</option></select>
           <button id="m-load">Load Snapshot + Book</button>
         </div>
         <div class="grid">
           <div class="card"><h2>Snapshot</h2><pre id="m-snapshot">—</pre></div>
-          <div class="card"><h2>Order Book Metrics</h2><pre id="m-book">—</pre></div>
+          <div class="card"><h2>Order Book</h2><pre id="m-book">—</pre></div>
         </div>
       </div>
     </section>
@@ -83,10 +85,43 @@
       </div>
     </section>
 
+    <section id="forecast" class="panel">
+      <div class="card">
+        <div class="row">
+          <input id="f-symbol" value="BTCUSDT" />
+          <select id="f-horizon">
+            <option value="scalp">scalp</option>
+            <option value="intraday" selected>intraday</option>
+            <option value="swing">swing</option>
+            <option value="position">position</option>
+          </select>
+          <button id="f-run">Run Forecast (Lars Hagen)</button>
+        </div>
+        <p class="muted">Probabilistic scenarios only — not guarantees.</p>
+        <pre id="f-out">—</pre>
+      </div>
+    </section>
+
+    <section id="portfolio" class="panel">
+      <div class="card">
+        <div class="row">
+          <button id="p-refresh">Refresh Portfolio + Journal</button>
+          <input id="p-symbol" value="BTCUSDT" />
+          <input id="p-qty" type="number" step="0.001" value="0.01" />
+          <select id="p-side"><option value="buy">buy</option><option value="sell">sell</option></select>
+          <button id="p-paper">Paper Order (risk-gated)</button>
+        </div>
+        <div class="grid">
+          <div class="card"><h2>Portfolio (Claire Bennett)</h2><pre id="p-summary">—</pre></div>
+          <div class="card"><h2>Journal</h2><pre id="p-journal">—</pre></div>
+        </div>
+      </div>
+    </section>
+
     <section id="traders" class="panel">
       <div class="card">
         <h2>Elite Trading Desk — Profiles &amp; Methods</h2>
-        <div id="traders-list" class="muted">Loading profiles…</div>
+        <div id="traders-list" class="muted">Loading…</div>
       </div>
     </section>
 
@@ -104,10 +139,10 @@
     </section>
 
     <section id="providers" class="panel">
-      <div class="card"><h2>Provider &amp; Stream Diagnostics</h2><pre id="p-out">—</pre></div>
+      <div class="card"><h2>Provider &amp; Stream Diagnostics</h2><pre id="prov-out">—</pre></div>
     </section>
   </main>
-  <footer>Research &amp; trading software. Live trading is risk-gated. Elite desk methods are evidence-bound.</footer>
+  <footer>Research software. Live trading risk-gated by Helena Frost. Forecasts by Lars Hagen are probabilistic only.</footer>
   <script>
     const $ = (id) => document.getElementById(id);
     document.querySelectorAll('nav button').forEach(btn => {
@@ -127,11 +162,10 @@
         const p = await (await fetch('/api/providers/status')).json();
         $('alpaca-status').textContent = (p.alpaca && p.alpaca.status) || '—';
         $('binance-status').textContent = (p.binance && p.binance.status) || '—';
-        const st = p.streams || {};
-        const b = st.binance || {};
-        $('stream-status').textContent = b.connected ? ('Binance WS connected (' + (b.subscriptions||[]).length + ' streams)') : 'Binance WS offline';
-        $('stream-status').className = b.connected ? 'ok' : 'warn';
-        $('p-out').textContent = JSON.stringify(p, null, 2);
+        const st = (p.streams && p.streams.binance) || {};
+        $('stream-status').textContent = st.connected ? ('WS connected (' + (st.subscriptions||[]).length + ')') : 'WS offline';
+        $('stream-status').className = st.connected ? 'ok' : 'warn';
+        $('prov-out').textContent = JSON.stringify(p, null, 2);
       } catch (e) {
         $('sys-status').textContent = 'Error';
         $('sys-status').className = 'bad';
@@ -141,60 +175,74 @@
     async function loadTraders() {
       try {
         const r = await (await fetch('/api/intelligence/traders')).json();
-        const el = $('traders-list');
-        el.innerHTML = (r.traders || []).map(t => `
+        $('traders-list').innerHTML = (r.traders || []).map(t => `
           <div class="trader">
             <strong>${t.name} — ${t.title}${t.veto_power ? ' (VETO)' : ''}</strong>
             <div class="muted">${t.mandate}</div>
             <div class="muted"><em>Methods:</em> ${(t.methods||[]).join('; ')}</div>
             <div class="muted"><em>Horizon:</em> ${t.typical_horizon} · <em>Posture:</em> ${t.risk_posture}</div>
           </div>`).join('');
-      } catch (e) {
-        $('traders-list').textContent = String(e);
-      }
+      } catch (e) { $('traders-list').textContent = String(e); }
     }
 
     $('m-load').onclick = async () => {
       const sym = $('m-symbol').value.trim();
       const prov = $('m-provider').value;
-      $('m-snapshot').textContent = 'Loading…';
       try {
         const s = await (await fetch(`/api/market/snapshot?provider=${prov}&symbol=${encodeURIComponent(sym)}`)).json();
         $('m-snapshot').textContent = JSON.stringify(s, null, 2);
         if (prov === 'binance') {
           const b = await (await fetch(`/api/market/order-book?symbol=${encodeURIComponent(sym)}&depth=20`)).json();
-          $('m-book').textContent = JSON.stringify({
-            best_bid: b.best_bid, best_ask: b.best_ask, spread_bps: b.spread_bps,
-            imbalance: b.imbalance, bid_volume: b.bid_volume, ask_volume: b.ask_volume,
-            large_bids: b.large_bids, large_asks: b.large_asks
-          }, null, 2);
-        } else {
-          $('m-book').textContent = 'Order book currently via Binance public API';
+          $('m-book').textContent = JSON.stringify({best_bid:b.best_bid,best_ask:b.best_ask,spread_bps:b.spread_bps,imbalance:b.imbalance}, null, 2);
         }
-      } catch (e) {
-        $('m-snapshot').textContent = String(e);
-      }
+      } catch (e) { $('m-snapshot').textContent = String(e); }
     };
 
     $('c-run').onclick = async () => {
-      const sym = $('c-symbol').value.trim();
       $('c-out').textContent = 'Convening elite desk…';
       try {
-        const r = await (await fetch(`/api/intelligence/council?symbol=${encodeURIComponent(sym)}`)).json();
+        const r = await (await fetch(`/api/intelligence/council?symbol=${encodeURIComponent($('c-symbol').value.trim())}`)).json();
         $('c-out').textContent = JSON.stringify(r, null, 2);
       } catch (e) { $('c-out').textContent = String(e); }
     };
 
+    $('f-run').onclick = async () => {
+      $('f-out').textContent = 'Lars Hagen computing scenarios…';
+      const q = new URLSearchParams({ symbol: $('f-symbol').value.trim(), horizon: $('f-horizon').value });
+      try {
+        const r = await (await fetch('/api/intelligence/forecast?' + q)).json();
+        $('f-out').textContent = JSON.stringify(r, null, 2);
+      } catch (e) { $('f-out').textContent = String(e); }
+    };
+
+    async function refreshPortfolio() {
+      const sum = await (await fetch('/api/paper-trading/portfolio')).json();
+      const jou = await (await fetch('/api/paper-trading/journal?limit=30')).json();
+      $('p-summary').textContent = JSON.stringify(sum, null, 2);
+      $('p-journal').textContent = JSON.stringify(jou, null, 2);
+    }
+    $('p-refresh').onclick = () => refreshPortfolio().catch(e => $('p-summary').textContent = String(e));
+
+    $('p-paper').onclick = async () => {
+      const body = {
+        provider: 'binance',
+        environment: 'paper',
+        symbol: $('p-symbol').value.trim(),
+        side: $('p-side').value,
+        qty: parseFloat($('p-qty').value),
+        equity: 10000,
+        data_status: 'fresh',
+        data_age_seconds: 5,
+        thesis: 'Manual paper ticket from dashboard',
+      };
+      const r = await (await fetch('/api/trading/order', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })).json();
+      $('p-summary').textContent = JSON.stringify(r, null, 2);
+      await refreshPortfolio();
+    };
+
     $('r-eval').onclick = async () => {
-      const q = new URLSearchParams({
-        symbol: $('r-symbol').value.trim(),
-        side: 'buy',
-        qty: $('r-qty').value,
-        environment: $('r-env').value,
-        equity: $('r-equity').value,
-      });
-      const r = await (await fetch('/api/risk/evaluate?' + q)).json();
-      $('r-out').textContent = JSON.stringify(r, null, 2);
+      const q = new URLSearchParams({ symbol: $('r-symbol').value.trim(), side: 'buy', qty: $('r-qty').value, environment: $('r-env').value, equity: $('r-equity').value });
+      $('r-out').textContent = JSON.stringify(await (await fetch('/api/risk/evaluate?' + q)).json(), null, 2);
     };
 
     refreshOverview();
