@@ -15,8 +15,8 @@
     h1 { margin: 0; font-size: 1.15rem; }
     .badge { font-size: .72rem; padding: .2rem .55rem; border-radius: 999px; background: #1e293b; color: var(--muted); }
     .badge.live { background: #14532d; color: #86efac; }
-    nav { display: flex; gap: .4rem; flex-wrap: wrap; }
-    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .6rem; border-radius: 8px; cursor: pointer; font-size: .75rem; }
+    nav { display: flex; gap: .35rem; flex-wrap: wrap; }
+    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .55rem; border-radius: 8px; cursor: pointer; font-size: .72rem; }
     nav button.active { background: var(--accent); border-color: var(--accent); }
     main { padding: 1.1rem; max-width: 1200px; margin: 0 auto; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .85rem; }
@@ -47,6 +47,8 @@
       <button data-panel="market">Market</button>
       <button data-panel="council">Council</button>
       <button data-panel="forecast">Forecast</button>
+      <button data-panel="knowledge">Knowledge</button>
+      <button data-panel="backtest">Backtest</button>
       <button data-panel="portfolio">Portfolio</button>
       <button data-panel="traders">Elite Desk</button>
       <button data-panel="risk">Risk</button>
@@ -155,6 +157,42 @@
       </div>
     </section>
 
+    <section id="knowledge" class="panel">
+      <div class="card">
+        <h2>Historical Trader Knowledge</h2>
+        <div class="row">
+          <input id="k-q" placeholder="search e.g. reflexivity, turtle, value" style="min-width:220px" />
+          <input id="k-tag" placeholder="tag" />
+          <button class="action" id="k-search">Search</button>
+          <button class="action" id="k-strategies">List Strategies</button>
+        </div>
+        <p class="muted">Documented philosophies — verified vs reported labeled. Not private fund code.</p>
+        <pre id="k-out">—</pre>
+      </div>
+    </section>
+
+    <section id="backtest" class="panel">
+      <div class="card">
+        <h2>Strategy Backtest / Signal</h2>
+        <div class="row">
+          <select id="bt-module">
+            <option value="turtle_trend">turtle_trend</option>
+            <option value="seykota_mechanical">seykota_mechanical</option>
+            <option value="darvas_box">darvas_box</option>
+            <option value="ptj_structure_preservation">ptj_structure_preservation</option>
+            <option value="minervini_vcp">minervini_vcp</option>
+            <option value="druck_liquidity_macro">druck_liquidity_macro</option>
+          </select>
+          <input id="bt-symbol" value="BTCUSDT" />
+          <button class="action" id="bt-run">Run Backtest</button>
+          <button class="action" id="bt-wf">Walk-Forward</button>
+          <button class="action" id="bt-signal">Signal Only</button>
+        </div>
+        <p class="muted">Execution still requires RiskEngine (Helena Frost). Set execute via API for paper/live.</p>
+        <pre id="bt-out">—</pre>
+      </div>
+    </section>
+
     <section id="portfolio" class="panel">
       <div class="card">
         <div class="row">
@@ -165,7 +203,7 @@
           <button class="action" id="p-paper">Paper Order</button>
         </div>
         <div class="grid">
-          <div class="card"><h2>Portfolio</h2><pre id="p-summary">—</pre></div>
+ intraclass="card"><h2>Portfolio</h2><pre id="p-summary">—</pre></div>
           <div class="card"><h2>Recent Journal</h2><pre id="p-journal">—</pre></div>
         </div>
       </div>
@@ -195,7 +233,7 @@
       <div class="card"><h2>Provider, Stream &amp; Feed Diagnostics</h2><pre id="prov-out">—</pre></div>
     </section>
   </main>
-  <footer>Research software. Risk-gated by Helena Frost. Forecasts by Lars Hagen are probabilistic only.</footer>
+  <footer>Research software. Risk-gated by Helena Frost. Knowledge base ≠ private fund strategies. Forecasts by Lars Hagen are probabilistic only.</footer>
   <script>
     const $ = (id) => document.getElementById(id);
     document.querySelectorAll('nav button').forEach(btn => {
@@ -282,6 +320,40 @@
     $('f-run').onclick = async () => {
       const q = new URLSearchParams({ symbol: $('f-symbol').value.trim(), horizon: $('f-horizon').value });
       $('f-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast?' + q)).json(), null, 2);
+    };
+
+    $('k-search').onclick = async () => {
+      const q = new URLSearchParams();
+      if ($('k-q').value.trim()) q.set('q', $('k-q').value.trim());
+      if ($('k-tag').value.trim()) q.set('tag', $('k-tag').value.trim());
+      const r = await (await fetch('/api/knowledge/traders?' + q)).json();
+      const slim = (r.traders || []).slice(0, 15).map(t => ({
+        id: t.id, name: t.full_name, tags: t.tags, philosophy: (t.philosophy||'').slice(0, 180),
+        modules: t.strategy_module_ids, lessons: (t.eti_lessons||[]).slice(0, 2),
+      }));
+      $('k-out').textContent = JSON.stringify({ count: r.count || slim.length, traders: slim }, null, 2);
+    };
+    $('k-strategies').onclick = async () => {
+      $('k-out').textContent = JSON.stringify(await (await fetch('/api/knowledge/strategies')).json(), null, 2);
+    };
+
+    async function btPost(path, body) {
+      return await (await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+    }
+    $('bt-run').onclick = async () => {
+      $('bt-out').textContent = JSON.stringify(await btPost('/api/backtest/run', {
+        module_id: $('bt-module').value, symbol: $('bt-symbol').value.trim(), walk_forward: false,
+      }), null, 2);
+    };
+    $('bt-wf').onclick = async () => {
+      $('bt-out').textContent = JSON.stringify(await btPost('/api/backtest/run', {
+        module_id: $('bt-module').value, symbol: $('bt-symbol').value.trim(), walk_forward: true,
+      }), null, 2);
+    };
+    $('bt-signal').onclick = async () => {
+      $('bt-out').textContent = JSON.stringify(await btPost('/api/backtest/signal', {
+        module_id: $('bt-module').value, symbol: $('bt-symbol').value.trim(), environment: 'paper', execute: false,
+      }), null, 2);
     };
 
     async function refreshPortfolio() {
