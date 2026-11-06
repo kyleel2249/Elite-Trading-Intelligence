@@ -7,6 +7,7 @@ from app.knowledge.schema import TraderKnowledgeProfile
 from app.knowledge import profiles_foundational as f
 from app.knowledge import profiles_additional as a
 from app.knowledge import profiles_deep as d
+from app.knowledge import profiles_deep2 as d2
 from app.knowledge import profiles_more as m
 from app.knowledge.strategies import STRATEGY_MODULES
 
@@ -16,9 +17,8 @@ def _all_profiles() -> dict[str, TraderKnowledgeProfile]:
     out.update(f.PROFILES)
     out.update(a.PROFILES)
     out.update(m.PROFILES)
-    # Deep overlays win
     out.update(d.DEEP_PROFILES)
-    # Drop meta placeholder ids that are not persons
+    out.update(d2.DEEP_PROFILES)
     out.pop("paul_tudor_secondary_note", None)
     return out
 
@@ -69,16 +69,13 @@ def attribution_for_decision(
     specialist_evidence: list[str],
     structured_tags: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
-    """
-    Structured + keyword attribution to strategy modules.
-    structured_tags examples: trend_breakout, liquidity_regime, structure_level, value_quality
-    """
     text = (summary + " " + " ".join(specialist_evidence)).lower()
     tags = {t.lower() for t in (structured_tags or [])}
 
-    # Map structured evidence tags → modules
     tag_map = {
         "trend_breakout": ["turtle_trend", "darvas_box", "minervini_vcp"],
+        "vcp": ["minervini_vcp"],
+        "wyckoff": ["wyckoff_supply_demand"],
         "liquidity_regime": ["druck_liquidity_macro", "soros_reflexivity"],
         "structure_level": ["ptj_structure_preservation"],
         "supply_demand": ["wyckoff_supply_demand"],
@@ -118,8 +115,10 @@ def attribution_for_decision(
                 "reasons": reasons.get(mid, []),
                 "principles": mod.principles[:3],
                 "incompatible_with": mod.incompatible_with,
-                "note": "Attribution explains influence — not sole causation; incompatible modules must not be blended blindly",
-                "risk_officer": "Helena Frost still gates execution",
+                "note": "Attribution explains influence — not sole causation",
+                "risk_officer": "Helena Frost",
+                "strategist": "Adrian Cole",
+                "auditor": "Claire Bennett",
             }
         )
     hits.sort(key=lambda x: -x["match_score"])
