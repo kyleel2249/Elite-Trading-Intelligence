@@ -116,8 +116,7 @@ _add(
     )
 )
 
-# Batch remaining foundational with compact but complete required fields
-for pid, name, bio, markets, phil, patterns, modules, tags in [
+_BATCH = [
     ("bruce_kovner", "Bruce Kovner", "Founder of Caxton Associates; leading global macro trader/investor.",
      ["FX", "commodities", "rates"], "Macro fundamentals with strong risk controls; respect markets.",
      ["Macro themes", "Risk containment"], ["druck_liquidity_macro"], ["macro", "foundational"]),
@@ -144,8 +143,8 @@ for pid, name, bio, markets, phil, patterns, modules, tags in [
      ["Wyckoff phases", "Effort vs result"], ["wyckoff_supply_demand"], ["supply-demand", "classic", "foundational"]),
     ("william_oneil", "William O'Neil", "Founder of Investor's Business Daily; CAN SLIM system.",
      ["US equities"], "Growth + institutional demand + technical bases + market direction.",
-     ["CAN SLIM", "Relative strength" "Cup-with-handle / bases"], ["oneil_canslim"], ["growth", "momentum", "foundational"]),
-    ("larry_williams", "Larry Williams", "Futures trader and educator; known for volatility and timing research; documented contest results exist in public record for specific events.",
+     ["CAN SLIM", "Relative strength", "Cup-with-handle / bases"], ["oneil_canslim"], ["growth", "momentum", "foundational"]),
+    ("larry_williams", "Larry Williams", "Futures trader and educator; volatility and timing research; documented contest results exist for specific events.",
      ["futures"], "Volatility, timing, risk awareness; educational track record separate from continuous institutional AUM.",
      ["Volatility breaks", "Seasonality research (published)"], ["seykota_mechanical"], ["futures", "education", "foundational"]),
     ("linda_bradford_raschke", "Linda Bradford Raschke", "Trader and educator; short-term price patterns; Market Wizards cohort.",
@@ -154,7 +153,7 @@ for pid, name, bio, markets, phil, patterns, modules, tags in [
     ("kathy_lien", "Kathy Lien", "FX strategist and trader/author; currency fundamentals + technical confluence.",
      ["FX"], "Macro FX drivers combined with technical confirmation.",
      ["Interest differentials", "Technical levels"], ["druck_liquidity_macro"], ["fx", "macro", "foundational"]),
-    ("ray_dalio", "Ray Dalio", "Founder of Bridgewater Associates; principles-based investing; all-weather / thinking.",
+    ("ray_dalio", "Ray Dalio", "Founder of Bridgewater Associates; principles-based investing; economic machine framework.",
      ["multi-asset"], "Economic machine framework; diversification of risk premia; radical transparency culture (firm-level).",
      ["Debt cycles", "Risk parity concepts (firm evolution)"], ["druck_liquidity_macro"], ["macro", "institutional", "foundational"]),
     ("jim_simons", "Jim Simons", "Mathematician; founder of Renaissance Technologies; quant pioneer.",
@@ -181,7 +180,9 @@ for pid, name, bio, markets, phil, patterns, modules, tags in [
     ("john_templeton", "John Templeton", "Pioneer of global value investing; Templeton funds.",
      ["global equities"], "Buy at points of maximum pessimism; global diversification.",
      ["Contrarian global value"], ["burry_contrarian", "buffett_munger_value"], ["value", "global", "foundational"]),
-]:
+]
+
+for pid, name, bio, markets, phil, patterns, modules, tags in _BATCH:
     _add(
         TraderKnowledgeProfile(
             id=pid,
@@ -189,7 +190,7 @@ for pid, name, bio, markets, phil, patterns, modules, tags in [
             biography=bio,
             trading_history="See biography and public historical record; details vary by source quality.",
             markets_traded=markets,
-            preferred_instruments=markets[:],
+            preferred_instruments=list(markets),
             philosophy=phil,
             documented_patterns=patterns,
             entry_criteria=["Documented setups aligned with philosophy — see strategy modules"],
@@ -209,9 +210,13 @@ for pid, name, bio, markets, phil, patterns, modules, tags in [
             famous_successful_trades=["See public case studies tied to this name"],
             famous_unsuccessful_trades=["Public records include mixed outcomes for most active managers"],
             predictions_outcomes=["Track dated public statements case-by-case"],
-            strengths=patterns[:2] or ["Documented edge domain"],
+            strengths=(patterns[:2] if patterns else ["Documented edge domain"]),
             weaknesses=["Style can underperform outside favored regimes"],
-            eti_lessons=[f"Map to strategy modules: {', '.join(modules)}", "Never blend incompatible modules blindly", "Helena Frost enforces risk regardless of legend attribution"],
+            eti_lessons=[
+                f"Map to strategy modules: {', '.join(modules)}",
+                "Never blend incompatible modules blindly",
+                "Helena Frost enforces risk regardless of legend attribution",
+            ],
             strategy_module_ids=modules,
             tags=tags,
             expandable_notes="Profile is expandable; deepen with primary sources over time.",
