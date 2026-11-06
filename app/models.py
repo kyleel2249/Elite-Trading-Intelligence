@@ -60,7 +60,7 @@ class OrderRecord(Base):
     qty: Mapped[float] = mapped_column(Float)
     limit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     fill_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="pending")
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     risk_approved: Mapped[bool] = mapped_column(Boolean, default=False)
     risk_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -77,13 +77,13 @@ class Position(Base):
     provider: Mapped[str] = mapped_column(String(32), index=True)
     environment: Mapped[str] = mapped_column(String(16), index=True)
     symbol: Mapped[str] = mapped_column(String(64), index=True)
-    side: Mapped[str] = mapped_column(String(8))  # long | short
+    side: Mapped[str] = mapped_column(String(8))
     qty: Mapped[float] = mapped_column(Float, default=0.0)
     avg_entry: Mapped[float] = mapped_column(Float, default=0.0)
     realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
     unrealized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
     mark_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="open")  # open | closed
+    status: Mapped[str] = mapped_column(String(16), default="open")
     opened_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -98,13 +98,13 @@ class JournalEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     client_order_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
-    provider: Mapped[str] = mapped_column(String(32))
-    environment: Mapped[str] = mapped_column(String(16))
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    environment: Mapped[str] = mapped_column(String(16), index=True)
     symbol: Mapped[str] = mapped_column(String(64), index=True)
     side: Mapped[str] = mapped_column(String(8))
     qty: Mapped[float] = mapped_column(Float)
     price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    event: Mapped[str] = mapped_column(String(32))  # submitted | filled | rejected | closed | note
+    event: Mapped[str] = mapped_column(String(32), index=True)
     pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     thesis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     council_action: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -154,4 +154,23 @@ class ForecastRecord(Base):
     expected_vol: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ForecastAccuracy(Base):
+    __tablename__ = "forecast_accuracy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    forecast_id: Mapped[int] = mapped_column(Integer, index=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    horizon: Mapped[str] = mapped_column(String(32))
+    predicted_base: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    realized_price: Mapped[float] = mapped_column(Float)
+    absolute_error: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pct_error: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    in_scenario_range: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    direction_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    analyst: Mapped[str] = mapped_column(String(64), default="Lars Hagen")
+    model_version: Mapped[str] = mapped_column(String(32), default="v0-scaffold")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
