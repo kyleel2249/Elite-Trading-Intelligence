@@ -13,13 +13,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # App
     app_env: str = "development"
     debug: bool = False
     secret_key: str = "change-me"
+    api_key: Optional[str] = None  # ETI_API_KEY — protects mutating routes when set
     database_url: str = "sqlite:///./eti.db"
 
-    # Global trading
     live_trading_enabled: bool = True
     default_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 3.0
@@ -27,31 +26,24 @@ class Settings(BaseSettings):
     max_open_positions: int = 8
     max_correlated_exposure_pct: float = 25.0
 
-    # Alpaca
     alpaca_api_key: Optional[str] = None
     alpaca_secret_key: Optional[str] = None
     alpaca_paper: bool = True
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
 
-    # Binance
     binance_api_key: Optional[str] = None
     binance_secret_key: Optional[str] = None
     binance_testnet_enabled: bool = True
     binance_live_trading_enabled: bool = True
 
-    # Optional external intelligence feeds
     fred_api_key: Optional[str] = None
     newsapi_key: Optional[str] = None
 
-    # Jobs
     mtm_interval_seconds: int = 60
     reconcile_interval_seconds: int = 120
 
-    # Data quality
     data_max_age_seconds: int = 300
     require_fresh_data_for_live_orders: bool = True
-
-    # Display
     default_timezone: str = "Africa/Accra"
 
     @property

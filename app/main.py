@@ -33,6 +33,8 @@ from app.jobs.reconcile import reconcile_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
 from app.models import CouncilDecisionRecord
 from app.api.knowledge import router as knowledge_router
+from app.api.backtest import router as backtest_router
+from app.security.auth import require_api_key
 
 
 @asynccontextmanager
@@ -67,6 +69,7 @@ app = FastAPI(
 )
 
 app.include_router(knowledge_router)
+app.include_router(backtest_router)
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -131,7 +134,7 @@ async def mtm_status():
 
 
 @app.post("/api/system/mtm-run")
-async def mtm_run():
+async def mtm_run(_auth=Depends(require_api_key)):
     n = await mtm_job.run_once()
     return {"marked": n, **mtm_job.status()}
 
@@ -142,7 +145,7 @@ async def reconcile_status():
 
 
 @app.post("/api/system/reconcile-run")
-async def reconcile_run():
+async def reconcile_run(_auth=Depends(require_api_key)):
     return await reconcile_job.run_once()
 
 
@@ -230,7 +233,6 @@ async def market_history(
 
 @app.get("/api/intelligence/traders")
 async def intelligence_traders():
-    """Live ETI desk (Adrian Cole, Helena Frost, etc.)."""
     return {"traders": list_trader_profiles()}
 
 
@@ -270,10 +272,20 @@ async def run_council(
             context=context,
         )
         evidence_blob = []
+        structured = []
         for r in decision.specialist_reports:
             evidence_blob.extend(r.evidence or [])
             evidence_blob.extend(r.methods_applied or [])
-        attribution = attribution_for_decision(decision.summary, evidence_blob)
+            if r.trader_id in ("ta", "liquidity") and r.bias != "neutral":
+                structured.append("structure_level")
+            if r.trader_id == "macro":
+                structured.append("liquidity_regime")
+            if r.trader_id == "fa":
+                structured.append("value_quality")
+            if "breakout" in " ".join(r.methods_applied or []).lower():
+                structured.append("trend_breakout")
+
+        attribution = attribution_for_decision(decision.summary, evidence_blob, structured_tags=structured)
 
         payload = {
             "action": decision.action.value,
@@ -288,6 +300,7 @@ async def run_council(
             "timestamp": decision.timestamp,
             "feeds": {"fred_status": fred.get("status"), "news_status": news.get("status")},
             "strategy_attribution": attribution,
+            "structured_evidence_tags": structured,
             "specialists": [
                 {
                     "trader_id": r.trader_id,
@@ -428,6 +441,7 @@ async def place_order(
     req: OrderRequest,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
+    _auth=Depends(require_api_key),
 ):
     fill_hint = None
     if req.environment.lower() in ("paper", "testnet"):
@@ -463,6 +477,7 @@ async def trading_reconcile(
     limit: int = 50,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
+    _auth=Depends(require_api_key),
 ):
     return await OrderReconciler(db, settings).reconcile_open(limit=limit)
 
