@@ -6,121 +6,171 @@
   <title>ETI — Elite Trading Intelligence</title>
   <style>
     :root {
-      --bg: #0b0f14;
-      --card: #121821;
-      --text: #e8eef6;
-      --muted: #8b9bb0;
-      --accent: #3d8bfd;
-      --good: #22c55e;
-      --warn: #f59e0b;
-      --bad: #ef4444;
+      --bg: #0b0f14; --card: #121821; --text: #e8eef6; --muted: #8b9bb0;
+      --accent: #3d8bfd; --good: #22c55e; --warn: #f59e0b; --bad: #ef4444; --border: #1e293b;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.5;
-    }
-    header {
-      padding: 1.25rem 1.5rem;
-      border-bottom: 1px solid #1e293b;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-    }
-    h1 { margin: 0; font-size: 1.25rem; font-weight: 650; }
-    .badge {
-      font-size: 0.75rem;
-      padding: 0.25rem 0.6rem;
-      border-radius: 999px;
-      background: #1e293b;
-      color: var(--muted);
-    }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.45; }
+    header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: .75rem; justify-content: space-between; align-items: center; }
+    h1 { margin: 0; font-size: 1.15rem; }
+    .badge { font-size: .72rem; padding: .2rem .55rem; border-radius: 999px; background: #1e293b; color: var(--muted); }
     .badge.live { background: #14532d; color: #86efac; }
-    main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1rem;
-    }
-    .card {
-      background: var(--card);
-      border: 1px solid #1e293b;
-      border-radius: 12px;
-      padding: 1.1rem 1.25rem;
-    }
-    .card h2 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--muted); font-weight: 600; }
-    .card p { margin: 0; font-size: 0.95rem; }
-    .status-ok { color: var(--good); }
-    .status-warn { color: var(--warn); }
-    footer {
-      margin-top: 2rem;
-      padding: 1rem 1.5rem;
-      color: var(--muted);
-      font-size: 0.85rem;
-      border-top: 1px solid #1e293b;
-    }
-    a { color: var(--accent); }
+    nav { display: flex; gap: .5rem; flex-wrap: wrap; }
+    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .7rem; border-radius: 8px; cursor: pointer; font-size: .8rem; }
+    nav button.active { background: var(--accent); border-color: var(--accent); }
+    main { padding: 1.1rem; max-width: 1200px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .85rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.1rem; }
+    .card h2 { margin: 0 0 .45rem; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .muted { color: var(--muted); font-size: .85rem; }
+    .ok { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    th, td { text-align: left; padding: .4rem .3rem; border-bottom: 1px solid var(--border); }
+    input, select { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: .4rem .55rem; border-radius: 8px; }
+    .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
+    .panel { display: none; } .panel.active { display: block; }
+    footer { margin-top: 1.5rem; padding: 1rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--border); }
+    pre { background: #0f172a; padding: .75rem; border-radius: 8px; overflow: auto; font-size: .78rem; }
   </style>
 </head>
 <body>
   <header>
-    <h1>ETI — Elite Trading Intelligence</h1>
     <div>
+      <h1>ETI — Elite Trading Intelligence</h1>
       <span class="badge">v{{ version }}</span>
-      {% if live_trading_enabled %}
-      <span class="badge live">LIVE PATH ENABLED (risk-gated)</span>
-      {% else %}
-      <span class="badge">Live trading disabled</span>
-      {% endif %}
+      {% if live_trading_enabled %}<span class="badge live">LIVE PATH (risk-gated)</span>{% endif %}
     </div>
+    <nav id="nav">
+      <button data-panel="overview" class="active">Overview</button>
+      <button data-panel="market">Market</button>
+      <button data-panel="council">Council</button>
+      <button data-panel="risk">Risk</button>
+      <button data-panel="providers">Providers</button>
+    </nav>
   </header>
   <main>
-    <div class="grid">
-      <div class="card">
-        <h2>System</h2>
-        <p class="status-ok">Core online</p>
-        <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
-          Risk engine active · Final veto authority
-        </p>
+    <section id="overview" class="panel active">
+      <div class="grid">
+        <div class="card"><h2>System</h2><p class="ok" id="sys-status">Loading…</p><p class="muted">Risk engine has final veto</p></div>
+        <div class="card"><h2>Alpaca</h2><p id="alpaca-status">—</p></div>
+        <div class="card"><h2>Binance</h2><p id="binance-status">—</p></div>
+        <div class="card"><h2>Live Trading</h2><p>{% if live_trading_enabled %}<span class="ok">Enabled (gated)</span>{% else %}<span class="warn">Disabled</span>{% endif %}</p></div>
       </div>
+    </section>
+
+    <section id="market" class="panel">
       <div class="card">
-        <h2>Alpaca</h2>
-        <p>{% if alpaca_paper %}Paper mode{% else %}Live mode configured{% endif %}</p>
-      <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
-          Credentials via environment only
-        </p>
+        <div class="row">
+          <input id="m-symbol" value="BTCUSDT" placeholder="Symbol" />
+          <select id="m-provider"><option value="binance">Binance</option><option value="alpaca">Alpaca</option></select>
+          <button id="m-load">Load Snapshot + Book</button>
+        </div>
+        <div class="grid">
+          <div class="card"><h2>Snapshot</h2><pre id="m-snapshot">—</pre></div>
+          <div class="card"><h2>Order Book Metrics</h2><pre id="m-book">—</pre></div>
+        </div>
       </div>
+    </section>
+
+    <section id="council" class="panel">
       <div class="card">
-        <h2>Binance</h2>
-        <p>{% if binance_testnet %}Testnet preferred{% else %}Production path available{% endif %}</p>
-        <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
-          Public data + authenticated when configured
-        </p>
+        <div class="row">
+          <input id="c-symbol" value="BTCUSDT" />
+          <button id="c-run">Run Council</button>
+        </div>
+        <pre id="c-out">—</pre>
       </div>
+    </section>
+
+    <section id="risk" class="panel">
       <div class="card">
-        <h2>Risk</h2>
-        <p>1% default risk per trade</p>
-        <p style="margin-top:0.5rem;color:var(--muted);font-size:0.85rem">
-          Daily loss, drawdown, position limits enforced
-        </p>
+        <div class="row">
+          <input id="r-symbol" value="BTCUSDT" />
+          <select id="r-env"><option value="paper">paper</option><option value="testnet">testnet</option><option value="live">live</option></select>
+          <input id="r-qty" type="number" step="0.001" value="0.01" />
+          <input id="r-equity" type="number" value="10000" />
+          <button id="r-eval">Evaluate Risk</button>
+        </div>
+        <pre id="r-out">—</pre>
       </div>
-    </div>
-    <div class="card" style="margin-top:1rem">
-      <h2>API</h2>
-      <p><a href="/api/system/health">/api/system/health</a></p>
-      <p><a href="/api/risk/evaluate?symbol=BTCUSDT&side=buy&qty=0.01&environment=paper&equity=10000">/api/risk/evaluate</a> (demo)</p>
-      <p style="margin-top:0.75rem;color:var(--muted);font-size:0.85rem">
-        OpenAPI docs at <a href="/docs">/docs</a>
-      </p>
-    </div>
+    </section>
+
+    <section id="providers" class="panel">
+      <div class="card"><h2>Provider Diagnostics</h2><pre id="p-out">—</pre></div>
+    </section>
   </main>
-  <footer>
-    Research &amp; trading software. Live trading is risk-gated. Use at your own risk.
-  </footer>
+  <footer>Research &amp; trading software. Live trading is risk-gated. No fabricated prices.</footer>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    document.querySelectorAll('nav button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        $(btn.dataset.panel).classList.add('active');
+      });
+    });
+
+    async function refreshOverview() {
+      try {
+        const h = await (await fetch('/api/system/health')).json();
+        $('sys-status').textContent = h.status === 'ok' ? 'Online' : h.status;
+        $('sys-status').className = h.status === 'ok' ? 'ok' : 'bad';
+        const p = await (await fetch('/api/providers/status')).json();
+        $('alpaca-status').textContent = (p.alpaca && p.alpaca.status) || '—';
+        $('binance-status').textContent = (p.binance && p.binance.status) || '—';
+        $('p-out').textContent = JSON.stringify(p, null, 2);
+      } catch (e) {
+        $('sys-status').textContent = 'Error';
+        $('sys-status').className = 'bad';
+      }
+    }
+
+    $('m-load').onclick = async () => {
+      const sym = $('m-symbol').value.trim();
+      const prov = $('m-provider').value;
+      $('m-snapshot').textContent = 'Loading…';
+      try {
+        const s = await (await fetch(`/api/market/snapshot?provider=${prov}&symbol=${encodeURIComponent(sym)}`)).json();
+        $('m-snapshot').textContent = JSON.stringify(s, null, 2);
+        if (prov === 'binance') {
+          const b = await (await fetch(`/api/market/order-book?symbol=${encodeURIComponent(sym)}&depth=20`)).json();
+          $('m-book').textContent = JSON.stringify({
+            best_bid: b.best_bid, best_ask: b.best_ask, spread_bps: b.spread_bps,
+            imbalance: b.imbalance, bid_volume: b.bid_volume, ask_volume: b.ask_volume,
+            large_bids: b.large_bids, large_asks: b.large_asks
+          }, null, 2);
+        } else {
+          $('m-book').textContent = 'Order book currently via Binance public API';
+        }
+      } catch (e) {
+        $('m-snapshot').textContent = String(e);
+      }
+    };
+
+    $('c-run').onclick = async () => {
+      const sym = $('c-symbol').value.trim();
+      $('c-out').textContent = 'Running council…';
+      try {
+        const r = await (await fetch(`/api/intelligence/council?symbol=${encodeURIComponent(sym)}`)).json();
+        $('c-out').textContent = JSON.stringify(r, null, 2);
+      } catch (e) { $('c-out').textContent = String(e); }
+    };
+
+    $('r-eval').onclick = async () => {
+      const q = new URLSearchParams({
+        symbol: $('r-symbol').value.trim(),
+        side: 'buy',
+        qty: $('r-qty').value,
+        environment: $('r-env').value,
+        equity: $('r-equity').value,
+      });
+      const r = await (await fetch('/api/risk/evaluate?' + q)).json();
+      $('r-out').textContent = JSON.stringify(r, null, 2);
+    };
+
+    refreshOverview();
+    setInterval(refreshOverview, 30000);
+  </script>
 </body>
 </html>

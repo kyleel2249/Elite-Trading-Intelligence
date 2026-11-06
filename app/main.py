@@ -17,6 +17,8 @@ from app.risk.engine import RiskEngine, OrderProposal
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
 from app.trading.service import TradingService
+from app.market.service import MarketService
+from app.intelligence.council import TradingCouncil
 
 
 @asynccontextmanager
@@ -92,19 +94,92 @@ async def providers_status(settings: Settings = Depends(get_settings)):
     }
 
 
-@app.get("/api/providers/binance/ticker")
-async def binance_ticker(symbol: str = "BTCUSDT", settings: Settings = Depends(get_settings)):
-    client = BinanceClient(settings)
+@app.get("/api/market/snapshot")
+async def market_snapshot(
+    provider: str = "binance",
+    symbol: str = "BTCUSDT",
+    settings: Settings = Depends(get_settings),
+):
+    svc = MarketService(settings)
     try:
-        quote = await client.get_quote(symbol)
+        return await svc.get_snapshot(provider, symbol)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/market/order-book")
+async def market_order_book(
+    symbol: str = "BTCUSDT",
+    depth: int = 20,
+    settings: Settings = Depends(get_settings),
+):
+    svc = MarketService(settings)
+    try:
+        return await svc.get_order_book(symbol, depth=depth)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/market/history")
+async def market_history(
+    provider: str = "binance",
+    symbol: str = "BTCUSDT",
+    interval: str = "1h",
+    limit: int = 100,
+    settings: Settings = Depends(get_settings),
+):
+    svc = MarketService(settings)
+    try:
+        return await svc.get_history(provider, symbol, interval=interval, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/intelligence/council")
+async def run_council(
+    symbol: str = "BTCUSDT",
+    provider: str = "binance",
+    settings: Settings = Depends(get_settings),
+):
+    mkt = MarketService(settings)
+    try:
+        snap = await mkt.get_snapshot(provider, symbol)
+        book = None
+        klines = None
+        if provider == "binance":
+            book = await mkt.get_order_book(symbol, depth=20)
+            klines = await mkt.get_history("binance", symbol, interval="1h", limit=30)
+        council = TradingCouncil()
+        decision = council.analyse(
+            symbol=symbol,
+            provider=provider,
+            price=snap.get("price"),
+            bid=snap.get("bid"),
+            ask=snap.get("ask"),
+            data_status=snap.get("data_status", "unknown"),
+            order_book=book,
+            klines=klines,
+        )
         return {
-            "provider": quote.provider,
-            "symbol": quote.symbol,
-            "price": quote.price,
-            "bid": quote.bid,
-            "ask": quote.ask,
-            "data_status": quote.data_status,
-            "ts_utc": quote.ts_utc.isoformat(),
+            "action": decision.action.value,
+            "confidence": decision.confidence,
+            "summary": decision.summary,
+            "risk_veto": decision.risk_veto,
+            "risk_notes": decision.risk_notes,
+            "contradictory_signals": decision.contradictory_signals,
+            "data_quality": decision.data_quality,
+            "timestamp": decision.timestamp,
+            "specialists": [
+                {
+                    "role": r.role,
+                    "bias": r.bias,
+                    "confidence": r.confidence,
+                    "analysis": r.analysis,
+                    "evidence": r.evidence,
+                    "limitations": r.limitations,
+                }
+                for r in decision.specialist_reports
+            ],
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -144,12 +219,8 @@ async def evaluate_risk_demo(
 
 @app.post("/api/trading/order")
 async def place_order(req: OrderRequest, settings: Settings = Depends(get_settings)):
-    """
-    Risk-gated order endpoint.
-    Live orders require LIVE_TRADING_ENABLED + provider flags + RiskEngine approval.
-    """
     service = TradingService(settings)
-    result = await service.place_order(
+    return await service.place_order(
         provider=req.provider,
         environment=req.environment,
         symbol=req.symbol,
@@ -164,4 +235,3 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
         data_age_seconds=req.data_age_seconds,
         data_status=req.data_status,
     )
-    return result
