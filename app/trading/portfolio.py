@@ -1,4 +1,4 @@
-"""Paper portfolio: positions, fills, journal."""
+"""Paper portfolio: positions, fills, journal with filters."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,10 +10,7 @@ from app.models import OrderRecord, Position, JournalEntry
 
 
 class PortfolioService:
-    """
-    Maintains paper/testnet positions and a trading journal.
-    Claire Bennett (Portfolio Auditor) standards: every event reconstructable.
-    """
+    """Claire Bennett standards: every event reconstructable."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -115,7 +112,6 @@ class PortfolioService:
             .one_or_none()
         )
 
-        # Map buy/sell to long/short book (simple net position model)
         if pos is None:
             pos_side = "long" if side == "buy" else "short"
             pos = Position(
@@ -131,7 +127,6 @@ class PortfolioService:
             self.db.add(pos)
             return
 
-        # Same direction → average in
         if (pos.side == "long" and side == "buy") or (pos.side == "short" and side == "sell"):
             new_qty = pos.qty + qty
             pos.avg_entry = ((pos.avg_entry * pos.qty) + (price * qty)) / new_qty if new_qty else price
@@ -140,9 +135,7 @@ class PortfolioService:
             pos.updated_at = datetime.utcnow()
             return
 
-        # Opposite direction → reduce / flip
         if qty < pos.qty:
-            # Partial close
             if pos.side == "long":
                 pnl = (price - pos.avg_entry) * qty
             else:
@@ -186,7 +179,6 @@ class PortfolioService:
                 thesis="Full position close",
             )
         else:
-            # Flip
             close_qty = pos.qty
             if pos.side == "long":
                 pnl = (price - pos.avg_entry) * close_qty
@@ -214,7 +206,6 @@ class PortfolioService:
             )
 
     def mark_positions(self, marks: dict[tuple[str, str, str], float]) -> list[Position]:
-        """marks key: (provider, environment, symbol) -> price"""
         open_pos = self.db.query(Position).filter(Position.status == "open").all()
         for p in open_pos:
             key = (p.provider, p.environment, p.symbol)
@@ -237,17 +228,35 @@ class PortfolioService:
             q = q.filter(Position.status == status)
         return q.order_by(Position.updated_at.desc()).all()
 
-    def list_journal(self, limit: int = 50) -> list[JournalEntry]:
-        return (
-            self.db.query(JournalEntry)
-            .order_by(JournalEntry.created_at.desc())
-            .limit(min(limit, 200))
-            .all()
-        )
+    def list_journal(
+        self,
+        limit: int = 50,
+        *,
+        symbol: Optional[str] = None,
+        event: Optional[str] = None,
+        environment: Optional[str] = None,
+        provider: Optional[str] = None,
+        side: Optional[str] = None,
+    ) -> list[JournalEntry]:
+        q = self.db.query(JournalEntry)
+        if symbol:
+            q = q.filter(JournalEntry.symbol == symbol.upper())
+        if event:
+            q = q.filter(JournalEntry.event == event)
+        if environment:
+            q = q.filter(JournalEntry.environment == environment)
+        if provider:
+            q = q.filter(JournalEntry.provider == provider)
+        if side:
+            q = q.filter(JournalEntry.side == side.lower())
+        return q.order_by(JournalEntry.created_at.desc()).limit(min(limit, 500)).all()
 
     def portfolio_summary(self, environment: str = "paper") -> dict[str, Any]:
         positions = self.list_positions(environment=environment, status="open")
-        realized = sum(p.realized_pnl for p in self.db.query(Position).filter(Position.environment == environment).all())
+        realized = sum(
+            p.realized_pnl
+            for p in self.db.query(Position).filter(Position.environment == environment).all()
+        )
         unrealized = sum(p.unrealized_pnl for p in positions)
         return {
             "environment": environment,

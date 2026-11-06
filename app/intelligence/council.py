@@ -1,6 +1,7 @@
 """
 AI Trading Council — elite named specialists + Risk Officer veto.
 Evidence-weighted aggregation; never a blind vote count.
+Marcus Okonkwo / Sofia Rahman / Priya Nair use adapters when inputs allow.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from app.intelligence.traders import ELITE_TRADERS, EliteTraderProfile
+from app.intelligence.adapters import FundamentalAdapter, MacroAdapter, SentimentAdapter
 
 
 class Action(str, Enum):
@@ -28,7 +30,7 @@ class SpecialistReport:
     trader_name: str
     trader_id: str
     analysis: str
-    bias: str  # bullish | bearish | neutral
+    bias: str
     confidence: float
     evidence: list[str] = field(default_factory=list)
     methods_applied: list[str] = field(default_factory=list)
@@ -55,6 +57,11 @@ class CouncilDecision:
 class TradingCouncil:
     """12 elite specialists. Helena Frost (Risk) has absolute veto."""
 
+    def __init__(self) -> None:
+        self.fa = FundamentalAdapter()
+        self.macro = MacroAdapter()
+        self.sentiment = SentimentAdapter()
+
     def analyse(
         self,
         *,
@@ -74,6 +81,7 @@ class TradingCouncil:
             "Aggregation is evidence-weighted confidence, not headcount voting",
             "Risk Management Officer (Helena Frost) holds veto authority",
             "Venue and quote-currency identity are preserved; no silent cross-venue substitution",
+            "FA/Macro/Sentiment desks use adapters when series allow; otherwise abstain honestly",
         ]
 
         if price is None or data_status in ("unavailable", "invalid") or not data_status:
@@ -91,7 +99,6 @@ class TradingCouncil:
                 methodology_notes=methodology_notes,
             )
 
-        # Elena Varga — Technical
         ta = ELITE_TRADERS["ta"]
         tech_bias, tech_conf, tech_ev, tech_methods = self._technical(klines, price, ta)
         reports.append(
@@ -109,7 +116,6 @@ class TradingCouncil:
             )
         )
 
-        # Jamal Reed — Liquidity
         liq = ELITE_TRADERS["liquidity"]
         liq_bias, liq_conf, liq_ev, liq_methods = self._liquidity(order_book, liq)
         reports.append(
@@ -127,7 +133,6 @@ class TradingCouncil:
             )
         )
 
-        # Nadia Petrova — Structure
         st = ELITE_TRADERS["structure"]
         reports.append(
             SpecialistReport(
@@ -148,8 +153,61 @@ class TradingCouncil:
             )
         )
 
-        # Roles that require additional feeds — honest abstention with profile methods listed
-        for key in ("fa", "macro", "sentiment", "predictive", "quant", "cis", "execution", "auditor"):
+        # Marcus Okonkwo — Fundamental adapter
+        fa_p = ELITE_TRADERS["fa"]
+        fa_sig = self.fa.analyse(symbol=symbol, price=price, klines=klines, context=context)
+        reports.append(
+            SpecialistReport(
+                role=fa_p.title,
+                trader_name=fa_p.name,
+                trader_id=fa_p.id,
+                analysis=fa_p.mandate,
+                bias=fa_sig.bias,
+                confidence=fa_sig.confidence,
+                evidence=fa_sig.evidence,
+                methods_applied=fa_sig.methods_applied,
+                assumptions=[],
+                limitations=fa_sig.limitations,
+            )
+        )
+
+        # Sofia Rahman — Macro adapter
+        mac_p = ELITE_TRADERS["macro"]
+        mac_sig = self.macro.analyse(klines=klines, order_book=order_book, context=context)
+        reports.append(
+            SpecialistReport(
+                role=mac_p.title,
+                trader_name=mac_p.name,
+                trader_id=mac_p.id,
+                analysis=mac_p.mandate,
+                bias=mac_sig.bias,
+                confidence=mac_sig.confidence,
+                evidence=mac_sig.evidence,
+                methods_applied=mac_sig.methods_applied,
+                assumptions=[],
+                limitations=mac_sig.limitations,
+            )
+        )
+
+        # Priya Nair — Sentiment adapter
+        sen_p = ELITE_TRADERS["sentiment"]
+        sen_sig = self.sentiment.analyse(klines=klines, context=context)
+        reports.append(
+            SpecialistReport(
+                role=sen_p.title,
+                trader_name=sen_p.name,
+                trader_id=sen_p.id,
+                analysis=sen_p.mandate,
+                bias=sen_sig.bias,
+                confidence=sen_sig.confidence,
+                evidence=sen_sig.evidence,
+                methods_applied=sen_sig.methods_applied,
+                assumptions=[],
+                limitations=sen_sig.limitations,
+            )
+        )
+
+        for key in ("predictive", "quant", "cis", "execution", "auditor"):
             t = ELITE_TRADERS[key]
             reports.append(
                 SpecialistReport(
@@ -157,19 +215,18 @@ class TradingCouncil:
                     trader_name=t.name,
                     trader_id=t.id,
                     analysis=(
-                        f"{t.mandate} "
-                        "Specialized inputs incomplete in this run; stance remains neutral per evidence standards."
+                        f"{t.mandate} Specialized path partially scaffolded; neutral until full module attaches."
                     ),
                     bias="neutral",
                     confidence=0.2,
                     evidence=[],
                     methods_applied=t.methods[:2],
                     assumptions=[],
-                    limitations=t.evidence_standards + ["Required feed or model not fully connected in this build"],
+                    limitations=t.evidence_standards
+                    + ["Full module not fully connected in this build"],
                 )
             )
 
-        # Helena Frost — Risk (veto)
         risk = ELITE_TRADERS["risk"]
         risk_notes: list[str] = []
         risk_veto = False
@@ -208,7 +265,7 @@ class TradingCouncil:
 
         contradictory = []
         if bull > 0.3 and bear > 0.3:
-            contradictory.append("Mixed technical vs liquidity evidence")
+            contradictory.append("Mixed evidence across technical, liquidity, and adapter desks")
 
         if risk_veto:
             action = Action.NO_TRADE
@@ -221,7 +278,7 @@ class TradingCouncil:
         elif net > 0.45:
             action = Action.BUY if net < 0.7 else Action.STRONG_BUY
             conf = min(0.85, abs(net))
-            summary = f"Evidence-weighted stance bullish (net {net:.2f}). Strategist synthesis pending fuller desks."
+            summary = f"Evidence-weighted stance bullish (net {net:.2f})."
         elif net < -0.45:
             action = Action.SELL if net > -0.7 else Action.STRONG_SELL
             conf = min(0.85, abs(net))

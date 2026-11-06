@@ -1,92 +1,86 @@
 # ETI — Elite Trading Intelligence
 
-Production-oriented multi-asset trading intelligence platform.
+Production-oriented multi-asset trading intelligence platform with a named elite desk, risk-gated paper/live paths, and probabilistic research tools.
 
 **Repository:** https://github.com/kyleel2249/Elite-Trading-Intelligence  
-**Owner:** kyleel2249  
-**Primary branch:** main
+**Branch:** `main`
 
-## Status
-
-This is the clean foundation matching the original ETI concept:
-
-- Unified provider architecture (Alpaca + Binance)
-- Strong risk engine with hard limits and veto authority
-- Live trading path **enabled** but fully gated by the risk engine
-- Paper / testnet paths as primary safe defaults
-- FastAPI core, SQLAlchemy models, configuration via environment
-- Security-first credential handling
-
-Live trading will never execute without:
-1. Explicit `LIVE_TRADING_ENABLED=true`
-2. Provider-specific live flags
-3. Passing RiskEngine checks (size, daily loss, drawdown, position limits, data freshness)
-4. Valid instrument and order precision
-
-## Quick Start (Local)
+## One-command local demo (Docker)
 
 ```bash
 git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
 cd Elite-Trading-Intelligence
+cp .env.example .env
+# Optional: add Alpaca / Binance keys to .env
+docker compose up --build
+```
+
+Open http://localhost:8000  · API docs http://localhost:8000/docs
+
+Health: `curl -s localhost:8000/api/system/health | jq`
+
+## Local Python (no Docker)
+
+```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your keys
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --port 8000
+pytest -q
 ```
 
-Open http://localhost:8000
+## Elite Trading Desk
 
-## Architecture (High Level)
+| Name | Title |
+|------|--------|
+| Adrian Cole | Chief Investment Strategist |
+| Elena Varga | Technical Analysis Specialist |
+| Marcus Okonkwo | Fundamental Analysis Specialist |
+| Sofia Rahman | Macroeconomic Analyst |
+| Kenji Mori | Quantitative Researcher |
+| Nadia Petrova | Market Structure Analyst |
+| Jamal Reed | Liquidity Analyst |
+| Priya Nair | News and Sentiment Analyst |
+| Lars Hagen | Predictive Intelligence Analyst |
+| **Helena Frost** | Risk Management Officer (**veto**) |
+| Omar Diallo | Execution Analyst |
+| Claire Bennett | Portfolio Auditor |
 
-```
-app/
-├── main.py                 # FastAPI entry
-├── config.py               # Central settings
-├── database.py
-├── models.py
-├── schemas.py
-├── risk/
-│   └── engine.py           # RiskEngine (veto authority)
-├── market/
-│   ├── normalization.py
-│   ├── data_quality.py
-│   └── service.py
-├── integrations/
-│   ├── base.py
-│   ├── registry.py
-│   ├── alpaca/
-│   └── binance/
-├── trading/
-│   ├── paper.py
-│   └── live.py             # Live path (risk-gated)
-├── intelligence/
-│   └── council.py          # AI Trading Council scaffold
-└── templates/ + static/
-```
+Profiles & methods: `GET /api/intelligence/traders`
 
-## Safety Rules
+## Key APIs
 
-- Secrets never leave environment variables / server side
+| Area | Endpoints |
+|------|-----------|
+| Health | `GET /api/system/health` |
+| Providers / streams | `GET /api/providers/status` |
+| Market | `GET /api/market/snapshot`, `/order-book`, `/history` |
+| Council | `GET /api/intelligence/council` |
+| Forecast | `GET /api/intelligence/forecast` |
+| Forecast accuracy | `POST /api/intelligence/forecast/score`, `GET /api/intelligence/forecast/accuracy` |
+| Risk | `GET /api/risk/evaluate` |
+| Trading | `POST /api/trading/order` |
+| Paper portfolio | `GET /api/paper-trading/portfolio`, `/positions`, `/journal` |
+| Reconcile | `POST /api/trading/reconcile` |
+| MTM job | `GET /api/system/mtm-status`, `POST /api/system/mtm-run` |
+
+## Safety
+
+- Live path is **enabled** but every order passes **Helena Frost / RiskEngine**
+- Paper/testnet preferred defaults; secrets only via environment
+- Forecasts are **probabilistic** (Lars Hagen) — not guarantees
 - No withdrawal permissions requested
-- RiskEngine has final veto on every order
-- Live orders require fresh validated data when configured
-- Default risk per trade: 1% of equity
-- Clear separation of paper vs live credentials and endpoints
 
-## Next Implementation Waves
+## Tests & CI
 
-1. Complete Alpaca + Binance market data + WebSocket clients
-2. Full data-quality + normalization pipeline
-3. Paper trading engine + journal
-4. Risk-gated live order submission
-5. AI Trading Council specialists + decision aggregation
-6. Predictive research layer (probabilistic only)
-7. Dashboard upgrades
-8. Comprehensive tests + CI
+```bash
+pytest -q
+```
 
-## License & Disclaimer
+GitHub Actions runs compile + pytest on every push to `main`.
 
-Research and trading software. Use at your own risk. Past performance is not indicative of future results. Live trading can result in loss of capital.
+## Disclaimer
+
+Research and trading software. Use at your own risk. Live trading can result in loss of capital.
