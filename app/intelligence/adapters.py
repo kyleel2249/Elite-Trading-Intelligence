@@ -1,7 +1,6 @@
 """
 Fundamental / Macro / Sentiment adapters.
-Unlock Marcus Okonkwo, Sofia Rahman, Priya Nair from pure neutral abstention
-when minimal structured inputs are available.
+Marcus Okonkwo, Sofia Rahman, Priya Nair — use price proxies and optional external feeds.
 """
 from __future__ import annotations
 
@@ -13,7 +12,7 @@ from app.intelligence.traders import ELITE_TRADERS
 
 @dataclass
 class DeskSignal:
-    bias: str  # bullish | bearish | neutral
+    bias: str
     confidence: float
     evidence: list[str]
     methods_applied: list[str]
@@ -21,7 +20,7 @@ class DeskSignal:
 
 
 class FundamentalAdapter:
-    """Marcus Okonkwo — relative simple proxies from market structure."""
+    """Marcus Okonkwo."""
 
     def analyse(
         self,
@@ -45,16 +44,27 @@ class FundamentalAdapter:
         sma20 = sum(closes[-20:]) / 20
         prem = (price - sma20) / sma20 if sma20 else 0
         evidence = [f"Price vs 20-SMA premium={prem:.2%}", f"SMA20={sma20:.6g}"]
-        # Crude proxy: extended premium → cautious; discount → constructive
         if prem < -0.03:
-            return DeskSignal("bullish", 0.4, evidence + ["Discount to recent mean"], profile.methods[:2], ["Proxy only — not issuer fundamentals"])
+            return DeskSignal(
+                "bullish",
+                0.4,
+                evidence + ["Discount to recent mean"],
+                profile.methods[:2],
+                ["Proxy only — not issuer fundamentals"],
+            )
         if prem > 0.05:
-            return DeskSignal("bearish", 0.35, evidence + ["Extended premium to mean"], profile.methods[:2], ["Proxy only — not issuer fundamentals"])
+            return DeskSignal(
+                "bearish",
+                0.35,
+                evidence + ["Extended premium to mean"],
+                profile.methods[:2],
+                ["Proxy only — not issuer fundamentals"],
+            )
         return DeskSignal("neutral", 0.3, evidence, profile.methods[:2], ["No strong relative dislocation"])
 
 
 class MacroAdapter:
-    """Sofia Rahman — session/vol regime proxy without external macro API."""
+    """Sofia Rahman — vol regime + optional FRED context."""
 
     def analyse(
         self,
@@ -64,48 +74,71 @@ class MacroAdapter:
         context: Optional[dict[str, Any]] = None,
     ) -> DeskSignal:
         profile = ELITE_TRADERS["macro"]
+        context = context or {}
+        evidence: list[str] = []
+        methods = list(profile.methods[:2])
+        limitations: list[str] = []
+
+        fred = context.get("fred") or {}
+        if fred.get("status") == "ok" and fred.get("latest"):
+            latest = fred["latest"]
+            evidence.append(f"FRED {fred.get('series_id')}={latest.get('value')} @ {latest.get('date')}")
+            if fred.get("change") is not None:
+                evidence.append(f"FRED change={fred['change']}")
+            methods.append("Policy path and surprise sensitivity")
+        elif fred.get("status") == "not_configured":
+            limitations.append("FRED_API_KEY not configured")
+
         if not klines or len(klines) < 15:
+            if evidence:
+                # FRED-only thin signal
+                chg = fred.get("change")
+                if chg is not None and chg > 0.05:
+                    return DeskSignal("bearish", 0.35, evidence + ["Rising policy rate proxy"], methods, limitations + ["Thin macro sample"])
+                if chg is not None and chg < -0.05:
+                    return DeskSignal("bullish", 0.35, evidence + ["Easing policy rate proxy"], methods, limitations + ["Thin macro sample"])
             return DeskSignal(
-                bias="neutral",
-                confidence=0.2,
-                evidence=[],
-                methods_applied=profile.methods[:1],
-                limitations=["No macro feed; insufficient price history for regime proxy"]
-                + profile.evidence_standards,
+                "neutral",
+                0.2,
+                evidence,
+                methods[:1],
+                limitations + ["Insufficient price history for regime proxy"] + profile.evidence_standards,
             )
+
         closes = [float(k["close"]) for k in klines if k.get("close")]
         rets = [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes)) if closes[i - 1]]
         if len(rets) < 5:
-            return DeskSignal("neutral", 0.2, [], profile.methods[:1], ["Insufficient returns"])
+            return DeskSignal("neutral", 0.2, evidence, methods[:1], limitations + ["Insufficient returns"])
+
         import statistics
 
         vol = statistics.pstdev(rets)
-        evidence = [f"Realized vol (proxy)={vol:.4f}"]
+        evidence.append(f"Realized vol (proxy)={vol:.4f}")
         spread_bps = (order_book or {}).get("spread_bps")
         if spread_bps is not None:
             evidence.append(f"Spread_bps={spread_bps}")
-        # High vol → defensive neutral/bearish risk-off tilt
+
         if vol > 0.02:
             return DeskSignal(
                 "bearish",
                 0.4,
                 evidence + ["Elevated vol regime — risk-off tilt"],
-                ["Cross-asset correlation regimes", "Session and calendar risk windows"],
-                ["Proxy from price vol only — no FRED/rates feed in this build"],
+                methods + ["Cross-asset correlation regimes"],
+                limitations + (["Vol proxy primary"] if fred.get("status") != "ok" else []),
             )
         if vol < 0.005:
             return DeskSignal(
                 "bullish",
                 0.35,
                 evidence + ["Compressed vol regime"],
-                ["Global liquidity and USD strength framing"],
-                ["Proxy only"],
+                methods,
+                limitations,
             )
-        return DeskSignal("neutral", 0.3, evidence, profile.methods[:2], ["Mid-vol regime"])
+        return DeskSignal("neutral", 0.3, evidence, methods, limitations + ["Mid-vol regime"])
 
 
 class SentimentAdapter:
-    """Priya Nair — momentum crowding proxy until news feed is connected."""
+    """Priya Nair — news feed when configured, else momentum crowding proxy."""
 
     def analyse(
         self,
@@ -115,8 +148,24 @@ class SentimentAdapter:
     ) -> DeskSignal:
         profile = ELITE_TRADERS["sentiment"]
         context = context or {}
-        # Optional external sentiment score in context: -1 .. +1
-        if "sentiment_score" in context:
+
+        news = context.get("news") or {}
+        if news.get("status") == "ok" and news.get("sentiment_score") is not None:
+            score = float(news["sentiment_score"])
+            bias = "bullish" if score > 0.15 else ("bearish" if score < -0.15 else "neutral")
+            return DeskSignal(
+                bias,
+                min(0.65, 0.3 + abs(score)),
+                [
+                    f"News sentiment_score={score:.3f}",
+                    f"Headlines={news.get('headline_count')}",
+                    news.get("note") or "NewsAPI keyword polarity",
+                ],
+                profile.methods[:2] + ["Headline and event proximity"],
+                ["Keyword polarity — not full NLP"],
+            )
+
+        if "sentiment_score" in context and not news:
             score = float(context["sentiment_score"])
             bias = "bullish" if score > 0.15 else ("bearish" if score < -0.15 else "neutral")
             return DeskSignal(
@@ -126,15 +175,21 @@ class SentimentAdapter:
                 profile.methods[:2],
                 [],
             )
+
+        if news.get("status") == "not_configured":
+            extra_lim = ["NEWSAPI_KEY not configured"]
+        else:
+            extra_lim = []
+
         if not klines or len(klines) < 10:
             return DeskSignal(
                 "neutral",
                 0.2,
                 [],
                 profile.methods[:1],
-                ["No news feed; insufficient price history for crowding proxy"]
-                + profile.evidence_standards,
+                extra_lim + ["No news feed; insufficient price history"] + profile.evidence_standards,
             )
+
         closes = [float(k["close"]) for k in klines if k.get("close")]
         chg = (closes[-1] - closes[-10]) / closes[-10] if closes[-10] else 0
         evidence = [f"10-bar momentum={chg:.2%}"]
@@ -144,7 +199,7 @@ class SentimentAdapter:
                 0.35,
                 evidence + ["Positive momentum crowding proxy"],
                 ["Sentiment polarity and crowding proxies"],
-                ["Not news-derived — price momentum proxy only"],
+                extra_lim + ["Not news-derived"],
             )
         if chg < -0.04:
             return DeskSignal(
@@ -152,6 +207,6 @@ class SentimentAdapter:
                 0.35,
                 evidence + ["Negative momentum crowding proxy"],
                 ["Sentiment polarity and crowding proxies"],
-                ["Not news-derived — price momentum proxy only"],
+                extra_lim + ["Not news-derived"],
             )
-        return DeskSignal("neutral", 0.25, evidence, profile.methods[:1], ["No extreme crowding proxy"])
+        return DeskSignal("neutral", 0.25, evidence, profile.methods[:1], extra_lim + ["No extreme crowding proxy"])

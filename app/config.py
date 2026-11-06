@@ -2,7 +2,6 @@
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +39,14 @@ class Settings(BaseSettings):
     binance_testnet_enabled: bool = True
     binance_live_trading_enabled: bool = True
 
+    # Optional external intelligence feeds
+    fred_api_key: Optional[str] = None
+    newsapi_key: Optional[str] = None
+
+    # Jobs
+    mtm_interval_seconds: int = 60
+    reconcile_interval_seconds: int = 120
+
     # Data quality
     data_max_age_seconds: int = 300
     require_fresh_data_for_live_orders: bool = True
@@ -56,8 +63,15 @@ class Settings(BaseSettings):
         return bool(self.binance_api_key and self.binance_secret_key)
 
     @property
+    def fred_configured(self) -> bool:
+        return bool(self.fred_api_key)
+
+    @property
+    def news_configured(self) -> bool:
+        return bool(self.newsapi_key)
+
+    @property
     def is_live_allowed(self) -> bool:
-        """Global gate. Provider-specific and risk gates still apply."""
         return self.live_trading_enabled
 
 
