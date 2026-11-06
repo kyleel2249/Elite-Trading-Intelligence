@@ -19,13 +19,16 @@ from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
 from app.trading.service import TradingService
 from app.trading.portfolio import PortfolioService
+from app.trading.reconciliation import OrderReconciler
 from app.market.service import MarketService
 from app.intelligence.council import TradingCouncil
 from app.intelligence.traders import list_trader_profiles
 from app.intelligence.predictive import PredictiveEngine
+from app.intelligence.forecast_accuracy import ForecastAccuracyService
 from app.streaming.manager import stream_hub
+from app.jobs.mark_to_market import mtm_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
-from app.models import CouncilDecisionRecord, ForecastRecord
+from app.models import CouncilDecisionRecord
 
 
 @asynccontextmanager
@@ -35,7 +38,12 @@ async def lifespan(app: FastAPI):
         await stream_hub.start(["btcusdt", "ethusdt"])
     except Exception:
         pass
+    try:
+        await mtm_job.start()
+    except Exception:
+        pass
     yield
+    await mtm_job.stop()
     await stream_hub.stop()
 
 
@@ -72,6 +80,12 @@ class OrderRequest(BaseModel):
     council_action: Optional[str] = None
 
 
+class ForecastScoreRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    provider: str = "binance"
+    realized_price: Optional[float] = None  # if omitted, fetch latest snapshot
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, settings: Settings = Depends(get_settings)):
     return templates.TemplateResponse(
@@ -97,6 +111,17 @@ async def health(settings: Settings = Depends(get_settings)):
     )
 
 
+@app.get("/api/system/mtm-status")
+async def mtm_status():
+    return mtm_job.status()
+
+
+@app.post("/api/system/mtm-run")
+async def mtm_run():
+    n = await mtm_job.run_once()
+    return {"marked": n, **mtm_job.status()}
+
+
 @app.get("/api/providers/status")
 async def providers_status(settings: Settings = Depends(get_settings)):
     alpaca = AlpacaClient(settings)
@@ -106,6 +131,7 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "binance": await binance.health(),
         "live_trading_enabled": settings.live_trading_enabled,
         "streams": stream_hub.status(),
+        "mtm": mtm_job.status(),
     }
 
 
@@ -185,7 +211,7 @@ async def run_council(
         klines = None
         if provider == "binance":
             book = await mkt.get_order_book(symbol, depth=20)
-            klines = await mkt.get_history("binance", symbol, interval="1h", limit=30)
+            klines = await mkt.get_history("binance", symbol, interval="1h", limit=48)
         council = TradingCouncil()
         decision = council.analyse(
             symbol=symbol,
@@ -265,7 +291,6 @@ async def intelligence_forecast(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
-    """Lars Hagen — probabilistic scenarios only."""
     mkt = MarketService(settings)
     try:
         klines = await mkt.get_history(provider, symbol, interval="1h", limit=48)
@@ -281,6 +306,35 @@ async def intelligence_forecast(
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/intelligence/forecast/score")
+async def forecast_score(
+    body: ForecastScoreRequest,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
+    """Score pending Lars Hagen forecasts against realized price (walk-forward store)."""
+    price = body.realized_price
+    if price is None:
+        snap = await MarketService(settings).get_snapshot(body.provider, body.symbol)
+        price = snap.get("price")
+        if price is None:
+            raise HTTPException(status_code=422, detail="No realized price available")
+    svc = ForecastAccuracyService(db)
+    scored = svc.score_pending(body.symbol, float(price), provider=body.provider)
+    return {
+        "symbol": body.symbol.upper(),
+        "realized_price": price,
+        "scored": scored,
+        "summary": svc.summary(symbol=body.symbol),
+        "analyst": "Lars Hagen",
+    }
+
+
+@app.get("/api/intelligence/forecast/accuracy")
+async def forecast_accuracy(symbol: Optional[str] = None, db: Session = Depends(get_db)):
+    return ForecastAccuracyService(db).summary(symbol=symbol)
 
 
 @app.get("/api/risk/evaluate")
@@ -322,7 +376,6 @@ async def place_order(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
-    # Mark price hint for paper simulation / journal
     fill_hint = None
     if req.environment.lower() in ("paper", "testnet"):
         try:
@@ -332,7 +385,7 @@ async def place_order(
             fill_hint = req.limit_price
 
     service = TradingService(settings, db=db)
-    result = await service.place_order(
+    return await service.place_order(
         provider=req.provider,
         environment=req.environment,
         symbol=req.symbol,
@@ -350,7 +403,16 @@ async def place_order(
         thesis=req.thesis,
         council_action=req.council_action,
     )
-    return result
+
+
+@app.post("/api/trading/reconcile")
+async def trading_reconcile(
+    limit: int = 50,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
+    """Idempotent reconciliation of open/submitted orders (Omar Diallo / Claire Bennett)."""
+    return await OrderReconciler(db, settings).reconcile_open(limit=limit)
 
 
 @app.get("/api/paper-trading/positions")
@@ -384,8 +446,23 @@ async def paper_portfolio(environment: str = "paper", db: Session = Depends(get_
 
 
 @app.get("/api/paper-trading/journal")
-async def paper_journal(limit: int = 50, db: Session = Depends(get_db)):
-    rows = PortfolioService(db).list_journal(limit=limit)
+async def paper_journal(
+    limit: int = 50,
+    symbol: Optional[str] = None,
+    event: Optional[str] = None,
+    environment: Optional[str] = None,
+    provider: Optional[str] = None,
+    side: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    rows = PortfolioService(db).list_journal(
+        limit=limit,
+        symbol=symbol,
+        event=event,
+        environment=environment,
+        provider=provider,
+        side=side,
+    )
     return [
         {
             "id": r.id,
@@ -409,7 +486,6 @@ async def paper_journal(limit: int = 50, db: Session = Depends(get_db)):
 
 @app.get("/api/paper-trading/history")
 async def paper_history(limit: int = 50, db: Session = Depends(get_db)):
-    """Order history (legacy path). Prefer /journal for audit trail."""
     from app.models import OrderRecord
 
     rows = db.query(OrderRecord).order_by(OrderRecord.created_at.desc()).limit(min(limit, 200)).all()
