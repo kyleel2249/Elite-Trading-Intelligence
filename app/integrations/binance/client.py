@@ -42,8 +42,7 @@ class BinanceClient(BaseProvider):
         ).hexdigest()
 
     def _headers(self) -> dict[str, str]:
-        h = {"X-MBX-APIKEY": self.api_key or ""}
-        return h
+        return {"X-MBX-APIKEY": self.api_key or ""}
 
     async def health(self) -> dict[str, Any]:
         try:
@@ -53,7 +52,7 @@ class BinanceClient(BaseProvider):
                 account_status = "not_configured"
                 if self.configured:
                     try:
-                        acc = await self.get_account()
+                        await self.get_account()
                         account_status = "connected"
                     except Exception as e:
                         account_status = f"error: {e}"
@@ -111,7 +110,7 @@ class BinanceClient(BaseProvider):
                 data_status="fresh",
                 exchange="BINANCE",
                 quote_currency=symbol[-4:] if symbol.endswith("USDT") else None,
-                meta={"source": "bookTicker"},
+                meta={"source": "bookTicker", "bid_qty": data.get("bidQty"), "ask_qty": data.get("askQty")},
             )
 
     async def get_klines(
@@ -142,6 +141,16 @@ class BinanceClient(BaseProvider):
                     }
                 )
             return out
+
+    async def get_order_book_raw(self, symbol: str, limit: int = 20) -> dict[str, Any]:
+        symbol = symbol.upper()
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            r = await client.get(
+                f"{self.base_url}/api/v3/depth",
+                params={"symbol": symbol, "limit": limit},
+            )
+            r.raise_for_status()
+            return r.json()
 
     async def get_account(self) -> dict[str, Any]:
         if not self.configured:
