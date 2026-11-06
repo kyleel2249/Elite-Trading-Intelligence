@@ -3,15 +3,23 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.knowledge.schema import TraderKnowledgeProfile, SourceNote
+from app.knowledge.schema import TraderKnowledgeProfile
 from app.knowledge import profiles_foundational as f
 from app.knowledge import profiles_additional as a
+from app.knowledge import profiles_deep as d
+from app.knowledge import profiles_more as m
+from app.knowledge.strategies import STRATEGY_MODULES
 
 
 def _all_profiles() -> dict[str, TraderKnowledgeProfile]:
     out: dict[str, TraderKnowledgeProfile] = {}
     out.update(f.PROFILES)
     out.update(a.PROFILES)
+    out.update(m.PROFILES)
+    # Deep overlays win
+    out.update(d.DEEP_PROFILES)
+    # Drop meta placeholder ids that are not persons
+    out.pop("paul_tudor_secondary_note", None)
     return out
 
 
@@ -20,10 +28,10 @@ def list_traders() -> list[dict[str, Any]]:
 
 
 def get_trader(trader_id: str) -> Optional[dict[str, Any]]:
-    p = _all_profiles().get(trader_id.lower().replace(" ", "_"))
+    key = trader_id.lower().replace(" ", "_")
+    p = _all_profiles().get(key)
     if p:
         return p.to_dict()
-    # fuzzy id
     for k, v in _all_profiles().items():
         if trader_id.lower() in k or trader_id.lower() in v.full_name.lower():
             return v.to_dict()
@@ -43,36 +51,76 @@ def search_traders(q: str, tag: Optional[str] = None, market: Optional[str] = No
                 " ".join(p.markets_traded),
                 " ".join(p.documented_patterns),
                 " ".join(p.eti_lessons),
+                p.expandable_notes or "",
             ]
         ).lower()
         if q and q not in blob:
             continue
         if tag and tag.lower() not in [t.lower() for t in p.tags]:
             continue
-        if market and market.lower() not in [m.lower() for m in p.markets_traded]:
+        if market and market.lower() not in [mkt.lower() for mkt in p.markets_traded]:
             continue
         results.append(p.to_dict())
     return sorted(results, key=lambda x: x["full_name"])
 
 
-def attribution_for_decision(summary: str, specialist_evidence: list[str]) -> list[dict[str, Any]]:
-    """Map decision text to strategy modules (explainability — not causal proof)."""
-    from app.knowledge.strategies import STRATEGY_MODULES
-
+def attribution_for_decision(
+    summary: str,
+    specialist_evidence: list[str],
+    structured_tags: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    """
+    Structured + keyword attribution to strategy modules.
+    structured_tags examples: trend_breakout, liquidity_regime, structure_level, value_quality
+    """
     text = (summary + " " + " ".join(specialist_evidence)).lower()
-    hits = []
+    tags = {t.lower() for t in (structured_tags or [])}
+
+    # Map structured evidence tags → modules
+    tag_map = {
+        "trend_breakout": ["turtle_trend", "darvas_box", "minervini_vcp"],
+        "liquidity_regime": ["druck_liquidity_macro", "soros_reflexivity"],
+        "structure_level": ["ptj_structure_preservation"],
+        "supply_demand": ["wyckoff_supply_demand"],
+        "value_quality": ["buffett_munger_value", "lynch_fundamental"],
+        "contrarian_mispricing": ["burry_contrarian"],
+        "quant_stat": ["simons_quant"],
+        "mechanical_risk": ["seykota_mechanical"],
+        "growth_momentum": ["oneil_canslim", "minervini_vcp"],
+    }
+
+    scores: dict[str, float] = {}
+    reasons: dict[str, list[str]] = {}
+
+    for tag, mods in tag_map.items():
+        if tag in tags or tag.replace("_", " ") in text:
+            for mid in mods:
+                scores[mid] = scores.get(mid, 0) + 2.0
+                reasons.setdefault(mid, []).append(f"structured_tag:{tag}")
+
     for mid, mod in STRATEGY_MODULES.items():
-        score = sum(1 for kw in mod.attribution_keywords if kw.lower() in text)
-        if score:
-            hits.append(
-                {
-                    "strategy_module_id": mid,
-                    "name": mod.name,
-                    "inspired_by": mod.inspired_by,
-                    "match_score": score,
-                    "principles": mod.principles[:3],
-                    "note": "Attribution by keyword overlap — not a claim that this module solely drove the decision",
-                }
-            )
+        for kw in mod.attribution_keywords:
+            if kw.lower() in text:
+                scores[mid] = scores.get(mid, 0) + 1.0
+                reasons.setdefault(mid, []).append(f"keyword:{kw}")
+
+    hits = []
+    for mid, score in scores.items():
+        mod = STRATEGY_MODULES.get(mid)
+        if not mod:
+            continue
+        hits.append(
+            {
+                "strategy_module_id": mid,
+                "name": mod.name,
+                "inspired_by": mod.inspired_by,
+                "match_score": score,
+                "reasons": reasons.get(mid, []),
+                "principles": mod.principles[:3],
+                "incompatible_with": mod.incompatible_with,
+                "note": "Attribution explains influence — not sole causation; incompatible modules must not be blended blindly",
+                "risk_officer": "Helena Frost still gates execution",
+            }
+        )
     hits.sort(key=lambda x: -x["match_score"])
     return hits

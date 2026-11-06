@@ -44,11 +44,7 @@ _add("bill_ackman", "Bill Ackman", "Pershing Square; concentrated activist/long-
      ["Activist campaigns", "Concentration"], ["buffett_munger_value", "lynch_fundamental"], ["activist"])
 _add("seth_klarman", "Seth Klarman", "Baupost; margin of safety; absolute return credit/equity value.",
      ["equities", "credit"], "Margin of safety; opportunistic credit and equity.",
-     ["Deep value", "Credit opportunities"], ["burry_contrarian", "", "buffett_munger_value"], ["value", "credit"])
-_add("paul_tudor_secondary_note", "Commodities Corp alumni tradition",
-     "Many macro traders share lineage with early commodity trading advisors and mentors — context node, not a person.",
-     ["futures"], "CTA trend/macro apprenticeship tradition.",
-     ["Mentorship networks"], ["turtle_trend"], ["meta"])
+     ["Deep value", "Credit opportunities"], ["burry_contrarian", "buffett_munger_value"], ["value", "credit"])
 _add("van_tharp", "Van K. Tharp", "Trading coach; position sizing and psychology frameworks (educational).",
      ["multi-asset"], "R-multiples, expectancy, psychological discipline.",
      ["Position sizing education", "Expectancy"], ["seykota_mechanical"], ["psychology", "education"])
@@ -58,3 +54,9 @@ _add("alexander_elder", "Alexander Elder", "Psychiatrist-trader; psychology + tr
 _add("jack_schwager", "Jack Schwager", "Author of Market Wizards; interviewer/documentarian of trader methods.",
      ["multi-asset"], "Document rather than promote a single proprietary system.",
      ["Interview synthesis"], ["seykota_mechanical"], ["documentation"])
+_add("nassim_taleb", "Nassim Nicholas Taleb", "Author/trader; antifragility, optionality, barbell risk (public writings).",
+     ["options", "futures"], "Convex payoffs; limit ruin; skepticism of fragile forecasts.",
+     ["Barbell", "Convexity"], ["ptj_structure_preservation", "simons_quant"], ["risk", "optionality"])
+_add("steven_cohen", "Steven Cohen", "Point72 / SAC history; discretionary multi-strategy equity trading culture (public).",
+     ["equities"], "Trading-oriented multi-strategy process; risk infrastructure (firm-level, reported).",
+     ["Trading culture", "Risk systems (firm)"], ["ptj_structure_preservation"], ["multi-strategy"])
