@@ -174,3 +174,68 @@ class ForecastAccuracy(Base):
     analyst: Mapped[str] = mapped_column(String(64), default="Lars Hagen")
     model_version: Mapped[str] = mapped_column(String(32), default="v0-scaffold")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class InvestorActivity(Base):
+    """Durable disclosure / investor activity intelligence record."""
+
+    __tablename__ = "investor_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    activity_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    category: Mapped[str] = mapped_column(String(64), index=True)
+    investor_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)
+    institution: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)
+    ticker: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    direction: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    transaction_date: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    filing_or_report_date: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    publication_date: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    amount_or_range: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    source_provider: Mapped[str] = mapped_column(String(64), index=True)
+    verification_status: Mapped[str] = mapped_column(String(64), default="UNCONFIRMED")
+    significance: Mapped[str] = mapped_column(String(32), default="INFORMATIONAL", index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    notes: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    is_historical_snapshot: Mapped[bool] = mapped_column(Boolean, default=False)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class IntelligenceAlert(Base):
+    """User-facing alert when meaningful verified activity is stored."""
+
+    __tablename__ = "intelligence_alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    alert_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    activity_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    title: Mapped[str] = mapped_column(String(512))
+    severity: Mapped[str] = mapped_column(String(32), default="MODERATE", index=True)
+    ticker: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    investor_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    recommended_action: Mapped[str] = mapped_column(String(64), default="RESEARCH")
+    source_provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(64), default="UNCONFIRMED")
+    payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class DisclosureOutcome(Base):
+    """Post-publication return study scaffold (publication date = info availability)."""
+
+    __tablename__ = "disclosure_outcomes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    activity_id: Mapped[str] = mapped_column(String(64), index=True)
+    ticker: Mapped[str] = mapped_column(String(32), index=True)
+    publication_date: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    horizon_days: Mapped[int] = mapped_column(Integer)
+    return_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    benchmark_return_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
