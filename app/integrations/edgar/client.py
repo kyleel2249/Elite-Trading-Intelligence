@@ -12,7 +12,6 @@ import hashlib
 import httpx
 
 BASE = "https://data.sec.gov"
-# SEC requires a descriptive User-Agent with contact
 UA = "EliteTradingIntelligence/1.0 (research; contact: eti-research@example.com)"
 
 
@@ -79,7 +78,6 @@ class EdgarClient:
         }
 
     def activities_from_13f_index(self, submissions: dict[str, Any]) -> list[dict[str, Any]]:
-        """Convert 13F index rows into activity records (snapshot metadata only)."""
         if submissions.get("status") != "ok":
             return []
         name = submissions.get("name") or "Unknown filer"
@@ -114,9 +112,8 @@ class EdgarClient:
         return acts
 
 
-# Well-known CIKs for elite-linked institutions (public)
+# Public CIKs linked to elite-associated institutions (labels only)
 WATCH_CIKS = {
     "0001067983": "Berkshire Hathaway",
-    "0001350694": "Bridgewater Associates" ,  # verify if needed
     "0001649339": "Scion Asset Management",
 }
