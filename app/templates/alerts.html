@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETI — Intelligence Alerts</title>
+  <style>
+    :root {
+      --bg:#070b12; --card:rgba(18,28,45,.78); --card-solid:#121c2d; --text:#e8eef8; --muted:#8b9bb4;
+      --cyan:#22d3ee; --blue:#3b82f6; --green:#22c55e; --red:#ef4444; --gold:#fbbf24; --purple:#a78bfa;
+      --border:rgba(56,189,248,.15); --glow:0 0 24px rgba(34,211,238,.12);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(1000px 500px at 80% -10%,#2a1540 0%,transparent 45%),radial-gradient(900px 500px at 0% 0%,#0e2a3d 0%,transparent 50%),var(--bg);color:var(--text);min-height:100vh;line-height:1.45}
+    header{position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);background:rgba(7,11,18,.88);border-bottom:1px solid var(--border);padding:.85rem 1.25rem;display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between}
+    h1{margin:0;font-size:1.1rem;letter-spacing:.03em;background:linear-gradient(90deg,var(--gold),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .sub{color:var(--muted);font-size:.75rem;margin-top:.15rem}
+    .nav a,.btn{text-decoration:none;color:var(--text);background:rgba(30,41,59,.85);border:1px solid var(--border);padding:.4rem .7rem;border-radius:8px;font-size:.78rem;cursor:pointer}
+    .nav{display:flex;gap:.45rem;flex-wrap:wrap;align-items:center}
+    .nav a:hover,.btn:hover{border-color:var(--cyan);box-shadow:var(--glow)}
+    .btn.primary{border-color:rgba(34,211,238,.4);color:var(--cyan)}
+    .btn.gold{border-color:rgba(251,191,36,.4);color:var(--gold)}
+    main{max-width:1100px;margin:0 auto;padding:1.15rem 1.25rem 2.5rem}
+    .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7rem;margin-bottom:1rem}
+    .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:.85rem 1rem}
+    .kpi .l{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+    .kpi .v{font-size:1.4rem;font-weight:650;margin-top:.2rem}
+    .toolbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:1rem;padding:.8rem;background:var(--card);border:1px solid var(--border);border-radius:14px}
+    input,select{background:#0a1220;border:1px solid var(--border);color:var(--text);padding:.45rem .6rem;border-radius:8px;font-size:.82rem}
+    #q{flex:1;min-width:200px;padding:.55rem .75rem;border-color:rgba(251,191,36,.3)}
+    #q:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(251,191,36,.12)}
+    .list{display:flex;flex-direction:column;gap:.65rem}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:.9rem 1rem;border-left:4px solid var(--blue);cursor:pointer;transition:background .12s}
+    .card:hover{background:rgba(30,41,59,.75)}
+    .card.CRITICAL,.card.HIGH{border-left-color:var(--gold)}
+    .card.MODERATE{border-left-color:var(--cyan)}
+    .card.LOW,.card.INFORMATIONAL{border-left-color:#64748b}
+    .card.acked{opacity:.72}
+    .row{display:flex;justify-content:space-between;gap:.75rem;flex-wrap:wrap;align-items:flex-start}
+    .title{font-weight:600;font-size:.95rem}
+    .meta{font-size:.75rem;color:var(--muted);margin-top:.3rem}
+    .tag{display:inline-block;font-size:.65rem;padding:.12rem .4rem;border-radius:999px;background:rgba(59,130,246,.2);color:#93c5fd;margin-right:.25rem}
+    .tag.gold{background:rgba(251,191,36,.15);color:var(--gold)}
+    .tag.green{background:rgba(34,197,94,.15);color:#86efac}
+    .tag.muted{background:rgba(100,116,139,.25);color:#cbd5e1}
+    .actions{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.55rem}
+    .empty{text-align:center;color:var(--muted);padding:2rem 1rem;background:var(--card);border:1px dashed var(--border);border-radius:14px}
+    .toast{position:fixed;bottom:1.2rem;right:1.2rem;z-index:50;background:#0f172a;border:1px solid var(--gold);padding:.7rem 1rem;border-radius:10px;font-size:.82rem;display:none;max-width:320px}
+    .toast.show{display:block}
+    .modal{display:none;position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:1rem}
+    .modal.open{display:flex}
+    .modal-card{background:var(--card-solid);border:1px solid var(--border);border-radius:14px;max-width:560px;width:100%;max-height:80vh;overflow:auto;padding:1.1rem 1.25rem}
+    .modal-card h3{margin:0 0 .5rem;color:var(--gold)}
+    .modal-card pre{background:#0a1220;padding:.75rem;border-radius:8px;font-size:.72rem;white-space:pre-wrap;overflow:auto}
+    footer{text-align:center;color:var(--muted);font-size:.72rem;padding:1rem;border-top:1px solid var(--border);margin-top:1.5rem}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>ETI Intelligence Alerts</h1>
+      <div class="sub">Claire Bennett audit trail · Research only · Not trade instructions · v{{ version }}</div>
+    </div>
+    <div class="nav">
+      <a href="/">Main</a>
+      <a href="/data-intel">Command Centre</a>
+      <a href="/alerts">Alerts</a>
+      <button class="btn" id="btn-refresh">Refresh</button>
+      <button class="btn primary" id="btn-scan">Scan Now</button>
+    </div>
+  </header>
+  <main>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Total shown</div><div class="v" id="kpi-total">0</div></div>
+      <div class="kpi"><div class="l">Unacknowledged</div><div class="v" id="kpi-open" style="color:var(--gold)">0</div></div>
+      <div class="kpi"><div class="l">CRITICAL / HIGH</div><div class="v" id="kpi-high">0</div></div>
+      <div class="kpi"><div class="l">Acknowledged</div><div class="v" id="kpi-acked">0</div></div>
+    </div>
+
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="Search ticker or name…" />
+      <select id="severity">
+        <option value="">All severity</option>
+        <option value="CRITICAL">CRITICAL</option>
+        <option value="HIGH">HIGH</option>
+        <option value="MODERATE">MODERATE</option>
+        <option value="LOW">LOW</option>
+        <option value="INFORMATIONAL">INFORMATIONAL</option>
+      </select>
+      <label class="sub" style="display:flex;align-items:center;gap:.35rem">
+        <input type="checkbox" id="unacked" checked /> Unacked only
+      </label>
+      <button class="btn gold" id="btn-search">Search</button>
+      <button class="btn" id="btn-clear">Clear</button>
+      <label class="sub" style="margin-left:auto">API key
+        <input id="api-key" type="password" placeholder="X-API-Key" style="width:120px" />
+      </label>
+    </div>
+
+    <div class="list" id="list"><div class="empty">Loading alerts…</div></div>
+  </main>
+
+  <div class="modal" id="modal">
+    <div class="modal-card">
+      <div class="row" style="margin-bottom:.5rem">
+        <h3 id="modal-title">Alert</h3>
+        <button class="btn" id="modal-close">Close</button>
+      </div>
+      <pre id="modal-body"></pre>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <footer>Alerts never place orders. Helena Frost still gates every live/paper path.</footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    function apiKey() {
+      const v = $('api-key').value.trim();
+      if (v) localStorage.setItem('eti_api_key', v);
+      return v || localStorage.getItem('eti_api_key') || '';
+    }
+    $('api-key').value = localStorage.getItem('eti_api_key') || '';
+    function headers() {
+      const h = {'Content-Type': 'application/json'};
+      const k = apiKey(); if (k) h['X-API-Key'] = k; return h;
+    }
+    function toast(msg) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+    async function getJSON(path) {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error(path + ' ' + r.status);
+      return r.json();
+    }
+    async function postJSON(path) {
+      const r = await fetch(path, { method: 'POST', headers: headers() });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || (path + ' ' + r.status));
+      return j;
+    }
+
+    function render(list) {
+      const el = $('list');
+      const open = (list || []).filter(a => !a.acknowledged);
+      const high = (list || []).filter(a => ['CRITICAL','HIGH'].includes(a.severity));
+      const acked = (list || []).filter(a => a.acknowledged);
+      $('kpi-total').textContent = String((list || []).length);
+      $('kpi-open').textContent = String(open.length);
+      $('kpi-high').textContent = String(high.length);
+      $('kpi-acked').textContent = String(acked.length);
+
+      if (!list || !list.length) {
+        el.innerHTML = '<div class="empty">No alerts match. Run Scan from Command Centre or clear filters.</div>';
+        return;
+      }
+
+      el.innerHTML = list.map(a => {
+        const sev = a.severity || '';
+        const ackedCls = a.acknowledged ? ' acked' : '';
+        return `<article class="card ${sev}${ackedCls}" data-id="${a.alert_id}" data-json='${JSON.stringify(a).replace(/'/g,"&#39;")}'>
+          <div class="row">
+            <div>
+              <div class="title">${a.title || a.alert_id}</div>
+              <div class="meta">
+                <span class="tag gold">${sev || '—'}</span>
+                <span class="tag">${a.ticker || 'n/a'}</span>
+                <span class="tag">${a.category || ''}</span>
+                <span class="tag purple">${a.verification_status || ''}</span>
+                ${a.acknowledged ? '<span class="tag muted">acknowledged</span>' : '<span class="tag green">open</span>'}
+              </div>
+              <div class="meta">${a.summary || ''}</div>
+              <div class="meta">${a.investor_name || '—'} · ${a.source_provider || ''} · ${a.created_at || ''}</div>
+              <div class="meta"><strong>Action:</strong> ${a.recommended_action || 'RESEARCH'} (not an order)</div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn detail-btn">Details</button>
+            ${a.acknowledged ? '' : '<button class="btn gold ack-btn">Acknowledge</button>'}
+          </div>
+        </article>`;
+      }).join('');
+
+      el.querySelectorAll('.card').forEach(card => {
+        const data = JSON.parse(card.getAttribute('data-json'));
+        card.querySelector('.detail-btn')?.addEventListener('click', e => {
+          e.stopPropagation();
+          openModal(data);
+        });
+        card.querySelector('.ack-btn')?.addEventListener('click', async e => {
+          e.stopPropagation();
+          try {
+            await postJSON('/api/data-intelligence/alerts/' + card.dataset.id + '/ack');
+            toast('Acknowledged');
+            load();
+          } catch (err) { toast(String(err.message || err)); }
+        });
+        card.addEventListener('click', () => openModal(data));
+      });
+    }
+
+    function openModal(a) {
+      $('modal-title').textContent = a.title || a.alert_id || 'Alert';
+      $('modal-body').textContent = JSON.stringify(a, null, 2);
+      $('modal').classList.add('open');
+    }
+    $('modal-close').onclick = () => $('modal').classList.remove('open');
+    $('modal').onclick = e => { if (e.target === $('modal')) $('modal').classList.remove('open'); };
+
+    async function load() {
+      const params = new URLSearchParams({ limit: '100' });
+      if ($('unacked').checked) params.set('unacked_only', 'true');
+      const q = ($('q').value || '').trim();
+      if (q) params.set('q', q);
+      const sev = $('severity').value;
+      // client-side severity filter after fetch (API q/unacked supported)
+      const j = await getJSON('/api/data-intelligence/alerts?' + params);
+      let list = j.alerts || [];
+      if (sev) list = list.filter(a => (a.severity || '') === sev);
+      render(list);
+    }
+
+    $('btn-refresh').onclick = () => load().then(() => toast('Refreshed')).catch(e => toast(String(e.message || e)));
+    $('btn-search').onclick = () => load().catch(e => toast(String(e.message || e)));
+    $('q').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+    $('severity').onchange = () => load();
+    $('unacked').onchange = () => load();
+    $('btn-clear').onclick = () => {
+      $('q').value = '';
+      $('severity').value = '';
+      $('unacked').checked = true;
+      load();
+    };
+    $('btn-scan').onclick = async () => {
+      try {
+        const j = await postJSON('/api/data-intelligence/monitor/scan');
+        toast('Scan done · alerts +' + ((j.ingest && j.ingest.alerts_created) || 0));
+        await load();
+      } catch (e) { toast(String(e.message || e)); }
+    };
+
+    load().catch(e => { $('list').innerHTML = '<div class="empty">Failed to load: ' + String(e.message || e) + '</div>'; });
+    setInterval(() => load().catch(() => {}), 30000);
+  </script>
+</body>
+</html>
