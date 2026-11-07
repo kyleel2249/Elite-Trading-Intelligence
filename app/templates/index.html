@@ -17,8 +17,9 @@
     .badge { font-size: .72rem; padding: .2rem .55rem; border-radius: 999px; background: #1e293b; color: var(--muted); }
     .badge.live { background: #14532d; color: #86efac; }
     nav { display: flex; gap: .35rem; flex-wrap: wrap; }
-    nav button { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .55rem; border-radius: 8px; cursor: pointer; font-size: .72rem; }
+    nav button, nav a.navlink { background: #1e293b; border: 1px solid var(--border); color: var(--text); padding: .35rem .55rem; border-radius: 8px; cursor: pointer; font-size: .72rem; text-decoration: none; display: inline-block; }
     nav button.active { background: var(--accent); border-color: var(--accent); }
+    nav a.navlink { border-color: rgba(34,211,238,.35); color: var(--cyan); }
     main { padding: 1.1rem; max-width: 1200px; margin: 0 auto; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .85rem; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.1rem; }
@@ -28,13 +29,13 @@
     input, select, button.action { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: .4rem .55rem; border-radius: 8px; }
     button.action { cursor: pointer; background: #1e293b; }
     button.action:hover { border-color: var(--accent); }
+    a.cta { display: inline-block; margin: .5rem 0 1rem; padding: .55rem 1rem; border-radius: 10px; background: linear-gradient(90deg,#0e7490,#1d4ed8); color: #fff; text-decoration: none; font-size: .85rem; }
+    a.cta:hover { filter: brightness(1.08); }
     .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
     .panel { display: none; } .panel.active { display: block; }
     footer { margin-top: 1.5rem; padding: 1rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--border); }
     pre { background: #0f172a; padding: .75rem; border-radius: 8px; overflow: auto; font-size: .76rem; max-height: 380px; }
     .trader { border-left: 3px solid var(--accent); padding-left: .75rem; margin: .55rem 0; }
-    .sev-HIGH, .sev-CRITICAL { color: var(--gold); }
-    .sev-MODERATE { color: var(--cyan); }
   </style>
 </head>
 <body>
@@ -52,6 +53,7 @@
       <button data-panel="forecast">Forecast</button>
       <button data-panel="knowledge">Knowledge</button>
       <button data-panel="dataintel">Data Intel</button>
+      <a class="navlink" href="/data-intel">Command Centre ↗</a>
       <button data-panel="backtest">Backtest</button>
       <button data-panel="portfolio">Portfolio</button>
       <button data-panel="traders">Elite Desk</button>
@@ -84,33 +86,17 @@
     <section id="knowledge" class="panel"><div class="card"><h2>Historical Knowledge</h2><div class="row"><input id="k-q" placeholder="search" style="min-width:200px" /><input id="k-tag" placeholder="tag" /><button class="action" id="k-search">Search</button><button class="action" id="k-strategies">Strategies</button></div><pre id="k-out">—</pre></div></section>
 
     <section id="dataintel" class="panel">
-      <div class="card" style="margin-bottom:.85rem">
-        <h2>ETI Data Intelligence &amp; Investor Command</h2>
-        <p class="muted">Research only. 13F = historical snapshot. Quiver never places orders. Helena Frost gates execution.</p>
+      <div class="card">
+        <h2>Data Intelligence</h2>
+        <p class="muted">Interactive Command Centre: live status cards, disclosure feed, alerts, consensus, EDGAR 13F, elite watchlist.</p>
+        <a class="cta" href="/data-intel">Open Investor Intelligence Command Centre →</a>
         <div class="row">
-          <button class="action" id="di-status">Status</button>
-          <button class="action" id="di-scan">Scan Now</button>
-          <button class="action" id="di-start">Start Monitor</button>
-          <button class="action" id="di-pause">Pause</button>
-          <button class="action" id="di-acts">Activities</button>
+          <button class="action" id="di-status">Quick status</button>
           <button class="action" id="di-alerts">Alerts</button>
-          <button class="action" id="di-consensus">Consensus</button>
-          <button class="action" id="di-congress">Congress</button>
-          <button class="action" id="di-watch">Watchlist</button>
-          <button class="action" id="di-learn">Learning</button>
+          <button class="action" id="di-acts">Activities</button>
         </div>
-        <div class="row">
-          <input id="di-ticker" placeholder="ticker e.g. AAPL" />
-          <button class="action" id="di-ticker-go">Ticker Context</button>
-          <input id="di-cik" placeholder="CIK e.g. 0001067983" />
-          <button class="action" id="di-edgar">EDGAR 13F</button>
-        </div>
+        <pre id="di-out">—</pre>
       </div>
-      <div class="grid">
-        <div class="card"><h2>Connection</h2><pre id="di-status-out">—</pre></div>
-        <div class="card"><h2>Alerts</h2><pre id="di-alerts-out">—</pre></div>
-      </div>
-      <div class="card" style="margin-top:.85rem"><h2>Output</h2><pre id="di-out">—</pre></div>
     </section>
 
     <section id="backtest" class="panel"><div class="card"><h2>Backtest / Signal</h2><div class="row">
@@ -133,7 +119,7 @@
     <section id="risk" class="panel"><div class="card"><div class="row"><input id="r-symbol" value="BTCUSDT" /><select id="r-env"><option>paper</option><option>testnet</option><option>live</option></select><input id="r-qty" type="number" value="0.01" /><input id="r-equity" type="number" value="10000" /><button class="action" id="r-eval">Evaluate</button></div><pre id="r-out">—</pre></div></section>
     <section id="providers" class="panel"><div class="card"><h2>Diagnostics</h2><pre id="prov-out">—</pre></div></section>
   </main>
-  <footer>Helena Frost risk-gates live. Claire Bennett audits disclosures. Knowledge informs modules; never bypasses risk.</footer>
+  <footer>Helena Frost risk-gates live. Claire Bennett audits disclosures. <a href="/data-intel" style="color:#22d3ee">Command Centre</a></footer>
   <script>
     const $ = (id) => document.getElementById(id);
     const apiKey = localStorage.getItem('eti_api_key') || '';
@@ -142,8 +128,8 @@
       if (apiKey) h['X-API-Key'] = apiKey;
       return h;
     }
-    document.querySelectorAll('nav button').forEach(btn => btn.addEventListener('click', () => {
-      document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('nav button[data-panel]').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('nav button[data-panel]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active'); $(btn.dataset.panel).classList.add('active');
     }));
@@ -163,9 +149,6 @@
         try {
           const di = await (await fetch('/api/data-intelligence/status')).json();
           $('edgar-status').textContent = (di.sec_edgar && di.sec_edgar.status) || '—';
-          $('di-status-out').textContent = JSON.stringify({
-            quiver: di.quiver, liquid: di.liquid, sec_edgar: di.sec_edgar, monitor: di.investor_monitor
-          }, null, 2);
         } catch (_) {}
       } catch (e) { $('sys-status').textContent = 'Error'; $('sys-status').className = 'bad'; }
     }
@@ -185,22 +168,9 @@
     $('f-run').onclick = async () => { const q=new URLSearchParams({symbol:$('f-symbol').value.trim(),horizon:$('f-horizon').value}); $('f-out').textContent=JSON.stringify(await(await fetch('/api/intelligence/forecast?'+q)).json(),null,2); };
     $('k-search').onclick = async () => { const q=new URLSearchParams(); if($('k-q').value.trim())q.set('q',$('k-q').value.trim()); if($('k-tag').value.trim())q.set('tag',$('k-tag').value.trim()); const r=await(await fetch('/api/knowledge/traders?'+q)).json(); $('k-out').textContent=JSON.stringify({count:r.count|| (r.traders||[]).length, traders:(r.traders||[]).slice(0,12).map(t=>({id:t.id,name:t.full_name,modules:t.strategy_module_ids,philosophy:(t.philosophy||'').slice(0,160)}))},null,2); };
     $('k-strategies').onclick = async () => $('k-out').textContent=JSON.stringify(await(await fetch('/api/knowledge/strategies')).json(),null,2);
-
-    async function diGet(path){ return await (await fetch(path)).json(); }
-    async function diPost(path){ return await (await fetch(path,{method:'POST', headers: authHeaders()})).json(); }
-    $('di-status').onclick = async () => { const j = await diGet('/api/data-intelligence/status'); $('di-status-out').textContent = JSON.stringify(j,null,2); $('di-out').textContent = JSON.stringify(j,null,2); };
-    $('di-scan').onclick = async () => $('di-out').textContent = JSON.stringify(await diPost('/api/data-intelligence/monitor/scan'), null, 2);
-    $('di-start').onclick = async () => $('di-out').textContent = JSON.stringify(await diPost('/api/data-intelligence/monitor/start'), null, 2);
-    $('di-pause').onclick = async () => $('di-out').textContent = JSON.stringify(await diPost('/api/data-intelligence/monitor/pause'), null, 2);
-    $('di-acts').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/activities?limit=30'), null, 2);
-    $('di-alerts').onclick = async () => { const j = await diGet('/api/data-intelligence/alerts?limit=30'); $('di-alerts-out').textContent = JSON.stringify(j,null,2); $('di-out').textContent = JSON.stringify(j,null,2); };
-    $('di-consensus').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/consensus'), null, 2);
-    $('di-congress').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/quiver/congress'), null, 2);
-    $('di-watch').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/watchlist'), null, 2);
-    $('di-learn').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/learning/summary'), null, 2);
-    $('di-ticker-go').onclick = async () => { const t=$('di-ticker').value.trim(); if(!t) return; $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/ticker/'+encodeURIComponent(t)), null, 2); };
-    $('di-edgar').onclick = async () => { const c=$('di-cik').value.trim()||'0001067983'; $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/edgar/13f/'+encodeURIComponent(c)), null, 2); };
-
+    $('di-status').onclick = async () => $('di-out').textContent = JSON.stringify(await (await fetch('/api/data-intelligence/status')).json(), null, 2);
+    $('di-alerts').onclick = async () => $('di-out').textContent = JSON.stringify(await (await fetch('/api/data-intelligence/alerts?limit=20')).json(), null, 2);
+    $('di-acts').onclick = async () => $('di-out').textContent = JSON.stringify(await (await fetch('/api/data-intelligence/activities?limit=20')).json(), null, 2);
     async function btPost(path,body){return await(await fetch(path,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)})).json();}
     $('bt-run').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/run',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim()}),null,2);
     $('bt-wf').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/run',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim(),walk_forward:true}),null,2);
