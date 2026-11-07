@@ -1,5 +1,5 @@
 {
-  "name": "eti",
+  "name": "elite-trading-intelligence-eti",
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-01",
   "containers": [

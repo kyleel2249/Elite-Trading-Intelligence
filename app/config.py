@@ -2,6 +2,8 @@
 from functools import lru_cache
 from typing import Optional
 
+from pydantic import AliasChoices, Field
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,7 +39,7 @@ class Settings(BaseSettings):
     binance_live_trading_enabled: bool = False
 
     fred_api_key: Optional[str] = None
-    newsapi_key: Optional[str] = None
+    newsapi_key: Optional[str] = Field(default=None, validation_alias=AliasChoices("newsapi_key", "news_api_key"))
 
     # Quiver Quant — research only (never execution)
     quiver_api_key: Optional[str] = None

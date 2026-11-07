@@ -12,12 +12,17 @@ interface Env {
   FRED_API_KEY?: string;
   NEWSAPI_KEY?: string;
   QUIVER_API_KEY?: string;
+  LIQUID_API_KEY?: string;
+  LIQUID_API_BASE_URL?: string;
+  ALPACA_BASE_URL?: string;
+  NEWS_API_KEY?: string;
 }
 
 // Secrets are set with `wrangler secret put NAME` and forwarded server-side only.
 const FORWARDED = [
   "SECRET_KEY", "API_KEY", "DATABASE_URL", "ALPACA_API_KEY", "ALPACA_SECRET_KEY",
   "BINANCE_API_KEY", "BINANCE_SECRET_KEY", "FRED_API_KEY", "NEWSAPI_KEY", "QUIVER_API_KEY",
+  "LIQUID_API_KEY", "LIQUID_API_BASE_URL", "ALPACA_BASE_URL", "NEWS_API_KEY",
 ] as const;
 
 export class EtiContainer extends Container<Env> {
