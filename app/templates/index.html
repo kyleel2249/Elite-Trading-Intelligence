@@ -54,6 +54,7 @@
       <button data-panel="knowledge">Knowledge</button>
       <button data-panel="dataintel">Data Intel</button>
       <a class="navlink" href="/data-intel">Command Centre ↗</a>
+      <a class="navlink" href="/alerts">Alerts ↗</a>
       <button data-panel="backtest">Backtest</button>
       <button data-panel="portfolio">Portfolio</button>
       <button data-panel="traders">Elite Desk</button>
@@ -90,9 +91,10 @@
         <h2>Data Intelligence</h2>
         <p class="muted">Interactive Command Centre: live status cards, disclosure feed, alerts, consensus, EDGAR 13F, elite watchlist.</p>
         <a class="cta" href="/data-intel">Open Investor Intelligence Command Centre →</a>
+        <a class="cta" href="/alerts" style="background:linear-gradient(90deg,#a16207,#b45309)">Open Alerts →</a>
         <div class="row">
           <button class="action" id="di-status">Quick status</button>
-          <button class="action" id="di-alerts">Alerts</button>
+          <button class="action" id="di-alerts">Alerts API</button>
           <button class="action" id="di-acts">Activities</button>
         </div>
         <pre id="di-out">—</pre>
@@ -119,7 +121,7 @@
     <section id="risk" class="panel"><div class="card"><div class="row"><input id="r-symbol" value="BTCUSDT" /><select id="r-env"><option>paper</option><option>testnet</option><option>live</option></select><input id="r-qty" type="number" value="0.01" /><input id="r-equity" type="number" value="10000" /><button class="action" id="r-eval">Evaluate</button></div><pre id="r-out">—</pre></div></section>
     <section id="providers" class="panel"><div class="card"><h2>Diagnostics</h2><pre id="prov-out">—</pre></div></section>
   </main>
-  <footer>Helena Frost risk-gates live. Claire Bennett audits disclosures. <a href="/data-intel" style="color:#22d3ee">Command Centre</a></footer>
+  <footer>Helena Frost risk-gates live. Claire Bennett audits disclosures. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a></footer>
   <script>
     const $ = (id) => document.getElementById(id);
     const apiKey = localStorage.getItem('eti_api_key') || '';
