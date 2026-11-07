@@ -1,11 +1,19 @@
-"""Data Intelligence & API Centre routes (Quiver + Liquid status + investor scan)."""
-from fastapi import APIRouter, Depends
+"""Data Intelligence & Investor Intelligence Command Centre API."""
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
+from app.database import get_db
 from app.integrations.quiver.client import QuiverClient
 from app.integrations.liquid.client import LiquidClient
+from app.integrations.edgar.client import EdgarClient, WATCH_CIKS
 from app.intelligence.investor_activity import InvestorActivityEngine
+from app.intelligence.significance import consensus_report
+from app.intelligence.disclosure_learning import summary_by_category, activities_pending_study
 from app.jobs.investor_monitor import investor_monitor_job
+from app.services.activity_store import ActivityStore
 from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/data-intelligence", tags=["data-intelligence"])
@@ -15,16 +23,25 @@ router = APIRouter(prefix="/api/data-intelligence", tags=["data-intelligence"])
 async def data_intelligence_status(settings: Settings = Depends(get_settings)):
     q = QuiverClient(settings)
     liq = LiquidClient(settings)
+    edgar = EdgarClient()
     return {
         "quiver": await q.health(),
         "liquid": await liq.health(),
+        "sec_edgar": await edgar.health(),
         "investor_monitor": investor_monitor_job.status(),
         "rules": [
             "Quiver is research-only",
-            "Liquid trading endpoints not assumed without verified base URL",
+            "13F / EDGAR = historical snapshot, not live portfolio",
+            "Liquid trading endpoints not assumed",
             "No withdrawals",
             "Helena Frost gates all orders",
+            "Claire Bennett audits alerts",
         ],
+        "desk": {
+            "strategist": "Adrian Cole",
+            "auditor": "Claire Bennett",
+            "risk_officer": "Helena Frost",
+        },
     }
 
 
@@ -78,3 +95,59 @@ async def monitor_start(_auth=Depends(require_api_key)):
 async def monitor_pause(_auth=Depends(require_api_key)):
     await investor_monitor_job.stop()
     return investor_monitor_job.status()
+
+
+@router.get("/activities")
+async def list_activities(
+    limit: int = 50,
+    ticker: Optional[str] = None,
+    category: Optional[str] = None,
+    significance: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    return {
+        "activities": ActivityStore(db).list_activities(
+            limit=limit, ticker=ticker, category=category, significance=significance
+        )
+    }
+
+
+@router.get("/alerts")
+async def list_alerts(
+    limit: int = 50,
+    unacked_only: bool = False,
+    db: Session = Depends(get_db),
+):
+    return {"alerts": ActivityStore(db).list_alerts(limit=limit, unacked_only=unacked_only)}
+
+
+@router.post("/alerts/{alert_id}/ack")
+async def ack_alert(alert_id: str, db: Session = Depends(get_db), _auth=Depends(require_api_key)):
+    ok = ActivityStore(db).acknowledge_alert(alert_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"acknowledged": True, "alert_id": alert_id}
+
+
+@router.get("/consensus")
+async def consensus(limit: int = 100, db: Session = Depends(get_db)):
+    acts = ActivityStore(db).list_activities(limit=limit)
+    return consensus_report(acts)
+
+
+@router.get("/edgar/13f/{cik}")
+async def edgar_13f(cik: str):
+    client = EdgarClient()
+    sub = await client.company_submissions(cik)
+    acts = client.activities_from_13f_index(sub)
+    return {"submissions": sub, "activities": acts, "watch_ciks": WATCH_CIKS}
+
+
+@router.get("/learning/summary")
+async def learning_summary(db: Session = Depends(get_db)):
+    return summary_by_category(db)
+
+
+@router.get("/learning/pending")
+async def learning_pending(db: Session = Depends(get_db)):
+    return {"pending": activities_pending_study(db)}
