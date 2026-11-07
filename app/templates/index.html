@@ -7,7 +7,8 @@
   <style>
     :root {
       --bg: #0b0f14; --card: #121821; --text: #e8eef6; --muted: #8b9bb0;
-      --accent: #3d8bfd; --good: #22c55e; --warn: #f59e0b; --bad: #ef4444; --border: #1e293b;
+      --accent: #3d8bfd; --cyan: #22d3ee; --good: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+      --gold: #fbbf24; --purple: #a78bfa; --border: #1e293b;
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.45; }
@@ -32,6 +33,8 @@
     footer { margin-top: 1.5rem; padding: 1rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--border); }
     pre { background: #0f172a; padding: .75rem; border-radius: 8px; overflow: auto; font-size: .76rem; max-height: 380px; }
     .trader { border-left: 3px solid var(--accent); padding-left: .75rem; margin: .55rem 0; }
+    .sev-HIGH, .sev-CRITICAL { color: var(--gold); }
+    .sev-MODERATE { color: var(--cyan); }
   </style>
 </head>
 <body>
@@ -48,6 +51,7 @@
       <button data-panel="council">Council</button>
       <button data-panel="forecast">Forecast</button>
       <button data-panel="knowledge">Knowledge</button>
+      <button data-panel="dataintel">Data Intel</button>
       <button data-panel="backtest">Backtest</button>
       <button data-panel="portfolio">Portfolio</button>
       <button data-panel="traders">Elite Desk</button>
@@ -62,6 +66,8 @@
         <div class="card"><h2>Alpaca</h2><p id="alpaca-status">—</p></div>
         <div class="card"><h2>Binance</h2><p id="binance-status">—</p></div>
         <div class="card"><h2>Streams</h2><p id="stream-status">—</p></div>
+        <div class="card"><h2>Quiver</h2><p id="quiver-status">—</p></div>
+        <div class="card"><h2>EDGAR</h2><p id="edgar-status">—</p></div>
       </div>
     </section>
     <section id="ops" class="panel">
@@ -76,6 +82,37 @@
     <section id="council" class="panel"><div class="card"><div class="row"><input id="c-symbol" value="BTCUSDT" /><button class="action" id="c-run">Run Council</button></div><pre id="c-out">—</pre></div></section>
     <section id="forecast" class="panel"><div class="card"><div class="row"><input id="f-symbol" value="BTCUSDT" /><select id="f-horizon"><option>scalp</option><option selected>intraday</option><option>swing</option><option>position</option></select><button class="action" id="f-run">Forecast</button></div><pre id="f-out">—</pre></div></section>
     <section id="knowledge" class="panel"><div class="card"><h2>Historical Knowledge</h2><div class="row"><input id="k-q" placeholder="search" style="min-width:200px" /><input id="k-tag" placeholder="tag" /><button class="action" id="k-search">Search</button><button class="action" id="k-strategies">Strategies</button></div><pre id="k-out">—</pre></div></section>
+
+    <section id="dataintel" class="panel">
+      <div class="card" style="margin-bottom:.85rem">
+        <h2>ETI Data Intelligence &amp; Investor Command</h2>
+        <p class="muted">Research only. 13F = historical snapshot. Quiver never places orders. Helena Frost gates execution.</p>
+        <div class="row">
+          <button class="action" id="di-status">Status</button>
+          <button class="action" id="di-scan">Scan Now</button>
+          <button class="action" id="di-start">Start Monitor</button>
+          <button class="action" id="di-pause">Pause</button>
+          <button class="action" id="di-acts">Activities</button>
+          <button class="action" id="di-alerts">Alerts</button>
+          <button class="action" id="di-consensus">Consensus</button>
+          <button class="action" id="di-congress">Congress</button>
+          <button class="action" id="di-watch">Watchlist</button>
+          <button class="action" id="di-learn">Learning</button>
+        </div>
+        <div class="row">
+          <input id="di-ticker" placeholder="ticker e.g. AAPL" />
+          <button class="action" id="di-ticker-go">Ticker Context</button>
+          <input id="di-cik" placeholder="CIK e.g. 0001067983" />
+          <button class="action" id="di-edgar">EDGAR 13F</button>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card"><h2>Connection</h2><pre id="di-status-out">—</pre></div>
+        <div class="card"><h2>Alerts</h2><pre id="di-alerts-out">—</pre></div>
+      </div>
+      <div class="card" style="margin-top:.85rem"><h2>Output</h2><pre id="di-out">—</pre></div>
+    </section>
+
     <section id="backtest" class="panel"><div class="card"><h2>Backtest / Signal</h2><div class="row">
       <select id="bt-module">
         <option value="turtle_trend">turtle_trend</option>
@@ -83,6 +120,7 @@
         <option value="wyckoff_supply_demand">wyckoff_supply_demand</option>
         <option value="seykota_mechanical">seykota_mechanical</option>
         <option value="darvas_box">darvas_box</option>
+        <option value="oneil_canslim">oneil_canslim</option>
         <option value="ptj_structure_preservation">ptj_structure_preservation</option>
       </select>
       <input id="bt-symbol" value="BTCUSDT" />
@@ -95,9 +133,15 @@
     <section id="risk" class="panel"><div class="card"><div class="row"><input id="r-symbol" value="BTCUSDT" /><select id="r-env"><option>paper</option><option>testnet</option><option>live</option></select><input id="r-qty" type="number" value="0.01" /><input id="r-equity" type="number" value="10000" /><button class="action" id="r-eval">Evaluate</button></div><pre id="r-out">—</pre></div></section>
     <section id="providers" class="panel"><div class="card"><h2>Diagnostics</h2><pre id="prov-out">—</pre></div></section>
   </main>
-  <footer>Helena Frost risk-gates live. Knowledge base informs modules; does not bypass risk.</footer>
+  <footer>Helena Frost risk-gates live. Claire Bennett audits disclosures. Knowledge informs modules; never bypasses risk.</footer>
   <script>
     const $ = (id) => document.getElementById(id);
+    const apiKey = localStorage.getItem('eti_api_key') || '';
+    function authHeaders() {
+      const h = {'Content-Type': 'application/json'};
+      if (apiKey) h['X-API-Key'] = apiKey;
+      return h;
+    }
     document.querySelectorAll('nav button').forEach(btn => btn.addEventListener('click', () => {
       document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -114,7 +158,15 @@
         const st = (p.streams && p.streams.binance) || {};
         $('stream-status').textContent = st.connected ? 'WS connected' : 'WS offline';
         $('stream-status').className = st.connected ? 'ok' : 'warn';
+        $('quiver-status').textContent = (p.quiver && p.quiver.status) || (p.quiver_configured ? 'configured' : 'not_configured');
         $('prov-out').textContent = JSON.stringify(p, null, 2);
+        try {
+          const di = await (await fetch('/api/data-intelligence/status')).json();
+          $('edgar-status').textContent = (di.sec_edgar && di.sec_edgar.status) || '—';
+          $('di-status-out').textContent = JSON.stringify({
+            quiver: di.quiver, liquid: di.liquid, sec_edgar: di.sec_edgar, monitor: di.investor_monitor
+          }, null, 2);
+        } catch (_) {}
       } catch (e) { $('sys-status').textContent = 'Error'; $('sys-status').className = 'bad'; }
     }
     async function loadTraders() {
@@ -122,24 +174,40 @@
       $('traders-list').innerHTML = (r.traders || []).map(t => `<div class="trader"><strong>${t.name} — ${t.title}${t.veto_power?' (VETO)':''}</strong><div class="muted">${t.mandate}</div></div>`).join('');
     }
     $('mtm-refresh').onclick = async () => $('mtm-out').textContent = JSON.stringify(await (await fetch('/api/system/mtm-status')).json(), null, 2);
-    $('mtm-run').onclick = async () => $('mtm-out').textContent = JSON.stringify(await (await fetch('/api/system/mtm-run',{method:'POST'})).json(), null, 2);
+    $('mtm-run').onclick = async () => $('mtm-out').textContent = JSON.stringify(await (await fetch('/api/system/mtm-run',{method:'POST', headers: authHeaders()})).json(), null, 2);
     $('rec-refresh').onclick = async () => $('rec-out').textContent = JSON.stringify(await (await fetch('/api/system/reconcile-status')).json(), null, 2);
-    $('rec-run').onclick = async () => $('rec-out').textContent = JSON.stringify(await (await fetch('/api/system/reconcile-run',{method:'POST'})).json(), null, 2);
+    $('rec-run').onclick = async () => $('rec-out').textContent = JSON.stringify(await (await fetch('/api/system/reconcile-run',{method:'POST', headers: authHeaders()})).json(), null, 2);
     $('acc-refresh').onclick = async () => $('acc-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast/accuracy?symbol='+encodeURIComponent($('acc-symbol').value.trim()))).json(), null, 2);
-    $('acc-score').onclick = async () => $('acc-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:$('acc-symbol').value.trim(),provider:'binance'})})).json(), null, 2);
+    $('acc-score').onclick = async () => $('acc-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast/score',{method:'POST',headers:authHeaders(),body:JSON.stringify({symbol:$('acc-symbol').value.trim(),provider:'binance'})})).json(), null, 2);
     $('j-load').onclick = async () => { const q=new URLSearchParams(); if($('j-symbol').value.trim())q.set('symbol',$('j-symbol').value.trim()); if($('j-event').value)q.set('event',$('j-event').value); if($('j-env').value)q.set('environment',$('j-env').value); $('j-out').textContent=JSON.stringify(await(await fetch('/api/paper-trading/journal?'+q)).json(),null,2); };
     $('m-load').onclick = async () => { const sym=$('m-symbol').value.trim(),prov=$('m-provider').value; $('m-snapshot').textContent=JSON.stringify(await(await fetch(`/api/market/snapshot?provider=${prov}&symbol=${encodeURIComponent(sym)}`)).json(),null,2); if(prov==='binance'){const b=await(await fetch(`/api/market/order-book?symbol=${encodeURIComponent(sym)}`)).json();$('m-book').textContent=JSON.stringify({best_bid:b.best_bid,best_ask:b.best_ask,spread_bps:b.spread_bps},null,2);} };
     $('c-run').onclick = async () => { $('c-out').textContent='…'; $('c-out').textContent=JSON.stringify(await(await fetch('/api/intelligence/council?symbol='+encodeURIComponent($('c-symbol').value.trim()))).json(),null,2); };
     $('f-run').onclick = async () => { const q=new URLSearchParams({symbol:$('f-symbol').value.trim(),horizon:$('f-horizon').value}); $('f-out').textContent=JSON.stringify(await(await fetch('/api/intelligence/forecast?'+q)).json(),null,2); };
     $('k-search').onclick = async () => { const q=new URLSearchParams(); if($('k-q').value.trim())q.set('q',$('k-q').value.trim()); if($('k-tag').value.trim())q.set('tag',$('k-tag').value.trim()); const r=await(await fetch('/api/knowledge/traders?'+q)).json(); $('k-out').textContent=JSON.stringify({count:r.count|| (r.traders||[]).length, traders:(r.traders||[]).slice(0,12).map(t=>({id:t.id,name:t.full_name,modules:t.strategy_module_ids,philosophy:(t.philosophy||'').slice(0,160)}))},null,2); };
     $('k-strategies').onclick = async () => $('k-out').textContent=JSON.stringify(await(await fetch('/api/knowledge/strategies')).json(),null,2);
-    async function btPost(path,body){return await(await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();}
+
+    async function diGet(path){ return await (await fetch(path)).json(); }
+    async function diPost(path){ return await (await fetch(path,{method:'POST', headers: authHeaders()})).json(); }
+    $('di-status').onclick = async () => { const j = await diGet('/api/data-intelligence/status'); $('di-status-out').textContent = JSON.stringify(j,null,2); $('di-out').textContent = JSON.stringify(j,null,2); };
+    $('di-scan').onclick = async () => $('di-out').textContent = JSON.stringify(await diPost('/api/data-intelligence/monitor/scan'), null, 2);
+    $('di-start').onclick = async () => $('di-out').textContent = JSON.stringify(await diPost('/api/data-intelligence/monitor/start'), null, 2);
+    $('di-pause').onclick = async () => $('di-out').textContent = JSON.stringify(await diPost('/api/data-intelligence/monitor/pause'), null, 2);
+    $('di-acts').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/activities?limit=30'), null, 2);
+    $('di-alerts').onclick = async () => { const j = await diGet('/api/data-intelligence/alerts?limit=30'); $('di-alerts-out').textContent = JSON.stringify(j,null,2); $('di-out').textContent = JSON.stringify(j,null,2); };
+    $('di-consensus').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/consensus'), null, 2);
+    $('di-congress').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/quiver/congress'), null, 2);
+    $('di-watch').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/watchlist'), null, 2);
+    $('di-learn').onclick = async () => $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/learning/summary'), null, 2);
+    $('di-ticker-go').onclick = async () => { const t=$('di-ticker').value.trim(); if(!t) return; $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/ticker/'+encodeURIComponent(t)), null, 2); };
+    $('di-edgar').onclick = async () => { const c=$('di-cik').value.trim()||'0001067983'; $('di-out').textContent = JSON.stringify(await diGet('/api/data-intelligence/edgar/13f/'+encodeURIComponent(c)), null, 2); };
+
+    async function btPost(path,body){return await(await fetch(path,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)})).json();}
     $('bt-run').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/run',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim()}),null,2);
     $('bt-wf').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/run',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim(),walk_forward:true}),null,2);
     $('bt-signal').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/signal',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim(),environment:'paper',execute:false}),null,2);
     async function refreshPortfolio(){ $('p-summary').textContent=JSON.stringify(await(await fetch('/api/paper-trading/portfolio')).json(),null,2); $('p-journal').textContent=JSON.stringify(await(await fetch('/api/paper-trading/journal?limit=20')).json(),null,2); }
     $('p-refresh').onclick = () => refreshPortfolio();
-    $('p-paper').onclick = async () => { const body={provider:'binance',environment:'paper',symbol:$('p-symbol').value.trim(),side:$('p-side').value,qty:parseFloat($('p-qty').value),equity:10000,data_status:'fresh',data_age_seconds:5}; $('p-summary').textContent=JSON.stringify(await(await fetch('/api/trading/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json(),null,2); await refreshPortfolio(); };
+    $('p-paper').onclick = async () => { const body={provider:'binance',environment:'paper',symbol:$('p-symbol').value.trim(),side:$('p-side').value,qty:parseFloat($('p-qty').value),equity:10000,data_status:'fresh',data_age_seconds:5}; $('p-summary').textContent=JSON.stringify(await(await fetch('/api/trading/order',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)})).json(),null,2); await refreshPortfolio(); };
     $('r-eval').onclick = async () => { const q=new URLSearchParams({symbol:$('r-symbol').value.trim(),side:'buy',qty:$('r-qty').value,environment:$('r-env').value,equity:$('r-equity').value}); $('r-out').textContent=JSON.stringify(await(await fetch('/api/risk/evaluate?'+q)).json(),null,2); };
     refreshOverview(); loadTraders(); setInterval(refreshOverview, 15000);
   </script>
