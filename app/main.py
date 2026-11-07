@@ -60,7 +60,6 @@ async def lifespan(app: FastAPI):
         await reconcile_job.start()
     except Exception:
         pass
-    # Investor monitor starts only when Quiver is configured (no fake activity)
     if settings.quiver_configured:
         try:
             await investor_monitor_job.start()
@@ -127,6 +126,15 @@ async def dashboard(request: Request, settings: Settings = Depends(get_settings)
             "alpaca_paper": settings.alpaca_paper,
             "binance_testnet": settings.binance_testnet_enabled,
         },
+    )
+
+
+@app.get("/data-intel", response_class=HTMLResponse)
+async def data_intel_dashboard(request: Request):
+    """Interactive Investor Intelligence Command Centre."""
+    return templates.TemplateResponse(
+        "data_intel.html",
+        {"request": request, "version": __version__},
     )
 
 
@@ -279,7 +287,6 @@ async def run_council(
         if news.get("status") == "ok" and news.get("sentiment_score") is not None:
             context["sentiment_score"] = news["sentiment_score"]
 
-        # Optional Quiver context (never auto-trade)
         quiver_ctx = {}
         if settings.quiver_configured and len(symbol) <= 6:
             try:
