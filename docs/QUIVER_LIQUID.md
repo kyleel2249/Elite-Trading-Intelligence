@@ -1,30 +1,52 @@
-# Quiver Quant & Liquid integration notes
+# Quiver Quant + Liquid integration notes
 
-## Quiver Quant (implemented)
+## Quiver Quant
 
-- Base: `https://api.quiverquant.com`
-- Auth: `Authorization: Bearer <QUIVER_API_KEY>`
-- Docs: https://api.quiverquant.com/docs/authentication
-- Probe: `GET /beta/live/congresstrading`
-- Ticker history: `GET /beta/historical/congresstrading/{TICKER}`
-- 401 = bad/missing key; 403 = plan does not include dataset
-- **Research only** — never auto-trade from Quiver alone
+- **Base:** `https://api.quiverquant.com`
+- **Auth:** `Authorization: Bearer <QUIVER_API_KEY>`
+- **Role in ETI:** research / disclosure intelligence only
+- **Never:** place orders, override Helena Frost, treat delayed filings as live books
 
-Env: `QUIVER_API_KEY=`
+### Implemented paths
 
-## Liquid (status-only)
+| Path | Method |
+|------|--------|
+| `/beta/live/congresstrading` | live congress |
+| `/beta/historical/congresstrading/{ticker}` | hist congress |
+| `/beta/live/governmentcontracts` | contracts |
+| `/beta/live/lobbying` | lobbying |
+| `/beta/historical/lobbying/{ticker}` | hist lobbying |
+| `/beta/historical/insiders/{ticker}` | insiders (plan-gated) |
+| `/beta/live/congress/politicians` | politicians |
+| `/beta/live/congress_stock_holdings` | holdings estimates |
 
-Research did **not** confirm an operational public **Liquid.com exchange** trading API comparable to Alpaca/Binance for ETI order routing.
+403 responses mean plan restriction — ETI surfaces `plan_restricted`, does not invent data.
 
-Public products named "Liquid" include Liquid AI, Blockstream Liquid Network, and various DeFi APIs — **not** silently substituted.
+### ETI routes
 
-Env (optional probe only):
+- `GET /api/data-intelligence/status`
+- `GET /api/data-intelligence/quiver/congress`
+- `GET /api/data-intelligence/quiver/contracts`
+- `GET /api/data-intelligence/quiver/lobbying`
+- `GET /api/data-intelligence/ticker/{ticker}`
+- `POST /api/data-intelligence/monitor/scan` (requires API key)
 
-```
-LIQUID_API_BASE_URL=
-LIQUID_API_KEY=
-```
+## Liquid
 
-`trading_supported` remains `false` until endpoints are verified from official docs you provide.
+Public research did **not** confirm a currently supported Quoine/Liquid *exchange* trading API suitable for automatic order routing in ETI.
 
-**No withdrawal permissions** are ever requested.
+ETI therefore:
+
+1. Does **not** invent order/book endpoints.
+2. Accepts optional `LIQUID_API_BASE_URL` + `LIQUID_API_KEY` for a **user-validated** probe only.
+3. Sets `trading_supported: false` until endpoints are verified by the operator.
+4. Never requests withdrawals.
+
+Do not confuse with Liquid AI (`api.liquid.ai`) or Blockstream Liquid Network.
+
+## Elite desk integration
+
+- Adrian Cole — synthesis when alt-data attached to council
+- Claire Bennett — monitor/audit
+- Helena Frost — still absolute veto on orders
+- Historical profiles (Soros, Buffett, Burry, …) inform **watchlist labels**, not copy-trading

@@ -8,6 +8,7 @@ from app.knowledge import profiles_foundational as f
 from app.knowledge import profiles_additional as a
 from app.knowledge import profiles_deep as d
 from app.knowledge import profiles_deep2 as d2
+from app.knowledge import profiles_deep3 as d3
 from app.knowledge import profiles_more as m
 from app.knowledge.strategies import STRATEGY_MODULES
 
@@ -19,6 +20,7 @@ def _all_profiles() -> dict[str, TraderKnowledgeProfile]:
     out.update(m.PROFILES)
     out.update(d.DEEP_PROFILES)
     out.update(d2.DEEP_PROFILES)
+    out.update(d3.DEEP_PROFILES)
     out.pop("paul_tudor_secondary_note", None)
     return out
 
@@ -84,6 +86,7 @@ def attribution_for_decision(
         "quant_stat": ["simons_quant"],
         "mechanical_risk": ["seykota_mechanical"],
         "growth_momentum": ["oneil_canslim", "minervini_vcp"],
+        "canslim": ["oneil_canslim"],
     }
 
     scores: dict[str, float] = {}

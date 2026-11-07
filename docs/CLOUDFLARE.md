@@ -1,110 +1,85 @@
-# Cloudflare deployment settings for ETI
+# Cloudflare deployment for ETI
 
-ETI is a **Python FastAPI** app with SQLite/Postgres, background jobs, and httpx WebSockets. Choose the path that matches your dependency footprint.
+ETI is a **Python FastAPI** application (Uvicorn). It is **not** a pure static site or Workers-only Node app.
 
-## Reality check
+## Realistic Cloudflare options
 
-| Path | Fit for full ETI |
-|------|------------------|
-| **Cloudflare Containers** (Worker + container image) | **Best** for full Docker/`uvicorn` stack (SQLAlchemy, jobs, websockets) |
-| **Python Workers** (`python_workers` + FastAPI ASGI) | Possible for a **slim** API; C-extension packages may fail on Pyodide/WASM |
-| **Pages only** | Frontend/static only — **not** the FastAPI backend |
+### Option A — Cloudflare Containers / Cloudflare Workers + Container (recommended when available)
 
-Full ETI (Alpaca/Binance streams, MTM, investor monitor) → prefer **Containers** or traditional VM/Docker (Fly, Railway, ECS) with Cloudflare only as DNS/CDN.
+Use a container image built from the repo `Dockerfile`.
 
----
+**Build**
 
-## Option A — Cloudflare Containers (recommended for full app)
-
-1. **Build** the existing `Dockerfile` (uvicorn on 8000).
-2. **Paid Workers plan** required for Containers.
-3. Configure container port **8000**, health check `GET /api/system/health`.
-4. Set secrets (not in git):
-
-```
-SECRET_KEY=
-API_KEY=
-DATABASE_URL=postgresql+psycopg2://...
-LIVE_TRADING_ENABLED=true
-ALPACA_API_KEY=
-ALPACA_SECRET_KEY=
-ALPACA_PAPER=true
-BINANCE_API_KEY=
-BINANCE_SECRET_KEY=
-QUIVER_API_KEY=
-FRED_API_KEY=
-NEWSAPI_KEY=
+```bash
+docker build -t eti:latest .
 ```
 
-5. Deploy flow (conceptual):
-   - `docker build -t eti .`
-   - Push image via Cloudflare container registry / `wrangler` container deploy (follow current CF Containers docs).
-   - Route Worker → container binding.
+**Runtime**
 
-6. **Do not** put API keys in Pages env for browser access.
+- Port: `8000`
+- CMD: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- Health check path: `GET /api/system/health`
 
----
+**Environment variables (Cloudflare dashboard / secrets)**
 
-## Option B — Python Workers (slim subset)
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `SECRET_KEY` | yes | Random long string |
+| `API_KEY` | recommended | Protects mutating routes (`X-API-Key`) |
+| `DATABASE_URL` | prod yes | Prefer Postgres; SQLite not for multi-instance |
+| `LIVE_TRADING_ENABLED` | no | Default false in prod unless intentional |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | optional | |
+| `ALPACA_PAPER` | optional | `true` for paper |
+| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | optional | |
+| `BINANCE_LIVE_TRADING_ENABLED` | optional | |
+| `QUIVER_API_KEY` | optional | Research only |
+| `LIQUID_API_KEY` / `LIQUID_API_BASE_URL` | optional | Only if you verified a base URL |
+| `FRED_API_KEY` / `NEWSAPI_KEY` | optional | |
+| `MTM_INTERVAL_SECONDS` | optional | |
+| `RECONCILE_INTERVAL_SECONDS` | optional | |
+| `INVESTOR_MONITOR_INTERVAL_SECONDS` | optional | Default 1800 |
 
-Only if you strip heavy jobs and confirm pure-Python deps.
+**Never** put API secrets in frontend JS or Workers public bindings that are client-readable.
 
-**wrangler.jsonc**
+### Option B — Cloudflare Tunnel to a VPS / home host
 
-```jsonc
-{
-  "name": "eti-slim",
-  "main": "src/worker.py",
-  "compatibility_date": "2026-11-07",
-  "compatibility_flags": ["python_workers"],
-  "vars": {
-    "LIVE_TRADING_ENABLED": "false"
-  }
-}
+Run ETI on a machine you control; expose via `cloudflared`.
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+# separate terminal
+cloudflared tunnel --url http://localhost:8000
 ```
 
-**Entrypoint pattern** (from CF FastAPI docs):
+### Option C — Pages (static only) — **not sufficient alone**
 
-```python
-from fastapi import FastAPI
-from workers import asgi
+Cloudflare Pages can host static assets, but **cannot** run this FastAPI process as-is.
+Use Pages only if you later split a static frontend and call a separate API origin.
 
-app = FastAPI()
-# mount only lightweight routes
-
-Default = asgi.entrypoint(app)
-```
-
-Local: `uv run pywrangler dev`  
-Deploy: `uv run pywrangler deploy`
-
-**Secrets:** `wrangler secret put QUIVER_API_KEY` etc.
-
----
-
-## Build settings summary
+## Build settings summary (for container deploy forms)
 
 | Setting | Value |
 |---------|--------|
-| Runtime | Docker Python 3.12 (full) or Python Workers 3.13+ (slim) |
-| Start command | `uvicorn app.main:app --host 0.0.0.0 --port 8000` |
-| Health | `/api/system/health` |
-| Node build | **Not required** for backend |
-| Root directory | repository root |
-| Env | server-side secrets only |
+| Dockerfile path | `./Dockerfile` |
+| Build context | repository root |
+| Exposed port | `8000` |
+| Health endpoint | `/api/system/health` |
+| Persistent disk | required if using SQLite; prefer managed Postgres |
+| WebSockets | needed for Binance stream features |
+| CPU/Memory | min 512MB RAM; 1GB+ recommended with jobs |
 
----
+## Post-deploy checks
 
-## What will break on pure Workers without Containers
-
-- Long-lived Binance/Alpaca WebSocket tasks
-- APScheduler-style infinite asyncio jobs (MTM/reconcile/investor) without Durable Objects/Queues redesign
-- SQLite file DB on ephemeral FS — use **D1/Hyperdrive/Postgres**
-
----
+```bash
+curl https://YOUR_HOST/api/system/health
+curl https://YOUR_HOST/api/providers/status
+curl https://YOUR_HOST/api/data-intelligence/status
+```
 
 ## Security
 
-- Never expose `QUIVER_API_KEY`, exchange keys, or `API_KEY` to the frontend.
-- Quiver = research only; cannot place trades.
-- Liquid exchange trading is **not assumed** until you supply a verified base URL and docs.
+- Set `API_KEY` and send `X-API-Key` on POST routes.
+- Keep `LIVE_TRADING_ENABLED=false` until keys and risk limits are verified.
+- Quiver key is research-only; never used for order placement.
+- Liquid: no withdrawal scopes; trading not assumed without verified docs.

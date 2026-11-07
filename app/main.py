@@ -17,6 +17,8 @@ from app.schemas import HealthResponse
 from app.risk.engine import RiskEngine, OrderProposal
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.quiver.client import QuiverClient
+from app.integrations.liquid.client import LiquidClient
 from app.trading.service import TradingService
 from app.trading.portfolio import PortfolioService
 from app.trading.reconciliation import OrderReconciler
@@ -30,10 +32,12 @@ from app.knowledge.registry import attribution_for_decision
 from app.streaming.manager import stream_hub
 from app.jobs.mark_to_market import mtm_job
 from app.jobs.reconcile import reconcile_job
+from app.jobs.investor_monitor import investor_monitor_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
 from app.models import CouncilDecisionRecord
 from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
+from app.api.intelligence_data import router as intelligence_data_router
 from app.security.auth import require_api_key
 
 
@@ -43,6 +47,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     mtm_job.interval_seconds = settings.mtm_interval_seconds
     reconcile_job.interval_seconds = settings.reconcile_interval_seconds
+    investor_monitor_job.interval_seconds = settings.investor_monitor_interval_seconds
     try:
         await stream_hub.start(["btcusdt", "ethusdt"])
     except Exception:
@@ -55,7 +60,14 @@ async def lifespan(app: FastAPI):
         await reconcile_job.start()
     except Exception:
         pass
+    # Investor monitor starts only when Quiver is configured (no fake activity)
+    if settings.quiver_configured:
+        try:
+            await investor_monitor_job.start()
+        except Exception:
+            pass
     yield
+    await investor_monitor_job.stop()
     await reconcile_job.stop()
     await mtm_job.stop()
     await stream_hub.stop()
@@ -70,6 +82,7 @@ app = FastAPI(
 
 app.include_router(knowledge_router)
 app.include_router(backtest_router)
+app.include_router(intelligence_data_router)
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -153,15 +166,22 @@ async def reconcile_run(_auth=Depends(require_api_key)):
 async def providers_status(settings: Settings = Depends(get_settings)):
     alpaca = AlpacaClient(settings)
     binance = BinanceClient(settings)
+    quiver = QuiverClient(settings)
+    liquid = LiquidClient(settings)
     return {
         "alpaca": await alpaca.health(),
         "binance": await binance.health(),
+        "quiver": await quiver.health(),
+        "liquid": await liquid.health(),
         "live_trading_enabled": settings.live_trading_enabled,
         "streams": stream_hub.status(),
         "mtm": mtm_job.status(),
         "reconcile": reconcile_job.status(),
+        "investor_monitor": investor_monitor_job.status(),
         "fred_configured": settings.fred_configured,
         "news_configured": settings.news_configured,
+        "quiver_configured": settings.quiver_configured,
+        "liquid_configured": settings.liquid_configured,
     }
 
 
@@ -259,6 +279,16 @@ async def run_council(
         if news.get("status") == "ok" and news.get("sentiment_score") is not None:
             context["sentiment_score"] = news["sentiment_score"]
 
+        # Optional Quiver context (never auto-trade)
+        quiver_ctx = {}
+        if settings.quiver_configured and len(symbol) <= 6:
+            try:
+                from app.intelligence.investor_activity import InvestorActivityEngine
+
+                quiver_ctx = await InvestorActivityEngine(settings).ticker_context(symbol)
+            except Exception:
+                quiver_ctx = {"status": "error"}
+
         council = TradingCouncil()
         decision = council.analyse(
             symbol=symbol,
@@ -298,7 +328,12 @@ async def run_council(
             "data_quality": decision.data_quality,
             "methodology_notes": decision.methodology_notes,
             "timestamp": decision.timestamp,
-            "feeds": {"fred_status": fred.get("status"), "news_status": news.get("status")},
+            "feeds": {
+                "fred_status": fred.get("status"),
+                "news_status": news.get("status"),
+                "quiver_ticker_status": quiver_ctx.get("congress", {}).get("status") if quiver_ctx else "skipped",
+            },
+            "alt_data_context": quiver_ctx or None,
             "strategy_attribution": attribution,
             "structured_evidence_tags": structured,
             "specialists": [
