@@ -1,4 +1,4 @@
-"""Central configuration. All secrets and trading flags come from environment."""
+"""Central configuration. Secrets only from environment."""
 from functools import lru_cache
 from typing import Optional
 
@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
     secret_key: str = "change-me"
-    api_key: Optional[str] = None  # ETI_API_KEY — protects mutating routes when set
+    api_key: Optional[str] = None
     database_url: str = "sqlite:///./eti.db"
 
     live_trading_enabled: bool = True
@@ -39,8 +39,16 @@ class Settings(BaseSettings):
     fred_api_key: Optional[str] = None
     newsapi_key: Optional[str] = None
 
+    # Quiver Quant — research only (never execution)
+    quiver_api_key: Optional[str] = None
+
+    # Liquid — only user-validated base URL; no assumed exchange endpoints
+    liquid_api_key: Optional[str] = None
+    liquid_api_base_url: Optional[str] = None
+
     mtm_interval_seconds: int = 60
     reconcile_interval_seconds: int = 120
+    investor_monitor_interval_seconds: int = 1800
 
     data_max_age_seconds: int = 300
     require_fresh_data_for_live_orders: bool = True
@@ -61,6 +69,14 @@ class Settings(BaseSettings):
     @property
     def news_configured(self) -> bool:
         return bool(self.newsapi_key)
+
+    @property
+    def quiver_configured(self) -> bool:
+        return bool(self.quiver_api_key)
+
+    @property
+    def liquid_configured(self) -> bool:
+        return bool(self.liquid_api_key and self.liquid_api_base_url)
 
     @property
     def is_live_allowed(self) -> bool:
