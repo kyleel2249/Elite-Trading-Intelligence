@@ -33,6 +33,7 @@ class BinanceWebSocketManager:
         self.last_message_at: Optional[datetime] = None
         self.connected = False
         self.reconnect_count = 0
+        self._force_reconnect = False
 
     def on_message(self, handler: Callable[[dict], Any]) -> None:
         self._handlers.append(handler)
@@ -42,6 +43,15 @@ class BinanceWebSocketManager:
         for s in streams:
             if s not in self._subscriptions:
                 self._subscriptions.append(s)
+
+    async def reconnect(self) -> None:
+        """Close current socket so the loop reconnects with updated subscriptions."""
+        self._force_reconnect = True
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
 
     async def start(self) -> None:
         if self._running:
@@ -77,23 +87,24 @@ class BinanceWebSocketManager:
             if not self._subscriptions:
                 await asyncio.sleep(1)
                 continue
-            # Combined stream URL
             stream_path = "/".join(self._subscriptions)
-            url = f"{self.base}/{stream_path}" if len(self._subscriptions) == 1 else (
-                self.base.replace("/ws", "/stream") + "?streams=" + "/".join(self._subscriptions)
+            url = (
+                f"{self.base}/{stream_path}"
+                if len(self._subscriptions) == 1
+                else self.base.replace("/ws", "/stream") + "?streams=" + "/".join(self._subscriptions)
             )
             try:
                 async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
                     self._ws = ws
                     self.connected = True
+                    self._force_reconnect = False
                     backoff = 1.0
-                    logger.info("Binance WS connected: %s", url)
+                    logger.info("Binance WS connected (%d streams)", len(self._subscriptions))
                     async for raw in ws:
-                        if not self._running:
+                        if not self._running or self._force_reconnect:
                             break
                         try:
                             msg = json.loads(raw)
-                            # Combined stream wraps payload
                             payload = msg.get("data", msg)
                             self.last_message_at = datetime.now(timezone.utc)
                             for h in self._handlers:
@@ -114,5 +125,8 @@ class BinanceWebSocketManager:
                 self.reconnect_count += 1
                 logger.warning("Binance WS error: %s; reconnecting in %.1fs", e, backoff)
             if self._running:
+                if self._force_reconnect:
+                    backoff = 0.3
+                    self._force_reconnect = False
                 await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
+                backoff = min(max(backoff, 1.0) * 2, 30.0)
