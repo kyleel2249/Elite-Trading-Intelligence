@@ -1,59 +1,80 @@
-"""Data Intelligence & API Centre + Investor monitor endpoints."""
+"""Data Intelligence & API Centre routes (Quiver + Liquid status + investor scan)."""
 from fastapi import APIRouter, Depends
 
-from app.config import get_settings, Settings
+from app.config import Settings, get_settings
 from app.integrations.quiver.client import QuiverClient
 from app.integrations.liquid.client import LiquidClient
-from app.jobs.investor_monitor import investor_monitor
+from app.intelligence.investor_activity import InvestorActivityEngine
+from app.jobs.investor_monitor import investor_monitor_job
 from app.security.auth import require_api_key
 
-router = APIRouter(prefix="/api/intelligence-data", tags=["intelligence-data"])
+router = APIRouter(prefix="/api/data-intelligence", tags=["data-intelligence"])
 
 
 @router.get("/status")
-async def data_status(settings: Settings = Depends(get_settings)):
-    quiver = QuiverClient(settings)
-    liquid = LiquidClient(settings)
+async def data_intelligence_status(settings: Settings = Depends(get_settings)):
+    q = QuiverClient(settings)
+    liq = LiquidClient(settings)
     return {
-        "quiver": await quiver.health(),
-        "liquid": await liquid.health(),
-        "investor_monitor": investor_monitor.status(),
-        "secrets_exposed": False,
-        "note": "Quiver is research-only; never triggers orders alone. Liquid trading not assumed.",
-        "risk_officer": "Helena Frost",
+        "quiver": await q.health(),
+        "liquid": await liq.health(),
+        "investor_monitor": investor_monitor_job.status(),
+        "rules": [
+            "Quiver is research-only",
+            "Liquid trading endpoints not assumed without verified base URL",
+            "No withdrawals",
+            "Helena Frost gates all orders",
+        ],
     }
 
 
-@router.post("/test/quiver")
-async def test_quiver(settings: Settings = Depends(get_settings)):
-    return await QuiverClient(settings).health()
-
-
-@router.post("/test/liquid")
-async def test_liquid(settings: Settings = Depends(get_settings)):
-    return await LiquidClient(settings).health()
+@router.get("/quiver/datasets")
+async def quiver_datasets(settings: Settings = Depends(get_settings)):
+    return await QuiverClient(settings).dataset_availability_probe()
 
 
 @router.get("/quiver/congress")
 async def quiver_congress(settings: Settings = Depends(get_settings)):
-    return await QuiverClient(settings).congress_trading_live()
+    return await InvestorActivityEngine(settings).scan_congress()
 
 
-@router.get("/quiver/congress/{ticker}")
-async def quiver_congress_ticker(ticker: str, settings: Settings = Depends(get_settings)):
-    return await QuiverClient(settings).congress_trading_ticker(ticker)
+@router.get("/quiver/contracts")
+async def quiver_contracts(settings: Settings = Depends(get_settings)):
+    return await InvestorActivityEngine(settings).scan_contracts()
 
 
-@router.get("/investor-monitor/status")
-async def inv_status():
-    return investor_monitor.status()
+@router.get("/quiver/lobbying")
+async def quiver_lobbying(settings: Settings = Depends(get_settings)):
+    return await InvestorActivityEngine(settings).scan_lobbying()
 
 
-@router.post("/investor-monitor/run")
-async def inv_run(_auth=Depends(require_api_key)):
-    return await investor_monitor.run_once()
+@router.get("/ticker/{ticker}")
+async def ticker_alt_data(ticker: str, settings: Settings = Depends(get_settings)):
+    return await InvestorActivityEngine(settings).ticker_context(ticker)
 
 
-@router.get("/investor-monitor/alerts")
-async def inv_alerts():
-    return {"alerts": investor_monitor.alerts[-50:], "count": len(investor_monitor.alerts)}
+@router.get("/watchlist")
+async def investor_watchlist(settings: Settings = Depends(get_settings)):
+    return InvestorActivityEngine(settings).watchlist_summary()
+
+
+@router.get("/monitor/status")
+async def monitor_status():
+    return investor_monitor_job.status()
+
+
+@router.post("/monitor/scan")
+async def monitor_scan(_auth=Depends(require_api_key)):
+    return await investor_monitor_job.run_once()
+
+
+@router.post("/monitor/start")
+async def monitor_start(_auth=Depends(require_api_key)):
+    await investor_monitor_job.start()
+    return investor_monitor_job.status()
+
+
+@router.post("/monitor/pause")
+async def monitor_pause(_auth=Depends(require_api_key)):
+    await investor_monitor_job.stop()
+    return investor_monitor_job.status()
