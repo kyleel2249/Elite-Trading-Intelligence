@@ -38,6 +38,7 @@ from app.models import CouncilDecisionRecord
 from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
+from app.api.stream import router as stream_router
 from app.security.auth import require_api_key
 
 
@@ -82,6 +83,7 @@ app = FastAPI(
 app.include_router(knowledge_router)
 app.include_router(backtest_router)
 app.include_router(intelligence_data_router)
+app.include_router(stream_router)
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -131,7 +133,6 @@ async def dashboard(request: Request, settings: Settings = Depends(get_settings)
 
 @app.get("/data-intel", response_class=HTMLResponse)
 async def data_intel_dashboard(request: Request):
-    """Interactive Investor Intelligence Command Centre."""
     return templates.TemplateResponse(
         "data_intel.html",
         {"request": request, "version": __version__},
@@ -140,7 +141,6 @@ async def data_intel_dashboard(request: Request):
 
 @app.get("/alerts", response_class=HTMLResponse)
 async def alerts_page(request: Request):
-    """Dedicated intelligence alerts workspace."""
     return templates.TemplateResponse(
         "alerts.html",
         {"request": request, "version": __version__},
@@ -289,36 +289,26 @@ async def run_council(
         if provider == "binance":
             book = await mkt.get_order_book(symbol, depth=20)
             klines = await mkt.get_history("binance", symbol, interval="1h", limit=48)
-
         fred = await fetch_fred_series(settings=settings)
         news = await fetch_news_headlines(query=f"{symbol} OR markets", settings=settings)
         context = {"fred": fred, "news": news}
         if news.get("status") == "ok" and news.get("sentiment_score") is not None:
             context["sentiment_score"] = news["sentiment_score"]
-
         quiver_ctx = {}
         if settings.quiver_configured and len(symbol) <= 6:
             try:
                 from app.intelligence.investor_activity import InvestorActivityEngine
-
                 quiver_ctx = await InvestorActivityEngine(settings).ticker_context(symbol)
             except Exception:
                 quiver_ctx = {"status": "error"}
-
         council = TradingCouncil()
         decision = council.analyse(
-            symbol=symbol,
-            provider=provider,
-            price=snap.get("price"),
-            bid=snap.get("bid"),
-            ask=snap.get("ask"),
+            symbol=symbol, provider=provider, price=snap.get("price"),
+            bid=snap.get("bid"), ask=snap.get("ask"),
             data_status=snap.get("data_status", "unknown"),
-            order_book=book,
-            klines=klines,
-            context=context,
+            order_book=book, klines=klines, context=context,
         )
-        evidence_blob = []
-        structured = []
+        evidence_blob, structured = [], []
         for r in decision.specialist_reports:
             evidence_blob.extend(r.evidence or [])
             evidence_blob.extend(r.methods_applied or [])
@@ -330,42 +320,23 @@ async def run_council(
                 structured.append("value_quality")
             if "breakout" in " ".join(r.methods_applied or []).lower():
                 structured.append("trend_breakout")
-
         attribution = attribution_for_decision(decision.summary, evidence_blob, structured_tags=structured)
-
         payload = {
-            "action": decision.action.value,
-            "confidence": decision.confidence,
-            "summary": decision.summary,
-            "risk_veto": decision.risk_veto,
-            "risk_notes": decision.risk_notes,
-            "risk_officer": decision.risk_officer,
+            "action": decision.action.value, "confidence": decision.confidence,
+            "summary": decision.summary, "risk_veto": decision.risk_veto,
+            "risk_notes": decision.risk_notes, "risk_officer": decision.risk_officer,
             "contradictory_signals": decision.contradictory_signals,
-            "data_quality": decision.data_quality,
-            "methodology_notes": decision.methodology_notes,
+            "data_quality": decision.data_quality, "methodology_notes": decision.methodology_notes,
             "timestamp": decision.timestamp,
-            "feeds": {
-                "fred_status": fred.get("status"),
-                "news_status": news.get("status"),
-                "quiver_ticker_status": quiver_ctx.get("congress", {}).get("status") if quiver_ctx else "skipped",
-            },
-            "alt_data_context": quiver_ctx or None,
-            "strategy_attribution": attribution,
+            "feeds": {"fred_status": fred.get("status"), "news_status": news.get("status"),
+                       "quiver_ticker_status": quiver_ctx.get("congress", {}).get("status") if quiver_ctx else "skipped"},
+            "alt_data_context": quiver_ctx or None, "strategy_attribution": attribution,
             "structured_evidence_tags": structured,
-            "specialists": [
-                {
-                    "trader_id": r.trader_id,
-                    "trader_name": r.trader_name,
-                    "role": r.role,
-                    "bias": r.bias,
-                    "confidence": r.confidence,
-                    "analysis": r.analysis,
-                    "evidence": r.evidence,
-                    "methods_applied": r.methods_applied,
-                    "limitations": r.limitations,
-                }
-                for r in decision.specialist_reports
-            ],
+            "specialists": [{
+                "trader_id": r.trader_id, "trader_name": r.trader_name, "role": r.role,
+                "bias": r.bias, "confidence": r.confidence, "analysis": r.analysis,
+                "evidence": r.evidence, "methods_applied": r.methods_applied, "limitations": r.limitations,
+            } for r in decision.specialist_reports],
         }
         if persist:
             save_council_decision(db, symbol, provider, payload)
@@ -378,36 +349,17 @@ async def run_council(
 
 @app.get("/api/intelligence/decisions")
 async def list_decisions(limit: int = 20, db: Session = Depends(get_db)):
-    rows = (
-        db.query(CouncilDecisionRecord)
-        .order_by(CouncilDecisionRecord.created_at.desc())
-        .limit(min(limit, 100))
-        .all()
-    )
-    return [
-        {
-            "id": r.id,
-            "symbol": r.symbol,
-            "provider": r.provider,
-            "action": r.action,
-            "confidence": r.confidence,
-            "summary": r.summary,
-            "risk_veto": r.risk_veto,
-            "data_quality": r.data_quality,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    rows = db.query(CouncilDecisionRecord).order_by(CouncilDecisionRecord.created_at.desc()).limit(min(limit, 100)).all()
+    return [{"id": r.id, "symbol": r.symbol, "provider": r.provider, "action": r.action,
+             "confidence": r.confidence, "summary": r.summary, "risk_veto": r.risk_veto,
+             "data_quality": r.data_quality,
+             "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
 @app.get("/api/intelligence/forecast")
 async def intelligence_forecast(
-    symbol: str = "BTCUSDT",
-    provider: str = "binance",
-    horizon: str = "intraday",
-    persist: bool = True,
-    settings: Settings = Depends(get_settings),
-    db: Session = Depends(get_db),
+    symbol: str = "BTCUSDT", provider: str = "binance", horizon: str = "intraday",
+    persist: bool = True, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
 ):
     mkt = MarketService(settings)
     try:
@@ -427,11 +379,7 @@ async def intelligence_forecast(
 
 
 @app.post("/api/intelligence/forecast/score")
-async def forecast_score(
-    body: ForecastScoreRequest,
-    settings: Settings = Depends(get_settings),
-    db: Session = Depends(get_db),
-):
+async def forecast_score(body: ForecastScoreRequest, settings: Settings = Depends(get_settings), db: Session = Depends(get_db)):
     price = body.realized_price
     if price is None:
         snap = await MarketService(settings).get_snapshot(body.provider, body.symbol)
@@ -440,13 +388,8 @@ async def forecast_score(
             raise HTTPException(status_code=422, detail="No realized price available")
     svc = ForecastAccuracyService(db)
     scored = svc.score_pending(body.symbol, float(price), provider=body.provider)
-    return {
-        "symbol": body.symbol.upper(),
-        "realized_price": price,
-        "scored": scored,
-        "summary": svc.summary(symbol=body.symbol),
-        "analyst": "Lars Hagen",
-    }
+    return {"symbol": body.symbol.upper(), "realized_price": price, "scored": scored,
+            "summary": svc.summary(symbol=body.symbol), "analyst": "Lars Hagen"}
 
 
 @app.get("/api/intelligence/forecast/accuracy")
@@ -455,45 +398,20 @@ async def forecast_accuracy(symbol: Optional[str] = None, db: Session = Depends(
 
 
 @app.get("/api/risk/evaluate")
-async def evaluate_risk_demo(
-    symbol: str = "BTCUSDT",
-    side: str = "buy",
-    qty: float = 0.01,
-    environment: str = "paper",
-    equity: float = 10000.0,
-):
+async def evaluate_risk_demo(symbol: str = "BTCUSDT", side: str = "buy", qty: float = 0.01,
+                             environment: str = "paper", equity: float = 10000.0):
     engine = RiskEngine()
-    proposal = OrderProposal(
-        provider="binance",
-        environment=environment,
-        symbol=symbol,
-        side=side,
-        qty=qty,
-        equity=equity,
-        current_open_positions=0,
-        daily_realized_pnl_pct=0.0,
-        current_drawdown_pct=0.0,
-        data_age_seconds=10.0,
-        data_status="fresh",
-    )
+    proposal = OrderProposal(provider="binance", environment=environment, symbol=symbol, side=side,
+                             qty=qty, equity=equity, current_open_positions=0, daily_realized_pnl_pct=0.0,
+                             current_drawdown_pct=0.0, data_age_seconds=10.0, data_status="fresh")
     decision = engine.evaluate(proposal)
-    return {
-        "decision": decision.decision.value,
-        "approved": decision.approved,
-        "reasons": decision.reasons,
-        "risk_per_trade_pct": decision.risk_per_trade_pct,
-        "notes": decision.notes,
-        "officer": "Helena Frost",
-    }
+    return {"decision": decision.decision.value, "approved": decision.approved, "reasons": decision.reasons,
+            "risk_per_trade_pct": decision.risk_per_trade_pct, "notes": decision.notes, "officer": "Helena Frost"}
 
 
 @app.post("/api/trading/order")
-async def place_order(
-    req: OrderRequest,
-    settings: Settings = Depends(get_settings),
-    db: Session = Depends(get_db),
-    _auth=Depends(require_api_key),
-):
+async def place_order(req: OrderRequest, settings: Settings = Depends(get_settings),
+                      db: Session = Depends(get_db), _auth=Depends(require_api_key)):
     fill_hint = None
     if req.environment.lower() in ("paper", "testnet"):
         try:
@@ -501,61 +419,29 @@ async def place_order(
             fill_hint = snap.get("price")
         except Exception:
             fill_hint = req.limit_price
-
     service = TradingService(settings, db=db)
     return await service.place_order(
-        provider=req.provider,
-        environment=req.environment,
-        symbol=req.symbol,
-        side=req.side,
-        qty=req.qty,
-        order_type=req.order_type,
-        limit_price=req.limit_price,
-        equity=req.equity,
-        current_open_positions=req.current_open_positions,
-        daily_realized_pnl_pct=req.daily_realized_pnl_pct,
-        current_drawdown_pct=req.current_drawdown_pct,
-        data_age_seconds=req.data_age_seconds,
-        data_status=req.data_status,
-        fill_price_hint=fill_hint,
-        thesis=req.thesis,
+        provider=req.provider, environment=req.environment, symbol=req.symbol, side=req.side,
+        qty=req.qty, order_type=req.order_type, limit_price=req.limit_price, equity=req.equity,
+        current_open_positions=req.current_open_positions, daily_realized_pnl_pct=req.daily_realized_pnl_pct,
+        current_drawdown_pct=req.current_drawdown_pct, data_age_seconds=req.data_age_seconds,
+        data_status=req.data_status, fill_price_hint=fill_hint, thesis=req.thesis,
         council_action=req.council_action,
     )
 
 
 @app.post("/api/trading/reconcile")
-async def trading_reconcile(
-    limit: int = 50,
-    settings: Settings = Depends(get_settings),
-    db: Session = Depends(get_db),
-    _auth=Depends(require_api_key),
-):
+async def trading_reconcile(limit: int = 50, settings: Settings = Depends(get_settings),
+                            db: Session = Depends(get_db), _auth=Depends(require_api_key)):
     return await OrderReconciler(db, settings).reconcile_open(limit=limit)
 
 
 @app.get("/api/paper-trading/positions")
-async def paper_positions(
-    environment: str = "paper",
-    status: str = "open",
-    db: Session = Depends(get_db),
-):
-    svc = PortfolioService(db)
-    rows = svc.list_positions(environment=environment, status=status)
-    return [
-        {
-            "symbol": p.symbol,
-            "side": p.side,
-            "qty": p.qty,
-            "avg_entry": p.avg_entry,
-            "mark_price": p.mark_price,
-            "unrealized_pnl": p.unrealized_pnl,
-            "realized_pnl": p.realized_pnl,
-            "status": p.status,
-            "provider": p.provider,
-            "environment": p.environment,
-        }
-        for p in rows
-    ]
+async def paper_positions(environment: str = "paper", status: str = "open", db: Session = Depends(get_db)):
+    rows = PortfolioService(db).list_positions(environment=environment, status=status)
+    return [{"symbol": p.symbol, "side": p.side, "qty": p.qty, "avg_entry": p.avg_entry,
+             "mark_price": p.mark_price, "unrealized_pnl": p.unrealized_pnl, "realized_pnl": p.realized_pnl,
+             "status": p.status, "provider": p.provider, "environment": p.environment} for p in rows]
 
 
 @app.get("/api/paper-trading/portfolio")
@@ -564,62 +450,23 @@ async def paper_portfolio(environment: str = "paper", db: Session = Depends(get_
 
 
 @app.get("/api/paper-trading/journal")
-async def paper_journal(
-    limit: int = 50,
-    symbol: Optional[str] = None,
-    event: Optional[str] = None,
-    environment: Optional[str] = None,
-    provider: Optional[str] = None,
-    side: Optional[str] = None,
-    db: Session = Depends(get_db),
-):
-    rows = PortfolioService(db).list_journal(
-        limit=limit,
-        symbol=symbol,
-        event=event,
-        environment=environment,
-        provider=provider,
-        side=side,
-    )
-    return [
-        {
-            "id": r.id,
-            "client_order_id": r.client_order_id,
-            "provider": r.provider,
-            "environment": r.environment,
-            "symbol": r.symbol,
-            "side": r.side,
-            "qty": r.qty,
-            "price": r.price,
-            "event": r.event,
-            "pnl": r.pnl,
-            "thesis": r.thesis,
-            "council_action": r.council_action,
-            "risk_officer": r.risk_officer,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+async def paper_journal(limit: int = 50, symbol: Optional[str] = None, event: Optional[str] = None,
+                        environment: Optional[str] = None, provider: Optional[str] = None,
+                        side: Optional[str] = None, db: Session = Depends(get_db)):
+    rows = PortfolioService(db).list_journal(limit=limit, symbol=symbol, event=event,
+                                            environment=environment, provider=provider, side=side)
+    return [{"id": r.id, "client_order_id": r.client_order_id, "provider": r.provider,
+             "environment": r.environment, "symbol": r.symbol, "side": r.side, "qty": r.qty,
+             "price": r.price, "event": r.event, "pnl": r.pnl, "thesis": r.thesis,
+             "council_action": r.council_action, "risk_officer": r.risk_officer,
+             "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
 @app.get("/api/paper-trading/history")
 async def paper_history(limit: int = 50, db: Session = Depends(get_db)):
     from app.models import OrderRecord
-
     rows = db.query(OrderRecord).order_by(OrderRecord.created_at.desc()).limit(min(limit, 200)).all()
-    return [
-        {
-            "client_order_id": r.client_order_id,
-            "provider": r.provider,
-            "environment": r.environment,
-            "symbol": r.symbol,
-            "side": r.side,
-            "qty": r.qty,
-            "fill_price": r.fill_price,
-            "status": r.status,
-            "risk_approved": r.risk_approved,
-            "risk_notes": r.risk_notes,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    return [{"client_order_id": r.client_order_id, "provider": r.provider, "environment": r.environment,
+             "symbol": r.symbol, "side": r.side, "qty": r.qty, "fill_price": r.fill_price,
+             "status": r.status, "risk_approved": r.risk_approved, "risk_notes": r.risk_notes,
+             "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
