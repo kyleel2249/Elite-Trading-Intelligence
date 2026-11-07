@@ -138,6 +138,15 @@ async def data_intel_dashboard(request: Request):
     )
 
 
+@app.get("/alerts", response_class=HTMLResponse)
+async def alerts_page(request: Request):
+    """Dedicated intelligence alerts workspace."""
+    return templates.TemplateResponse(
+        "alerts.html",
+        {"request": request, "version": __version__},
+    )
+
+
 @app.get("/api/system/health", response_model=HealthResponse)
 async def health(settings: Settings = Depends(get_settings)):
     return HealthResponse(
