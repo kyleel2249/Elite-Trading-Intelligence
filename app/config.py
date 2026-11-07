@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     api_key: Optional[str] = None
     database_url: str = "sqlite:///./eti.db"
 
-    live_trading_enabled: bool = True
+    live_trading_enabled: bool = False
     default_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 3.0
     max_portfolio_drawdown_pct: float = 10.0
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     binance_api_key: Optional[str] = None
     binance_secret_key: Optional[str] = None
     binance_testnet_enabled: bool = True
-    binance_live_trading_enabled: bool = True
+    binance_live_trading_enabled: bool = False
 
     fred_api_key: Optional[str] = None
     newsapi_key: Optional[str] = None

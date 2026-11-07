@@ -1,5 +1,17 @@
 # Cloudflare deployment for ETI
 
+> **Build failure `docker: not found` (exit 127):** the Cloudflare **Pages** project has its build command set to
+> `docker build -t eti:latest .`. Pages build workers have no Docker and cannot run a Python server.
+> Fix: deploy as a **Worker + Container** (this repo now ships `wrangler.jsonc`, `worker/index.ts`, `package.json`):
+>
+> 1. Dashboard: Workers & Pages -> Create -> Import repository (Workers, not Pages), or delete the Pages project.
+> 2. Build command: `npm install`; Deploy command: `npx wrangler deploy`.
+> 3. Add secrets: `npx wrangler secret put SECRET_KEY` (and `API_KEY`, `DATABASE_URL`, provider keys as needed).
+> 4. Set `DATABASE_URL` to managed Postgres (container disk is ephemeral; see `docs/POSTGRES.md`).
+> 5. Verify: `curl https://<worker>.workers.dev/api/system/health`.
+>
+> Live trading is forced off in the Worker wrapper (paper/testnet only). Containers availability depends on your Cloudflare plan.
+
 ETI is a **Python FastAPI** application (Uvicorn). It is **not** a pure static site or Workers-only Node app.
 
 ## Realistic Cloudflare options

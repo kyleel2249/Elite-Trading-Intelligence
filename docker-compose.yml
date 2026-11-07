@@ -7,7 +7,7 @@ services:
       - .env
     environment:
       DATABASE_URL: sqlite:////data/eti.db
-      LIVE_TRADING_ENABLED: "true"
+      LIVE_TRADING_ENABLED: "false"
       ALPACA_PAPER: "true"
       BINANCE_TESTNET_ENABLED: "true"
     volumes:

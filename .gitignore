@@ -63,3 +63,5 @@ tmp/
 # Generated
 *.pyc
 .pytest_cache/
+node_modules/
+.wrangler/
