@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Optional
 import hashlib
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models import InvestorActivity, IntelligenceAlert
@@ -114,22 +115,115 @@ class ActivityStore:
         ticker: Optional[str] = None,
         category: Optional[str] = None,
         significance: Optional[str] = None,
+        q: Optional[str] = None,
     ) -> list[dict[str, Any]]:
-        q = self.db.query(InvestorActivity).order_by(InvestorActivity.created_at.desc())
+        query = self.db.query(InvestorActivity).order_by(InvestorActivity.created_at.desc())
         if ticker:
-            q = q.filter(InvestorActivity.ticker == ticker.upper())
+            query = query.filter(InvestorActivity.ticker == ticker.upper())
         if category:
-            q = q.filter(InvestorActivity.category == category)
+            query = query.filter(InvestorActivity.category == category)
         if significance:
-            q = q.filter(InvestorActivity.significance == significance)
-        rows = q.limit(min(limit, 200)).all()
+            query = query.filter(InvestorActivity.significance == significance)
+        if q:
+            term = q.strip()
+            if term:
+                like = f"%{term}%"
+                query = query.filter(
+                    or_(
+                        InvestorActivity.ticker.ilike(like),
+                        InvestorActivity.investor_name.ilike(like),
+                        InvestorActivity.institution.ilike(like),
+                    )
+                )
+        rows = query.limit(min(limit, 200)).all()
         return [self._act_dict(r) for r in rows]
 
-    def list_alerts(self, limit: int = 50, unacked_only: bool = False) -> list[dict[str, Any]]:
-        q = self.db.query(IntelligenceAlert).order_by(IntelligenceAlert.created_at.desc())
+    def search(
+        self,
+        q: str,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Search activities + alerts by ticker or person/institution name."""
+        term = (q or "").strip()
+        if not term:
+            return {"query": q, "activities": [], "alerts": [], "count": 0}
+
+        like = f"%{term}%"
+        acts = (
+            self.db.query(InvestorActivity)
+            .filter(
+                or_(
+                    InvestorActivity.ticker.ilike(like),
+                    InvestorActivity.investor_name.ilike(like),
+                    InvestorActivity.institution.ilike(like),
+                )
+            )
+            .order_by(InvestorActivity.created_at.desc())
+            .limit(min(limit, 200))
+            .all()
+        )
+        alerts = (
+            self.db.query(IntelligenceAlert)
+            .filter(
+                or_(
+                    IntelligenceAlert.ticker.ilike(like),
+                    IntelligenceAlert.investor_name.ilike(like),
+                    IntelligenceAlert.title.ilike(like),
+                )
+            )
+            .order_by(IntelligenceAlert.created_at.desc())
+            .limit(min(limit, 100))
+            .all()
+        )
+        act_list = [self._act_dict(r) for r in acts]
+        alert_list = [
+            {
+                "alert_id": a.alert_id,
+                "activity_id": a.activity_id,
+                "title": a.title,
+                "severity": a.severity,
+                "ticker": a.ticker,
+                "investor_name": a.investor_name,
+                "category": a.category,
+                "summary": a.summary,
+                "recommended_action": a.recommended_action,
+                "source_provider": a.source_provider,
+                "verification_status": a.verification_status,
+                "acknowledged": a.acknowledged,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in alerts
+        ]
+        return {
+            "query": term,
+            "activities": act_list,
+            "alerts": alert_list,
+            "count": len(act_list) + len(alert_list),
+            "activities_count": len(act_list),
+            "alerts_count": len(alert_list),
+        }
+
+    def list_alerts(
+        self,
+        limit: int = 50,
+        unacked_only: bool = False,
+        q: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        query = self.db.query(IntelligenceAlert).order_by(IntelligenceAlert.created_at.desc())
         if unacked_only:
-            q = q.filter(IntelligenceAlert.acknowledged.is_(False))
-        rows = q.limit(min(limit, 200)).all()
+            query = query.filter(IntelligenceAlert.acknowledged.is_(False))
+        if q:
+            term = q.strip()
+            if term:
+                like = f"%{term}%"
+                query = query.filter(
+                    or_(
+                        IntelligenceAlert.ticker.ilike(like),
+                        IntelligenceAlert.investor_name.ilike(like),
+                        IntelligenceAlert.title.ilike(like),
+                    )
+                )
+        rows = query.limit(min(limit, 200)).all()
         return [
             {
                 "alert_id": a.alert_id,

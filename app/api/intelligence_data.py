@@ -1,7 +1,7 @@
 """Data Intelligence & Investor Intelligence Command Centre API."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -43,6 +43,16 @@ async def data_intelligence_status(settings: Settings = Depends(get_settings)):
             "risk_officer": "Helena Frost",
         },
     }
+
+
+@router.get("/search")
+async def search_intelligence(
+    q: str = Query(..., min_length=1, description="Ticker or investor/institution name"),
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """Search stored activities and alerts by ticker or name."""
+    return ActivityStore(db).search(q=q, limit=limit)
 
 
 @router.get("/quiver/datasets")
@@ -103,11 +113,16 @@ async def list_activities(
     ticker: Optional[str] = None,
     category: Optional[str] = None,
     significance: Optional[str] = None,
+    q: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     return {
         "activities": ActivityStore(db).list_activities(
-            limit=limit, ticker=ticker, category=category, significance=significance
+            limit=limit,
+            ticker=ticker,
+            category=category,
+            significance=significance,
+            q=q,
         )
     }
 
@@ -116,9 +131,14 @@ async def list_activities(
 async def list_alerts(
     limit: int = 50,
     unacked_only: bool = False,
+    q: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    return {"alerts": ActivityStore(db).list_alerts(limit=limit, unacked_only=unacked_only)}
+    return {
+        "alerts": ActivityStore(db).list_alerts(
+            limit=limit, unacked_only=unacked_only, q=q
+        )
+    }
 
 
 @router.post("/alerts/{alert_id}/ack")
