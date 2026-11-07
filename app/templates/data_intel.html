@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETI — Investor Intelligence Command Centre</title>
+  <style>
+    :root {
+      --bg: #070b12;
+      --bg2: #0c1220;
+      --card: rgba(18, 28, 45, 0.72);
+      --card-solid: #121c2d;
+      --text: #e8eef8;
+      --muted: #8b9bb4;
+      --cyan: #22d3ee;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --red: #ef4444;
+      --gold: #fbbf24;
+      --purple: #a78bfa;
+      --border: rgba(56, 189, 248, 0.15);
+      --glow: 0 0 24px rgba(34, 211, 238, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Inter, system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #0e2a3d 0%, transparent 50%),
+                  radial-gradient(900px 500px at 100% 0%, #1a1040 0%, transparent 45%),
+                  var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.45;
+    }
+    header {
+      position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(12px);
+      background: rgba(7, 11, 18, 0.85);
+      border-bottom: 1px solid var(--border);
+      padding: 0.85rem 1.25rem;
+      display: flex; flex-wrap: wrap; gap: 0.75rem;
+      align-items: center; justify-content: space-between;
+    }
+    h1 {
+      margin: 0; font-size: 1.05rem; letter-spacing: 0.04em;
+      background: linear-gradient(90deg, var(--cyan), var(--blue), var(--purple));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .sub { color: var(--muted); font-size: 0.75rem; margin-top: 0.15rem; }
+    .nav-links { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .nav-links a, .btn {
+      text-decoration: none; color: var(--text);
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.7rem; border-radius: 8px;
+      font-size: 0.78rem; cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .nav-links a:hover, .btn:hover { border-color: var(--cyan); box-shadow: var(--glow); }
+    .btn.primary { border-color: rgba(34, 211, 238, 0.4); color: var(--cyan); }
+    .btn.danger { border-color: rgba(239, 68, 68, 0.35); color: #fca5a5; }
+    .btn:disabled { opacity: 0.5; cursor: wait; }
+    main { max-width: 1400px; margin: 0 auto; padding: 1.1rem 1.25rem 2.5rem; }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .kpi {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 0.9rem 1rem;
+      box-shadow: var(--glow);
+      backdrop-filter: blur(8px);
+    }
+    .kpi .label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .kpi .value { font-size: 1.35rem; font-weight: 650; margin-top: 0.25rem; }
+    .kpi .hint { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .dot.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.warn { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+    .dot.bad { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    .dot.off { background: #475569; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+      margin-bottom: 1rem;
+      padding: 0.75rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+    input, select {
+      background: #0a1220; border: 1px solid var(--border); color: var(--text);
+      padding: 0.4rem 0.55rem; border-radius: 8px; font-size: 0.8rem;
+    }
+    input:focus, select:focus { outline: 1px solid var(--cyan); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 0.85rem;
+    }
+    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      min-height: 280px;
+      display: flex; flex-direction: column;
+    }
+    .panel-h {
+      padding: 0.7rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 0.5rem;
+    }
+    .panel-h h2 {
+      margin: 0; font-size: 0.78rem; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--cyan);
+    }
+    .panel-b { padding: 0.75rem 1rem; overflow: auto; flex: 1; max-height: 420px; }
+
+    .feed-item {
+      border-left: 3px solid var(--blue);
+      padding: 0.55rem 0.7rem;
+      margin-bottom: 0.55rem;
+      background: rgba(15, 23, 42, 0.55);
+      border-radius: 0 10px 10px 0;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .feed-item:hover { background: rgba(30, 41, 59, 0.75); }
+    .feed-item.buy { border-left-color: var(--green); }
+    .feed-item.sell { border-left-color: var(--red); }
+    .feed-item.HIGH, .feed-item.CRITICAL { border-left-color: var(--gold); }
+    .feed-item .top { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.82rem; }
+    .feed-item .meta { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
+    .tag {
+      display: inline-block; font-size: 0.65rem; padding: 0.12rem 0.4rem;
+      border-radius: 999px; background: rgba(59, 130, 246, 0.2); color: #93c5fd;
+      margin-right: 0.25rem;
+    }
+    .tag.gold { background: rgba(251, 191, 36, 0.15); color: var(--gold); }
+    .tag.green { background: rgba(34, 197, 94, 0.15); color: #86efac; }
+    .tag.red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+    .tag.purple { background: rgba(167, 139, 250, 0.15); color: var(--purple); }
+
+    .empty { color: var(--muted); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
+    .toast {
+      position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 50;
+      background: #0f172a; border: 1px solid var(--cyan); color: var(--text);
+      padding: 0.75rem 1rem; border-radius: 10px; box-shadow: var(--glow);
+      font-size: 0.82rem; display: none; max-width: 320px;
+    }
+    .toast.show { display: block; animation: fadein 0.2s ease; }
+    @keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    .detail-modal {
+      display: none; position: fixed; inset: 0; z-index: 40;
+      background: rgba(0,0,0,0.55); align-items: center; justify-content: center;
+      padding: 1rem;
+    }
+    .detail-modal.open { display: flex; }
+    .modal-card {
+      background: var(--card-solid); border: 1px solid var(--border);
+      border-radius: 14px; max-width: 560px; width: 100%;
+      max-height: 80vh; overflow: auto; padding: 1.1rem 1.25rem;
+      box-shadow: var(--glow);
+    }
+    .modal-card h3 { margin: 0 0 0.5rem; color: var(--cyan); font-size: 1rem; }
+    .modal-card pre {
+      background: #0a1220; padding: 0.75rem; border-radius: 8px;
+      font-size: 0.72rem; overflow: auto; white-space: pre-wrap;
+    }
+    footer {
+      text-align: center; color: var(--muted); font-size: 0.72rem;
+      padding: 1rem; border-top: 1px solid var(--border); margin-top: 1rem;
+    }
+    .pulse { animation: pulse 1.6s ease infinite; }
+    @keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:0.55 } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>ETI GLOBAL INVESTOR INTELLIGENCE COMMAND CENTRE</h1>
+      <div class="sub">Research · Disclosure monitoring · No auto-trade · Frost risk gate intact · v{{ version }}</div>
+    </div>
+    <div class="nav-links">
+      <a href="/">Main Dashboard</a>
+      <button class="btn" id="btn-refresh">Refresh All</button>
+      <button class="btn primary" id="btn-scan">Scan Now</button>
+      <button class="btn" id="btn-start">Start Monitor</button>
+      <button class="btn danger" id="btn-pause">Pause</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">Quiver</div><div class="value" id="kpi-quiver"><span class="dot off"></span>—</div><div class="hint" id="kpi-quiver-h">API</div></div>
+      <div class="kpi"><div class="label">SEC EDGAR</div><div class="value" id="kpi-edgar"><span class="dot off"></span>—</div><div class="hint">Public filings</div></div>
+      <div class="kpi"><div class="label">Liquid</div><div class="value" id="kpi-liquid"><span class="dot off"></span>—</div><div class="hint">Probe only</div></div>
+      <div class="kpi"><div class="label">Monitor</div><div class="value" id="kpi-mon"><span class="dot off"></span>—</div><div class="hint" id="kpi-mon-h">Claire Bennett</div></div>
+      <div class="kpi"><div class="label">Activities</div><div class="value" id="kpi-acts">0</div><div class="hint">Stored</div></div>
+      <div class="kpi"><div class="label">Open Alerts</div><div class="value" id="kpi-alerts" style="color:var(--gold)">0</div><div class="hint">Unacked</div></div>
+    </div>
+
+    <div class="toolbar">
+      <input id="f-ticker" placeholder="Filter ticker" style="width:110px" />
+      <select id="f-category">
+        <option value="">All categories</option>
+        <option value="congressional_trade">Congressional</option>
+        <option value="government_contract">Gov contracts</option>
+        <option value="lobbying">Lobbying</option>
+        <option value="13f_holding">13F snapshot</option>
+      </select>
+      <select id="f-sig">
+        <option value="">All significance</option>
+        <option value="CRITICAL">CRITICAL</option>
+        <option value="HIGH">HIGH</option>
+        <option value="MODERATE">MODERATE</option>
+        <option value="LOW">LOW</option>
+        <option value="INFORMATIONAL">INFORMATIONAL</option>
+      </select>
+      <button class="btn" id="btn-filter">Apply filters</button>
+      <input id="q-ticker" placeholder="Ticker context" style="width:110px" />
+      <button class="btn" id="btn-ticker">Lookup</button>
+      <input id="q-cik" placeholder="CIK (Berkshire 0001067983)" style="min-width:160px" />
+      <button class="btn" id="btn-edgar">EDGAR 13F</button>
+      <label class="sub" style="margin-left:auto">API key
+        <input id="api-key" type="password" placeholder="X-API-Key" style="width:120px" />
+      </label>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="panel-h">
+          <h2>Latest disclosures</h2>
+          <span class="sub" id="acts-count">—</span>
+        </div>
+        <div class="panel-b" id="acts-feed"><div class="empty">Load activities or run a scan</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h">
+          <h2>Intelligence alerts</h2>
+          <button class="btn" id="btn-alerts-only" style="font-size:0.7rem">Unacked only</button>
+        </div>
+        <div class="panel-b" id="alerts-feed"><div class="empty">No alerts yet</div></div>
+      </div>
+    </div>
+
+    <div class="layout" style="margin-top:0.85rem">
+      <div class="panel">
+        <div class="panel-h"><h2>Consensus / overlap</h2><span class="sub">Research priority only</span></div>
+        <div class="panel-b" id="consensus-feed"><div class="empty">—</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Watchlist · elite knowledge</h2><span class="sub">Adrian Cole / knowledge base</span></div>
+        <div class="panel-b" id="watch-feed"><div class="empty">—</div></div>
+      </div>
+    </div>
+
+    <div class="layout" style="margin-top:0.85rem">
+      <div class="panel">
+        <div class="panel-h"><h2>Detail / API output</h2></div>
+        <div class="panel-b"><pre id="detail-out" style="margin:0;font-size:0.72rem;white-space:pre-wrap;color:var(--muted)">Select an item or run a lookup.</pre></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Disclosure learning</h2><span class="sub">Publication date = T0 · no alpha claim</span></div>
+        <div class="panel-b" id="learn-feed"><div class="empty">—</div></div>
+      </div>
+    </div>
+  </main>
+
+  <div class="detail-modal" id="modal">
+    <div class="modal-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 id="modal-title">Detail</h3>
+        <button class="btn" id="modal-close">Close</button>
+      </div>
+      <pre id="modal-body"></pre>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <footer>
+    Helena Frost gates all orders · Claire Bennett audits alerts · 13F is a historical snapshot · Quiver never executes trades
+  </footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let unackedOnly = false;
+
+    function apiKey() {
+      const v = $('api-key').value.trim();
+      if (v) localStorage.setItem('eti_api_key', v);
+      return v || localStorage.getItem('eti_api_key') || '';
+    }
+    $('api-key').value = localStorage.getItem('eti_api_key') || '';
+
+    function headers(json = true) {
+      const h = {};
+      if (json) h['Content-Type'] = 'application/json';
+      const k = apiKey();
+      if (k) h['X-API-Key'] = k;
+      return h;
+    }
+
+    function toast(msg) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3200);
+    }
+
+    function statusDot(status) {
+      if (status === 'ok' || status === 'reachable') return 'ok';
+      if (status === 'not_configured') return 'off';
+      if (status === 'plan_restricted' || status === 'auth_failed') return 'warn';
+      return 'bad';
+    }
+
+    async function getJSON(path) {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error(path + ' ' + r.status);
+      return r.json();
+    }
+    async function postJSON(path) {
+      const r = await fetch(path, { method: 'POST', headers: headers() });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || (path + ' ' + r.status));
+      return j;
+    }
+
+    function renderActs(list) {
+      const el = $('acts-feed');
+      if (!list || !list.length) {
+        el.innerHTML = '<div class="empty">No stored activities. Run Scan Now (needs Quiver key for congress/contracts).</div>';
+        $('kpi-acts').textContent = '0';
+        $('acts-count').textContent = '0 items';
+        return;
+      }
+      $('kpi-acts').textContent = String(list.length);
+      $('acts-count').textContent = list.length + ' shown';
+      el.innerHTML = list.map(a => {
+        const dir = (a.direction || '').toLowerCase();
+        const cls = dir === 'buy' ? 'buy' : dir === 'sell' ? 'sell' : (a.significance || '');
+        return `<div class="feed-item ${cls}" data-json='${JSON.stringify(a).replace(/'/g, "&#39;")}'>
+          <div class="top">
+            <strong>${a.ticker || '—'}</strong>
+            <span>${a.investor_name || a.institution || 'Unknown'}</span>
+          </div>
+          <div class="meta">
+            <span class="tag">${a.category || ''}</span>
+            <span class="tag ${dir==='buy'?'green':dir==='sell'?'red':''}">${a.direction || 'n/a'}</span>
+            <span class="tag gold">${a.significance || ''}</span>
+            <span class="tag purple">${a.verification_status || ''}</span>
+            ${a.is_historical_snapshot ? '<span class="tag">SNAPSHOT</span>' : ''}
+          </div>
+          <div class="meta">txn ${a.transaction_date || '—'} · report ${a.filing_or_report_date || '—'} · ${a.source_provider || ''}</div>
+        </div>`;
+      }).join('');
+      el.querySelectorAll('.feed-item').forEach(node => {
+        node.onclick = () => openModal('Activity', JSON.parse(node.getAttribute('data-json')));
+      });
+    }
+
+    function renderAlerts(list) {
+      const el = $('alerts-feed');
+      const open = (list || []).filter(a => !a.acknowledged);
+      $('kpi-alerts').textContent = String(open.length);
+      if (!list || !list.length) {
+        el.innerHTML = '<div class="empty">No alerts. High/Moderate verified activity creates alerts on scan.</div>';
+        return;
+      }
+      el.innerHTML = list.map(a => `
+        <div class="feed-item ${a.severity || ''}" data-id="${a.alert_id}" data-json='${JSON.stringify(a).replace(/'/g, "&#39;")}'>
+          <div class="top"><strong>${a.title || a.alert_id}</strong><span class="tag gold">${a.severity || ''}</span></div>
+          <div class="meta">${a.summary || ''}</div>
+          <div class="meta">
+            <span class="tag">${a.recommended_action || 'RESEARCH'}</span>
+            ${a.acknowledged ? '<span class="tag">acked</span>' : '<button class="btn ack-btn" style="margin-top:4px;font-size:0.68rem">Acknowledge</button>'}
+          </div>
+        </div>`).join('');
+      el.querySelectorAll('.feed-item').forEach(node => {
+        node.querySelector('.ack-btn')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await postJSON('/api/data-intelligence/alerts/' + node.dataset.id + '/ack');
+            toast('Alert acknowledged');
+            loadAlerts();
+          } catch (err) { toast(String(err.message || err)); }
+        });
+        node.onclick = () => openModal('Alert', JSON.parse(node.getAttribute('data-json')));
+      });
+    }
+
+    function renderConsensus(data) {
+      const el = $('consensus-feed');
+      const rows = (data && data.tickers_with_overlap) || [];
+      if (!rows.length) {
+        el.innerHTML = `<div class="empty">${(data && data.disclaimer) || 'No multi-actor overlap in recent store.'}</div>`;
+        return;
+      }
+      el.innerHTML = rows.map(r => `
+        <div class="feed-item HIGH">
+          <div class="top"><strong>${r.ticker}</strong><span class="tag gold">${r.research_priority}</span></div>
+          <div class="meta">${r.activity_count} activities · actors: ${(r.unique_actors||[]).join(', ')}</div>
+          <div class="meta">${JSON.stringify(r.direction_counts || {})} — ${r.note || ''}</div>
+        </div>`).join('');
+    }
+
+    function renderWatch(data) {
+      const el = $('watch-feed');
+      const names = (data && data.elite_names) || [];
+      const inst = (data && data.institutions_monitored) || [];
+      el.innerHTML = `
+        <div class="meta" style="margin-bottom:0.5rem">Profiles: <strong>${data.elite_profiles_count || names.length}</strong></div>
+        <div class="meta" style="margin-bottom:0.75rem">${names.slice(0, 24).join(' · ')}${names.length > 24 ? '…' : ''}</div>
+        <div class="meta" style="color:var(--purple);margin-bottom:0.35rem">Institutions</div>
+        ${(inst || []).map(i => `<div class="feed-item"><div class="top"><strong>${i.name}</strong></div>
+          <div class="meta">${(i.related_investors||[]).join(', ') || '—'}</div></div>`).join('') || '<div class="empty">—</div>'}
+        <div class="meta" style="margin-top:0.75rem">${data.note || ''}</div>`;
+    }
+
+    function renderLearn(data) {
+      const el = $('learn-feed');
+      if (!data || data.n === 0) {
+        el.innerHTML = `<div class="empty">${(data && data.message) || 'No outcomes recorded yet'}</div>`;
+        return;
+      }
+      const by = data.by_horizon || {};
+      el.innerHTML = Object.keys(by).sort((a,b)=>a-b).map(h => {
+        const s = by[h];
+        return `<div class="feed-item"><div class="top"><strong>${h}d</strong><span>n=${s.n}</span></div>
+          <div class="meta">mean return %: ${s.mean_return_pct ?? '—'}</div></div>`;
+      }).join('') + `<div class="meta" style="margin-top:0.5rem">${data.disclaimer || ''}</div>`;
+    }
+
+    function openModal(title, obj) {
+      $('modal-title').textContent = title;
+      $('modal-body').textContent = JSON.stringify(obj, null, 2);
+      $('modal').classList.add('open');
+    }
+    $('modal-close').onclick = () => $('modal').classList.remove('open');
+    $('modal').onclick = (e) => { if (e.target === $('modal')) $('modal').classList.remove('open'); };
+
+    async function loadStatus() {
+      const st = await getJSON('/api/data-intelligence/status');
+      const q = st.quiver || {};
+      const e = st.sec_edgar || {};
+      const l = st.liquid || {};
+      const m = st.investor_monitor || {};
+      $('kpi-quiver').innerHTML = `<span class="dot ${statusDot(q.status)}"></span>${q.status || '—'}`;
+      $('kpi-quiver-h').textContent = q.message || q.detail || 'API';
+      $('kpi-edgar').innerHTML = `<span class="dot ${statusDot(e.status)}"></span>${e.status || '—'}`;
+      $('kpi-liquid').innerHTML = `<span class="dot ${statusDot(l.status)}"></span>${l.status || '—'}`;
+      const mon = m.running ? 'running' : 'paused';
+      $('kpi-mon').innerHTML = `<span class="dot ${m.running ? 'ok' : 'off'}${m.running ? ' pulse' : ''}"></span>${mon}`;
+      $('kpi-mon-h').textContent = m.last_run ? ('last ' + m.last_run) : 'Claire Bennett';
+      $('detail-out').textContent = JSON.stringify({ rules: st.rules, desk: st.desk, monitor: m }, null, 2);
+    }
+
+    async function loadActivities() {
+      const q = new URLSearchParams({ limit: '40' });
+      if ($('f-ticker').value.trim()) q.set('ticker', $('f-ticker').value.trim());
+      if ($('f-category').value) q.set('category', $('f-category').value);
+      if ($('f-sig').value) q.set('significance', $('f-sig').value);
+      const j = await getJSON('/api/data-intelligence/activities?' + q);
+      renderActs(j.activities || []);
+    }
+
+    async function loadAlerts() {
+      const q = unackedOnly ? '?limit=40&unacked_only=true' : '?limit=40';
+      const j = await getJSON('/api/data-intelligence/alerts' + q);
+      renderAlerts(j.alerts || []);
+    }
+
+    async function loadConsensus() {
+      renderConsensus(await getJSON('/api/data-intelligence/consensus'));
+    }
+    async function loadWatch() {
+      renderWatch(await getJSON('/api/data-intelligence/watchlist'));
+    }
+    async function loadLearn() {
+      renderLearn(await getJSON('/api/data-intelligence/learning/summary'));
+    }
+
+    async function refreshAll() {
+      try {
+        await Promise.all([loadStatus(), loadActivities(), loadAlerts(), loadConsensus(), loadWatch(), loadLearn()]);
+        toast('Dashboard refreshed');
+      } catch (e) { toast(String(e.message || e)); }
+    }
+
+    $('btn-refresh').onclick = refreshAll;
+    $('btn-filter').onclick = () => loadActivities().catch(e => toast(String(e.message || e)));
+    $('btn-alerts-only').onclick = () => { unackedOnly = !unackedOnly; $('btn-alerts-only').textContent = unackedOnly ? 'Show all' : 'Unacked only'; loadAlerts(); };
+    $('btn-scan').onclick = async () => {
+      try {
+        $('btn-scan').disabled = true;
+        const j = await postJSON('/api/data-intelligence/monitor/scan');
+        $('detail-out').textContent = JSON.stringify(j, null, 2);
+        toast('Scan complete · created ' + ((j.ingest && j.ingest.created) || 0));
+        await refreshAll();
+      } catch (e) { toast(String(e.message || e)); }
+      finally { $('btn-scan').disabled = false; }
+    };
+    $('btn-start').onclick = async () => { try { toast('Monitor ' + JSON.stringify(await postJSON('/api/data-intelligence/monitor/start'))); loadStatus(); } catch (e) { toast(String(e.message || e)); } };
+    $('btn-pause').onclick = async () => { try { toast('Monitor ' + JSON.stringify(await postJSON('/api/data-intelligence/monitor/pause'))); loadStatus(); } catch (e) { toast(String(e.message || e)); } };
+    $('btn-ticker').onclick = async () => {
+      const t = $('q-ticker').value.trim();
+      if (!t) return;
+      try {
+        const j = await getJSON('/api/data-intelligence/ticker/' + encodeURIComponent(t));
+        openModal('Ticker context ' + t, j);
+      } catch (e) { toast(String(e.message || e)); }
+    };
+    $('btn-edgar').onclick = async () => {
+      const c = $('q-cik').value.trim() || '0001067983';
+      try {
+        const j = await getJSON('/api/data-intelligence/edgar/13f/' + encodeURIComponent(c));
+        openModal('EDGAR 13F ' + c, j);
+      } catch (e) { toast(String(e.message || e)); }
+    };
+
+    refreshAll();
+    setInterval(() => { loadStatus().catch(()=>{}); loadAlerts().catch(()=>{}); }, 30000);
+  </script>
+</body>
+</html>
