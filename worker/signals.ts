@@ -1,4 +1,4 @@
-import { getMarketData, providerOrder, INTERVALS, type Kline, type MarketEnv } from "./market";
+import { getMarketData, providerOrder, INTERVALS, INTERVAL_SECONDS, type Kline, type MarketEnv } from "./market";
 
 export interface SignalEnv extends MarketEnv {}
 
@@ -166,6 +166,8 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
   try {
     const result = await getMarketData("klines", { symbol, interval, limit: 500 }, providerOrder(env, requestedProvider));
     const rows = result.data as Kline[];
+    const latestAge = (Date.now() - rows.at(-1)![0]) / 1000;
+    if (latestAge < -60 || latestAge > (INTERVAL_SECONDS[interval] || 60) * 3) return new Response(JSON.stringify({ error: "stale_market_data", ageSeconds: Math.round(latestAge), maxAgeSeconds: (INTERVAL_SECONDS[interval] || 60) * 3 }), { status: 503, headers: { "content-type": "application/json" } });
     const signal = evaluate(rows, symbol, result.provider, interval);
     if (!signal) return new Response(JSON.stringify({ error: "insufficient_history", requiredCandles: 210, received: rows.length }), { status: 422, headers: { "content-type": "application/json" } });
     signal.historicalValidation = backtest(rows, symbol, result.provider, interval);
