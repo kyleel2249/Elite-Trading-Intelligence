@@ -9,8 +9,10 @@ export interface PaperConfig {
   startingEquity: number; feeRate: number; slippageBps: number; riskFraction: number; maxNotionalFraction: number; maxOpenPositions: number;
   /** Max distance (bps) a market price may sit outside the entry zone and still fill. */
   maxEntryDeviationBps: number; maxDailyLossPct: number; maxConsecutiveLosses: number; reentryCooldownMs: number;
+  /** How long new entries stay paused after the loss streak limit is reached. A further loss re-triggers it. */
+  lossPauseMs: number;
 }
-export const DEFAULT_PAPER_CONFIG: PaperConfig = { startingEquity: 10_000, feeRate: 0.001, slippageBps: 5, riskFraction: 0.005, maxNotionalFraction: 1, maxOpenPositions: 3, maxEntryDeviationBps: 15, maxDailyLossPct: 3, maxConsecutiveLosses: 4, reentryCooldownMs: 3_600_000 };
+export const DEFAULT_PAPER_CONFIG: PaperConfig = { startingEquity: 10_000, feeRate: 0.001, slippageBps: 5, riskFraction: 0.005, maxNotionalFraction: 1, maxOpenPositions: 3, maxEntryDeviationBps: 15, maxDailyLossPct: 3, maxConsecutiveLosses: 4, reentryCooldownMs: 3_600_000, lossPauseMs: 86_400_000 };
 
 export interface PreflightRequest { mode: "paper"; symbol: string; side: "buy" | "sell"; quantity: number; orderType: "limit"; limitPrice: number; clientOrderId: string; source: { actorType: "strategy"; actorId: string; signalGeneratedAt: string } }
 export type Preflight = (req: PreflightRequest) => Promise<{ approved: boolean; reasons: string[] }>;
@@ -77,7 +79,7 @@ export class PaperEngine {
     const dailyPct = (s.equity - s.dayStartEquity) / s.dayStartEquity * 100;
     if (dailyPct <= -this.cfg.maxDailyLossPct) return this.reject(plan, [`Daily loss limit hit (${dailyPct.toFixed(2)}%)`], now, id);
     const tail = s.closed.slice(-this.cfg.maxConsecutiveLosses);
-    if (tail.length === this.cfg.maxConsecutiveLosses && tail.every(t => t.pnl < 0)) return this.reject(plan, [`${this.cfg.maxConsecutiveLosses} consecutive losses: new entries paused`], now, id);
+    if (tail.length === this.cfg.maxConsecutiveLosses && tail.every(t => t.pnl < 0) && now - tail[tail.length - 1].closedAt < this.cfg.lossPauseMs) return this.reject(plan, [`${this.cfg.maxConsecutiveLosses} consecutive losses: new entries paused until ${new Date(tail[tail.length - 1].closedAt + this.cfg.lossPauseMs).toISOString()}`], now, id);
     const last = s.lastStopOut[plan.symbol]; if (last !== undefined && now - last < this.cfg.reentryCooldownMs) return this.reject(plan, ["Re-entry cooldown after a stop-out"], now, id);
     const [zl, zh] = plan.entryZone, dev = marketPrice < zl ? (zl - marketPrice) / zl : marketPrice > zh ? (marketPrice - zh) / zh : 0;
     if (dev * 1e4 > this.cfg.maxEntryDeviationBps) return this.reject(plan, [`Market price ${marketPrice} is ${(dev * 1e4).toFixed(1)} bps outside the entry zone (max ${this.cfg.maxEntryDeviationBps})`], now, id);

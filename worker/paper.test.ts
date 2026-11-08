@@ -150,3 +150,14 @@ test("KV-backed store round-trips state and writes TTL'd audit entries", async (
   assert.equal(e2.state.positions.length, 1); assert.equal(e2.state.orderIds.length, 1);
   const audits = [...data.entries()].filter(([k]) => k.includes(":audit:")); assert.ok(audits.length >= 1 && audits.every(([, x]) => x.ttl === 90 * 86400));
 });
+
+test("the consecutive-loss pause expires, and a further loss re-triggers it", async () => {
+  const plan = buyPlan(), PAUSE = 3_600_000, { eng } = await mk(approve(), { maxConsecutiveLosses: 1, maxDailyLossPct: 50, reentryCooldownMs: 0, lossPauseMs: PAUSE });
+  await eng.open(plan, mid(plan), NOW); const t1 = NOW + 60_000;
+  await eng.onBar(plan.symbol, { ts: t1, high: eng.state.positions[0].entry, low: eng.state.positions[0].stop - 1, close: 1 });
+  const fresh = (ts: number): OmnisignalResult => ({ ...plan, generatedAt: new Date(ts).toISOString(), expiresAt: new Date(ts + 9e6).toISOString() });
+  const blocked = await eng.open(fresh(t1 + 1000), mid(plan), t1 + 1000); assert.equal(blocked.type, "REJECTED"); assert.match(blocked.reasons![0], /paused until/);
+  const resumed = await eng.open(fresh(t1 + PAUSE + 1000), mid(plan), t1 + PAUSE + 1000); assert.equal(resumed.type, "OPENED", "entries resume once the pause has elapsed");
+  const t2 = t1 + PAUSE + 60_000; await eng.onBar(plan.symbol, { ts: t2, high: eng.state.positions[0].entry, low: eng.state.positions[0].stop - 1, close: 1 });
+  const again = await eng.open(fresh(t2 + 1000), mid(plan), t2 + 1000); assert.equal(again.type, "REJECTED"); assert.match(again.reasons![0], /paused until/);
+});
