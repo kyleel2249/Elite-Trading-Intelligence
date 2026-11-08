@@ -13,7 +13,7 @@ if str(_ROOT) not in sys.path:
 
 _tmp = tempfile.mkdtemp(prefix="eti-test-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/eti-test.db"
-os.environ.setdefault("LIVE_TRADING_ENABLED", "false")
-os.environ.setdefault("BINANCE_LIVE_TRADING_ENABLED", "false")
-os.environ.setdefault("ALPACA_PAPER", "true")
-os.environ.setdefault("BINANCE_TESTNET_ENABLED", "true")
+os.environ["LIVE_TRADING_ENABLED"] = "false"
+os.environ["BINANCE_LIVE_TRADING_ENABLED"] = "false"
+os.environ["ALPACA_PAPER"] = "true"
+os.environ["BINANCE_TESTNET_ENABLED"] = "true"
