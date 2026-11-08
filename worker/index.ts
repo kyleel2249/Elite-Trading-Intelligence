@@ -77,7 +77,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <p class="execution-note">Shows ETI orders recorded in KV, including who or what initiated each order. This is separate from the public Binance market trade tape above.</p>
 <div id="executionHistory" class="history-table"><span class="muted">Enter your execution token, then refresh.</span></div>
 </section>
-<p class="muted">Public exchange market data only. This dashboard does not place orders. Market data may be delayed, interrupted, or subject to exchange limits. Trading credentials and withdrawal permissions are not used.</p>
+<p class="muted">Market panels use public exchange data. Order entry submits broker orders only after authenticated preview and explicit confirmation. Market data may be delayed or interrupted. ETI does not request or use withdrawal, transfer, funding, or wallet-management permissions.</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);let socket=null, candles=[], book={bids:[],asks:[]}, trades=[];
@@ -118,8 +118,9 @@ function renderPreview(o){
 async function refreshExecutionStatus(){
  try{
   const r=await fetch('/api/execution/status',{cache:'no-store'}),d=await r.json();executionStatus=d;
-  $('executionStatus').textContent=d.live_trading_enabled?'Live switch ON':'Paper/Testnet default';
-  $('executionStatus').style.color=d.live_trading_enabled?'#ffb08c':'#21d69a';
+  const brokerReady=$('orderBroker').value==='alpaca'?d.alpaca_live_configured:d.binance_live_configured;
+  $('executionStatus').textContent=d.live_trading_enabled?(brokerReady?'Live switch ON · broker credentials configured':'Live switch ON · live broker credentials missing'):'Paper/Testnet default';
+  $('executionStatus').style.color=d.live_trading_enabled?(brokerReady?'#21d69a':'#ffb08c'):'#21d69a';
   $('killSwitchStatus').textContent=d.kill_switch?'ACTIVE':'Inactive';
   $('killSwitchStatus').style.color=d.kill_switch?'#ff637d':'#21d69a';
   $('orderMode').value='paper_testnet';
@@ -162,7 +163,7 @@ async function submitOrder(side){
 }
 $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').value==='limit'?'flex':'none';};
 $('orderMode').onchange=()=>{$('liveTokenWrap').style.display=$('orderMode').value==='live'?'flex':'none';};
-$('orderBroker').onchange=()=>{$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';};
+$('orderBroker').onchange=()=>{$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';if(executionStatus){const ready=$('orderBroker').value==='alpaca'?executionStatus.alpaca_live_configured:executionStatus.binance_live_configured;$('executionStatus').textContent=executionStatus.live_trading_enabled?(ready?'Live switch ON · broker credentials configured':'Live switch ON · live broker credentials missing'):'Paper/Testnet default';$('executionStatus').style.color=executionStatus.live_trading_enabled?(ready?'#21d69a':'#ffb08c'):'#21d69a';}};
 $('orderSymbol').onchange=()=>{};
 $('previewOrder').onclick=()=>{const o=selectedOrder();const problem=orderValidation(o,false);if(problem){$('orderOutput').textContent=problem;return;}renderPreview(o);};
 $('buyOrder').onclick=()=>submitOrder('buy');
