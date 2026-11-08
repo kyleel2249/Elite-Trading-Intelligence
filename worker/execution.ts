@@ -130,7 +130,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       return reply({error:"risk_gate_not_configured",message:"Live execution requires the ETI server-side portfolio risk preflight service."},503);
     let gateResponse:Response;
     try {
-      gateResponse=await fetch(gateUrl,{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+gateToken},body:JSON.stringify({
+      gateResponse=await fetch(gateUrl,{method:"POST",headers:{"content-type":"application/json","x-api-key":gateToken},body:JSON.stringify({
         provider:broker,environment:"live",symbol,side,quantity,order_type:type,limit_price:body.limitPrice??null
       })});
     } catch {
