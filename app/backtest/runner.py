@@ -1,9 +1,11 @@
 """
 Wire strategy modules to paper/live execution via TradingService.
 Every order passes RiskEngine (Helena Frost). Live requires LIVE_TRADING_ENABLED + keys.
+Risk inputs (equity, positions, PnL, data freshness) are derived server-side.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -12,8 +14,11 @@ from app.backtest.engine import BacktestParams, run_backtest, walk_forward
 from app.backtest.signals import vcp_signals, wyckoff_signals, breakout_signals, sma_trend_signals
 from app.config import Settings
 from app.market.service import MarketService
+from app.trading.risk_context import build_risk_context
 from app.trading.service import TradingService
 from app.knowledge.strategies import STRATEGY_MODULES
+
+logger = logging.getLogger("eti.runner")
 
 
 class StrategyRunner:
@@ -66,7 +71,7 @@ class StrategyRunner:
         provider: str,
         environment: str,
         qty: float,
-        equity: float = 10000.0,
+        equity: float = 10000.0,  # deprecated and ignored: equity is derived server-side
         execute: bool = False,
     ) -> dict[str, Any]:
         if module_id not in STRATEGY_MODULES:
@@ -133,18 +138,35 @@ class StrategyRunner:
             result["message"] = "No actionable signal"
             return result
 
+        # Real quote for freshness + paper fill price (previously hard-coded "fresh"/5s).
+        snapshot: Optional[dict[str, Any]] = None
+        try:
+            snapshot = await self.market.get_snapshot(provider, symbol)
+        except Exception:
+            logger.warning("snapshot failed for %s %s", provider, symbol, exc_info=True)
+
+        ctx = build_risk_context(self.db, self.settings, environment=env, snapshot=snapshot)
+        fill_hint = None
+        if env in ("paper", "testnet") and snapshot and snapshot.get("price") is not None:
+            fill_hint = float(snapshot["price"])
+
         order = await self.trading.place_order(
             provider=provider,
             environment=env,
             symbol=symbol,
             side=side,
             qty=qty,
-            equity=equity,
-            data_status="fresh",
-            data_age_seconds=5.0,
+            equity=ctx.equity,
+            current_open_positions=ctx.current_open_positions,
+            daily_realized_pnl_pct=ctx.daily_realized_pnl_pct,
+            current_drawdown_pct=ctx.current_drawdown_pct,
+            data_status=ctx.data_status,
+            data_age_seconds=ctx.data_age_seconds,
+            fill_price_hint=fill_hint,
             thesis=f"StrategyRunner:{module_id}:{signal}:{bt.signal_model}",
             council_action=signal.upper(),
         )
         result["executed"] = order.get("status") in ("submitted", "filled")
         result["order"] = order
+        result["risk_inputs"] = {"source": "server", **ctx.to_dict()}
         return result

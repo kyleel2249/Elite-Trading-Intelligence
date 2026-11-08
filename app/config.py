@@ -13,6 +13,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # A blank value in .env (e.g. "LIVE_ACCOUNT_EQUITY=") means "unset", not a parse error.
+        env_ignore_empty=True,
     )
 
     app_env: str = "development"
@@ -27,6 +29,12 @@ class Settings(BaseSettings):
     max_portfolio_drawdown_pct: float = 10.0
     max_open_positions: int = 8
     max_correlated_exposure_pct: float = 25.0
+
+    # Server-side equity baselines used by the risk engine (never taken from requests).
+    # Paper/testnet equity = paper_starting_equity + realized + unrealized PnL.
+    paper_starting_equity: float = 10000.0
+    # Live equity must be set explicitly until broker account sync exists; unset => live orders rejected.
+    live_account_equity: Optional[float] = None
 
     alpaca_api_key: Optional[str] = None
     alpaca_secret_key: Optional[str] = None
