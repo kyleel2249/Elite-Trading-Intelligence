@@ -116,7 +116,8 @@ test("parameter validation and provider order", async () => {
   assert.equal((await handleMarket(req("/api/market/klines?limit=5000"), {})).status, 400);
   assert.equal((await handleMarket(new Request("https://eti.test/api/market/klines", { method: "POST" }), {})).status, 405);
   assert.deepEqual(providerOrder({ MARKET_PROVIDER_ORDER: "okx,binance" }), ["okx", "binance"]);
-  assert.deepEqual(providerOrder({}, "okx"), ["okx", "binance", "bybit"]);
+  assert.deepEqual(providerOrder({}, "okx"), ["okx", "bybit", "binance"]);
+  assert.deepEqual(providerOrder({}), ["bybit", "binance", "okx"]);
 });
 
 test("diagnostics report per-host status/latency without secrets", async () => {
