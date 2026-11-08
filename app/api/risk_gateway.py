@@ -76,7 +76,7 @@ async def execution_preflight(
     high_impact = [
         row for row in disclosures
         if row.get("significance") in ("CRITICAL", "HIGH")
-        and row.get("verification_status") not in ("UNCONFIRMED", "DISPUTED", "INSUFFICIENT_INFORMATION")
+        and str(row.get("verification_status") or "").upper() == "VERIFIED"
     ]
     research_context = {
         "investor_disclosures": high_impact[:10],
@@ -119,17 +119,22 @@ async def execution_preflight(
     decision = RiskEngine(settings).evaluate(proposal)
 
     reasons = list(decision.reasons)
+    quote_price = snapshot.get("price")
+    quote_age = risk_context.data_age_seconds
+    quote_status = str(risk_context.data_status or "unavailable").lower()
+    quote_is_valid = (
+        isinstance(quote_price, (int, float))
+        and quote_price > 0
+        and quote_status == "fresh"
+        and quote_age is not None
+        and 0 <= quote_age <= settings.data_max_age_seconds
+    )
+    if not quote_is_valid:
+        reasons.append("Order preflight requires a valid, timestamped, fresh market quote")
     if req.environment == "live" and council.risk_veto:
         reasons.extend(council.risk_notes or ["Trading Council risk veto"])
-    if req.environment == "live" and (snapshot.get("price") is None or risk_context.data_status in ("unavailable", "invalid", "stale", "incomplete")):
-        reasons.append("Live preflight requires an available, valid, fresh market quote")
-    approved = decision.approved and not (
-        req.environment == "live"
-        and (
-            snapshot.get("price") is None
-            or risk_context.data_status in ("unavailable", "invalid", "stale", "incomplete")
-            or council.risk_veto
-        )
+    approved = decision.approved and quote_is_valid and not (
+        req.environment == "live" and council.risk_veto
     )
     return {
         "approved": approved,
