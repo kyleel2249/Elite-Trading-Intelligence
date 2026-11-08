@@ -4,11 +4,20 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+
+  // Keep variables/secrets that were set in the dashboard (BACKEND_URL!) when
+  // `wrangler deploy` runs from Workers Builds or CI. Without this, every deploy
+  // would wipe a dashboard-defined BACKEND_URL and bring the "misconfigured" error back.
+  "keep_vars": true,
+
   // Retire the previous Container Durable Object so deploy does not require Containers API.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["EtiContainer"] },
     { "tag": "v2", "deleted_classes": ["EtiContainer"] }
   ],
+
+  // NOTE: do NOT declare BACKEND_URL here as a var if you also use
+  // `wrangler secret put BACKEND_URL` — a var and a secret cannot share a name.
   "vars": {
     "ETI_EDGE": "proxy"
   }

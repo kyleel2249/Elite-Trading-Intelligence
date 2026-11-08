@@ -3,7 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Literal, Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+from pathlib import Path
+
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -41,9 +43,11 @@ from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
-from app.security.auth import require_api_key
+from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
+
+BASE_DIR = Path(__file__).resolve().parent
 
 
 def _upstream_error(exc: Exception, what: str) -> HTTPException:
@@ -59,10 +63,20 @@ async def _start_component(name: str, starter) -> None:
         logger.warning("startup: %s failed to start; continuing without it", name, exc_info=True)
 
 
+def _warn_insecure_config(settings: Settings) -> None:
+    if (settings.app_env or "").strip().lower() not in PROTECTED_ENVS:
+        return
+    if settings.secret_key in ("change-me", "change-me-to-a-long-random-string"):
+        logger.warning("SECRET_KEY is still the default; set a long random value in production")
+    if not (settings.api_key or "").strip():
+        logger.warning("API_KEY is not set; protected routes will return 503 in this environment")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     settings = get_settings()
+    _warn_insecure_config(settings)
     mtm_job.interval_seconds = settings.mtm_interval_seconds
     reconcile_job.interval_seconds = settings.reconcile_interval_seconds
     investor_monitor_job.interval_seconds = settings.investor_monitor_interval_seconds
@@ -90,10 +104,10 @@ app.include_router(backtest_router)
 app.include_router(intelligence_data_router)
 app.include_router(stream_router)
 
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 try:
-    app.mount("/static", StaticFiles(directory="app/static"), name="static")
+    app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 except RuntimeError:
     logger.info("app/static not present; static files are not mounted")
 
@@ -139,9 +153,9 @@ class ForecastScoreRequest(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, settings: Settings = Depends(get_settings)):
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "version": __version__,
             "live_trading_enabled": settings.live_trading_enabled,
             "alpaca_paper": settings.alpaca_paper,
@@ -153,16 +167,18 @@ async def dashboard(request: Request, settings: Settings = Depends(get_settings)
 @app.get("/data-intel", response_class=HTMLResponse)
 async def data_intel_dashboard(request: Request):
     return templates.TemplateResponse(
+        request,
         "data_intel.html",
-        {"request": request, "version": __version__},
+        {"version": __version__},
     )
 
 
 @app.get("/alerts", response_class=HTMLResponse)
 async def alerts_page(request: Request):
     return templates.TemplateResponse(
+        request,
         "alerts.html",
-        {"request": request, "version": __version__},
+        {"version": __version__},
     )
 
 
@@ -262,7 +278,7 @@ async def market_snapshot(
 @app.get("/api/market/order-book")
 async def market_order_book(
     symbol: str = "BTCUSDT",
-    depth: int = 20,
+    depth: int = Query(20, ge=1, le=100),
     settings: Settings = Depends(get_settings),
 ):
     svc = MarketService(settings)
@@ -276,8 +292,8 @@ async def market_order_book(
 async def market_history(
     provider: str = "binance",
     symbol: str = "BTCUSDT",
-    interval: str = "1h",
-    limit: int = 100,
+    interval: str = Query("1h", pattern=r"^[0-9]{1,2}[smhdwM]$"),
+    limit: int = Query(100, ge=1, le=1000),
     settings: Settings = Depends(get_settings),
 ):
     svc = MarketService(settings)
@@ -368,7 +384,7 @@ async def run_council(
 
 
 @app.get("/api/intelligence/decisions")
-async def list_decisions(limit: int = 20, db: Session = Depends(get_db)):
+async def list_decisions(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
     rows = db.query(CouncilDecisionRecord).order_by(CouncilDecisionRecord.created_at.desc()).limit(min(limit, 100)).all()
     return [{"id": r.id, "symbol": r.symbol, "provider": r.provider, "action": r.action,
              "confidence": r.confidence, "summary": r.summary, "risk_veto": r.risk_veto,
@@ -465,7 +481,7 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
 
 
 @app.post("/api/trading/reconcile")
-async def trading_reconcile(limit: int = 50, settings: Settings = Depends(get_settings),
+async def trading_reconcile(limit: int = Query(50, ge=1, le=200), settings: Settings = Depends(get_settings),
                             db: Session = Depends(get_db), _auth=Depends(require_api_key)):
     return await OrderReconciler(db, settings).reconcile_open(limit=limit)
 
@@ -484,7 +500,7 @@ async def paper_portfolio(environment: str = "paper", db: Session = Depends(get_
 
 
 @app.get("/api/paper-trading/journal")
-async def paper_journal(limit: int = 50, symbol: Optional[str] = None, event: Optional[str] = None,
+async def paper_journal(limit: int = Query(50, ge=1, le=500), symbol: Optional[str] = None, event: Optional[str] = None,
                         environment: Optional[str] = None, provider: Optional[str] = None,
                         side: Optional[str] = None, db: Session = Depends(get_db)):
     rows = PortfolioService(db).list_journal(limit=limit, symbol=symbol, event=event,
@@ -497,7 +513,7 @@ async def paper_journal(limit: int = 50, symbol: Optional[str] = None, event: Op
 
 
 @app.get("/api/paper-trading/history")
-async def paper_history(limit: int = 50, db: Session = Depends(get_db)):
+async def paper_history(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
     from app.models import OrderRecord
     rows = db.query(OrderRecord).order_by(OrderRecord.created_at.desc()).limit(min(limit, 200)).all()
     return [{"client_order_id": r.client_order_id, "provider": r.provider, "environment": r.environment,

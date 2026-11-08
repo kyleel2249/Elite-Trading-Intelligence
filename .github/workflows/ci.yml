@@ -38,3 +38,18 @@ jobs:
         env:
           PYTHONPATH: .
         run: python -c "from app.main import app; print(app.title)"
+
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm install
+
+      - name: Bundle Worker (dry run, no credentials needed)
+        run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run

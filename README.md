@@ -19,18 +19,23 @@ Open http://localhost:8000  · API docs http://localhost:8000/docs
 
 Health: `curl -s localhost:8000/api/system/health | jq`
 
-## Cloudflare (edge proxy only)
+## Deploy (origin + Cloudflare edge)
 
-Cloudflare Workers **do not run** the Python app. Deploy FastAPI with Docker (above) or any host,
-then optionally deploy the Worker as a reverse proxy:
+ETI is two pieces: the **FastAPI origin** (Python, runs the app) and an optional **Cloudflare Worker** that only reverse-proxies to it. Workers cannot run the Python app, so the Worker needs `BACKEND_URL`.
 
-```bash
+**If the Worker returns `"status": "misconfigured"` / `BACKEND_URL is not set`, the origin is not connected yet:**
+
+1. Deploy the origin — one click on Render via [`render.yaml`](render.yaml) (Dashboard → New → Blueprint), or any Docker host (`docker compose up --build`). Confirm `https://<origin>/api/system/health` returns `{"status":"ok"...}`.
+2. Point the Worker at it (no trailing slash):
+
+```
 npm install
 npx wrangler deploy
-npx wrangler secret put BACKEND_URL   # https://your-origin.example.com
+npx wrangler secret put BACKEND_URL   # https://eti-api.onrender.com
+curl https://<worker>.workers.dev/__eti/status
 ```
 
-Details and Workers Builds settings: [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md).
+Full guide, Workers Builds settings and GitHub Actions deploy: [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md).
 
 ## Local Python (no Docker)
 

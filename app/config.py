@@ -2,7 +2,7 @@
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     data_max_age_seconds: int = 300
     require_fresh_data_for_live_orders: bool = True
     default_timezone: str = "Africa/Accra"
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _normalize_database_url(cls, v: str) -> str:
+        """Hosts hand out postgres:// or postgresql://; SQLAlchemy needs an explicit psycopg2 driver."""
+        v = (v or "").strip()
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg2://" + v[len(prefix):]
+        return v
 
     @property
     def alpaca_configured(self) -> bool:
