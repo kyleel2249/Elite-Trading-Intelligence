@@ -1,7 +1,6 @@
 /**
- * ETI paper/testnet execution gateway.
- * Live endpoints are deliberately impossible in this module: Alpaca always uses
- * paper-api and Binance always uses Spot Testnet. No withdrawal/transfer APIs.
+ * ETI execution gateway: paper/testnet by default; live is separately gated.
+ * No withdrawal, transfer, funding or wallet-management endpoints are exposed.
  */
 export interface ExecutionEnv {
   ETI_EXECUTION_TOKEN?: string;
@@ -70,6 +69,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
   const side=body?.side, type=body?.type??"market", quantity=num(body?.quantity);
   const clientOrderId=body?.clientOrderId;
   const riskConfirmed=body?.riskConfirmed===true;
+  if(requestedLive && body?.liveConfirmed!==true) return reply({error:"live_order_confirmation_required",message:"Every live order requires liveConfirmed:true after reviewing the order preview."},400);
   const source=body?.executionSource;
   const sourceTypes=["manual_user","strategy","system","automation"];
   if(!source || !sourceTypes.includes(source.actorType) || typeof source.actorId!=="string" || !source.actorId.trim() || typeof source.sourceName!=="string" || !source.sourceName.trim())
