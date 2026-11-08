@@ -5,7 +5,10 @@
  * No FastAPI origin / BACKEND_URL is required. Brokerage credentials are never
  * accepted by these public market-data routes.
  */
-export interface Env {
+import { handleExecution } from "./execution";
+import type { ExecutionEnv } from "./execution";
+
+export interface Env extends ExecutionEnv {
   ETI_EDGE?: string;
   MARKET_CACHE?: KVNamespace;
 }
@@ -57,6 +60,9 @@ $('refresh').onclick=()=>{load().then(connect)};$('symbol').onchange=()=>{trades
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status") {
+      return handleExecution(request, _env);
+    }
     if (url.pathname === "/__eti/status" || url.pathname === "/api/system/health") {
       return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "public Binance REST + WebSocket", time: new Date().toISOString() });
     }
