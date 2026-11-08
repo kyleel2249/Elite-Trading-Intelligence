@@ -1,124 +1,87 @@
 # ETI — Elite Trading Intelligence
 
-Production-oriented multi-asset trading intelligence platform with a named elite desk, risk-gated paper/live paths, and probabilistic research tools.
+ETI Cloudflare-native edge dashboard for live public market data.
 
-**Repository:** https://github.com/kyleel2249/Elite-Trading-Intelligence  
-**Branch:** `main`
+## Cloudflare-only deployment
 
-## One-command local demo (Docker)
+This deployment serves the ETI dashboard and health APIs directly from a Cloudflare Worker.
+It does not require a FastAPI origin, Fly.io, Docker hosting, a VPS, or `BACKEND_URL`.
+
+### Cloudflare Workers Builds
+
+Connect this GitHub repository to Cloudflare Workers Builds and configure:
+
+| Setting | Value |
+|---|---|
+| Root directory | `/` |
+| Build command | `npm install` |
+| Deploy command | `npx wrangler deploy` |
+| Entry point | `worker/index.ts` |
+
+Use the Cloudflare Workers Free plan. Ensure the workers.dev subdomain is enabled.
+
+### GitHub Actions deployment
+
+Add these repository Actions secrets:
+
+- `CLOUDFLARE_API_TOKEN` — token with permission to deploy Workers.
+- `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID.
+
+Push to `main` or manually run **Deploy ETI to Cloudflare Workers**.
+
+### Local development and checks
 
 ```bash
-git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
-cd Elite-Trading-Intelligence
-cp .env.example .env
-# Optional: add Alpaca / Binance keys to .env
-docker compose up --build
-```
-
-Open http://localhost:8000  · API docs http://localhost:8000/docs
-
-Health: `curl -s localhost:8000/api/system/health | jq`
-
-## Deploy (origin + Cloudflare edge)
-
-ETI is two pieces: the **FastAPI origin** (Python, runs the app) and an optional **Cloudflare Worker** that only reverse-proxies to it. Workers cannot run the Python app, so the Worker needs `BACKEND_URL`.
-
-**If the Worker returns `"status": "misconfigured"` / `BACKEND_URL is not set`, the origin is not connected yet:**
-
-1. Deploy the origin — run the **Deploy** GitHub Action (Fly.io, see [`fly.toml`](fly.toml)), or self-host with [`docker-compose.tunnel.yml`](docker-compose.tunnel.yml) (Cloudflare Tunnel, no cloud host). Confirm `https://<origin>/api/system/health` returns `{"status":"ok"...}`.
-2. Point the Worker at it (no trailing slash):
-
-```
 npm install
-npx wrangler deploy
-npx wrangler secret put BACKEND_URL   # https://eti-trading-intelligence.fly.dev
-curl https://<worker>.workers.dev/__eti/status
+npm run check:worker
+npm run dev
 ```
 
-Full guide, Workers Builds settings and GitHub Actions deploy: [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md).
-
-## Local Python (no Docker)
+### Health checks
 
 ```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --port 8000
-pytest -q
+curl https://<worker>.<subdomain>.workers.dev/__eti/status
+curl https://<worker>.<subdomain>.workers.dev/api/system/health
+curl https://<worker>.<subdomain>.workers.dev/api/market/providers
 ```
 
-## Elite Trading Desk
+The health endpoint should report `status: ok` and `backend_required: false`.
 
-| Name | Title |
-|------|--------|
-| Adrian Cole | Chief Investment Strategist |
-| Elena Varga | Technical Analysis Specialist |
-| Marcus Okonkwo | Fundamental Analysis Specialist |
-| Sofia Rahman | Macroeconomic Analyst |
-| Kenji Mori | Quantitative Researcher |
-| Nadia Petrova | Market Structure Analyst |
-| Jamal Reed | Liquidity Analyst |
-| Priya Nair | News and Sentiment Analyst |
-| Lars Hagen | Predictive Intelligence Analyst |
-| **Helena Frost** | Risk Management Officer (**veto**) |
-| Omar Diallo | Execution Analyst |
-| Claire Bennett | Portfolio Auditor |
+## Live market dashboard
 
-Profiles & methods: `GET /api/intelligence/traders`
+The Worker serves:
 
-## Key APIs
+- Live candlestick chart and selectable intervals.
+- Order-book bid/ask depth and spread.
+- Cumulative visible market depth.
+- Recent executed trades with timestamps and side.
+- Connection status and update timestamps.
 
-| Area | Endpoints |
-|------|-----------|
-| Health | `GET /api/system/health` |
-| Providers / streams | `GET /api/providers/status` |
-| Market | `GET /api/market/snapshot`, `/order-book`, `/history` |
-| Council | `GET /api/intelligence/council` |
-| Forecast | `GET /api/intelligence/forecast` |
-| Forecast accuracy | `POST /api/intelligence/forecast/score`, `GET /api/intelligence/forecast/accuracy` |
-| Risk | `GET /api/risk/evaluate` |
-| Trading | `POST /api/trading/order` |
-| Paper portfolio | `GET /api/paper-trading/portfolio`, `/positions`, `/journal` |
-| Reconcile | `POST /api/trading/reconcile` |
-| MTM job | `GET /api/system/mtm-status`, `POST /api/system/mtm-run` |
+The current market-data adapter uses Binance's public REST API for initial snapshots and
+public WebSocket streams for live updates. It is read-only and does not require exchange
+credentials. Exchange connectivity, browser networking, public API limits and stream
+availability apply. The interface must not represent stale or disconnected data as live.
 
-## Authentication
+## Important feature boundary
 
-Mutating routes (orders, reconcile, MTM run, strategy execution, monitor control) require the
-`X-API-Key` header matching the `API_KEY` environment variable:
+This Cloudflare edge deployment is a working market dashboard foundation, not a completed
+port of every legacy Python/FastAPI subsystem. Existing investor disclosure monitoring,
+Quiver Quant, Liquid API, research workflows, persistent portfolios, background jobs and
+authenticated order execution must be migrated separately into Cloudflare-compatible
+services and individually tested before being advertised as available.
 
-```bash
-curl -X POST localhost:8000/api/trading/order \
-  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
-  -d '{"provider":"binance","environment":"paper","symbol":"BTCUSDT","side":"buy","qty":0.01}'
-```
+Persistent ingestion and always-on jobs must be designed against actual Workers Free plan
+limits. Do not silently rely on paid Workers features, Containers, or an external host.
 
-- **Local development** (`APP_ENV=development`): routes are open if `API_KEY` is unset.
-- **Production / staging** (`APP_ENV=production|prod|staging`): if `API_KEY` is unset, protected routes
-  refuse requests with HTTP 503 instead of running open. Set `APP_ENV` and `API_KEY` on the
-  **FastAPI origin** (Docker/host). Optional Cloudflare Worker only proxies to `BACKEND_URL`
-  (see `docs/CLOUDFLARE.md`); it does not run the Python app or hold broker secrets.
-- **Live orders** are refused (HTTP 403) on any deployment without an `API_KEY`.
+## Security
 
-## Safety
+- Public market feeds are read-only.
+- Do not expose API keys, broker credentials, Quiver tokens or Liquid API tokens in frontend
+  JavaScript or public environment variables.
+- Withdrawal permissions must never be requested, stored or enabled.
+- Live trading remains disabled unless a separate authenticated and risk-gated execution
+  implementation is explicitly deployed and tested.
 
-- Live trading is **disabled by default** (`LIVE_TRADING_ENABLED=false`). When enabled, every order still passes **Helena Frost / RiskEngine** and requires an `API_KEY`
-- Risk inputs are **server-derived**: equity, open positions, daily PnL, drawdown and data freshness come from the database and a server-fetched quote. Values sent in the order request body are ignored (the fields remain accepted but deprecated). Responses include `risk_inputs` showing what the risk engine used
-- Paper equity = `PAPER_STARTING_EQUITY` + realized + unrealized PnL. Live equity must be configured via `LIVE_ACCOUNT_EQUITY`; until set, live orders are rejected
-- Paper/testnet preferred defaults; secrets only via environment
-- Forecasts are **probabilistic** (Lars Hagen) — not guarantees
-- No withdrawal permissions requested
+## Documentation
 
-## Tests & CI
-
-```bash
-pytest -q
-```
-
-GitHub Actions runs compile + pytest on every push to `main`.
-
-## Disclaimer
-
-Research and trading software. Use at your own risk. Live trading can result in loss of capital.
+See [Cloudflare deployment guide](docs/CLOUDFLARE.md).
