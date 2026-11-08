@@ -24,7 +24,7 @@ const req = (path: string) => new Request("https://eti.test" + path);
 
 test("binance healthy -> serves binance, no failover", async () => {
   mock((u) => u.host === "data-api.binance.vision" ? { status: 200, body: binanceK(5) } : { status: 500, body: "x" });
-  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), {});
+  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), { MARKET_PROVIDER_ORDER: "binance,bybit,okx" });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-eti-provider"), "binance");
   assert.equal(res.headers.get("x-eti-failover"), "false");
@@ -36,7 +36,7 @@ test("binance healthy -> serves binance, no failover", async () => {
 
 test("binance 403 on every host -> fails over to bybit with correct mapping", async () => {
   mock((u) => u.host.includes("binance") ? { status: 403, body: "Forbidden" } : u.host === "api.bybit.com" ? { status: 200, body: bybitK(4) } : { status: 500, body: "" });
-  const res = await handleMarket(req("/api/market/klines?symbol=ETHUSDT&interval=1h&limit=4"), {});
+  const res = await handleMarket(req("/api/market/klines?symbol=ETHUSDT&interval=1h&limit=4"), { MARKET_PROVIDER_ORDER: "binance,bybit,okx" });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-eti-provider"), "bybit");
   assert.equal(res.headers.get("x-eti-failover"), "true");
