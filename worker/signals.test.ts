@@ -40,3 +40,35 @@ test("signal endpoint fails closed when upstream market data is unavailable", as
   const res = await handleSignals(new Request("https://eti.test/api/signals?symbol=BTCUSDT&interval=1h"), {});
   assert.equal(res.status, 503);
 });
+
+function series(fn: (i: number) => number, n = 500) {
+  const now = Date.now();
+  return Array.from({ length: n }, (_, i) => {
+    const close = fn(i), open = fn(i) - (i % 2 ? 0.1 : -0.1);
+    return [now - (n - 1 - i) * 3600000, String(open), String(Math.max(open, close) + 0.5), String(Math.min(open, close) - 0.5), String(close), String(100 + (i % 5) * 10)];
+  });
+}
+async function signalFor(candles: unknown[]) {
+  globalThis.fetch = (async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch;
+  const res = await handleSignals(new Request("https://eti.test/api/signals?symbol=BTCUSDT&interval=1h"), {});
+  assert.equal(res.status, 200);
+  return await res.json() as any;
+}
+
+test("downtrend is labelled SELL with stop above entry and three descending targets", async () => {
+  const s = await signalFor(series(i => 500 - i * 0.8));
+  assert.equal(s.label, "SELL");
+  assert.equal(s.action, "SELL");
+  assert.ok(s.stopLoss > s.entry);
+  assert.ok(s.targets[0].price < s.entry && s.targets[2].price < s.targets[1].price);
+});
+
+test("a choppy chart still gets BUY or SELL, honestly marked low conviction and not tradeable", async () => {
+  const s = await signalFor(series(i => 100 + Math.sin(i / 3) * 2));
+  assert.ok(s.label === "BUY" || s.label === "SELL");
+  assert.equal(s.action, s.label);
+  assert.ok(s.entry > 0 && s.stopLoss > 0 && s.targets.length === 3);
+  if (s.gatedAction === "WAIT") { assert.notEqual(s.conviction, "high"); assert.equal(s.tradeable, false); }
+  assert.match(s.historicalValidation.note, /conviction/i);
+  if (s.historicalValidation.sampleCount < 20) assert.equal(s.historicalValidation.winRate, null);
+});

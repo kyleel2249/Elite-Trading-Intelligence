@@ -13,6 +13,13 @@ export interface IndicatorSnapshot {
 export interface SignalResult {
   symbol: string; provider: string; interval: string; asOf: string;
   action: "BUY" | "SELL" | "WAIT"; score: number; confidence: number;
+  /** Always BUY or SELL: the directional lean of the score. `action` mirrors it. */
+  label: "BUY" | "SELL";
+  /** The original quality gate (BUY/SELL only at |score| >= 55, otherwise WAIT). */
+  gatedAction: "BUY" | "SELL" | "WAIT";
+  conviction: "high" | "medium" | "low";
+  /** True only when the gated action is BUY/SELL, i.e. a real, high-conviction setup. */
+  tradeable: boolean;
   confidenceType: "heuristic_score_not_probability";
   entry: number | null; stopLoss: number | null;
   targets: { target: number; price: number; rewardRisk: number }[];
@@ -20,7 +27,7 @@ export interface SignalResult {
   indicators: IndicatorSnapshot | null;
   evidence: string[]; strategyAttribution: { trader: string; documentedPrinciple: string; contribution: string }[];
   invalidation: string[]; dataQuality: { status: string; candleCount: number; provider: string };
-  historicalValidation: { status: string; method: string; sampleCount: number; wins: number; losses: number; winRate: number | null; note: string };
+  historicalValidation: { status: string; method: string; sampleCount: number; wins: number; losses: number; winRate: number | null; note: string; unresolved?: number; highConviction?: { sampleCount: number; wins: number; losses: number; winRate: number | null } };
 }
 
 const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
@@ -116,12 +123,18 @@ function evaluate(rows: Kline[], symbol: string, provider: string, interval: str
   else evidence.push("ADX indicates weak or absent trend strength");
   if (price < ind.ema20 && ind.ema20 < ind.ema50 && ind.ema50 < ind.ema200) score -= 22;
   score = Math.max(-100, Math.min(100, score));
-  const action = score >= 55 ? "BUY" : score <= -55 ? "SELL" : "WAIT";
-  const direction = action === "BUY" ? 1 : action === "SELL" ? -1 : 0;
+  const gatedAction = score >= 55 ? "BUY" : score <= -55 ? "SELL" : "WAIT";
+  // Every chart gets a BUY or SELL label. A score of exactly 0 is broken by trend (EMA20 vs EMA50, then price vs EMA50).
+  const lean = score !== 0 ? score : (ind.ema20 !== ind.ema50 ? ind.ema20 - ind.ema50 : price - ind.ema50);
+  const label: "BUY" | "SELL" = lean >= 0 ? "BUY" : "SELL";
+  const action = label;
+  const conviction: "high" | "medium" | "low" = Math.abs(score) >= 55 ? "high" : Math.abs(score) >= 30 ? "medium" : "low";
+  const direction = label === "BUY" ? 1 : -1;
+  evidence.unshift("Conviction " + conviction.toUpperCase() + " (|score| " + Math.abs(score) + "): " + (conviction === "high" ? "confluence is strong enough to treat as a trade setup" : conviction === "medium" ? "partial confluence; size down" : "weak confluence; this is a directional lean, not a validated edge"));
   const stopDistance = Math.max(ind.atr14 * 1.5, price * 0.002);
-  const entry = direction ? price : null;
-  const stopLoss = direction ? price - direction * stopDistance : null;
-  const targets = direction ? [1, 2, 3].map(r => ({ target: r, price: price + direction * stopDistance * r, rewardRisk: r })) : [];
+  const entry: number | null = price;
+  const stopLoss: number | null = price - direction * stopDistance;
+  const targets = [1, 2, 3].map(r => ({ target: r, price: price + direction * stopDistance * r, rewardRisk: r }));
   const attribution = [
     { trader: "Richard Dennis / William Eckhardt / Ed Seykota", documentedPrinciple: "Systematic trend following and disciplined exits", contribution: "EMA alignment and ATR-based stop distance" },
     { trader: "Nicolas Darvas / William O'Neil", documentedPrinciple: "Price breakouts with confirmation", contribution: "Prior 20-candle high/low breakout and volume confirmation" },
@@ -130,22 +143,23 @@ function evaluate(rows: Kline[], symbol: string, provider: string, interval: str
   ];
   return {
     symbol, provider, interval, asOf: new Date(last[0]).toISOString(), action, score,
+    label, gatedAction, conviction, tradeable: gatedAction !== "WAIT",
     confidence: Math.abs(score), confidenceType: "heuristic_score_not_probability",
-    entry, stopLoss, targets, riskRewardToTarget3: direction ? 3 : null, indicators: ind,
+    entry, stopLoss, targets, riskRewardToTarget3: 3, indicators: ind,
     evidence, strategyAttribution: attribution,
-    invalidation: direction ? [`Close beyond stop level ${stopLoss}`, "Signal is invalid if the market quote or candle stream becomes stale", "Re-evaluate after each completed candle; do not widen stops to avoid a loss"] : ["No directional trade until score reaches +55 or -55 and data remains fresh"],
+    invalidation: [`Close beyond stop level ${stopLoss}`, "Signal is invalid if the market quote or candle stream becomes stale", "Re-evaluate after each completed candle; do not widen stops to avoid a loss", ...(gatedAction === "WAIT" ? ["Below |score| 55 this is a lean only; the quality gate would normally stand aside"] : [])],
     dataQuality: { status: "validated_public_exchange_candles", candleCount: rows.length, provider },
     historicalValidation: validation ? { status: "computed", method: "Walk-forward candle replay; stop-first assumption when stop and target touch in the same candle; TP1 defines a win", sampleCount: 0, wins: 0, losses: 0, winRate: null, note: "Insufficient closed observations to publish a rate" } : { status: "pending", method: "Walk-forward candle replay", sampleCount: 0, wins: 0, losses: 0, winRate: null, note: "Not yet computed; no win rate is claimed" },
   };
 }
 
 function backtest(rows: Kline[], symbol: string, provider: string, interval: string) {
-  let wins = 0, losses = 0, samples = 0;
+  let wins = 0, losses = 0, unresolved = 0, hcWins = 0, hcLosses = 0;
   const horizon = 12;
   for (let i = 210; i + horizon < rows.length; i += horizon) {
     const s = evaluate(rows.slice(0, i + 1), symbol, provider, interval, true);
-    if (!s || s.action === "WAIT" || s.entry === null || s.stopLoss === null) continue;
-    const dir = s.action === "BUY" ? 1 : -1, stop = s.stopLoss, target = s.targets[0].price;
+    if (!s || s.entry === null || s.stopLoss === null) continue;
+    const dir = s.label === "BUY" ? 1 : -1, stop = s.stopLoss, target = s.targets[0].price;
     let outcome: "win" | "loss" | null = null;
     for (const bar of rows.slice(i + 1, i + 1 + horizon)) {
       const stopHit = dir > 0 ? bar[3] <= stop : bar[2] >= stop;
@@ -153,9 +167,19 @@ function backtest(rows: Kline[], symbol: string, provider: string, interval: str
       if (stopHit) { outcome = "loss"; break; }
       if (targetHit) { outcome = "win"; break; }
     }
-    samples++; if (outcome === "win") wins++; else losses++;
+    if (outcome === null) { unresolved++; continue; }
+    if (outcome === "win") wins++; else losses++;
+    if (s.conviction === "high") { if (outcome === "win") hcWins++; else hcLosses++; }
   }
-  return { status: samples >= 20 ? "computed" : "insufficient_sample", method: "Non-overlapping walk-forward candle replay; conservative stop-first tie handling; TP1 defines a win; fees, slippage and funding excluded", sampleCount: samples, wins, losses, winRate: samples >= 20 ? Number((wins / samples * 100).toFixed(1)) : null, note: samples >= 20 ? "Historical simulation only; not a forecast. Results may overfit and omit fees, slippage and market impact." : "Fewer than 20 closed observations: win rate withheld rather than presented as reliable." };
+  const samples = wins + losses, hcSamples = hcWins + hcLosses;
+  const rate = (w: number, n: number) => n >= 20 ? Number((w / n * 100).toFixed(1)) : null;
+  return {
+    status: samples >= 20 ? "computed" : "insufficient_sample",
+    method: "Replay of this same BUY/SELL labelling rule on this chart's own history; one signal per 12 candles (non-overlapping); a win is TP1 reached before the stop, stop-first when both touch in one candle; signals resolving in neither are excluded and counted as unresolved; fees, slippage and funding excluded",
+    sampleCount: samples, wins, losses, unresolved, winRate: rate(wins, samples),
+    highConviction: { sampleCount: hcSamples, wins: hcWins, losses: hcLosses, winRate: rate(hcWins, hcSamples) },
+    note: samples >= 20 ? "Historical simulation of TP1-before-stop only; not a forecast and not a guarantee. Results can overfit and omit fees, slippage and market impact." : "Fewer than 20 resolved observations on this chart: win rate withheld rather than presented as reliable.",
+  };
 }
 
 export async function handleSignals(req: Request, env: SignalEnv): Promise<Response> {
@@ -166,13 +190,17 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
   const requestedProvider = url.searchParams.get("provider");
   if (!/^[A-Z0-9]{5,20}$/.test(symbol) || !INTERVALS.includes(interval)) return new Response(JSON.stringify({ error: "invalid_symbol_or_interval" }), { status: 400, headers: { "content-type": "application/json" } });
   try {
-    const result = await getMarketData("klines", { symbol, interval, limit: 500 }, providerOrder(env, requestedProvider));
+    const result = await getMarketData("klines", { symbol, interval, limit: 1000 }, providerOrder(env, requestedProvider));
     const rows = result.data as Kline[];
     const latestAge = (Date.now() - rows.at(-1)![0]) / 1000;
     if (latestAge < -60 || latestAge > (INTERVAL_SECONDS[interval] || 60) * 3) return new Response(JSON.stringify({ error: "stale_market_data", ageSeconds: Math.round(latestAge), maxAgeSeconds: (INTERVAL_SECONDS[interval] || 60) * 3 }), { status: 503, headers: { "content-type": "application/json" } });
     const signal = evaluate(rows, symbol, result.provider, interval);
     if (!signal) return new Response(JSON.stringify({ error: "insufficient_history", requiredCandles: 210, received: rows.length }), { status: 422, headers: { "content-type": "application/json" } });
-    signal.historicalValidation = backtest(rows, symbol, result.provider, interval);
+    const validation = backtest(rows, symbol, result.provider, interval);
+    const hc = validation.highConviction;
+    validation.note = "Current conviction: " + signal.conviction.toUpperCase() + (signal.conviction === "low" ? " (directional lean, not a validated edge). " : ". ") +
+      (hc.winRate !== null ? "High-conviction-only win rate on this chart: " + hc.winRate + "% (n=" + hc.sampleCount + "). " : "") + validation.note;
+    signal.historicalValidation = validation;
     return new Response(JSON.stringify(signal), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: "market_data_unavailable", detail: e instanceof Error ? e.message : "unknown" }), { status: 503, headers: { "content-type": "application/json" } });
