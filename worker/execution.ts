@@ -44,7 +44,15 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
   if(url.pathname==="/api/execution/status" && req.method==="GET") {
     return reply({mode:"paper_testnet_default",live_trading_enabled:env.ETI_LIVE_TRADING_ENABLED==="true",alpaca_paper_configured:!!(env.ALPACA_API_KEY&&env.ALPACA_SECRET_KEY),binance_testnet_configured:!!(env.BINANCE_API_KEY&&env.BINANCE_SECRET_KEY),live_credentials_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY&&env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),audit_log_configured:!!env.ETI_EXECUTION_LOG,kill_switch:env.ETI_KILL_SWITCH==="true",withdrawal_permissions:false});
   }
-  if(url.pathname!=="/api/orders" && url.pathname!=="/api/orders/live" && url.pathname!=="/api/execution/history") return reply({error:"not_found"},404);
+  if(url.pathname==="/api/execution/history") {
+    if(req.method!=="GET") return reply({error:"method_not_allowed"},405);
+    if(!await authorized(req,env)) return reply({error:"unauthorized"},401);
+    if(!env.ETI_EXECUTION_LOG) return reply({error:"audit_log_not_configured"},503);
+    const listed=await env.ETI_EXECUTION_LOG.list({prefix:"order:",limit:100});
+    const records=await Promise.all(listed.keys.map(async key=>JSON.parse((await env.ETI_EXECUTION_LOG!.get(key.name))||"null")));
+    return reply({records:records.filter(Boolean).sort((a,b)=>b.executedAt.localeCompare(a.executedAt))});
+  }
+  if(url.pathname!=="/api/orders" && url.pathname!=="/api/orders/live") return reply({error:"not_found"},404);
   if(req.method!=="POST") return reply({error:"method_not_allowed"},405);
   if(env.ETI_KILL_SWITCH==="true") return reply({error:"execution_disabled",reason:"Emergency kill switch is active"},423);
   if(!await authorized(req,env)) return reply({error:"unauthorized"},401);
@@ -87,7 +95,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       const data=await r.json().catch(()=>({}));
       if(!r.ok) return reply({error:"broker_rejected",broker,status:r.status,detail:data,mode:requestedLive?"live":"paper"},502);
       result=data; mode=requestedLive?"live":"paper";
-    }
+    } else {
     const apiKey=requestedLive?env.BINANCE_LIVE_API_KEY:env.BINANCE_API_KEY;
     const secret=requestedLive?env.BINANCE_LIVE_SECRET_KEY:env.BINANCE_SECRET_KEY;
     if(!apiKey||!secret) return reply({error:"broker_not_configured",broker,mode:requestedLive?"live":"testnet"},503);
@@ -99,6 +107,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
     const data=await r.json().catch(()=>({}));
     if(!r.ok) return reply({error:"broker_rejected",broker,status:r.status,detail:data,mode:requestedLive?"live":"testnet"},502);
     result=data; mode=requestedLive?"live":"testnet";
+    }
     const record={executedAt:new Date().toISOString(),broker,mode,symbol,side,type,quantity,clientOrderId,brokerOrderId:result?.id??result?.orderId??null,executionSource:{actorType:source.actorType,actorId:source.actorId,sourceName:source.sourceName,strategyId:source.strategyId??null,signalId:source.signalId??null,triggerReason:source.triggerReason??null},order:result};
     await env.ETI_EXECUTION_LOG!.put("order:"+record.executedAt+":"+clientOrderId,JSON.stringify(record),{expirationTtl:60*60*24*90});
     return reply({ok:true,broker,mode,order:result,executionSource:record.executionSource,executedAt:record.executedAt,live_trading:requestedLive},201);
