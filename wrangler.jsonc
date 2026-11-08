@@ -10,7 +10,7 @@
     "ETI_KILL_SWITCH": "false",
     "ETI_LIVE_TRADING_ENABLED": "false",
     "ETI_EDGE": "native",
-    "MARKET_PROVIDER_ORDER": "binance,bybit,okx"
+    "MARKET_PROVIDER_ORDER": "bybit,binance,okx"
   },
   "kv_namespaces": [
     {
