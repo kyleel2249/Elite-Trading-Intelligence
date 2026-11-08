@@ -6,6 +6,7 @@ Paper fills update portfolio + journal (Claire Bennett audit trail).
 from __future__ import annotations
 
 import uuid
+import math
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -16,6 +17,7 @@ from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
 from app.trading.portfolio import PortfolioService
+from app.trading.executions import normalize_execution
 
 
 class TradingService:
@@ -47,9 +49,12 @@ class TradingService:
         data_status: str = "unknown",
         estimated_risk_amount: Optional[float] = None,
         fill_price_hint: Optional[float] = None,
+        reference_price: Optional[float] = None,
         thesis: Optional[str] = None,
         council_action: Optional[str] = None,
     ) -> dict[str, Any]:
+        provider, environment = provider.strip().lower(), environment.strip().lower()
+        side, order_type, symbol = side.strip().lower(), order_type.strip().lower(), symbol.strip().upper()
         client_order_id = self._client_order_id()
         proposal = OrderProposal(
             provider=provider.lower(),
@@ -60,6 +65,7 @@ class TradingService:
             order_type=order_type.lower(),
             limit_price=limit_price,
             client_order_id=client_order_id,
+            reference_price=reference_price if reference_price is not None else (fill_price_hint if environment in ("paper", "testnet") else None),
             equity=equity,
             current_open_positions=current_open_positions,
             daily_realized_pnl_pct=daily_realized_pnl_pct,
@@ -82,7 +88,7 @@ class TradingService:
                 },
                 "provider_response": None,
             }
-            if self.db is not None:
+            if self.db is not None and math.isfinite(qty) and qty > 0:
                 PortfolioService(self.db).record_order_event(
                     client_order_id=client_order_id,
                     provider=provider,
@@ -98,6 +104,14 @@ class TradingService:
                 )
             return result
 
+        # Persist intent BEFORE a remote side effect. Timeouts and malformed
+        # responses remain discoverable by client_order_id during reconciliation.
+        if self.db is not None:
+            PortfolioService(self.db).record_order_event(
+                client_order_id=client_order_id, provider=provider, environment=environment,
+                symbol=symbol, side=side, qty=qty, status="pending", risk_approved=True,
+                risk_notes=decision.notes, thesis=thesis, council_action=council_action,
+            )
         try:
             if provider.lower() == "alpaca":
                 if environment.lower() == "paper" and not self.settings.alpaca_paper:
@@ -120,19 +134,23 @@ class TradingService:
                     limit_price=limit_price,
                     client_order_id=client_order_id,
                 )
-                fill_price = fill_price_hint
+                execution = normalize_execution("alpaca", resp)
             elif provider.lower() == "binance":
                 use_testnet = environment.lower() in ("paper", "testnet")
                 # Paper without keys: simulate fill for journal/positions
                 if use_testnet and not self.binance.configured and fill_price_hint is not None:
+                    if not math.isfinite(fill_price_hint) or fill_price_hint <= 0:
+                        raise ValueError("Simulation requires a finite positive market price")
+                    crosses = (order_type == "market" or
+                               (side == "buy" and fill_price_hint <= limit_price) or
+                               (side == "sell" and fill_price_hint >= limit_price))
                     resp = {
-                        "simulated": True,
-                        "symbol": symbol.upper(),
-                        "side": side.upper(),
-                        "executedQty": str(qty),
-                        "status": "FILLED",
+                        "simulated": True, "symbol": symbol, "side": side.upper(),
+                        "executedQty": str(qty if crosses else 0),
+                        "cummulativeQuoteQty": str(qty * fill_price_hint if crosses else 0),
+                        "status": "FILLED" if crosses else "NEW",
                     }
-                    fill_price = fill_price_hint
+                    execution = normalize_execution("binance", resp)
                 else:
                     client = BinanceClient(self.settings, use_testnet=use_testnet)
                     resp = await client.submit_order(
@@ -141,8 +159,9 @@ class TradingService:
                         qty=qty,
                         order_type=order_type.upper(),
                         client_order_id=client_order_id,
+                        limit_price=limit_price,
                     )
-                    fill_price = fill_price_hint
+                    execution = normalize_execution("binance", resp)
             else:
                 return {
                     "status": "rejected",
@@ -157,7 +176,7 @@ class TradingService:
                 }
 
             result = {
-                "status": "submitted",
+                "status": execution["status"],
                 "client_order_id": client_order_id,
                 "environment": environment,
                 "risk": {
@@ -171,8 +190,7 @@ class TradingService:
             }
 
             if self.db is not None:
-                # For paper/sim: treat as filled when we have a price hint
-                status = "filled" if fill_price is not None and environment.lower() in ("paper", "testnet") else "submitted"
+                status = execution["status"]
                 PortfolioService(self.db).record_order_event(
                     client_order_id=client_order_id,
                     provider=provider,
@@ -181,7 +199,8 @@ class TradingService:
                     side=side,
                     qty=qty,
                     status=status,
-                    fill_price=fill_price,
+                    fill_price=execution["fill_price"],
+                    filled_qty=execution["filled_qty"],
                     risk_approved=True,
                     risk_notes=decision.notes,
                     thesis=thesis,
@@ -191,8 +210,10 @@ class TradingService:
 
             return result
         except Exception as e:
+            if self.db is not None:
+                self.db.rollback()
             return {
-                "status": "error",
+                "status": "submission_unknown",
                 "client_order_id": client_order_id,
                 "risk": {
                     "decision": decision.decision.value,
