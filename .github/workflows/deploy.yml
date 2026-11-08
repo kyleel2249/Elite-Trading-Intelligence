@@ -1,113 +1,40 @@
-name: Deploy (Fly.io origin + Cloudflare Worker)
+name: Deploy ETI to Cloudflare Workers
 
-# Manual one-click deploy. Required repository secrets:
-#   FLY_API_TOKEN          (flyctl tokens create deploy / org token)
-#   API_KEY                (protects mutating routes; pick a long random value)
-#   SECRET_KEY             (long random string)
-#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID   (only for the Worker job)
-# Optional secrets forwarded to the origin: ALPACA_API_KEY, ALPACA_SECRET_KEY,
-#   BINANCE_API_KEY, BINANCE_SECRET_KEY, FRED_API_KEY, NEWSAPI_KEY, QUIVER_API_KEY
-# Optional: set repository variable FLY_APP to override the app name in fly.toml.
 on:
   workflow_dispatch:
-    inputs:
-      deploy_worker:
-        description: "Also deploy the Cloudflare Worker proxy"
-        type: boolean
-        default: true
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - "wrangler.jsonc"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy.yml"
 
 concurrency:
-  group: deploy
-  cancel-in-progress: false
+  group: eti-cloudflare-deploy
+  cancel-in-progress: true
 
 jobs:
-  origin:
+  deploy:
     runs-on: ubuntu-latest
-    outputs:
-      url: ${{ steps.url.outputs.url }}
-    env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check required secrets
-        env:
-          API_KEY: ${{ secrets.API_KEY }}
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-        run: |
-          missing=0
-          [ -z "$FLY_API_TOKEN" ] && echo "::error::Secret FLY_API_TOKEN is not set" && missing=1
-          [ -z "$API_KEY" ] && echo "::error::Secret API_KEY is not set" && missing=1
-          [ -z "$SECRET_KEY" ] && echo "::error::Secret SECRET_KEY is not set" && missing=1
-          exit $missing
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Resolve app name
-        id: app
-        run: |
-          APP="${{ vars.FLY_APP }}"
-          [ -z "$APP" ] && APP="$(sed -n 's/^app *= *"\(.*\)"/\1/p' fly.toml | head -1)"
-          echo "name=$APP" >> "$GITHUB_OUTPUT"
-
-      - name: Create app and volume if missing
-        run: |
-          APP="${{ steps.app.outputs.name }}"
-          REGION="$(sed -n 's/^primary_region *= *"\(.*\)"/\1/p' fly.toml | head -1)"
-          flyctl status -a "$APP" >/dev/null 2>&1 || flyctl apps create "$APP"
-          flyctl volumes list -a "$APP" 2>/dev/null | grep -q eti_data \
-            || flyctl volumes create eti_data --region "$REGION" --size 1 --yes -a "$APP"
-
-      - name: Set runtime secrets
-        env:
-          API_KEY: ${{ secrets.API_KEY }}
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          BINANCE_SECRET_KEY: ${{ secrets.BINANCE_SECRET_KEY }}
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
-          QUIVER_API_KEY: ${{ secrets.QUIVER_API_KEY }}
-        run: |
-          args=()
-          for k in API_KEY SECRET_KEY ALPACA_API_KEY ALPACA_SECRET_KEY BINANCE_API_KEY BINANCE_SECRET_KEY FRED_API_KEY NEWSAPI_KEY QUIVER_API_KEY; do
-            [ -n "${!k}" ] && args+=("$k=${!k}")
-          done
-          flyctl secrets set --stage -a "${{ steps.app.outputs.name }}" "${args[@]}"
-
-      - name: Deploy
-        run: flyctl deploy --remote-only --ha=false -a "${{ steps.app.outputs.name }}"
-
-      - name: Verify health
-        id: url
-        run: |
-          URL="https://${{ steps.app.outputs.name }}.fly.dev"
-          for i in $(seq 1 20); do
-            if curl -fsS "$URL/api/system/health"; then echo; echo "url=$URL" >> "$GITHUB_OUTPUT"; exit 0; fi
-            sleep 6
-          done
-          echo "::error::Health check failed at $URL"; exit 1
-
-  worker:
-    needs: origin
-    if: ${{ inputs.deploy_worker }}
-    runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Check Cloudflare secrets
+          cache: "npm"
+      - name: Install dependencies
+        run: npm install
+      - name: Validate Worker bundle
+        run: npm run check:worker
+      - name: Deploy to Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          [ -z "$CLOUDFLARE_API_TOKEN" ] && echo "::error::Secret CLOUDFLARE_API_TOKEN is not set" && exit 1
-          [ -z "$CLOUDFLARE_ACCOUNT_ID" ] && echo "::error::Secret CLOUDFLARE_ACCOUNT_ID is not set" && exit 1
-          exit 0
-      - run: npm install
-      - name: Deploy Worker with BACKEND_URL
-        run: npx wrangler deploy --var "BACKEND_URL:${{ needs.origin.outputs.url }}"
-      - name: Done
-        run: echo "Worker deployed with BACKEND_URL=${{ needs.origin.outputs.url }}. Check https://<worker>.workers.dev/__eti/status"
+          test -n "$CLOUDFLARE_API_TOKEN" || (echo "::error::Set CLOUDFLARE_API_TOKEN in GitHub Actions secrets"; exit 1)
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "::error::Set CLOUDFLARE_ACCOUNT_ID in GitHub Actions secrets"; exit 1)
+          npx wrangler deploy
