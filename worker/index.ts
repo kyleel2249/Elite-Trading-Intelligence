@@ -9,7 +9,7 @@ import { handleExecution } from "./execution";
 import type { ExecutionEnv } from "./execution";
 import { handleMarket } from "./market";
 import { handleSignals } from "./signals";
-import { handleTraderDirectory } from "./traders";
+import { handleKnowledge } from "./knowledge";
 import type { MarketEnv } from "./market";
 
 export interface Env extends ExecutionEnv, MarketEnv {
@@ -92,6 +92,12 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Execution Audit History</h2><button id="refreshExecutionHistory">Refresh audit history</button></div>
 <p class="execution-note">Shows ETI orders recorded in KV, including who or what initiated each order. This is separate from the public Binance market trade tape above.</p>
 <div id="executionHistory" class="history-table"><span class="muted">Enter your execution token, then refresh.</span></div>
+</section>
+<section class="panel" id="traderPanel" style="margin-top:14px">
+<div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Elite Trader Intelligence</h2><span class="muted" id="traderMeta">Loading…</span></div>
+<div class="toolbar"><input id="traderSearch" placeholder="Search traders, tags, principles" style="min-width:220px"><select id="traderSelect" style="min-width:220px"></select></div>
+<p class="execution-note">Built from documented public methods only. Every performance, win-rate and net-worth note is labelled verified, reported, estimate or speculation; missing sources are shown as missing. Educational research, not financial advice.</p>
+<div id="traderDetail" class="scroll execution-note">Loading profiles…</div>
 </section>
 <p class="muted">Market panels use public exchange data. Order entry submits broker orders only after authenticated preview and explicit confirmation. Market data may be delayed or interrupted. ETI does not request or use withdrawal, transfer, funding, or wallet-management permissions.</p>
 </main>
@@ -246,7 +252,8 @@ async function loadSignal(){
   $('signalTargets').textContent=d.targets.length?d.targets.map(t=>'TP'+t.target+': '+fmt(t.price)+' ('+t.rewardRisk+'R)').join('\\n'):'No targets · wait for confluence';
   $('signalSummary').textContent='Confidence is a confluence score, not a probability. '+d.historicalValidation.note;
   $('signalEvidence').textContent='Evidence: '+d.evidence.join(' · ');
-  $('signalAttribution').textContent='Documented methods: '+d.strategyAttribution.map(a=>a.trader+' — '+a.contribution).join(' | ');
+  $('signalAttribution').innerHTML='<b style="color:#eaf2ff">Strategy attribution</b> · regime '+esc(d.regime.state)+' (ADX '+esc(d.regime.adx)+')'+d.strategyAttribution.map(function(a){return '<div>'+esc(a.trader)+' — '+esc(a.contribution)+'</div>';}).join('');
+  $('signalSummary').textContent+=' Sizing: '+(d.positionSizing?(d.positionSizing.suggestedRiskPercent>0?'up to '+d.positionSizing.suggestedRiskPercent+'% of equity at risk':'none suggested')+' ('+d.positionSizing.basis+')':'n/a')+'.';
  }catch(e){
   $('signalAction').textContent='UNAVAILABLE';
   $('signalScore').textContent='—';$('signalWinRate').textContent='Not validated';
@@ -254,6 +261,33 @@ async function loadSignal(){
   $('signalEvidence').textContent='Fail-closed: no trade recommendation without fresh, valid market candles.';
  }
 }
+function fmtVal(v){if(v==null||v==='')return '—';if(Array.isArray(v))return v.map(fmtVal).join('; ');if(typeof v==='object')return '['+esc(v.classification||'')+'] '+esc(v.claim||'')+(v.source?' — '+esc(v.source):' — no source recorded');return esc(v);}
+let traderTimer=null;
+async function loadTraders(){
+ const q=$('traderSearch').value.trim();
+ try{
+  const r=await fetch('/api/intelligence/traders'+(q?'?q='+encodeURIComponent(q):''),{cache:'no-store'}),d=await r.json();
+  const list=d.profiles||[];
+  $('traderSelect').innerHTML=list.map(function(t){return '<option value="'+esc(t.id)+'">'+esc(t.name||t.full_name)+'</option>';}).join('');
+  $('traderMeta').textContent=(d.count==null?list.length:d.count)+' profiles · source: '+(d.source||'unknown')+(d.generatedAt?' · built '+String(d.generatedAt).slice(0,10):'');
+  if(list.length)showTrader(list[0].id);else $('traderDetail').textContent='No matching profiles.';
+ }catch(e){$('traderMeta').textContent='unavailable';$('traderDetail').textContent='Trader intelligence unavailable: '+e.message;}
+}
+async function showTrader(id){
+ $('traderDetail').textContent='Loading…';
+ try{
+  const r=await fetch('/api/intelligence/traders/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw Error(d.error||('HTTP '+r.status));
+  const p=d.profile;
+  if(!p.full_name){$('traderDetail').innerHTML='<b>'+esc(p.name)+'</b><div>'+esc((p.documentedPrinciples||[]).join('; '))+'</div><div>'+esc(p.evidenceCaveat||'')+'</div>';return;}
+  const rows=[['Biography',p.biography],['Trading history',p.trading_history],['Markets',p.markets_traded],['Instruments',p.preferred_instruments],['Philosophy',p.philosophy],['Documented patterns',p.documented_patterns],['Entry criteria',p.entry_criteria],['Exit criteria',p.exit_criteria],['Stop-loss methodology',p.stop_loss_methodology],['Position sizing',p.position_sizing],['Risk to reward',p.risk_reward],['Technical indicators',p.technical_indicators],['Fundamental methodology',p.fundamental_methodology],['Preferred conditions',p.preferred_conditions],['Avoid trading when',p.avoid_conditions],['Decision psychology',p.decision_psychology],['Historical returns',p.historical_returns],['Historical drawdowns',p.historical_drawdowns],['Win rates',p.win_rates],['Net worth',p.net_worth],['Famous successful trades',p.famous_successful_trades],['Famous unsuccessful trades',p.famous_unsuccessful_trades],['Predictions and outcomes',p.predictions_outcomes],['Strengths',p.strengths],['Weaknesses',p.weaknesses],['Lessons for ETI',p.eti_lessons],['Strategy modules',p.strategy_module_ids]];
+  const c=d.completeness||{};
+  $('traderDetail').innerHTML='<div style="font-size:16px;color:#eaf2ff"><b>'+esc(p.full_name)+'</b></div><div>Profile fields: '+esc(c.fieldsPresent)+' / '+esc(c.fieldsRequired)+' · net worth: '+esc(d.netWorthStatus)+' · sourced performance notes: '+esc(d.sourcedPerformanceNotes)+'</div>'+rows.map(function(x){return '<div style="margin:8px 0"><b style="color:#eaf2ff">'+esc(x[0])+'</b><div>'+fmtVal(x[1])+'</div></div>';}).join('');
+ }catch(e){$('traderDetail').textContent='Could not load profile: '+e.message;}
+}
+$('traderSelect').onchange=function(){showTrader($('traderSelect').value);};
+$('traderSearch').oninput=function(){clearTimeout(traderTimer);traderTimer=setTimeout(loadTraders,300);};
+loadTraders();
 refreshExecutionStatus();
 loadSignal();
 setInterval(loadSignal,60000);
@@ -267,8 +301,9 @@ export default {
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
     }
-    if (url.pathname === "/api/intelligence/traders") {
-      return handleTraderDirectory(request);
+    if (url.pathname.startsWith("/api/intelligence/")) {
+      const knowledge = handleKnowledge(request);
+      if (knowledge) return knowledge;
     }
     if (url.pathname === "/api/signals") {
       return handleSignals(request, _env);
