@@ -44,7 +44,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <button id="refresh" class="active">Refresh market</button><span class="muted" id="stamp">Waiting for market data…</span></div>
 <div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>Source <b>Binance public market feed</b></span></div><div class="chart"><canvas id="chart"></canvas></div></section>
 <section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section></div>
-<div class="lower"><section class="panel"><h2>Executed Trade History</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:220px"><canvas id="depth"></canvas></div><small>Aggregated visible bid and ask liquidity. Not a full exchange order queue.</small></section></div>
+<div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:220px"><canvas id="depth"></canvas></div><small>Aggregated visible bid and ask liquidity. Not a full exchange order queue.</small></section></div>
 
 <section class="panel" style="margin-top:14px">
 <h2>Order Execution</h2>
@@ -87,8 +87,8 @@ function drawChart(){const c=$('chart'),{x,w,h}=resize(c);x.clearRect(0,0,w,h);i
 function drawDepth(){const c=$('depth'),{x,w,h}=resize(c);x.clearRect(0,0,w,h);for(const [levels,color,reverse] of [[book.bids,'#21d69a',true],[book.asks,'#ff637d',false]]){const sorted=[...levels].sort((a,b)=>reverse?b[0]-a[0]:a[0]-b[0]);if(!sorted.length)continue;let total=0,max=sorted.reduce((s,v)=>s+Number(v[1]),0);x.beginPath();x.strokeStyle=color;x.lineWidth=2;sorted.forEach((v,i)=>{total+=Number(v[1]);let xx=i*w/Math.max(1,sorted.length-1),yy=h-8-total/max*(h-16);i?x.lineTo(xx,yy):x.moveTo(xx,yy);});x.stroke();}}
 function renderBook(){const bids=book.bids.slice(0,15),asks=book.asks.slice(0,15);if(bids.length)$('bid').textContent=fmt(bids[0][0]);if(asks.length)$('ask').textContent=fmt(asks[0][0]);if(bids.length&&asks.length)$('spread').textContent=fmt(asks[0][0]-bids[0][0]);let rows='<table><tr><th>Side</th><th>Price</th><th>Quantity</th></tr>';for(const a of [...asks].reverse())rows+='<tr><td class="ask">ASK</td><td>'+fmt(a[0])+'</td><td>'+fmt(a[1])+'</td></tr>';for(const b of bids)rows+='<tr><td class="bid">BID</td><td>'+fmt(b[0])+'</td><td>'+fmt(b[1])+'</td></tr>';rows+='</table>';$('book').innerHTML=rows;drawDepth();}
 function renderTrades(){$('trades').innerHTML='<table><tr><th>Time</th><th>Side</th><th>Price</th><th>Quantity</th></tr>'+trades.slice(0,50).map(t=>'<tr><td>'+new Date(t.T).toLocaleTimeString()+'</td><td class="'+(t.m?'sell':'buy')+'">'+(t.m?'SELL':'BUY')+'</td><td>'+fmt(t.p)+'</td><td>'+fmt(t.q)+'</td></tr>').join('')+'</table>';}
-async function load(){const s=$('symbol').value,i=$('interval').value;try{const r=await fetch('https://api.binance.com/api/v3/klines?symbol='+s+'&interval='+i+'&limit=120');if(!r.ok)throw Error('Kline HTTP '+r.status);candles=await r.json();drawChart();const b=await fetch('https://api.binance.com/api/v3/depth?symbol='+s+'&limit=20');if(!b.ok)throw Error('Depth HTTP '+b.status);const d=await b.json();book={bids:d.bids.map(v=>v.map(Number)),asks:d.asks.map(v=>v.map(Number))};renderBook();$('last').textContent=fmt(candles.at(-1)[4]);$('volume').textContent=fmt(candles.at(-1)[5]);$('stamp').textContent='REST snapshot '+new Date().toLocaleTimeString();$('connection').textContent='Connected · REST snapshot';}catch(e){$('connection').textContent='Market data unavailable';$('connection').style.color='#ff637d';$('stamp').textContent=e.message;}}
-function connect(){if(socket)socket.close();const s=$('symbol').value.toLowerCase();socket=new WebSocket('wss://stream.binance.com:9443/stream?streams='+s+'@trade/'+s+'@depth20@100ms/'+s+'@kline_'+$('interval').value);socket.onopen=()=>{$('connection').textContent='Live WebSocket connected';$('connection').style.color='#21d69a';};socket.onmessage=e=>{const msg=JSON.parse(e.data),d=msg.data;if(msg.stream.includes('@trade')){trades.unshift(d);trades=trades.slice(0,100);renderTrades();$('last').textContent=fmt(d.p);}else if(msg.stream.includes('@depth')){book={bids:d.b.map(v=>v.map(Number)),asks:d.a.map(v=>v.map(Number))};renderBook();}else if(msg.stream.includes('@kline')){const k=d.k, row=[k.t,k.o,k.h,k.l,k.c,k.v].map((v,i)=>i===0?Number(v):Number(v));if(candles.length&&candles.at(-1)[0]===row[0])candles[candles.length-1]=row;else candles.push(row);candles=candles.slice(-120);drawChart();}};socket.onclose=()=>{$('connection').textContent='Disconnected · retrying';$('connection').style.color='#f59e0b';};socket.onerror=()=>socket.close();}
+async function load(){const s=$('symbol').value,i=$('interval').value;try{const [kr,dr,tr]=await Promise.all([fetch('/api/market/klines?symbol='+encodeURIComponent(s)+'&interval='+encodeURIComponent(i)+'&limit=120',{cache:'no-store'}),fetch('/api/market/depth?symbol='+encodeURIComponent(s)+'&limit=20',{cache:'no-store'}),fetch('/api/market/trades?symbol='+encodeURIComponent(s)+'&limit=50',{cache:'no-store'})]);for(const [r,n] of [[kr,'Klines'],[dr,'Depth'],[tr,'Trades']])if(!r.ok)throw Error(n+' HTTP '+r.status+' — '+(await r.clone().text()).slice(0,180));candles=await kr.json();const d=await dr.json(),t=await tr.json();if(!Array.isArray(candles)||!candles.length||!Array.isArray(d.bids)||!Array.isArray(d.asks)||!Array.isArray(t))throw Error('Unexpected market-data response');candles=candles.map(v=>v.map((x,j)=>j===0?Number(x):Number(x)));book={bids:d.bids.map(v=>v.map(Number)),asks:d.asks.map(v=>v.map(Number))};trades=t.map(v=>({T:Number(v.time),m:!!v.isBuyerMaker,p:String(v.price),q:String(v.qty)}));drawChart();renderBook();renderTrades();$('last').textContent=fmt(candles.at(-1)[4]);$('volume').textContent=fmt(candles.at(-1)[5]);$('stamp').textContent='Cloudflare REST snapshot '+new Date().toLocaleTimeString();$('connection').textContent=socket&&socket.readyState===1?'Live stream + REST fallback':'REST market feed connected';$('connection').style.color='#21d69a';}catch(e){$('connection').textContent='Market data unavailable';$('connection').style.color='#ff637d';$('stamp').textContent=e.message;}}
+function connect(){if(socket)socket.close();const s=$('symbol').value.toLowerCase();socket=new WebSocket('wss://data-stream.binance.vision/stream?streams='+s+'@trade/'+s+'@depth20@100ms/'+s+'@kline_'+$('interval').value);socket.onopen=()=>{$('connection').textContent='Live WebSocket connected';$('connection').style.color='#21d69a';};socket.onmessage=e=>{const msg=JSON.parse(e.data),d=msg.data;if(msg.stream.includes('@trade')){trades.unshift(d);trades=trades.slice(0,100);renderTrades();$('last').textContent=fmt(d.p);}else if(msg.stream.includes('@depth')){book={bids:d.b.map(v=>v.map(Number)),asks:d.a.map(v=>v.map(Number))};renderBook();}else if(msg.stream.includes('@kline')){const k=d.k, row=[k.t,k.o,k.h,k.l,k.c,k.v].map((v,i)=>i===0?Number(v):Number(v));if(candles.length&&candles.at(-1)[0]===row[0])candles[candles.length-1]=row;else candles.push(row);candles=candles.slice(-120);drawChart();}};socket.onclose=()=>{$('connection').textContent='WebSocket disconnected · REST polling active';$('connection').style.color='#f59e0b';};socket.onerror=()=>socket.close();}
 
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let preparedOrder=null, executionStatus=null;
@@ -158,7 +158,7 @@ async function submitOrder(side){
   $('orderOutput').textContent=JSON.stringify(d,null,2);
   if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
   await refreshExecutionHistory();
- }catch(e){$('orderOutput').textContent+='\nOrder submission failed: '+e.message;}
+ }catch(e){$('orderOutput').textContent+=' | Order submission failed: '+e.message;}
 }
 $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').value==='limit'?'flex':'none';};
 $('orderMode').onchange=()=>{$('liveTokenWrap').style.display=$('orderMode').value==='live'?'flex':'none';};
@@ -171,7 +171,7 @@ $('clearExecutionSecrets').onclick=()=>{$('executionToken').value='';$('liveActi
 $('refreshExecutionHistory').onclick=refreshExecutionHistory;
 refreshExecutionStatus();
 
-$('refresh').onclick=()=>{load().then(connect)};$('symbol').onchange=()=>{trades=[];load().then(connect)};$('interval').onchange=()=>load().then(connect);window.onresize=()=>{drawChart();drawDepth()};load().then(connect);setInterval(()=>{if(!socket||socket.readyState>1)connect()},5000);
+$('refresh').onclick=()=>{load().then(connect)};$('symbol').onchange=()=>{trades=[];load().then(connect)};$('interval').onchange=()=>load().then(connect);window.onresize=()=>{drawChart();drawDepth()};load().then(connect);setInterval(()=>{load();if(!socket||socket.readyState>1)connect()},15000);
 </script></body></html>`;
 
 export default {
@@ -179,6 +179,32 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
+    }
+    if (url.pathname.startsWith("/api/market/")) {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const endpoint = url.pathname.slice("/api/market/".length);
+      const allowed = new Set(["klines", "depth", "trades"]);
+      if (!allowed.has(endpoint)) return json({ error: "not_found" }, 404);
+      const symbol = url.searchParams.get("symbol") || "BTCUSDT";
+      const interval = url.searchParams.get("interval") || "1m";
+      const limit = url.searchParams.get("limit") || (endpoint === "klines" ? "120" : endpoint === "depth" ? "20" : "50");
+      if (!/^[A-Z0-9]{5,20}$/.test(symbol)) return json({ error: "invalid_symbol" }, 400);
+      if (!["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"].includes(interval)) return json({ error: "invalid_interval" }, 400);
+      if (!/^\\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > (endpoint === "depth" ? 100 : 1000)) return json({ error: "invalid_limit" }, 400);
+      const params = new URLSearchParams({ symbol, limit });
+      if (endpoint === "klines") params.set("interval", interval);
+      const path = endpoint === "klines" ? "/api/v3/klines" : endpoint === "depth" ? "/api/v3/depth" : "/api/v3/trades";
+      let upstream: Response | null = null;
+      let lastError = "";
+      for (const host of ["https://data-api.binance.vision", "https://api.binance.com"]) {
+        try {
+          const candidate = await fetch(host + path + "?" + params.toString(), { headers: { "accept": "application/json" }, cf: { cacheTtl: 2, cacheEverything: true } });
+          if (candidate.ok) { upstream = candidate; break; }
+          lastError = "upstream_http_" + candidate.status;
+        } catch (error) { lastError = error instanceof Error ? error.message : "upstream_fetch_failed"; }
+      }
+      if (!upstream) return json({ error: "market_data_unavailable", detail: lastError }, 502);
+      return new Response(await upstream.text(), { status: 200, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" } });
     }
     if (url.pathname === "/__eti/status" || url.pathname === "/api/system/health") {
       return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "public Binance REST + WebSocket", time: new Date().toISOString() });
