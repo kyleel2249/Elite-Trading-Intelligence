@@ -9,6 +9,7 @@ import { handleExecution } from "./execution";
 import type { ExecutionEnv } from "./execution";
 import { handleMarket } from "./market";
 import { handleSignals } from "./signals";
+import { handleTraderDirectory } from "./traders";
 import type { MarketEnv } from "./market";
 
 export interface Env extends ExecutionEnv, MarketEnv {
@@ -265,6 +266,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
+    }
+    if (url.pathname === "/api/intelligence/traders") {
+      return handleTraderDirectory(request);
     }
     if (url.pathname === "/api/signals") {
       return handleSignals(request, _env);
