@@ -1,4 +1,5 @@
 import { getMarketData, providerOrder, INTERVALS, INTERVAL_SECONDS, type Kline, type MarketEnv } from "./market.ts";
+import { runModules, attributionFor, stanceCounts, statEdge, edgeAttribution, kellySizing, type AttributionEntry, type Regime, type StatEdge, type PositionSizing } from "./strategies.ts";
 
 export interface SignalEnv extends MarketEnv {}
 
@@ -25,7 +26,8 @@ export interface SignalResult {
   targets: { target: number; price: number; rewardRisk: number }[];
   riskRewardToTarget3: number | null;
   indicators: IndicatorSnapshot | null;
-  evidence: string[]; strategyAttribution: { trader: string; documentedPrinciple: string; contribution: string }[];
+  evidence: string[]; strategyAttribution: AttributionEntry[];
+  regime: Regime; statisticalEdge: StatEdge | null; positionSizing: PositionSizing | null;
   invalidation: string[]; dataQuality: { status: string; candleCount: number; provider: string };
   historicalValidation: { status: string; method: string; sampleCount: number; wins: number; losses: number; winRate: number | null; note: string; unresolved?: number; highConviction?: { sampleCount: number; wins: number; losses: number; winRate: number | null } };
 }
@@ -128,25 +130,25 @@ function evaluate(rows: Kline[], symbol: string, provider: string, interval: str
   const lean = score !== 0 ? score : (ind.ema20 !== ind.ema50 ? ind.ema20 - ind.ema50 : price - ind.ema50);
   const label: "BUY" | "SELL" = lean >= 0 ? "BUY" : "SELL";
   const action = label;
-  const conviction: "high" | "medium" | "low" = Math.abs(score) >= 55 ? "high" : Math.abs(score) >= 30 ? "medium" : "low";
-  const direction = label === "BUY" ? 1 : -1;
-  evidence.unshift("Conviction " + conviction.toUpperCase() + " (|score| " + Math.abs(score) + "): " + (conviction === "high" ? "confluence is strong enough to treat as a trade setup" : conviction === "medium" ? "partial confluence; size down" : "weak confluence; this is a directional lean, not a validated edge"));
+  const direction: 1 | -1 = label === "BUY" ? 1 : -1;
+  const { regime, results } = runModules(rows, ind);
+  const { supporting, opposing } = stanceCounts(results, direction);
+  const baseConviction: "high" | "medium" | "low" = Math.abs(score) >= 55 ? "high" : Math.abs(score) >= 30 ? "medium" : "low";
+  // Disagreement between active documented methods lowers conviction by one tier instead of being averaged away.
+  const downgraded = opposing > supporting && baseConviction !== "low";
+  const conviction: "high" | "medium" | "low" = downgraded ? (baseConviction === "high" ? "medium" : "low") : baseConviction;
+  evidence.unshift("Conviction " + conviction.toUpperCase() + " (|score| " + Math.abs(score) + "): " + (conviction === "high" ? "confluence is strong enough to treat as a trade setup" : conviction === "medium" ? "partial confluence; size down" : "weak confluence; this is a directional lean, not a validated edge") + (downgraded ? "; lowered because " + opposing + " active documented method(s) oppose vs " + supporting + " supporting" : ""));
+  evidence.push("Regime " + regime.state.toUpperCase() + " (ADX " + regime.adx + "); documented methods: " + supporting + " supporting, " + opposing + " opposing");
   const stopDistance = Math.max(ind.atr14 * 1.5, price * 0.002);
   const entry: number | null = price;
   const stopLoss: number | null = price - direction * stopDistance;
   const targets = [1, 2, 3].map(r => ({ target: r, price: price + direction * stopDistance * r, rewardRisk: r }));
-  const attribution = [
-    { trader: "Richard Dennis / William Eckhardt / Ed Seykota", documentedPrinciple: "Systematic trend following and disciplined exits", contribution: "EMA alignment and ATR-based stop distance" },
-    { trader: "Nicolas Darvas / William O'Neil", documentedPrinciple: "Price breakouts with confirmation", contribution: "Prior 20-candle high/low breakout and volume confirmation" },
-    { trader: "Paul Tudor Jones", documentedPrinciple: "Capital preservation and asymmetric risk", contribution: "Predefined invalidation and staged 1R/2R/3R targets" },
-    { trader: "Jim Simons (high-level inspiration only)", documentedPrinciple: "Statistical testing of repeatable patterns", contribution: "Signals require empirical validation; no claim to proprietary Renaissance methods" },
-  ];
   return {
     symbol, provider, interval, asOf: new Date(last[0]).toISOString(), action, score,
-    label, gatedAction, conviction, tradeable: gatedAction !== "WAIT",
+    label, gatedAction, conviction, tradeable: conviction === "high" && gatedAction !== "WAIT",
     confidence: Math.abs(score), confidenceType: "heuristic_score_not_probability",
     entry, stopLoss, targets, riskRewardToTarget3: 3, indicators: ind,
-    evidence, strategyAttribution: attribution,
+    evidence, strategyAttribution: attributionFor(results, direction), regime, statisticalEdge: null, positionSizing: null,
     invalidation: [`Close beyond stop level ${stopLoss}`, "Signal is invalid if the market quote or candle stream becomes stale", "Re-evaluate after each completed candle; do not widen stops to avoid a loss", ...(gatedAction === "WAIT" ? ["Below |score| 55 this is a lean only; the quality gate would normally stand aside"] : [])],
     dataQuality: { status: "validated_public_exchange_candles", candleCount: rows.length, provider },
     historicalValidation: validation ? { status: "computed", method: "Walk-forward candle replay; stop-first assumption when stop and target touch in the same candle; TP1 defines a win", sampleCount: 0, wins: 0, losses: 0, winRate: null, note: "Insufficient closed observations to publish a rate" } : { status: "pending", method: "Walk-forward candle replay", sampleCount: 0, wins: 0, losses: 0, winRate: null, note: "Not yet computed; no win rate is claimed" },
@@ -201,6 +203,10 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
     validation.note = "Current conviction: " + signal.conviction.toUpperCase() + (signal.conviction === "low" ? " (directional lean, not a validated edge). " : ". ") +
       (hc.winRate !== null ? "High-conviction-only win rate on this chart: " + hc.winRate + "% (n=" + hc.sampleCount + "). " : "") + validation.note;
     signal.historicalValidation = validation;
+    const edge = statEdge(validation);
+    signal.statisticalEdge = edge;
+    signal.strategyAttribution.push(edgeAttribution(edge));
+    signal.positionSizing = kellySizing(validation, edge);
     return new Response(JSON.stringify(signal), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: "market_data_unavailable", detail: e instanceof Error ? e.message : "unknown" }), { status: 503, headers: { "content-type": "application/json" } });

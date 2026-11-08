@@ -72,3 +72,14 @@ test("a choppy chart still gets BUY or SELL, honestly marked low conviction and 
   assert.match(s.historicalValidation.note, /conviction/i);
   if (s.historicalValidation.sampleCount < 20) assert.equal(s.historicalValidation.winRate, null);
 });
+
+test("signal attribution is dynamic: regime, module stances, statistical edge and sizing are reported", async () => {
+  const s = await signalFor(series(i => 100 + i * 0.8));
+  assert.ok(["trend", "range", "transition"].includes(s.regime.state));
+  const ids = s.strategyAttribution.map((a: any) => a.moduleId);
+  for (const id of ["turtle_trend", "seykota_mechanical", "simons_quant", "soros_reflexivity"]) assert.ok(ids.includes(id), id);
+  assert.ok(s.strategyAttribution.every((a: any) => a.stance && a.contribution));
+  assert.ok(s.positionSizing && typeof s.positionSizing.suggestedRiskPercent === "number");
+  if (s.statisticalEdge.verdict !== "positive_edge") assert.equal(s.positionSizing.suggestedRiskPercent, 0);
+  assert.equal(s.tradeable, s.conviction === "high" && s.gatedAction !== "WAIT");
+});
