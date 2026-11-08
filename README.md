@@ -150,3 +150,18 @@ A separate `POST /api/orders/live` route exists. It is not activated by the defa
 9. The FastAPI preflight derives equity, open positions, daily PnL, drawdown and quote freshness server-side, and attaches verified investor-disclosure context. It never submits an order. Until the FastAPI service is deployed, reachable and configured with synchronized live-account equity, live preflight will reject orders.
 
 Paper/testnet remains the default `POST /api/orders` route. The Cloudflare Worker dashboard and Python/FastAPI intelligence service are separate deployable components: all order submission now requires the FastAPI service to be hosted at a stable HTTPS origin. The Cloudflare-only Worker deployment by itself does not host the Python portfolio/disclosure engine. Never enable withdrawals, transfers, or wallet-management permissions on any broker API key. Live trading has not been activated or validated by this repository change. The execution history endpoint stores audit records in KV for 90 days; configure backups/retention separately if longer regulatory retention is required.
+
+
+## Elite-method signal engine (incremental release)
+
+The Worker now exposes a read-only `GET /api/signals?symbol=BTCUSDT&interval=1h` endpoint and a searchable `GET /api/intelligence/traders` directory. The signal engine uses validated OHLCV candles from Binance/Bybit/OKX failover and computes EMA 20/50/200, RSI 14, MACD, ATR 14, ADX, Bollinger bands, relative volume and 20-candle breakout levels. It returns BUY, SELL or WAIT; a reference entry; ATR-derived stop; and 1R, 2R and 3R targets.
+
+The displayed score is a **heuristic confluence score, not a probability**. The historical win rate is a walk-forward candle replay using non-overlapping samples and a conservative stop-first rule. It is withheld unless at least 20 samples are available. Simulation excludes fees, slippage, funding and market impact, so it is not a live expected win rate. A signal endpoint rejects stale candles and returns no recommendation if market data is unavailable.
+
+The trader directory records documented high-level public principles and maps only testable ideas to indicators. It explicitly does not claim access to private algorithms (including Renaissance Technologies / D. E. Shaw methods), undocumented entry rules, or unsupported win rates/returns. Fundamentals, macro event calendars, portfolio optimization, continuous self-learning, broad multi-asset provider coverage, 3D UI, and a complete production deployment are separate workstreams and are not represented as finished by this signal-engine increment.
+
+Example:
+```bash
+curl 'https://<worker>.<subdomain>.workers.dev/api/signals?symbol=BTCUSDT&interval=1h'
+curl 'https://<worker>.<subdomain>.workers.dev/api/intelligence/traders?q=reflexivity'
+```
