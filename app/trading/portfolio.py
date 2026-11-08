@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Optional
+import json
+import math
 
 from sqlalchemy.orm import Session
 
@@ -35,12 +37,66 @@ class PortfolioService:
         council_action: Optional[str] = None,
         thesis: Optional[str] = None,
         provider_order_id: Optional[str] = None,
+        filled_qty: Optional[float] = None,
     ) -> OrderRecord:
         row = (
             self.db.query(OrderRecord)
             .filter(OrderRecord.client_order_id == client_order_id)
+            .with_for_update()
+            .populate_existing()
             .one_or_none()
         )
+        # Cumulative execution state lives in the existing notes column, avoiding
+        # an implicit schema migration. Legacy filled rows are already accounted.
+        previous_qty = previous_cost = 0.0
+        metadata = {}
+        if row is not None:
+            if (row.provider, row.environment, row.symbol, row.side, row.qty) != (
+                    provider, environment, symbol.upper(), side.lower(), qty):
+                raise ValueError("Client order ID belongs to a different order")
+            try:
+                metadata = json.loads(row.notes or "{}")
+                if not isinstance(metadata, dict):
+                    metadata = {"legacy_notes": row.notes}
+            except (ValueError, TypeError):
+                metadata = {"legacy_notes": row.notes}
+            state = metadata.get("execution_accounting")
+            if state:
+                previous_qty, previous_cost = float(state["qty"]), float(state["cost"])
+            elif row.status == "filled":
+                previous_qty = row.qty
+                previous_cost = row.qty * (row.fill_price or 0)
+        cumulative = filled_qty if filled_qty is not None else (qty if status == "filled" else previous_qty)
+        if not math.isfinite(cumulative) or cumulative < 0 or cumulative > qty:
+            raise ValueError("Invalid cumulative execution quantity")
+        if cumulative < previous_qty:
+            raise ValueError("Execution quantity cannot regress")
+        delta = cumulative - previous_qty
+        cost = previous_cost
+        delta_price = None
+        if cumulative > previous_qty:
+            if fill_price is None or not math.isfinite(fill_price) or fill_price <= 0:
+                raise ValueError("Execution requires a finite positive price")
+            cost = cumulative * fill_price
+            delta_price = (cost - previous_cost) / delta
+            if not math.isfinite(delta_price) or delta_price <= 0:
+                raise ValueError("Invalid execution cost delta")
+        if status == "filled" and not math.isclose(cumulative, qty, rel_tol=1e-10, abs_tol=1e-12):
+            raise ValueError("Filled status requires the entire order quantity")
+        if row is not None and row.status in {"filled", "canceled", "rejected", "expired"}:
+            if status not in {"filled", "canceled", "rejected", "expired"}:
+                status = row.status
+        metadata["execution_accounting"] = {"qty": cumulative, "cost": cost}
+        encoded = json.dumps(metadata, sort_keys=True)
+        if row is not None:
+            # Compare-and-swap protects same-order replays on SQLite as well as
+            # databases supporting SELECT FOR UPDATE. Caller must retry conflicts.
+            changed = self.db.query(OrderRecord).filter(
+                OrderRecord.id == row.id, OrderRecord.notes == row.notes
+            ).update({OrderRecord.notes: encoded}, synchronize_session=False)
+            if changed != 1:
+                self.db.rollback()
+                raise ValueError("Concurrent execution update; retry reconciliation")
         if row is None:
             row = OrderRecord(
                 client_order_id=client_order_id,
@@ -65,6 +121,7 @@ class PortfolioService:
             row.provider_order_id = provider_order_id or row.provider_order_id
             row.updated_at = _utcnow()
 
+        row.notes = encoded
         self._journal(
             client_order_id=client_order_id,
             provider=provider,
@@ -79,14 +136,14 @@ class PortfolioService:
             risk_officer="Helena Frost",
         )
 
-        if status in ("submitted", "filled") and fill_price is not None and risk_approved:
+        if delta > 0 and risk_approved:
             self._apply_fill(
                 provider=provider,
                 environment=environment,
                 symbol=symbol,
                 side=side,
-                qty=qty,
-                price=fill_price,
+                qty=delta,
+                price=delta_price,
             )
 
         self.db.commit()
@@ -136,6 +193,7 @@ class PortfolioService:
             pos.avg_entry = ((pos.avg_entry * pos.qty) + (price * qty)) / new_qty if new_qty else price
             pos.qty = new_qty
             pos.mark_price = price
+            pos.unrealized_pnl = ((price - pos.avg_entry) if pos.side == "long" else (pos.avg_entry - price)) * pos.qty
             pos.updated_at = _utcnow()
             return
 
@@ -147,6 +205,7 @@ class PortfolioService:
             pos.qty -= qty
             pos.realized_pnl += pnl
             pos.mark_price = price
+            pos.unrealized_pnl = ((price - pos.avg_entry) if pos.side == "long" else (pos.avg_entry - price)) * pos.qty
             pos.updated_at = _utcnow()
             self._journal(
                 client_order_id=None,
@@ -169,6 +228,7 @@ class PortfolioService:
             pos.realized_pnl += pnl
             pos.status = "closed"
             pos.mark_price = price
+            pos.unrealized_pnl = ((price - pos.avg_entry) if pos.side == "long" else (pos.avg_entry - price)) * pos.qty
             pos.updated_at = _utcnow()
             self._journal(
                 client_order_id=None,
@@ -195,6 +255,7 @@ class PortfolioService:
             pos.avg_entry = price
             pos.mark_price = price
             pos.status = "open"
+            pos.unrealized_pnl = ((price - pos.avg_entry) if pos.side == "long" else (pos.avg_entry - price)) * pos.qty
             pos.updated_at = _utcnow()
             self._journal(
                 client_order_id=None,
