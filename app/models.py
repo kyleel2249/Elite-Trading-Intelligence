@@ -1,5 +1,5 @@
 """SQLAlchemy models — extend, do not destroy."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import String, Float, Integer, Boolean, DateTime, Text, JSON, Index
@@ -9,7 +9,7 @@ from app.database import Base
 
 
 def utcnow() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 class Instrument(Base):

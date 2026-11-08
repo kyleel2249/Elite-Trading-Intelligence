@@ -27,11 +27,14 @@ jobs:
 
       - name: Unit tests
         env:
+          PYTHONPATH: .
           LIVE_TRADING_ENABLED: "false"
           ALPACA_PAPER: "true"
           BINANCE_TESTNET_ENABLED: "true"
           BINANCE_LIVE_TRADING_ENABLED: "false"
-        run: pytest -q --tb=short
+        run: python -m pytest -q --tb=short
 
       - name: Import app
+        env:
+          PYTHONPATH: .
         run: python -c "from app.main import app; print(app.title)"

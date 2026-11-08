@@ -6,7 +6,7 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "check": "python -m compileall -q app tests && python -m pytest -q"
+    "check": "python -m compileall -q app tests && PYTHONPATH=. python -m pytest -q"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.0.30"

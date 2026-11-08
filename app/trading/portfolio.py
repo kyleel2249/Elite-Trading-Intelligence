@@ -1,12 +1,16 @@
 """Paper portfolio: positions, fills, journal with filters."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models import OrderRecord, Position, JournalEntry
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class PortfolioService:
@@ -59,7 +63,7 @@ class PortfolioService:
             row.risk_approved = risk_approved
             row.risk_notes = risk_notes or row.risk_notes
             row.provider_order_id = provider_order_id or row.provider_order_id
-            row.updated_at = datetime.utcnow()
+            row.updated_at = _utcnow()
 
         self._journal(
             client_order_id=client_order_id,
@@ -132,7 +136,7 @@ class PortfolioService:
             pos.avg_entry = ((pos.avg_entry * pos.qty) + (price * qty)) / new_qty if new_qty else price
             pos.qty = new_qty
             pos.mark_price = price
-            pos.updated_at = datetime.utcnow()
+            pos.updated_at = _utcnow()
             return
 
         if qty < pos.qty:
@@ -143,7 +147,7 @@ class PortfolioService:
             pos.qty -= qty
             pos.realized_pnl += pnl
             pos.mark_price = price
-            pos.updated_at = datetime.utcnow()
+            pos.updated_at = _utcnow()
             self._journal(
                 client_order_id=None,
                 provider=provider,
@@ -165,7 +169,7 @@ class PortfolioService:
             pos.realized_pnl += pnl
             pos.status = "closed"
             pos.mark_price = price
-            pos.updated_at = datetime.utcnow()
+            pos.updated_at = _utcnow()
             self._journal(
                 client_order_id=None,
                 provider=provider,
@@ -191,7 +195,7 @@ class PortfolioService:
             pos.avg_entry = price
             pos.mark_price = price
             pos.status = "open"
-            pos.updated_at = datetime.utcnow()
+            pos.updated_at = _utcnow()
             self._journal(
                 client_order_id=None,
                 provider=provider,
@@ -216,7 +220,7 @@ class PortfolioService:
                     p.unrealized_pnl = (px - p.avg_entry) * p.qty
                 else:
                     p.unrealized_pnl = (p.avg_entry - px) * p.qty
-                p.updated_at = datetime.utcnow()
+                p.updated_at = _utcnow()
         self.db.commit()
         return open_pos
 

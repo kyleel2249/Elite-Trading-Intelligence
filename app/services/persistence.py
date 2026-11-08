@@ -1,12 +1,16 @@
 """Persist market snapshots, orders, council decisions, forecasts."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models import MarketSnapshot, OrderRecord, RiskEvent, CouncilDecisionRecord, ForecastRecord
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def save_snapshot(db: Session, snap: dict[str, Any]) -> MarketSnapshot:
@@ -18,7 +22,7 @@ def save_snapshot(db: Session, snap: dict[str, Any]) -> MarketSnapshot:
         ask=snap.get("ask"),
         volume=snap.get("volume"),
         ts_provider=None,
-        ts_utc=datetime.utcnow(),
+        ts_utc=_utcnow(),
         data_status=snap.get("data_status", "unknown"),
         quality_flags={"exchange": snap.get("exchange"), "quote_currency": snap.get("quote_currency")},
     )
@@ -31,7 +35,7 @@ def save_snapshot(db: Session, snap: dict[str, Any]) -> MarketSnapshot:
 def save_order(db: Session, payload: dict[str, Any]) -> OrderRecord:
     risk = payload.get("risk") or {}
     row = OrderRecord(
-        client_order_id=payload.get("client_order_id") or f"unknown-{datetime.utcnow().timestamp()}",
+        client_order_id=payload.get("client_order_id") or f"unknown-{_utcnow().timestamp()}",
         provider=payload.get("provider", "unknown"),
         environment=payload.get("environment", "paper"),
         symbol=payload.get("symbol", ""),
