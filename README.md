@@ -25,13 +25,13 @@ ETI is two pieces: the **FastAPI origin** (Python, runs the app) and an optional
 
 **If the Worker returns `"status": "misconfigured"` / `BACKEND_URL is not set`, the origin is not connected yet:**
 
-1. Deploy the origin — one click on Render via [`render.yaml`](render.yaml) (Dashboard → New → Blueprint), or any Docker host (`docker compose up --build`). Confirm `https://<origin>/api/system/health` returns `{"status":"ok"...}`.
+1. Deploy the origin — run the **Deploy** GitHub Action (Fly.io, see [`fly.toml`](fly.toml)), or self-host with [`docker-compose.tunnel.yml`](docker-compose.tunnel.yml) (Cloudflare Tunnel, no cloud host). Confirm `https://<origin>/api/system/health` returns `{"status":"ok"...}`.
 2. Point the Worker at it (no trailing slash):
 
 ```
 npm install
 npx wrangler deploy
-npx wrangler secret put BACKEND_URL   # https://eti-api.onrender.com
+npx wrangler secret put BACKEND_URL   # https://eti-trading-intelligence.fly.dev
 curl https://<worker>.workers.dev/__eti/status
 ```
 

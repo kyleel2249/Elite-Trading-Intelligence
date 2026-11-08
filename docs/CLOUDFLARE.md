@@ -3,34 +3,41 @@
 ETI is a **Python FastAPI** application. It does **not** run inside Cloudflare Workers or Containers.
 
 The repo ships a **plain Worker** that reverse-proxies to your FastAPI origin (`BACKEND_URL`).
-Run the API with Render (blueprint included), Docker Compose, a VPS, Railway, Fly, or any host that can run the `Dockerfile`.
+Run the API on Fly.io (workflow included), a self-hosted Docker machine behind a Cloudflare Tunnel, or any host that can run the `Dockerfile`.
 
 ## Fixing: `"status": "misconfigured" — BACKEND_URL is not set`
 
 That JSON is the Worker telling you the origin has not been connected. It is not a crash. Fix = deploy the origin, then set one variable.
 
-### Step 1 — Deploy the FastAPI origin
+### Step 1 — Deploy the FastAPI origin (no Render)
 
-**Option A: Render (one click, `render.yaml` included)**
+**Option A: Fly.io via GitHub Actions (automated, config in `fly.toml`)**
 
-1. Render dashboard → **New → Blueprint** → select this repo → **Apply**.
-2. It builds the `Dockerfile`, creates a Postgres database, and auto-generates `SECRET_KEY` and `API_KEY` (read `API_KEY` under the service's Environment tab; you need it for POST routes).
-3. Wait until `https://eti-api.onrender.com/api/system/health` (your service URL) returns `{"status":"ok", ...}`.
+1. Install flyctl locally once and run `fly auth login`, then `fly tokens create deploy` (or create an org token) to get a token.
+2. In GitHub: **Settings → Secrets and variables → Actions → New repository secret**, add:
+   - `FLY_API_TOKEN`
+   - `API_KEY` and `SECRET_KEY` (long random values, e.g. `openssl rand -hex 32`)
+   - for the Worker job: `CLOUDFLARE_API_TOKEN` (Workers Edit permission) and `CLOUDFLARE_ACCOUNT_ID`
+   - optional provider keys: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `BINANCE_API_KEY`, `BINANCE_SECRET_KEY`, `FRED_API_KEY`, `NEWSAPI_KEY`, `QUIVER_API_KEY`
+3. **Actions → Deploy (Fly.io origin + Cloudflare Worker) → Run workflow.** It creates the app and a 1 GB volume if missing, sets secrets, deploys, waits for `/api/system/health`, then deploys the Worker with `BACKEND_URL` set to `https://<app>.fly.dev`.
 
-Notes: Render's free web tier sleeps when idle (first request is slow) and its free Postgres expires after 30 days; use a paid plan for anything long-lived.
+If the app name `eti-trading-intelligence` is taken, change `app` in `fly.toml` (or set repository variable `FLY_APP`). Fly.io is a paid service with no free tier; the config uses one small always-on machine (needed for the background jobs). SQLite lives on the volume, so keep a single machine, or switch `DATABASE_URL` to Postgres to scale out.
 
-**Option B: Docker Compose on any host**
+**Option B: Self-host with a Cloudflare Tunnel (no cloud host, free)**
+
+Run on any machine or VPS you control:
 
 ```bash
 git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
 cd Elite-Trading-Intelligence
 cp .env.example .env
-# edit .env — set APP_ENV=production, SECRET_KEY, API_KEY, DATABASE_URL (Postgres recommended)
-docker compose up --build -d
-curl -s http://localhost:8000/api/system/health
+# edit .env: APP_ENV=production, SECRET_KEY, API_KEY, TUNNEL_TOKEN
+docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up --build -d
 ```
 
-Expose it over HTTPS (Cloudflare Tunnel, load balancer, or your host's URL). The container honors `$PORT` and defaults to 8000.
+Create the tunnel token in Cloudflare Zero Trust → Networks → Tunnels, and add a public hostname pointing at `http://eti:8000`. Your origin is then `https://<that hostname>`. The machine must stay on for the site to stay up.
+
+**Option C: any other Docker host** (Railway, a VPS, Koyeb, Cloud Run): build the `Dockerfile`; it honors `$PORT` and defaults to 8000.
 
 ### Step 2 — Give the Worker its `BACKEND_URL`
 
@@ -39,7 +46,7 @@ Use **one** of these (they are alternatives, do not combine a secret and a varia
 ```bash
 # CLI (recommended; stored as an encrypted secret, survives redeploys)
 npx wrangler secret put BACKEND_URL
-# paste the origin only, no trailing slash, e.g. https://eti-api.onrender.com
+# paste the origin only, no trailing slash, e.g. https://eti-trading-intelligence.fly.dev
 ```
 
 or dashboard: **Workers & Pages → elite-trading-intelligence-eti → Settings → Variables and Secrets → Add** `BACKEND_URL`.
@@ -49,7 +56,7 @@ or dashboard: **Workers & Pages → elite-trading-intelligence-eti → Settings 
 
 ```bash
 curl -s https://elite-trading-intelligence-eti.<subdomain>.workers.dev/__eti/status
-# {"status":"configured","backend":"https://eti-api.onrender.com"}
+# {"status":"configured","backend":"https://eti-trading-intelligence.fly.dev"}
 curl -s https://elite-trading-intelligence-eti.<subdomain>.workers.dev/api/system/health
 ```
 
@@ -74,12 +81,7 @@ curl -s https://elite-trading-intelligence-eti.<subdomain>.workers.dev/api/syste
 
 ### GitHub Actions (optional)
 
-`.github/workflows/deploy-worker.yml` deploys on changes to the Worker files and injects `BACKEND_URL`:
-
-- Repository **secrets**: `CLOUDFLARE_API_TOKEN` (Workers Edit permission), `CLOUDFLARE_ACCOUNT_ID`
-- Repository **variable**: `BACKEND_URL`
-
-Do not enable both Workers Builds and this workflow for the same Worker.
+`.github/workflows/deploy.yml` (manual run) deploys the origin and then the Worker with the correct `BACKEND_URL` in one go. Do not also enable Workers Builds for the same Worker, or the two will fight over variables.
 
 ### Local
 

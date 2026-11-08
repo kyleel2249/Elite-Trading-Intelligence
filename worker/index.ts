@@ -2,8 +2,8 @@
  * ETI edge Worker — reverse proxy to an external FastAPI origin.
  *
  * Cloudflare Containers are NOT used. Run the Python app with Docker Compose,
- * a VPS, Render (see render.yaml) or any container host, then set BACKEND_URL
- * (e.g. https://eti-api.onrender.com).
+ * a VPS, Fly.io (see fly.toml), a Cloudflare Tunnel or any container host, then set BACKEND_URL
+ * (e.g. https://eti-trading-intelligence.fly.dev).
  *
  * Secrets and provider keys stay on the origin; this Worker only forwards HTTP.
  * Server-Sent Events (/api/stream/sse) stream straight through.
@@ -59,7 +59,7 @@ function missingBackendResponse(): Response {
       message:
         "BACKEND_URL is not set. Deploy the FastAPI app (Docker Compose or any host), then set the Worker variable BACKEND_URL to that origin (no trailing slash).",
       fix: [
-        "1. Deploy the origin (Render blueprint: render.yaml, or `docker compose up --build`).",
+        "1. Deploy the origin (Fly.io: run the 'Deploy' GitHub workflow; or self-host with docker-compose.tunnel.yml).",
         "2. Run: npx wrangler secret put BACKEND_URL   (paste https://your-origin, no trailing slash)",
         "3. Or in the dashboard: Workers & Pages -> this Worker -> Settings -> Variables and Secrets -> add BACKEND_URL.",
         "4. Re-test: curl <worker-url>/api/system/health",
