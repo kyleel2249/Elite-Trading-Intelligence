@@ -8,7 +8,9 @@
     "dev": "wrangler dev",
     "check:worker": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
     "test": "node --test worker/*.test.ts",
-    "check": "npm run test && npm run check:worker"
+    "check": "npm run test && npm run check:worker",
+    "build:knowledge": "node scripts/build-knowledge.mjs",
+    "pretest": "npm run build:knowledge"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

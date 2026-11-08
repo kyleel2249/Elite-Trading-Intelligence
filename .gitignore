@@ -65,3 +65,6 @@ tmp/
 .pytest_cache/
 node_modules/
 .wrangler/
+
+# Generated from app/knowledge by scripts/build-knowledge.mjs
+worker/knowledge.generated.json
