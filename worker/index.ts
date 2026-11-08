@@ -49,7 +49,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <section class="panel" style="margin-top:14px">
 <h2>Order Execution</h2>
 <div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
-<p class="execution-note">Orders are sent only after you preview and confirm them. Paper/Testnet is the recommended starting mode. Live mode requires the live switch, live broker credentials, the execution token, and the separate live activation secret. Never enter withdrawal or transfer credentials here.</p>
+<p class="execution-note">Orders are sent only after you preview and confirm them. Paper/Testnet is the recommended starting mode. Live mode requires the live switch, broker-specific live credentials, the execution token, and the separate live activation secret. Protect this dashboard with Cloudflare Access before entering credentials. Never enter withdrawal or transfer credentials here.</p>
 <div class="execution-grid">
 <label>Broker<select id="orderBroker"><option value="alpaca">Alpaca</option><option value="binance">Binance</option></select></label>
 <label>Mode<select id="orderMode"><option value="paper_testnet">Paper / Testnet</option><option value="live">Live trading</option></select></label>
@@ -99,13 +99,13 @@ function selectedOrder(){
  if(type==='limit') order.limitPrice=Number($('orderLimitPrice').value);
  return order;
 }
-function orderValidation(o){
+function orderValidation(o,requireCredentials=true){
  if(!/^[A-Z0-9._-]{2,24}$/.test(o.symbol))return 'Enter a valid symbol.';
  if(!Number.isFinite(o.quantity)||o.quantity<=0)return 'Enter a quantity greater than zero.';
  if(o.type==='limit'&&(!Number.isFinite(o.limitPrice)||o.limitPrice<=0))return 'Enter a valid limit price.';
  if(!$('operatorId').value.trim())return 'Enter an operator ID for the audit record.';
- if(!$('executionToken').value)return 'Enter your ETI execution token.';
- if(o.mode==='live'&&!$('liveActivationToken').value)return 'Enter the separate live activation secret.';
+ if(requireCredentials&&!$('executionToken').value)return 'Enter your ETI execution token.';
+ if(requireCredentials&&o.mode==='live'&&!$('liveActivationToken').value)return 'Enter the separate live activation secret.';
  if(o.mode==='live'&&(!executionStatus||executionStatus.live_trading_enabled!==true))return 'Live trading is not enabled in the Worker configuration.';
  return '';
 }
@@ -164,7 +164,7 @@ $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').va
 $('orderMode').onchange=()=>{$('liveTokenWrap').style.display=$('orderMode').value==='live'?'flex':'none';};
 $('orderBroker').onchange=()=>{$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';};
 $('orderSymbol').onchange=()=>{};
-$('previewOrder').onclick=()=>{const o=selectedOrder();const problem=orderValidation(o);if(problem){$('orderOutput').textContent=problem;return;}renderPreview(o);};
+$('previewOrder').onclick=()=>{const o=selectedOrder();const problem=orderValidation(o,false);if(problem){$('orderOutput').textContent=problem;return;}renderPreview(o);};
 $('buyOrder').onclick=()=>submitOrder('buy');
 $('sellOrder').onclick=()=>submitOrder('sell');
 $('clearExecutionSecrets').onclick=()=>{$('executionToken').value='';$('liveActivationToken').value='';$('orderOutput').textContent='Credentials cleared from this page.';$('executionHistory').textContent='Enter your execution token, then refresh.';};
