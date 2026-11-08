@@ -1,6 +1,6 @@
 {
   "name": "elite-trading-intelligence-eti",
-  "main": "worker/index.ts",
+  "main": "worker/main.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
   "observability": {
