@@ -22,7 +22,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import JournalEntry
+from app.models import JournalEntry, OrderRecord, Position
 from app.trading.portfolio import PortfolioService
 
 
@@ -97,7 +97,13 @@ def build_risk_context(
     daily_pnl = 0.0
     if db is not None:
         summary = PortfolioService(db).portfolio_summary(env)
-        open_positions = int(summary["open_positions"])
+        occupied = {(p.provider, p.symbol) for p in db.query(Position).filter(
+            Position.environment == env, Position.status == "open").all()}
+        reserved = {(o.provider, o.symbol) for o in db.query(OrderRecord).filter(
+            OrderRecord.environment == env,
+            OrderRecord.status.in_(["pending", "submitted", "partial", "new"]),
+            OrderRecord.risk_approved.is_(True)).all()}
+        open_positions = len(occupied | reserved)
         net_pnl = float(summary["net_pnl"])
         daily_pnl = _realized_pnl_today(db, env)
 
