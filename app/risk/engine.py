@@ -72,14 +72,27 @@ class RiskEngine:
         reasons: list[str] = []
         s = self.settings
 
+        # --- Kill switch (all environments) ---
+        if getattr(s, "kill_switch", False):
+            reasons.append("KILL_SWITCH is active — all order submission halted")
+
         # --- Environment gates ---
         if proposal.environment == "live":
             if not s.live_trading_enabled:
                 reasons.append("LIVE_TRADING_ENABLED is false")
             if proposal.provider == "alpaca" and s.alpaca_paper:
-                reasons.append("Alpaca is configured for paper (ALPACA_PAPER=true)")
+                reasons.append("Alpaca is configured for paper (ALPACA_PAPER=true); set ALPACA_PAPER=false for live")
             if proposal.provider == "binance" and not s.binance_live_trading_enabled:
                 reasons.append("BINANCE_LIVE_TRADING_ENABLED is false")
+            # Live requires limit orders by default for controllable entry
+            if proposal.order_type == "market":
+                reasons.append("Live orders require limit order_type (market blocked on live path)")
+            if proposal.limit_price is None or proposal.limit_price <= 0:
+                reasons.append("Live orders require a positive limit_price")
+            # Explicit confirmation via meta
+            if getattr(s, "require_live_confirmation", True):
+                if not (proposal.meta or {}).get("live_confirmed"):
+                    reasons.append("Live order requires live_confirmed=true in request meta")
 
         # --- Basic validation ---
         if proposal.qty <= 0:
@@ -88,6 +101,18 @@ class RiskEngine:
             reasons.append("Side must be buy or sell")
         if proposal.equity <= 0:
             reasons.append("Account equity must be positive for risk sizing")
+
+        # --- Max position notional (6% default) ---
+        max_notional_pct = getattr(s, "max_position_notional_pct", 6.0)
+        if proposal.equity > 0 and proposal.qty > 0:
+            px = proposal.limit_price or (proposal.meta or {}).get("ref_price")
+            if px and float(px) > 0:
+                notional = float(proposal.qty) * float(px)
+                notional_pct = (notional / proposal.equity) * 100.0
+                if notional_pct > max_notional_pct + 1e-9:
+                    reasons.append(
+                        f"Position notional {notional_pct:.2f}% exceeds max {max_notional_pct}% of equity"
+                    )
 
         # --- Position limits ---
         if proposal.current_open_positions >= s.max_open_positions:
