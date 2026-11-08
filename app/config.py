@@ -24,22 +24,29 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./eti.db"
 
     live_trading_enabled: bool = False
+    # Global kill switch — rejects all order submission when true.
+    kill_switch: bool = False
     default_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 3.0
     max_portfolio_drawdown_pct: float = 10.0
     max_open_positions: int = 8
     max_correlated_exposure_pct: float = 25.0
+    # Hard notional cap per position as % of equity (product rule).
+    max_position_notional_pct: float = 6.0
+    require_live_confirmation: bool = True
 
     # Server-side equity baselines used by the risk engine (never taken from requests).
     # Paper/testnet equity = paper_starting_equity + realized + unrealized PnL.
     paper_starting_equity: float = 10000.0
-    # Live equity must be set explicitly until broker account sync exists; unset => live orders rejected.
+    # Optional override when broker equity sync is unavailable.
     live_account_equity: Optional[float] = None
+    use_broker_equity_for_live: bool = True
 
     alpaca_api_key: Optional[str] = None
     alpaca_secret_key: Optional[str] = None
     alpaca_paper: bool = True
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
+    alpaca_live_base_url: str = "https://api.alpaca.markets"
 
     binance_api_key: Optional[str] = None
     binance_secret_key: Optional[str] = None
@@ -59,6 +66,7 @@ class Settings(BaseSettings):
     mtm_interval_seconds: int = 60
     reconcile_interval_seconds: int = 120
     investor_monitor_interval_seconds: int = 1800
+    adaptive_edge_interval_seconds: int = 900
 
     data_max_age_seconds: int = 300
     require_fresh_data_for_live_orders: bool = True
