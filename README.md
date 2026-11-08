@@ -106,7 +106,7 @@ POST /api/orders
 Authorization: Bearer <ETI_EXECUTION_TOKEN>
 Content-Type: application/json
 
-{"broker":"alpaca","symbol":"AAPL","side":"buy","type":"limit","quantity":1,"limitPrice":150,"clientOrderId":"eti-demo-000001"}
+{"broker":"alpaca","symbol":"AAPL","side":"buy","type":"limit","quantity":1,"limitPrice":150,"clientOrderId":"eti-demo-000001","riskConfirmed":true}
 ```
 
 For Binance use `"broker":"binance"` and a Binance Spot Testnet symbol such as `BTCUSDT`. Check `GET /api/execution/status` for configured adapters and kill-switch state. This endpoint intentionally reports paper/testnet-only mode.
