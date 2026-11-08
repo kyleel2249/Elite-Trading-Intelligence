@@ -9,7 +9,8 @@
   "vars": {
     "ETI_KILL_SWITCH": "false",
     "ETI_LIVE_TRADING_ENABLED": "true",
-    "ETI_EDGE": "native"
+    "ETI_EDGE": "native",
+    "MARKET_PROVIDER_ORDER": "binance,bybit,okx"
   },
   "kv_namespaces": [
     {

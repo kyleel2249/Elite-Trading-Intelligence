@@ -7,7 +7,8 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "check:worker": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
-    "check": "npm run check:worker"
+    "test": "node --test worker/market.test.ts",
+    "check": "npm run test && npm run check:worker"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
