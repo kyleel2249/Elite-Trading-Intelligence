@@ -113,7 +113,7 @@ function renderPreview(o){
  const summary={broker:o.broker,mode:o.mode==='live'?'LIVE':'paper/testnet',symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
  if(o.type==='limit')summary.limitPrice=o.limitPrice;
  summary.executionSource={actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'};
- $('orderOutput').textContent='Review this order carefully before submission:\n'+JSON.stringify(summary,null,2);
+ $('orderOutput').textContent='Review this order carefully before submission: | '+JSON.stringify(summary,null,2);
 }
 async function refreshExecutionStatus(){
  try{
@@ -144,7 +144,7 @@ async function submitOrder(side){
  renderPreview(o);
  const modeLabel=o.mode==='live'?'LIVE':'PAPER / TESTNET';
  const detail=side.toUpperCase()+' '+o.quantity+' '+o.symbol+' via '+o.broker.toUpperCase()+' ('+modeLabel+', '+o.type.toUpperCase()+')';
- if(!window.confirm('FINAL ORDER CONFIRMATION\n\n'+detail+'\n\nThis will submit a real broker order if LIVE is selected. Continue?'))return;
+ if(!window.confirm('FINAL ORDER CONFIRMATION |  | '+detail+' |  | This will submit a real broker order if LIVE is selected. Continue?'))return;
  const clientOrderId='eti'+crypto.randomUUID().replace(/-/g,'').slice(0,29);
  const body={broker:o.broker,symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity,timeInForce:o.timeInForce,clientOrderId,riskConfirmed:true,executionSource:{actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'}};
  if(o.type==='limit')body.limitPrice=o.limitPrice;
