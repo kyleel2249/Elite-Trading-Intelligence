@@ -1,54 +1,119 @@
-import { Container, getContainer } from "@cloudflare/containers";
+/**
+ * ETI edge Worker — reverse proxy to an external FastAPI origin.
+ *
+ * Cloudflare Containers are NOT used. Run the Python app with Docker Compose,
+ * a VPS, or any container host, then set BACKEND_URL (e.g. https://api.example.com).
+ *
+ * Secrets and provider keys stay on the origin; this Worker only forwards HTTP.
+ */
 
-interface Env {
-  ETI_CONTAINER: DurableObjectNamespace<EtiContainer>;
-  SECRET_KEY?: string;
-  API_KEY?: string;
-  DATABASE_URL?: string;
-  ALPACA_API_KEY?: string;
-  ALPACA_SECRET_KEY?: string;
-  BINANCE_API_KEY?: string;
-  BINANCE_SECRET_KEY?: string;
-  FRED_API_KEY?: string;
-  NEWSAPI_KEY?: string;
-  QUIVER_API_KEY?: string;
-  LIQUID_API_KEY?: string;
-  LIQUID_API_BASE_URL?: string;
-  ALPACA_BASE_URL?: string;
-  NEWS_API_KEY?: string;
+export interface Env {
+  /** Origin of the ETI FastAPI process, no trailing slash. Example: https://eti.example.com */
+  BACKEND_URL?: string;
 }
 
-// Secrets are set with `wrangler secret put NAME` and forwarded server-side only.
-const FORWARDED = [
-  "SECRET_KEY", "API_KEY", "DATABASE_URL", "ALPACA_API_KEY", "ALPACA_SECRET_KEY",
-  "BINANCE_API_KEY", "BINANCE_SECRET_KEY", "FRED_API_KEY", "NEWSAPI_KEY", "QUIVER_API_KEY",
-  "LIQUID_API_KEY", "LIQUID_API_BASE_URL", "ALPACA_BASE_URL", "NEWS_API_KEY",
-] as const;
+const HOP_BY_HOP = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailers",
+  "transfer-encoding",
+  "upgrade",
+  "host",
+  "cf-connecting-ip",
+  "cf-ipcountry",
+  "cf-ray",
+  "cf-visitor",
+  "x-forwarded-proto",
+  "x-forwarded-for",
+]);
 
-export class EtiContainer extends Container<Env> {
-  defaultPort = 8000;
-  sleepAfter = "30m";
-
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    const vars: Record<string, string> = {
-      APP_ENV: "production",
-      // Paper/testnet only. Live trading stays disabled.
-      LIVE_TRADING_ENABLED: "false",
-      BINANCE_LIVE_TRADING_ENABLED: "false",
-      ALPACA_PAPER: "true",
-      BINANCE_TESTNET_ENABLED: "true",
-    };
-    for (const k of FORWARDED) {
-      const v = env[k];
-      if (v) vars[k] = v;
-    }
-    this.envVars = vars;
-  }
+function missingBackendResponse(): Response {
+  const body = {
+    service: "Elite Trading Intelligence",
+    role: "edge-proxy",
+    status: "misconfigured",
+    message:
+      "BACKEND_URL is not set. Deploy the FastAPI app (Docker Compose or any host), then set the Worker variable BACKEND_URL to that origin (no trailing slash).",
+    docs: "https://github.com/kyleel2249/Elite-Trading-Intelligence/blob/main/docs/CLOUDFLARE.md",
+    local: "docker compose up --build → http://localhost:8000",
+  };
+  return new Response(JSON.stringify(body, null, 2), {
+    status: 503,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    return getContainer(env.ETI_CONTAINER).fetch(request);
+    const backend = (env.BACKEND_URL || "").trim().replace(/\/+$/, "");
+    if (!backend) {
+      return missingBackendResponse();
+    }
+
+    let targetBase: URL;
+    try {
+      targetBase = new URL(backend);
+    } catch {
+      return new Response(
+        JSON.stringify({
+          error: "BACKEND_URL is not a valid absolute URL",
+          backend_url: backend,
+        }),
+        { status: 500, headers: { "content-type": "application/json" } },
+      );
+    }
+
+    const incoming = new URL(request.url);
+    const target = new URL(incoming.pathname + incoming.search, targetBase);
+
+    const headers = new Headers();
+    request.headers.forEach((value, key) => {
+      if (!HOP_BY_HOP.has(key.toLowerCase())) {
+        headers.set(key, value);
+      }
+    });
+    headers.set("x-forwarded-host", incoming.host);
+    headers.set("x-forwarded-proto", incoming.protocol.replace(":", ""));
+
+    const init: RequestInit = {
+      method: request.method,
+      headers,
+      redirect: "manual",
+    };
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      init.body = request.body;
+      // @ts-expect-error duplex required for streaming bodies in some runtimes
+      init.duplex = "half";
+    }
+
+    try {
+      const upstream = await fetch(target.toString(), init);
+      const outHeaders = new Headers(upstream.headers);
+      outHeaders.set("x-eti-proxy", "cloudflare-worker");
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: outHeaders,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "upstream fetch failed";
+      return new Response(
+        JSON.stringify({
+          error: "backend_unreachable",
+          message,
+          backend: targetBase.origin,
+        }),
+        {
+          status: 502,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        },
+      );
+    }
   },
 };

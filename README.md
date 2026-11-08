@@ -19,6 +19,19 @@ Open http://localhost:8000  · API docs http://localhost:8000/docs
 
 Health: `curl -s localhost:8000/api/system/health | jq`
 
+## Cloudflare (edge proxy only)
+
+Cloudflare Workers **do not run** the Python app. Deploy FastAPI with Docker (above) or any host,
+then optionally deploy the Worker as a reverse proxy:
+
+```bash
+npm install
+npx wrangler deploy
+npx wrangler secret put BACKEND_URL   # https://your-origin.example.com
+```
+
+Details and Workers Builds settings: [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md).
+
 ## Local Python (no Docker)
 
 ```bash
@@ -79,8 +92,9 @@ curl -X POST localhost:8000/api/trading/order \
 
 - **Local development** (`APP_ENV=development`): routes are open if `API_KEY` is unset.
 - **Production / staging** (`APP_ENV=production|prod|staging`): if `API_KEY` is unset, protected routes
-  refuse requests with HTTP 503 instead of running open. The Cloudflare worker sets
-  `APP_ENV=production`, so set the secret: `wrangler secret put API_KEY`.
+  refuse requests with HTTP 503 instead of running open. Set `APP_ENV` and `API_KEY` on the
+  **FastAPI origin** (Docker/host). Optional Cloudflare Worker only proxies to `BACKEND_URL`
+  (see `docs/CLOUDFLARE.md`); it does not run the Python app or hold broker secrets.
 - **Live orders** are refused (HTTP 403) on any deployment without an `API_KEY`.
 
 ## Safety

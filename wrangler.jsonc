@@ -1,18 +1,15 @@
 {
+  // Plain Worker (no Cloudflare Containers). Proxies to BACKEND_URL.
   "name": "elite-trading-intelligence-eti",
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-01",
-  "containers": [
-    {
-      "class_name": "EtiContainer",
-      "image": "./Dockerfile",
-      "max_instances": 1,
-      "instance_type": "basic"
-    }
+  "observability": { "enabled": true },
+  // Retire the previous Container Durable Object so deploy does not require Containers API.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["EtiContainer"] },
+    { "tag": "v2", "deleted_classes": ["EtiContainer"] }
   ],
-  "durable_objects": {
-    "bindings": [{ "class_name": "EtiContainer", "name": "ETI_CONTAINER" }]
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EtiContainer"] }],
-  "observability": { "enabled": true }
+  "vars": {
+    "ETI_EDGE": "proxy"
+  }
 }

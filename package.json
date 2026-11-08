@@ -1,15 +1,12 @@
 {
   "name": "eti-cloudflare",
   "private": true,
-  "version": "1.0.0",
-  "description": "Cloudflare Containers wrapper for the ETI FastAPI app",
+  "version": "1.1.0",
+  "description": "Cloudflare Worker edge proxy for ETI (FastAPI runs outside Containers)",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "check": "python -m compileall -q app tests && PYTHONPATH=. python -m pytest -q"
-  },
-  "dependencies": {
-    "@cloudflare/containers": "^0.0.30"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
