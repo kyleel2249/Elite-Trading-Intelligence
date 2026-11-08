@@ -13,12 +13,12 @@ Run the API with Docker Compose, a VPS, Railway, Fly, Render, or any host that c
 git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
 cd Elite-Trading-Intelligence
 cp .env.example .env
-# edit .env — set SECRET_KEY, API_KEY, DATABASE_URL (Postgres in production)
+# edit .env: set API_KEY and DATABASE_URL (Postgres in production); keep APP_ENV=production
 docker compose up --build -d
 curl -s http://localhost:8000/api/system/health
 ```
 
-Expose that origin with HTTPS (Cloudflare Tunnel, load balancer, or your host’s URL).
+Compose binds the origin to 127.0.0.1:8000 and forces APP_ENV=production. Expose it through a local HTTPS reverse proxy or Cloudflare Tunnel. A containerized proxy can use the Compose network.
 
 ### 2. Deploy the edge Worker (no Containers)
 
@@ -63,8 +63,8 @@ after a successful image build and Worker upload. The edge Worker no longer refe
 
 | Variable | Notes |
 |----------|--------|
-| `SECRET_KEY` | Long random string |
-| `API_KEY` | Protects mutating routes (`X-API-Key`) |
+| `APP_ENV` | Defaults to production; Compose forces production |
+| `API_KEY` | Required for mutations and private portfolio/history reads (`X-API-Key`) |
 | `DATABASE_URL` | Prefer Postgres in production (see `docs/POSTGRES.md`) |
 | Provider keys | Alpaca, Binance, FRED, NewsAPI, Quiver, Liquid as needed |
 | `LIVE_TRADING_ENABLED` | Keep `false` until intentional |
@@ -101,6 +101,7 @@ Point `BACKEND_URL` at the tunnel hostname, or put the Worker in front of the tu
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+# Set API_KEY in .env, or explicitly choose APP_ENV=development for local-only unauthenticated work.
 uvicorn app.main:app --reload --port 8000
 ```
 
