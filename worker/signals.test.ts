@@ -15,9 +15,9 @@ test("signal endpoint rejects malformed symbols and unsupported intervals", asyn
 test("signal endpoint calculates market-derived BUY, ATR risk levels and attribution", async () => {
   const now = Date.now();
   const candles = Array.from({ length: 500 }, (_, i) => {
-    const close = 100 + i * 0.8;
+    const close = 100 + i * 0.8 + (i === 499 ? 3 : 0);
     const open = close - 0.25;
-    return [now - (499 - i) * 3600000, String(open), String(close + 1.2), String(open - 0.5), String(close), String(100 + (i % 7) * 25)];
+    return [now - (499 - i) * 3600000, String(open), String(close + 1.2), String(open - 0.5), String(close), String(i === 499 ? 5000 : 100 + (i % 7) * 25)];
   });
   globalThis.fetch = (async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch;
   const res = await handleSignals(new Request("https://eti.test/api/signals?symbol=BTCUSDT&interval=1h"), {});
