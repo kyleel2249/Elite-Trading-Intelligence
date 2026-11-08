@@ -89,7 +89,7 @@ See [Cloudflare deployment guide](docs/CLOUDFLARE.md).
 
 ## Broker execution — paper/testnet only
 
-The Worker includes a server-side execution gateway for **Alpaca Paper** and **Binance Spot Testnet**. It has no live-trading code path. Both adapters submit only spot/equity buy or sell market/limit orders; advanced order types, cancel/replace, persistent audit history and portfolio reconciliation are not yet exposed.
+The Worker includes a server-side execution gateway for **Alpaca Paper**, **Binance Spot Testnet**, and a separately locked live route. Live execution is not ready for activation: it now requires a reachable ETI FastAPI risk-preflight service, independent live credentials, an explicit per-order confirmation and server-side quantity/notional caps. The Worker does not expose withdrawal, transfer, funding or wallet-management endpoints.
 
 Configure these as **Cloudflare Worker secrets**, never frontend variables or GitHub source files:
 
@@ -135,7 +135,7 @@ Every submitted order must include an `executionSource` object so the execution 
 
 Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, paper/testnet/live mode, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
 
-### Live trading is present but locked by default
+### Live trading is locked pending integrated risk preflight
 
 A separate `POST /api/orders/live` route exists. It is not activated by the default deployment. Live submission requires **all** of the following:
 
@@ -146,5 +146,7 @@ A separate `POST /api/orders/live` route exists. It is not activated by the defa
 5. Keep the general `ETI_EXECUTION_TOKEN` authentication in place. The emergency `ETI_KILL_SWITCH=true` rejects both paper and live submissions.
 6. Configure `ETI_LIVE_MAX_NOTIONAL_USD` and `ETI_LIVE_MAX_ORDER_QUANTITY` as positive server-side Worker variables. Live orders fail closed if either cap is missing or invalid.
 7. Live orders are limit-order only. The Worker rejects live market orders and rejects any quantity or `quantity × limitPrice` that exceeds the configured caps. This is a deterministic order-input cap, not a guarantee against gaps, slippage, exchange faults or losses.
+8. Configure `ETI_RISK_GATE_URL` as the HTTPS URL of the deployed ETI FastAPI `/api/risk-gateway/preflight` endpoint, and `ETI_RISK_GATE_TOKEN` as a Worker secret matching the FastAPI `API_KEY`. The Worker sends each live order to this service before contacting a broker. Missing, unreachable, unauthorized or rejected preflight blocks the order.
+9. The FastAPI preflight derives equity, open positions, daily PnL, drawdown and quote freshness server-side, and attaches verified investor-disclosure context. It never submits an order. Until the FastAPI service is deployed, reachable and configured with synchronized live-account equity, live preflight will reject orders.
 
-Paper/testnet remains the default `POST /api/orders` route. Never enable withdrawals, transfers, or wallet-management permissions on any broker API key. Live trading has not been activated or validated by this repository change. The execution history endpoint stores audit records in KV for 90 days; configure backups/retention separately if longer regulatory retention is required.
+Paper/testnet remains the default `POST /api/orders` route. The Cloudflare Worker dashboard and Python/FastAPI intelligence service are separate deployable components: the risk-gateway integration requires the FastAPI service to be hosted at a stable HTTPS origin. The Cloudflare-only Worker deployment by itself does not host the Python portfolio/disclosure engine. Never enable withdrawals, transfers, or wallet-management permissions on any broker API key. Live trading has not been activated or validated by this repository change. The execution history endpoint stores audit records in KV for 90 days; configure backups/retention separately if longer regulatory retention is required.
