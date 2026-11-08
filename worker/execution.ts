@@ -12,6 +12,8 @@ export interface ExecutionEnv {
   ETI_KILL_SWITCH?: string;
   ETI_LIVE_TRADING_ENABLED?: string;
   ETI_LIVE_ACTIVATION_TOKEN?: string;
+  ETI_LIVE_MAX_NOTIONAL_USD?: string;
+  ETI_LIVE_MAX_ORDER_QUANTITY?: string;
   ALPACA_LIVE_API_KEY?: string;
   ALPACA_LIVE_SECRET_KEY?: string;
   BINANCE_LIVE_API_KEY?: string;
@@ -37,6 +39,31 @@ async function hmac(secret: string, query: string) {
 }
 function safeOrderId(value: unknown) {
   return typeof value==="string" && /^[A-Za-z0-9_-]{8,36}$/.test(value);
+}
+
+/**
+ * Fail-closed guard for live orders. Live market orders are intentionally
+ * disallowed: only a user-reviewed limit order has a deterministic price cap.
+ * Both caps must be explicitly configured as Worker variables.
+ */
+export function validateLiveOrderLimits(input: {
+  type: unknown; quantity: number; limitPrice: number; env: ExecutionEnv;
+}): { ok: true; notionalUsd: number } | { ok: false; reason: string } {
+  if (input.type !== "limit") return { ok: false, reason: "live_limit_orders_only" };
+  const maxNotional = Number(input.env.ETI_LIVE_MAX_NOTIONAL_USD ?? "");
+  const maxQuantity = Number(input.env.ETI_LIVE_MAX_ORDER_QUANTITY ?? "");
+  if (!Number.isFinite(maxNotional) || maxNotional <= 0)
+    return { ok: false, reason: "live_notional_cap_not_configured" };
+  if (!Number.isFinite(maxQuantity) || maxQuantity <= 0)
+    return { ok: false, reason: "live_quantity_cap_not_configured" };
+  if (!Number.isFinite(input.quantity) || input.quantity <= 0 || input.quantity > maxQuantity)
+    return { ok: false, reason: "live_quantity_limit_exceeded" };
+  if (!Number.isFinite(input.limitPrice) || input.limitPrice <= 0)
+    return { ok: false, reason: "live_limit_price_required" };
+  const notionalUsd = input.quantity * input.limitPrice;
+  if (!Number.isFinite(notionalUsd) || notionalUsd > maxNotional)
+    return { ok: false, reason: "live_notional_limit_exceeded" };
+  return { ok: true, notionalUsd };
 }
 export async function handleExecution(req: Request, env: ExecutionEnv): Promise<Response> {
   const url=new URL(req.url);
@@ -83,6 +110,16 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
   if(type==="limit" && (!Number.isFinite(num(body.limitPrice)) || num(body.limitPrice)<=0))
     return reply({error:"invalid_limit_price"},400);
   if(type==="market" && body.limitPrice!==undefined) return reply({error:"unexpected_limit_price"},400);
+  if(requestedLive) {
+    const liveLimits = validateLiveOrderLimits({
+      type, quantity, limitPrice: num(body.limitPrice), env,
+    });
+    if(!liveLimits.ok) return reply({
+      error: "live_risk_limit_rejected",
+      reason: liveLimits.reason,
+      message: "Live orders require configured server-side quantity and USD notional caps, and limit orders only.",
+    }, 403);
+  }
   try {
     let result:any, mode:string;
     if(broker==="alpaca") {
