@@ -53,6 +53,8 @@ def test_preflight_connects_market_risk_and_disclosures_without_submitting(monke
     assert result["market"]["price"] == 100.0
     assert result["disclosure_context"]["high_impact_verified_count"] == 1
     assert result["disclosure_context"]["interpretation"].startswith("Research context only")
+    assert "market_research" in result
+    assert "council_action" in result["market_research"]
     assert result["submits_order"] is False
 
 
