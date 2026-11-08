@@ -144,5 +144,7 @@ A separate `POST /api/orders/live` route exists. It is not activated by the defa
 3. Add separate live broker credentials as `ALPACA_LIVE_API_KEY`, `ALPACA_LIVE_SECRET_KEY`, `BINANCE_LIVE_API_KEY`, and `BINANCE_LIVE_SECRET_KEY`.
 4. Submit to `/api/orders/live` with `riskConfirmed:true`, a unique client order ID and the required `executionSource`.
 5. Keep the general `ETI_EXECUTION_TOKEN` authentication in place. The emergency `ETI_KILL_SWITCH=true` rejects both paper and live submissions.
+6. Configure `ETI_LIVE_MAX_NOTIONAL_USD` and `ETI_LIVE_MAX_ORDER_QUANTITY` as positive server-side Worker variables. Live orders fail closed if either cap is missing or invalid.
+7. Live orders are limit-order only. The Worker rejects live market orders and rejects any quantity or `quantity × limitPrice` that exceeds the configured caps. This is a deterministic order-input cap, not a guarantee against gaps, slippage, exchange faults or losses.
 
 Paper/testnet remains the default `POST /api/orders` route. Never enable withdrawals, transfers, or wallet-management permissions on any broker API key. Live trading has not been activated or validated by this repository change. The execution history endpoint stores audit records in KV for 90 days; configure backups/retention separately if longer regulatory retention is required.
