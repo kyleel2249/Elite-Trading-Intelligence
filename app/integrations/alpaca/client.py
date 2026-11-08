@@ -96,14 +96,20 @@ class AlpacaClient(BaseProvider):
             price = float(trade.get("p") or 0)
             ts_raw = trade.get("t")
             ts_utc = datetime.now(timezone.utc)
+            timestamp_valid = False
             if ts_raw:
                 try:
-                    ts_utc = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+                    parsed = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                    if parsed.tzinfo is not None:
+                        ts_utc = parsed.astimezone(timezone.utc)
+                        timestamp_valid = True
                 except Exception:
                     pass
             now = datetime.now(timezone.utc)
             age = (now - ts_utc).total_seconds()
-            status = "fresh" if age <= 60 else ("delayed" if age <= 300 else "stale")
+            status = "fresh" if 0 <= age <= 60 else ("delayed" if 60 < age <= 300 else "stale")
+            if not timestamp_valid or age < 0:
+                status = "invalid"
             return NormalizedQuote(
                 provider=self.name,
                 symbol=symbol,
@@ -113,7 +119,7 @@ class AlpacaClient(BaseProvider):
                 bid=None,
                 ask=None,
                 volume=None,
-                ts_provider=ts_utc,
+                ts_provider=ts_utc if timestamp_valid else None,
                 ts_utc=ts_utc,
                 retrieved_at=now,
                 data_status=status,
