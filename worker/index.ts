@@ -190,7 +190,7 @@ export default {
       const limit = url.searchParams.get("limit") || (endpoint === "klines" ? "120" : endpoint === "depth" ? "20" : "50");
       if (!/^[A-Z0-9]{5,20}$/.test(symbol)) return json({ error: "invalid_symbol" }, 400);
       if (!["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"].includes(interval)) return json({ error: "invalid_interval" }, 400);
-      if (!/^\\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > (endpoint === "depth" ? 100 : 1000)) return json({ error: "invalid_limit" }, 400);
+      if (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > (endpoint === "depth" ? 100 : 1000)) return json({ error: "invalid_limit" }, 400);
       const params = new URLSearchParams({ symbol, limit });
       if (endpoint === "klines") params.set("interval", interval);
       const path = endpoint === "klines" ? "/api/v3/klines" : endpoint === "depth" ? "/api/v3/depth" : "/api/v3/trades";
