@@ -94,13 +94,15 @@ class InvestorMonitorJob:
 
     async def stop(self) -> None:
         self._running = False
-        if self._task:
-            self._task.cancel()
+        task = self._task
+        if task is not None:
+            task.cancel()
             try:
-                await self._task
-            except Exception:
+                await task
+            except asyncio.CancelledError:
                 pass
-            self._task = None
+            finally:
+                self._task = None
 
 
 investor_monitor_job = InvestorMonitorJob()
