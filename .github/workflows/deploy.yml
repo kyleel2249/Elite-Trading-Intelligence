@@ -27,7 +27,7 @@ jobs:
           node-version: "22"
           cache: "npm"
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       - name: Validate Worker bundle
         run: npm run check:worker
       - name: Deploy to Cloudflare Workers
