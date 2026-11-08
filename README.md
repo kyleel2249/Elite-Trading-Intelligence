@@ -117,3 +117,15 @@ GitHub Actions runs compile + pytest on every push to `main`.
 ## Disclaimer
 
 Research and trading software. Use at your own risk. Live trading can result in loss of capital.
+
+## Security defaults and API compatibility
+
+The application now defaults to `APP_ENV=production`. Configure `API_KEY` before using mutations or private portfolio, journal, and order-history reads. A missing configured key returns HTTP 503 on these routes; an incorrect or missing request header returns HTTP 401 when a key is configured. Only explicit `development`, `test`, or `local` mode permits a missing key. Unknown environment names and nonpositive job intervals are rejected.
+
+Market snapshot, council, and forecast GET requests are read-only by default. Existing clients that need to save results must explicitly send `persist=true` and `X-API-Key`. Forecast scoring also requires the key; supplied prices must be positive and finite. Private reads use the same shared key, not per-user account permissions.
+
+Dashboard keys now use tab-session storage instead of persistent local storage. Enter the key on the Command Centre or Alerts page in the same tab. Clearing that field clears the session key on the next request. Existing persistent keys are removed when a dashboard page loads. This does not protect keys from other same-origin JavaScript; do not host untrusted scripts on this origin.
+
+Docker Compose binds port 8000 to host loopback and sets production mode. Use a local reverse proxy or tunnel for HTTPS. If a containerized reverse proxy needs direct access, connect it to the Compose network rather than exposing port 8000 publicly.
+
+Run Python regressions with `python -m pytest -q`. Run offline Worker and dashboard regressions with `npm run test:security` using Node 22.6 or newer (Node 22 LTS recommended). No provider calls are made by those security tests.
