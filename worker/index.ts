@@ -5,12 +5,14 @@
  * No FastAPI origin / BACKEND_URL is required. Brokerage credentials are never
  * accepted by these public market-data routes.
  */
-import { handleExecution } from "./execution";
-import type { ExecutionEnv } from "./execution";
-import { handleMarket } from "./market";
-import { handleSignals } from "./signals";
-import { handleKnowledge } from "./knowledge";
-import type { MarketEnv } from "./market";
+import { handleExecution } from "./execution.ts";
+import type { ExecutionEnv } from "./execution.ts";
+import { handleMarket } from "./market.ts";
+import { handleSignals } from "./signals.ts";
+import { handleAlgoSignal } from "./algo/api.ts";
+import { handleOmnisignal } from "./algo/omni-api.ts";
+import { handleKnowledge } from "./knowledge.ts";
+import type { MarketEnv } from "./market.ts";
 
 export interface Env extends ExecutionEnv, MarketEnv {
   ETI_EDGE?: string;
@@ -519,6 +521,12 @@ export default {
     }
     if (url.pathname === "/api/signals") {
       return handleSignals(request, _env);
+    }
+    if (url.pathname === "/api/algo/signal") {
+      return handleAlgoSignal(request, _env);
+    }
+    if (url.pathname === "/api/omnisignal") {
+      return handleOmnisignal(request, _env);
     }
     if (url.pathname.startsWith("/api/market/")) {
       return handleMarket(request, _env);

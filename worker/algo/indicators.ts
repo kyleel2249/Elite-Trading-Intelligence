@@ -189,7 +189,7 @@ export function emaFilter(rows: Kline[], periods = [20, 50, 200], atrNow = NaN):
   const lastBars = close.slice(-50), mid = e[1].slice(-50);
   const consistency = lastBars.filter((c, i) => Math.sign(c - mid[i]) === side).length / lastBars.length;
   const strength = clamp((alignment === "mixed" ? 0.3 : 0.7) * 50 + Math.min(spread, 10) * 3 + consistency * 20 - (alignment === "mixed" ? 10 : 0), 0, 100);
-  return { short, intermediate: inter, long, alignment, slope, strength: Number(strength.toFixed(1)), consistency, countertrendAllowedAgainst: alignment };
+  return { short, intermediate: inter, long, alignment, slope, strength: Number(strength.toFixed(1)), consistency, countertrendAllowedAgainst: alignment === "mixed" ? "neutral" : alignment };
 }
 /** Countertrend setups are only allowed when reversal evidence AND reward/risk are both strong. */
 export function countertrendAllowed(filter: EmaFilter, direction: 1 | -1, reversalEvidence: number, rewardRisk: number): boolean {
