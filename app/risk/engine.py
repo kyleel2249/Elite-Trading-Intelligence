@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
+import math
+from urllib.parse import urlsplit
 
 from app.config import Settings, get_settings
 
@@ -39,6 +41,7 @@ class OrderProposal:
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     client_order_id: Optional[str] = None
+    reference_price: Optional[float] = None
     equity: float = 0.0
     current_open_positions: int = 0
     daily_realized_pnl_pct: float = 0.0
@@ -71,6 +74,30 @@ class RiskEngine:
     def evaluate(self, proposal: OrderProposal) -> RiskDecision:
         reasons: list[str] = []
         s = self.settings
+
+        # Validate the actual provider/environment pairing before any routing.
+        if proposal.provider not in ("alpaca", "binance"):
+            reasons.append("Unsupported provider")
+        if proposal.environment not in ("paper", "testnet", "live"):
+            reasons.append("Unsupported environment")
+        if proposal.provider == "alpaca":
+            expected = "paper-api.alpaca.markets" if proposal.environment == "paper" else "api.alpaca.markets"
+            url = urlsplit(s.alpaca_base_url)
+            if proposal.environment == "testnet":
+                reasons.append("Alpaca does not support testnet; select paper or live")
+            if (url.scheme != "https" or url.netloc != expected or url.path not in ("", "/")
+                    or url.query or url.fragment):
+                reasons.append("Alpaca endpoint does not match requested environment")
+            if s.alpaca_paper != (proposal.environment == "paper"):
+                reasons.append("ALPACA_PAPER does not match requested environment")
+        for name in ("qty", "equity", "daily_realized_pnl_pct", "current_drawdown_pct", "current_open_positions"):
+            if not math.isfinite(getattr(proposal, name)):
+                reasons.append(f"{name} must be finite")
+        if proposal.order_type not in ("market", "limit"):
+            reasons.append("Unsupported order type")
+        if proposal.order_type == "limit" and (proposal.limit_price is None or
+                not math.isfinite(proposal.limit_price) or proposal.limit_price <= 0):
+            reasons.append("Limit order requires a finite positive limit price")
 
         # --- Environment gates ---
         if proposal.environment == "live":
@@ -108,23 +135,34 @@ class RiskEngine:
             )
 
         # --- Risk per trade ---
-        risk_pct = s.default_risk_per_trade_pct
-        if proposal.estimated_risk_amount is not None and proposal.equity > 0:
-            risk_pct = (proposal.estimated_risk_amount / proposal.equity) * 100
-            if risk_pct > s.default_risk_per_trade_pct:
-                reasons.append(
-                    f"Risk per trade {risk_pct:.2f}% exceeds limit {s.default_risk_per_trade_pct}%"
-                )
+        # Until enforceable stops exist, charge the full order notional to the risk
+        # budget. Never report a default percentage as if it were measured risk.
+        risk_pct = 0.0
+        price = proposal.reference_price
+        if price is None or not math.isfinite(price) or price <= 0:
+            reasons.append("Risk sizing requires a finite positive server reference price")
+        elif math.isfinite(proposal.qty) and math.isfinite(proposal.equity) and proposal.equity > 0:
+            sizing_price = max(price, proposal.limit_price or price)
+            amount = abs(proposal.qty) * sizing_price
+            estimate = proposal.estimated_risk_amount
+            if estimate is not None:
+                if not math.isfinite(estimate) or estimate < 0:
+                    reasons.append("Estimated risk must be finite and nonnegative")
+                else:
+                    amount = max(amount, estimate)
+            risk_pct = amount / proposal.equity * 100.0
+            if not math.isfinite(risk_pct) or risk_pct > s.default_risk_per_trade_pct:
+                reasons.append(f"Conservative notional risk {risk_pct:.2f}% exceeds limit {s.default_risk_per_trade_pct}%")
 
         # --- Data freshness (live only) ---
         if proposal.environment == "live" and s.require_fresh_data_for_live_orders:
-            if proposal.data_age_seconds is None:
+            if proposal.data_age_seconds is None or not math.isfinite(proposal.data_age_seconds) or proposal.data_age_seconds < 0:
                 reasons.append("Live order requires known data age")
             elif proposal.data_age_seconds > s.data_max_age_seconds:
                 reasons.append(
                     f"Data too stale ({proposal.data_age_seconds:.0f}s > {s.data_max_age_seconds}s)"
                 )
-            if proposal.data_status in ("stale", "invalid", "unavailable", "incomplete"):
+            if proposal.data_status != "fresh":
                 reasons.append(f"Data status not acceptable for live: {proposal.data_status}")
 
         if reasons:
@@ -151,7 +189,9 @@ class RiskEngine:
         risk_pct: Optional[float] = None,
     ) -> float:
         """Simple fixed-fractional position size."""
-        risk_pct = risk_pct or self.settings.default_risk_per_trade_pct
+        risk_pct = self.settings.default_risk_per_trade_pct if risk_pct is None else risk_pct
+        if not all(math.isfinite(x) for x in (equity, entry_price, stop_price, risk_pct)) or risk_pct <= 0:
+            return 0.0
         if equity <= 0 or entry_price <= 0:
             return 0.0
         risk_amount = equity * (risk_pct / 100.0)
