@@ -10,9 +10,65 @@
 > 4. Set `DATABASE_URL` to managed Postgres (container disk is ephemeral; see `docs/POSTGRES.md`).
 > 5. Verify: `curl https://<worker>.workers.dev/api/system/health`.
 >
-> Live trading is forced off in the Worker wrapper (paper/testnet only). Containers availability depends on your Cloudflare plan.
+> Live trading is forced off in the Worker wrapper (paper/testnet only). Containers require a **Workers Paid** plan and Containers API access on the account.
 
 ETI is a **Python FastAPI** application (Uvicorn). It is **not** a pure static site or Workers-only Node app.
+
+## Troubleshooting: deploy fails with Containers 401 Unauthorized
+
+**Symptom (Workers Builds / `npx wrangler deploy`):**
+
+- `npm install` and Docker image build succeed
+- Worker script uploads successfully
+- Then fails with:
+
+```text
+GET https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/containers/me
+→ Unauthorized 401
+✘ [ERROR] ... container build image operation failed
+```
+
+This is **not** an ETI application bug. The image and Worker are fine; Cloudflare rejected the Containers API call.
+
+### Required fixes (account / CI credentials)
+
+1. **Workers Paid plan**  
+   Containers are available on the Workers Paid plan (not Free).  
+   Dashboard → Workers & Pages → Plans: https://dash.cloudflare.com/?to=/:account/workers/plans
+
+2. **Containers permission on the credential used by CI**  
+   Workers Builds uses an account-linked token/OAuth. It must include **Containers Edit** (and typically Workers Scripts Edit).  
+   - Dashboard → Manage account → Account API tokens (or the token Workers Builds created)  
+   - Ensure **Account → Containers → Edit** is present  
+   - Or re-authenticate Wrangler / reconnect the Git integration so OAuth re-requests Containers scopes
+
+3. **Confirm account can use Containers**  
+   After plan + permissions are correct:
+
+   ```bash
+   npx wrangler whoami
+   npx wrangler containers list
+   ```
+
+   If `containers list` still returns Unauthorized, open a Cloudflare support ticket with account ID and the `/containers/me` 401 — some accounts need Containers entitlement flipped on the backend.
+
+4. **Local deploy (after steps above)**  
+
+   ```bash
+   npx wrangler deploy
+   npx wrangler secret put SECRET_KEY
+   npx wrangler secret put API_KEY
+   # DATABASE_URL → managed Postgres (see docs/POSTGRES.md)
+   curl https://elite-trading-intelligence-eti.<subdomain>.workers.dev/api/system/health
+   ```
+
+### Temporary alternatives while Containers is blocked
+
+| Option | Notes |
+|--------|--------|
+| **B — Cloudflare Tunnel** | Run Uvicorn on a VPS/home host; `cloudflared tunnel --url http://localhost:8000` |
+| **Any Docker host** | `docker compose up --build` or the repo `Dockerfile` on Fly, Railway, Render, ECS, etc. |
+| Worker-only | Not viable for full ETI (Python FastAPI + jobs need the container) |
 
 ## Realistic Cloudflare options
 
