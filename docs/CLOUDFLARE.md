@@ -1,147 +1,98 @@
-# Cloudflare deployment for ETI
+# Cloudflare-only deployment
 
-ETI is a **Python FastAPI** application. It does **not** run inside Cloudflare Workers or Containers.
+ETI's Cloudflare-native edge build runs as a Cloudflare Worker. It serves the dashboard,
+health endpoints, and public read-only market data UI. **No FastAPI origin or
+BACKEND_URL is required for this build.**
 
-The repo ships a **plain Worker** that reverse-proxies to your FastAPI origin (`BACKEND_URL`).
-Run the API on Fly.io (workflow included), a self-hosted Docker machine behind a Cloudflare Tunnel, or any host that can run the `Dockerfile`.
+## Deploy on the Cloudflare Workers Free plan
 
-## Fixing: `"status": "misconfigured" — BACKEND_URL is not set`
+1. Connect this GitHub repository to Cloudflare Workers Builds, or deploy manually.
+2. Set the project root to the repository root.
+3. Build command: `npm install`
+4. Deploy command: `npx wrangler deploy`
+5. Ensure the Worker has Workers Free plan access and Workers Dev subdomain enabled.
 
-That JSON is the Worker telling you the origin has not been connected. It is not a crash. Fix = deploy the origin, then set one variable.
-
-### Step 1 — Deploy the FastAPI origin (no Render)
-
-**Option A: Fly.io via GitHub Actions (automated, config in `fly.toml`)**
-
-1. Install flyctl locally once and run `fly auth login`, then `fly tokens create deploy` (or create an org token) to get a token.
-2. In GitHub: **Settings → Secrets and variables → Actions → New repository secret**, add:
-   - `FLY_API_TOKEN`
-   - `API_KEY` and `SECRET_KEY` (long random values, e.g. `openssl rand -hex 32`)
-   - for the Worker job: `CLOUDFLARE_API_TOKEN` (Workers Edit permission) and `CLOUDFLARE_ACCOUNT_ID`
-   - optional provider keys: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `BINANCE_API_KEY`, `BINANCE_SECRET_KEY`, `FRED_API_KEY`, `NEWSAPI_KEY`, `QUIVER_API_KEY`
-3. **Actions → Deploy (Fly.io origin + Cloudflare Worker) → Run workflow.** It creates the app and a 1 GB volume if missing, sets secrets, deploys, waits for `/api/system/health`, then deploys the Worker with `BACKEND_URL` set to `https://<app>.fly.dev`.
-
-If the app name `eti-trading-intelligence` is taken, change `app` in `fly.toml` (or set repository variable `FLY_APP`). Fly.io is a paid service with no free tier; the config uses one small always-on machine (needed for the background jobs). SQLite lives on the volume, so keep a single machine, or switch `DATABASE_URL` to Postgres to scale out.
-
-**Option B: Self-host with a Cloudflare Tunnel (no cloud host, free)**
-
-Run on any machine or VPS you control:
-
-```bash
-git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
-cd Elite-Trading-Intelligence
-cp .env.example .env
-# edit .env: APP_ENV=production, SECRET_KEY, API_KEY, TUNNEL_TOKEN
-docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up --build -d
-```
-
-Create the tunnel token in Cloudflare Zero Trust → Networks → Tunnels, and add a public hostname pointing at `http://eti:8000`. Your origin is then `https://<that hostname>`. The machine must stay on for the site to stay up.
-
-**Option C: any other Docker host** (Railway, a VPS, Koyeb, Cloud Run): build the `Dockerfile`; it honors `$PORT` and defaults to 8000.
-
-### Step 2 — Give the Worker its `BACKEND_URL`
-
-Use **one** of these (they are alternatives, do not combine a secret and a variable with the same name):
-
-```bash
-# CLI (recommended; stored as an encrypted secret, survives redeploys)
-npx wrangler secret put BACKEND_URL
-# paste the origin only, no trailing slash, e.g. https://eti-trading-intelligence.fly.dev
-```
-
-or dashboard: **Workers & Pages → elite-trading-intelligence-eti → Settings → Variables and Secrets → Add** `BACKEND_URL`.
-`wrangler.jsonc` sets `keep_vars: true`, so dashboard-defined variables are no longer wiped by each deploy.
-
-### Step 3 — Verify
-
-```bash
-curl -s https://elite-trading-intelligence-eti.<subdomain>.workers.dev/__eti/status
-# {"status":"configured","backend":"https://eti-trading-intelligence.fly.dev"}
-curl -s https://elite-trading-intelligence-eti.<subdomain>.workers.dev/api/system/health
-```
-
-`/__eti/status` is answered by the Worker itself (never proxied). Responses proxied from the origin carry an `x-eti-proxy: cloudflare-worker` header.
-
-| Worker response | Meaning |
-|---|---|
-| 503 `misconfigured` | `BACKEND_URL` not set — Step 2 |
-| 500 `invalid_backend_url` | Not an absolute `http(s)://` URL |
-| 500 `proxy_loop` | `BACKEND_URL` points at the Worker itself |
-| 502 `backend_unreachable` | Origin is down, asleep, or not publicly reachable |
-
-## Deploying the Worker
-
-### Workers Builds (Cloudflare dashboard, Git-connected)
-
-| Setting | Value |
-|---------|--------|
-| Project type | **Worker** (not Pages) |
-| Build command | `npm install` |
-| Deploy command | `npx wrangler deploy` |
-
-### GitHub Actions (optional)
-
-`.github/workflows/deploy.yml` (manual run) deploys the origin and then the Worker with the correct `BACKEND_URL` in one go. Do not also enable Workers Builds for the same Worker, or the two will fight over variables.
-
-### Local
+Manual deployment:
 
 ```bash
 npm install
-npx wrangler dev --var BACKEND_URL:http://127.0.0.1:8000   # Worker in front of a local uvicorn
 npx wrangler deploy
 ```
 
-## Why Containers were removed
+Local preview:
 
-Cloudflare Containers required a paid plan and Containers API entitlement. Deploy was failing with:
+```bash
+npm install
+npx wrangler dev
+```
+
+## Verify deployment
+
+Replace the hostname with the Worker URL printed by Wrangler:
+
+```bash
+curl https://<worker>.<subdomain>.workers.dev/__eti/status
+curl https://<worker>.<subdomain>.workers.dev/api/system/health
+curl https://<worker>.<subdomain>.workers.dev/api/market/providers
+```
+
+The health response should include `"status":"ok"` and `"backend_required":false`.
+The previous `BACKEND_URL is not set` error is removed because the Worker no longer
+proxies requests to a separate origin.
+
+## Live market data
+
+The dashboard consumes Binance's public REST endpoints for initial candle and order-book
+snapshots, then subscribes to Binance public WebSocket streams for trades, partial depth,
+and kline updates. No exchange API key is required for these public market-data endpoints.
+
+This is a browser-to-exchange data connection. It is not a Cloudflare-hosted exchange
+feed or a guaranteed low-latency institutional feed. Exchange availability, regional
+connectivity, rate limits, and browser network conditions apply. If the exchange stream
+is disconnected, the UI must show the disconnected state rather than presenting stale
+data as live.
+
+## Free-plan constraints and scope
+
+- No paid Cloudflare Containers, Durable Objects, Workers Paid features, Fly.io, VPS,
+  Railway, Render, or other application-hosting origin is required for this dashboard.
+- Cloudflare Workers Free plan quotas and execution limits apply.
+- Public browser market data is read-only. It does not place trades.
+- Full historical data storage, always-on ingestion, persistent background monitoring,
+  and authenticated broker execution require separate design against the available
+  Cloudflare free-plan quotas; they are not claimed by this dashboard build.
+- Existing Python/FastAPI intelligence, portfolio, broker execution, investor-monitoring,
+  Quiver Quant, and Liquid API modules have not all been ported by this edge-dashboard
+  change. Do not represent those features as operational on this Worker until separately
+  migrated and tested.
+
+## Secrets and trading safety
+
+Do not put broker credentials, Quiver tokens, Liquid API credentials, or exchange private
+keys in browser code or public Worker variables. Use encrypted Worker secrets only for
+server-side integrations that are actually implemented and required.
+
+Public market-data routes do not require authentication. No withdrawal permission is
+requested or supported. Live order execution remains disabled unless a separately
+implemented, authenticated, risk-gated execution service is deployed and tested.
+
+## Troubleshooting
+
+| Symptom | Action |
+|---|---|
+| Build fails | Run `npm install` then `npm run check:worker`; inspect Wrangler output |
+| Worker URL unavailable | Check Workers Builds deployment status and workers.dev setting |
+| Market data unavailable | Check Binance API/WebSocket availability and local network access |
+| WebSocket disconnects | UI should show disconnected/retrying; refresh and check exchange connectivity |
+| BACKEND_URL error persists | Confirm Cloudflare is deploying the latest commit and correct Worker entry point |
+
+## Deployment architecture
 
 ```text
-GET /accounts/.../containers/me → 401 Unauthorized
-```
+Browser
+  |-- HTTPS --> Cloudflare Worker (ETI dashboard + health APIs)
+  |
+  |-- HTTPS/WSS --> Binance public market-data API/streams
 
-The edge Worker no longer references Containers, Durable Object container classes (retired via migration `v2`), or `@cloudflare/containers`. If a deploy still complains about legacy bindings, delete the Worker once in the dashboard and redeploy.
-
-## Environment variables
-
-### On the FastAPI origin
-
-| Variable | Notes |
-|----------|--------|
-| `APP_ENV` | `production` on any public deployment (protected routes fail closed without `API_KEY`) |
-| `SECRET_KEY` | Long random string (a startup warning is logged if left default) |
-| `API_KEY` | Protects mutating routes (`X-API-Key`) |
-| `DATABASE_URL` | Postgres in production (see `docs/POSTGRES.md`); `postgres://` and `postgresql://` URLs are accepted as-is |
-| `PORT` | Set by most hosts; the image honors it |
-| Provider keys | Alpaca, Binance, FRED, NewsAPI, Quiver, Liquid as needed |
-| `LIVE_TRADING_ENABLED` | Keep `false` until intentional |
-
-### On the Worker
-
-| Variable | Notes |
-|----------|--------|
-| `BACKEND_URL` | **Required.** Origin of FastAPI, no trailing slash |
-
-Do **not** put broker secrets on the Worker; keep them only on the origin.
-
-## Cloudflare Tunnel (origin without public IP)
-
-```bash
-cloudflared tunnel --url http://localhost:8000
-```
-
-Point `BACKEND_URL` at the tunnel hostname.
-
-## Security
-
-- Set `API_KEY` on the origin; send `X-API-Key` on POST routes.
-- Keep `LIVE_TRADING_ENABLED=false` until keys and risk limits are verified.
-- Quiver is research-only; never used for order placement.
-- The Worker only proxies HTTP; it holds no trading secrets.
-
-## Post-deploy checks
-
-```bash
-curl -s "$ORIGIN/api/system/health"
-curl -s "$ORIGIN/api/providers/status"
-curl -s -H "X-API-Key: $API_KEY" -X POST "$ORIGIN/api/trading/order" ...
+No external FastAPI origin is used by this Cloudflare-native edge build.
 ```
