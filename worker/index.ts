@@ -243,7 +243,7 @@ async function loadSignal(){
   $('signalProvider').textContent=d.provider+' · '+d.interval;
   $('signalEntry').textContent=d.entry===null?'No trade':fmt(d.entry);
   $('signalStop').textContent=d.stopLoss===null?'—':fmt(d.stopLoss);
-  $('signalTargets').textContent=d.targets.length?d.targets.map(t=>'TP'+t.target+': '+fmt(t.price)+' ('+t.rewardRisk+'R)').join('\n'):'No targets · wait for confluence';
+  $('signalTargets').textContent=d.targets.length?d.targets.map(t=>'TP'+t.target+': '+fmt(t.price)+' ('+t.rewardRisk+'R)').join('\\n'):'No targets · wait for confluence';
   $('signalSummary').textContent='Confidence is a confluence score, not a probability. '+d.historicalValidation.note;
   $('signalEvidence').textContent='Evidence: '+d.evidence.join(' · ');
   $('signalAttribution').textContent='Documented methods: '+d.strategyAttribution.map(a=>a.trader+' — '+a.contribution).join(' | ');
