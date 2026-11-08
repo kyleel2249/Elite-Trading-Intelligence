@@ -140,9 +140,14 @@
   <footer>Helena Frost risk-gates live. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a></footer>
   <script>
     const $ = (id) => document.getElementById(id);
-    const apiKey = localStorage.getItem('eti_api_key') || '';
+    function escapeHTML(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[ch]));
+    }
+    // Retire persistent credentials from earlier versions. Keys now last only this tab session.
+    localStorage.removeItem('eti_api_key');
     function authHeaders() {
       const h = {'Content-Type': 'application/json'};
+      const apiKey = sessionStorage.getItem('eti_api_key') || '';
       if (apiKey) h['X-API-Key'] = apiKey;
       return h;
     }
@@ -173,7 +178,7 @@
     }
     async function loadTraders() {
       const r = await (await fetch('/api/intelligence/traders')).json();
-      $('traders-list').innerHTML = (r.traders || []).map(t => `<div class="trader"><strong>${t.name} — ${t.title}${t.veto_power?' (VETO)':''}</strong><div class="muted">${t.mandate}</div></div>`).join('');
+      $('traders-list').innerHTML = (r.traders || []).map(t => `<div class="trader"><strong>${escapeHTML(t.name)} — ${escapeHTML(t.title)}${t.veto_power?' (VETO)':''}</strong><div class="muted">${escapeHTML(t.mandate)}</div></div>`).join('');
     }
     $('mtm-refresh').onclick = async () => $('mtm-out').textContent = JSON.stringify(await (await fetch('/api/system/mtm-status')).json(), null, 2);
     $('mtm-run').onclick = async () => $('mtm-out').textContent = JSON.stringify(await (await fetch('/api/system/mtm-run',{method:'POST', headers: authHeaders()})).json(), null, 2);
@@ -181,7 +186,7 @@
     $('rec-run').onclick = async () => $('rec-out').textContent = JSON.stringify(await (await fetch('/api/system/reconcile-run',{method:'POST', headers: authHeaders()})).json(), null, 2);
     $('acc-refresh').onclick = async () => $('acc-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast/accuracy?symbol='+encodeURIComponent($('acc-symbol').value.trim()))).json(), null, 2);
     $('acc-score').onclick = async () => $('acc-out').textContent = JSON.stringify(await (await fetch('/api/intelligence/forecast/score',{method:'POST',headers:authHeaders(),body:JSON.stringify({symbol:$('acc-symbol').value.trim(),provider:'binance'})})).json(), null, 2);
-    $('j-load').onclick = async () => { const q=new URLSearchParams(); if($('j-symbol').value.trim())q.set('symbol',$('j-symbol').value.trim()); if($('j-event').value)q.set('event',$('j-event').value); if($('j-env').value)q.set('environment',$('j-env').value); $('j-out').textContent=JSON.stringify(await(await fetch('/api/paper-trading/journal?'+q)).json(),null,2); };
+    $('j-load').onclick = async () => { const q=new URLSearchParams(); if($('j-symbol').value.trim())q.set('symbol',$('j-symbol').value.trim()); if($('j-event').value)q.set('event',$('j-event').value); if($('j-env').value)q.set('environment',$('j-env').value); $('j-out').textContent=JSON.stringify(await(await fetch('/api/paper-trading/journal?'+q,{headers:authHeaders()})).json(),null,2); };
 
     let marketEs = null;
     function setChip(price, st, on) {
@@ -227,7 +232,7 @@
     $('bt-run').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/run',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim()}),null,2);
     $('bt-wf').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/run',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim(),walk_forward:true}),null,2);
     $('bt-signal').onclick = async () => $('bt-out').textContent=JSON.stringify(await btPost('/api/backtest/signal',{module_id:$('bt-module').value,symbol:$('bt-symbol').value.trim(),environment:'paper',execute:false}),null,2);
-    async function refreshPortfolio(){ $('p-summary').textContent=JSON.stringify(await(await fetch('/api/paper-trading/portfolio')).json(),null,2); $('p-journal').textContent=JSON.stringify(await(await fetch('/api/paper-trading/journal?limit=20')).json(),null,2); }
+    async function refreshPortfolio(){ $('p-summary').textContent=JSON.stringify(await(await fetch('/api/paper-trading/portfolio',{headers:authHeaders()})).json(),null,2); $('p-journal').textContent=JSON.stringify(await(await fetch('/api/paper-trading/journal?limit=20',{headers:authHeaders()})).json(),null,2); }
     $('p-refresh').onclick = () => refreshPortfolio();
     $('p-paper').onclick = async () => { const body={provider:'binance',environment:'paper',symbol:$('p-symbol').value.trim(),side:$('p-side').value,qty:parseFloat($('p-qty').value),equity:10000,data_status:'fresh',data_age_seconds:5}; $('p-summary').textContent=JSON.stringify(await(await fetch('/api/trading/order',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)})).json(),null,2); await refreshPortfolio(); };
     $('r-eval').onclick = async () => { const q=new URLSearchParams({symbol:$('r-symbol').value.trim(),side:'buy',qty:$('r-qty').value,environment:$('r-env').value,equity:$('r-equity').value}); $('r-out').textContent=JSON.stringify(await(await fetch('/api/risk/evaluate?'+q)).json(),null,2); };
