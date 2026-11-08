@@ -14,6 +14,8 @@ export interface ExecutionEnv {
   ETI_LIVE_ACTIVATION_TOKEN?: string;
   ETI_LIVE_MAX_NOTIONAL_USD?: string;
   ETI_LIVE_MAX_ORDER_QUANTITY?: string;
+  ETI_RISK_GATE_URL?: string;
+  ETI_RISK_GATE_TOKEN?: string;
   ALPACA_LIVE_API_KEY?: string;
   ALPACA_LIVE_SECRET_KEY?: string;
   BINANCE_LIVE_API_KEY?: string;
@@ -120,6 +122,28 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       message: "Live orders require configured server-side quantity and USD notional caps, and limit orders only.",
     }, 403);
   }
+  let riskGateEvidence:any = null;
+  if(requestedLive) {
+    const gateUrl=env.ETI_RISK_GATE_URL||"";
+    const gateToken=env.ETI_RISK_GATE_TOKEN||"";
+    if(!gateUrl || !gateToken)
+      return reply({error:"risk_gate_not_configured",message:"Live execution requires the ETI server-side portfolio risk preflight service."},503);
+    let gateResponse:Response;
+    try {
+      gateResponse=await fetch(gateUrl,{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+gateToken},body:JSON.stringify({
+        provider:broker,environment:"live",symbol,side,quantity,order_type:type,limit_price:body.limitPrice??null
+      })});
+    } catch {
+      return reply({error:"risk_gate_unavailable",message:"Live execution was blocked because ETI risk preflight could not be reached."},503);
+    }
+    const gateBody:any=await gateResponse.json().catch(()=>({}));
+    if(!gateResponse.ok || gateBody?.approved!==true)
+      return reply({error:"risk_gate_rejected",status:gateResponse.status,reasons:Array.isArray(gateBody?.reasons)?gateBody.reasons:["Server-side risk approval unavailable"]},403);
+    riskGateEvidence={decision:gateBody.decision,market:gateBody.market,risk_inputs:gateBody.risk_inputs,disclosure_context:{
+      matched_count:gateBody.disclosure_context?.matched_count??0,
+      high_impact_verified_count:gateBody.disclosure_context?.high_impact_verified_count??0
+    }};
+  }
   try {
     let result:any, mode:string;
     if(broker==="alpaca") {
@@ -145,7 +169,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
     if(!r.ok) return reply({error:"broker_rejected",broker,status:r.status,detail:data,mode:requestedLive?"live":"testnet"},502);
     result=data; mode=requestedLive?"live":"testnet";
     }
-    const record={executedAt:new Date().toISOString(),broker,mode,symbol,side,type,quantity,clientOrderId,brokerOrderId:result?.id??result?.orderId??null,executionSource:{actorType:source.actorType,actorId:source.actorId,sourceName:source.sourceName,strategyId:source.strategyId??null,signalId:source.signalId??null,triggerReason:source.triggerReason??null},order:result};
+    const record={executedAt:new Date().toISOString(),broker,mode,symbol,side,type,quantity,clientOrderId,brokerOrderId:result?.id??result?.orderId??null,executionSource:{actorType:source.actorType,actorId:source.actorId,sourceName:source.sourceName,strategyId:source.strategyId??null,signalId:source.signalId??null,triggerReason:source.triggerReason??null},riskGateEvidence,order:result};
     await env.ETI_EXECUTION_LOG!.put("order:"+record.executedAt+":"+clientOrderId,JSON.stringify(record),{expirationTtl:60*60*24*90});
     return reply({ok:true,broker,mode,order:result,executionSource:record.executionSource,executedAt:record.executedAt,live_trading:requestedLive},201);
   } catch(e) { return reply({error:"execution_upstream_error",message:e instanceof Error?e.message:"Unknown error"},502); }
