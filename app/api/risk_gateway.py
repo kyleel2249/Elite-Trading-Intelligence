@@ -81,6 +81,8 @@ async def execution_preflight(
     research_context = {
         "investor_disclosures": high_impact[:10],
         "risk_context": risk_context.to_dict(),
+        "daily_realized_pnl_pct": risk_context.daily_realized_pnl_pct,
+        "current_drawdown_pct": risk_context.current_drawdown_pct,
         "market_provider": req.provider,
     }
     council = TradingCouncil().analyse(
