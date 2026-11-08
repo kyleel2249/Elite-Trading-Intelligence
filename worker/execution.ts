@@ -46,10 +46,11 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
   const broker=body?.broker, symbol=typeof body?.symbol==="string"?body.symbol.toUpperCase():"";
   const side=body?.side, type=body?.type??"market", quantity=num(body?.quantity);
   const clientOrderId=body?.clientOrderId;
+  const riskConfirmed=body?.riskConfirmed===true;
   if(!["alpaca","binance"].includes(broker) || !/^[A-Z0-9._-]{2,24}$/.test(symbol) ||
     !["buy","sell"].includes(side) || !["market","limit"].includes(type) ||
-    !Number.isFinite(quantity) || quantity<=0 || !safeOrderId(clientOrderId))
-    return reply({error:"invalid_order",message:"Provide broker, symbol, buy/sell, market/limit, positive quantity and unique clientOrderId (8–36 safe characters)."},400);
+    !Number.isFinite(quantity) || quantity<=0 || !safeOrderId(clientOrderId) || !riskConfirmed)
+    return reply({error:"invalid_order",message:"Provide broker, symbol, buy/sell, market/limit, positive quantity, unique clientOrderId (8–36 safe characters), and riskConfirmed:true after user review."},400);
   const maxQty=Number(env.ETI_MAX_ORDER_QUANTITY??"100");
   if(!Number.isFinite(maxQty)||maxQty<=0||quantity>maxQty) return reply({error:"risk_limit_exceeded",limit:"max_quantity",max:maxQty},403);
   if(type==="limit" && (!Number.isFinite(num(body.limitPrice)) || num(body.limitPrice)<=0))
