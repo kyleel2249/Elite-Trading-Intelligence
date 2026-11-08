@@ -139,7 +139,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
     const gateBody:any=await gateResponse.json().catch(()=>({}));
     if(!gateResponse.ok || gateBody?.approved!==true)
       return reply({error:"risk_gate_rejected",status:gateResponse.status,reasons:Array.isArray(gateBody?.reasons)?gateBody.reasons:["Server-side risk approval unavailable"]},403);
-    riskGateEvidence={decision:gateBody.decision,market:gateBody.market,risk_inputs:gateBody.risk_inputs,disclosure_context:{
+    riskGateEvidence={decision:gateBody.decision,market:gateBody.market,risk_inputs:gateBody.risk_inputs,market_research:gateBody.market_research?{council_action:gateBody.market_research.council_action,confidence:gateBody.market_research.confidence,risk_veto:gateBody.market_research.risk_veto,data_quality:gateBody.market_research.data_quality}:null,disclosure_context:{
       matched_count:gateBody.disclosure_context?.matched_count??0,
       high_impact_verified_count:gateBody.disclosure_context?.high_impact_verified_count??0
     }};
