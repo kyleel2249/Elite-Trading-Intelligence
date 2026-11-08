@@ -75,7 +75,9 @@ function indicators(rows: Kline[]): IndicatorSnapshot | null {
   if (rows.length < 210) return null;
   const close = rows.map(r => r[4]), volumes = rows.map(r => r[5]);
   const e20 = ema(close, 20), e50 = ema(close, 50), e200 = ema(close, 200);
-  const mLine = close.map((_, i) => ema(close.slice(0, i + 1), 12).at(-1)! - ema(close.slice(0, i + 1), 26).at(-1)!);
+  // EMA is recursive from the first value, so one pass yields the same value as re-running on each prefix (O(n) instead of O(n^2)).
+  const e12 = ema(close, 12), e26 = ema(close, 26);
+  const mLine = close.map((_, i) => e12[i] - e26[i]);
   const mSignal = ema(mLine, 9);
   const a = atr(rows), last = close.at(-1)!;
   const sample = close.slice(-20), mid = mean(sample), sd = Math.sqrt(mean(sample.map(x => (x - mid) ** 2)));
