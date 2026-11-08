@@ -23,7 +23,7 @@ const reply = (body: unknown, status=200) => new Response(JSON.stringify(body), 
 const num = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? v : NaN;
 async function authorized(req: Request, env: ExecutionEnv): Promise<boolean> {
   const token=env.ETI_EXECUTION_TOKEN;
-  const supplied=req.headers.get("authorization")?.replace(/^Bearer\\s+/i,"");
+  const supplied=req.headers.get("authorization")?.replace(/^Bearer\s+/i,"");
   if(!token||!supplied||supplied.length!==token.length) return false;
   const [a,b]=await Promise.all([token,supplied].map(v=>crypto.subtle.digest("SHA-256",new TextEncoder().encode(v))));
   const aa=new Uint8Array(a),bb=new Uint8Array(b);let diff=0;
