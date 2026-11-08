@@ -63,14 +63,22 @@ export default {
       return new Response(
         JSON.stringify({
           error: "BACKEND_URL is not a valid absolute URL",
-          backend_url: backend,
         }),
         { status: 500, headers: { "content-type": "application/json" } },
       );
     }
 
+    if (!['http:', 'https:'].includes(targetBase.protocol) || targetBase.username || targetBase.password || targetBase.pathname !== '/' || targetBase.search || targetBase.hash) {
+      return new Response(JSON.stringify({ error: 'BACKEND_URL must be an HTTP(S) origin without credentials, path, query or fragment' }), { status: 500, headers: { 'content-type': 'application/json' } });
+    }
     const incoming = new URL(request.url);
-    const target = new URL(incoming.pathname + incoming.search, targetBase);
+    // Component assignment keeps even network-path references on the configured host.
+    const target = new URL(targetBase);
+    target.pathname = incoming.pathname;
+    target.search = incoming.search;
+    if (target.origin !== targetBase.origin) {
+      return new Response('Invalid proxy target', { status: 400 });
+    }
 
     const headers = new Headers();
     request.headers.forEach((value, key) => {
@@ -102,7 +110,7 @@ export default {
         headers: outHeaders,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "upstream fetch failed";
+      const message = "upstream fetch failed";
       return new Response(
         JSON.stringify({
           error: "backend_unreachable",
