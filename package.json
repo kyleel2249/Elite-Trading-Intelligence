@@ -1,13 +1,13 @@
 {
   "name": "eti-cloudflare",
   "private": true,
-  "version": "1.2.0",
-  "description": "Cloudflare Worker edge proxy for ETI (FastAPI runs outside Containers)",
+  "version": "1.3.0",
+  "description": "Cloudflare-native ETI market intelligence dashboard",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "check:worker": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
-    "check": "python -m compileall -q app tests && PYTHONPATH=. python -m pytest -q"
+    "check": "npm run check:worker"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
