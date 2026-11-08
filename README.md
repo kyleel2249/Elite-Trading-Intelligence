@@ -66,9 +66,28 @@ Profiles & methods: `GET /api/intelligence/traders`
 | Reconcile | `POST /api/trading/reconcile` |
 | MTM job | `GET /api/system/mtm-status`, `POST /api/system/mtm-run` |
 
+## Authentication
+
+Mutating routes (orders, reconcile, MTM run, strategy execution, monitor control) require the
+`X-API-Key` header matching the `API_KEY` environment variable:
+
+```bash
+curl -X POST localhost:8000/api/trading/order \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"provider":"binance","environment":"paper","symbol":"BTCUSDT","side":"buy","qty":0.01}'
+```
+
+- **Local development** (`APP_ENV=development`): routes are open if `API_KEY` is unset.
+- **Production / staging** (`APP_ENV=production|prod|staging`): if `API_KEY` is unset, protected routes
+  refuse requests with HTTP 503 instead of running open. The Cloudflare worker sets
+  `APP_ENV=production`, so set the secret: `wrangler secret put API_KEY`.
+- **Live orders** are refused (HTTP 403) on any deployment without an `API_KEY`.
+
 ## Safety
 
-- Live path is **enabled** but every order passes **Helena Frost / RiskEngine**
+- Live trading is **disabled by default** (`LIVE_TRADING_ENABLED=false`). When enabled, every order still passes **Helena Frost / RiskEngine** and requires an `API_KEY`
+- Risk inputs are **server-derived**: equity, open positions, daily PnL, drawdown and data freshness come from the database and a server-fetched quote. Values sent in the order request body are ignored (the fields remain accepted but deprecated). Responses include `risk_inputs` showing what the risk engine used
+- Paper equity = `PAPER_STARTING_EQUITY` + realized + unrealized PnL. Live equity must be configured via `LIVE_ACCOUNT_EQUITY`; until set, live orders are rejected
 - Paper/testnet preferred defaults; secrets only via environment
 - Forecasts are **probabilistic** (Lars Hagen) — not guarantees
 - No withdrawal permissions requested

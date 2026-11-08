@@ -1,12 +1,13 @@
 """ETI FastAPI application entrypoint."""
+import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -22,6 +23,7 @@ from app.integrations.liquid.client import LiquidClient
 from app.trading.service import TradingService
 from app.trading.portfolio import PortfolioService
 from app.trading.reconciliation import OrderReconciler
+from app.trading.risk_context import build_risk_context
 from app.market.service import MarketService
 from app.intelligence.council import TradingCouncil
 from app.intelligence.traders import list_trader_profiles
@@ -41,6 +43,21 @@ from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
 from app.security.auth import require_api_key
 
+logger = logging.getLogger("eti")
+
+
+def _upstream_error(exc: Exception, what: str) -> HTTPException:
+    """Log the real error server-side; never echo upstream exception text (URLs, keys) to clients."""
+    logger.warning("%s failed: %s", what, type(exc).__name__, exc_info=True)
+    return HTTPException(status_code=502, detail=f"{what} failed upstream")
+
+
+async def _start_component(name: str, starter) -> None:
+    try:
+        await starter()
+    except Exception:
+        logger.warning("startup: %s failed to start; continuing without it", name, exc_info=True)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,23 +66,11 @@ async def lifespan(app: FastAPI):
     mtm_job.interval_seconds = settings.mtm_interval_seconds
     reconcile_job.interval_seconds = settings.reconcile_interval_seconds
     investor_monitor_job.interval_seconds = settings.investor_monitor_interval_seconds
-    try:
-        await stream_hub.start(["btcusdt", "ethusdt"])
-    except Exception:
-        pass
-    try:
-        await mtm_job.start()
-    except Exception:
-        pass
-    try:
-        await reconcile_job.start()
-    except Exception:
-        pass
+    await _start_component("stream_hub", lambda: stream_hub.start(["btcusdt", "ethusdt"]))
+    await _start_component("mtm_job", mtm_job.start)
+    await _start_component("reconcile_job", reconcile_job.start)
     if settings.quiver_configured:
-        try:
-            await investor_monitor_job.start()
-        except Exception:
-            pass
+        await _start_component("investor_monitor_job", investor_monitor_job.start)
     yield
     await investor_monitor_job.stop()
     await reconcile_job.stop()
@@ -90,25 +95,39 @@ templates = Jinja2Templates(directory="app/templates")
 try:
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 except RuntimeError:
-    pass
+    logger.info("app/static not present; static files are not mounted")
 
 
 class OrderRequest(BaseModel):
-    provider: str = Field(..., examples=["binance", "alpaca"])
-    environment: str = Field(..., examples=["paper", "testnet", "live"])
-    symbol: str
-    side: str
-    qty: float
-    order_type: str = "market"
-    limit_price: Optional[float] = None
-    equity: float = 10000.0
-    current_open_positions: int = 0
-    daily_realized_pnl_pct: float = 0.0
-    current_drawdown_pct: float = 0.0
-    data_age_seconds: Optional[float] = 10.0
-    data_status: str = "fresh"
-    thesis: Optional[str] = None
-    council_action: Optional[str] = None
+    provider: Literal["binance", "alpaca"] = Field(..., examples=["binance", "alpaca"])
+    environment: Literal["paper", "testnet", "live"] = Field(..., examples=["paper", "testnet", "live"])
+    symbol: str = Field(..., min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
+    side: Literal["buy", "sell"]
+    qty: float = Field(..., gt=0, allow_inf_nan=False)
+    order_type: str = Field("market", pattern=r"^[a-z_]{1,24}$")
+    limit_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    thesis: Optional[str] = Field(default=None, max_length=2000)
+    council_action: Optional[str] = Field(default=None, max_length=32)
+
+    # Deprecated: accepted so existing clients keep working, but IGNORED. The server
+    # derives equity, positions, PnL, drawdown and data freshness itself.
+    equity: Optional[float] = Field(default=None, description="Deprecated; ignored (server-derived).")
+    current_open_positions: Optional[int] = Field(default=None, description="Deprecated; ignored.")
+    daily_realized_pnl_pct: Optional[float] = Field(default=None, description="Deprecated; ignored.")
+    current_drawdown_pct: Optional[float] = Field(default=None, description="Deprecated; ignored.")
+    data_age_seconds: Optional[float] = Field(default=None, description="Deprecated; ignored.")
+    data_status: Optional[str] = Field(default=None, description="Deprecated; ignored.")
+
+    @field_validator("provider", "environment", "side", "order_type", mode="before")
+    @classmethod
+    def _normalize(cls, v):
+        return v.strip().lower() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _limit_needs_price(self):
+        if self.order_type == "limit" and self.limit_price is None:
+            raise ValueError("limit_price is required for limit orders")
+        return self
 
 
 class ForecastScoreRequest(BaseModel):
@@ -237,7 +256,7 @@ async def market_snapshot(
             save_snapshot(db, snap)
         return snap
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _upstream_error(e, "Market snapshot")
 
 
 @app.get("/api/market/order-book")
@@ -250,7 +269,7 @@ async def market_order_book(
     try:
         return await svc.get_order_book(symbol, depth=depth)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _upstream_error(e, "Order book")
 
 
 @app.get("/api/market/history")
@@ -265,7 +284,7 @@ async def market_history(
     try:
         return await svc.get_history(provider, symbol, interval=interval, limit=limit)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _upstream_error(e, "Market history")
 
 
 @app.get("/api/intelligence/traders")
@@ -300,6 +319,7 @@ async def run_council(
                 from app.intelligence.investor_activity import InvestorActivityEngine
                 quiver_ctx = await InvestorActivityEngine(settings).ticker_context(symbol)
             except Exception:
+                logger.warning("quiver ticker context failed for %s", symbol, exc_info=True)
                 quiver_ctx = {"status": "error"}
         council = TradingCouncil()
         decision = council.analyse(
@@ -344,7 +364,7 @@ async def run_council(
                 save_snapshot(db, snap)
         return payload
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _upstream_error(e, "Council analysis")
 
 
 @app.get("/api/intelligence/decisions")
@@ -375,7 +395,7 @@ async def intelligence_forecast(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _upstream_error(e, "Forecast")
 
 
 @app.post("/api/intelligence/forecast/score")
@@ -412,22 +432,36 @@ async def evaluate_risk_demo(symbol: str = "BTCUSDT", side: str = "buy", qty: fl
 @app.post("/api/trading/order")
 async def place_order(req: OrderRequest, settings: Settings = Depends(get_settings),
                       db: Session = Depends(get_db), _auth=Depends(require_api_key)):
+    # Live orders are never allowed on an unauthenticated (no API_KEY) deployment.
+    if req.environment == "live" and not settings.api_key:
+        raise HTTPException(status_code=403, detail="Live orders require API_KEY to be configured")
+
+    # Fetch the quote server-side: it drives data-freshness checks and paper fill prices.
+    snapshot = None
+    try:
+        snapshot = await MarketService(settings).get_snapshot(req.provider, req.symbol)
+    except Exception:
+        logger.warning("snapshot failed for %s %s", req.provider, req.symbol, exc_info=True)
+
+    # Risk inputs are derived from the database/market data, never from the request body.
+    ctx = build_risk_context(db, settings, environment=req.environment, snapshot=snapshot)
+
     fill_hint = None
-    if req.environment.lower() in ("paper", "testnet"):
-        try:
-            snap = await MarketService(settings).get_snapshot(req.provider, req.symbol)
-            fill_hint = snap.get("price")
-        except Exception:
-            fill_hint = req.limit_price
+    if req.environment in ("paper", "testnet"):
+        price = snapshot.get("price") if snapshot else None
+        fill_hint = price if price is not None else req.limit_price
+
     service = TradingService(settings, db=db)
-    return await service.place_order(
+    result = await service.place_order(
         provider=req.provider, environment=req.environment, symbol=req.symbol, side=req.side,
-        qty=req.qty, order_type=req.order_type, limit_price=req.limit_price, equity=req.equity,
-        current_open_positions=req.current_open_positions, daily_realized_pnl_pct=req.daily_realized_pnl_pct,
-        current_drawdown_pct=req.current_drawdown_pct, data_age_seconds=req.data_age_seconds,
-        data_status=req.data_status, fill_price_hint=fill_hint, thesis=req.thesis,
+        qty=req.qty, order_type=req.order_type, limit_price=req.limit_price, equity=ctx.equity,
+        current_open_positions=ctx.current_open_positions, daily_realized_pnl_pct=ctx.daily_realized_pnl_pct,
+        current_drawdown_pct=ctx.current_drawdown_pct, data_age_seconds=ctx.data_age_seconds,
+        data_status=ctx.data_status, fill_price_hint=fill_hint, thesis=req.thesis,
         council_action=req.council_action,
     )
+    result["risk_inputs"] = {"source": "server", **ctx.to_dict()}
+    return result
 
 
 @app.post("/api/trading/reconcile")
