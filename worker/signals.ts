@@ -1,4 +1,4 @@
-import { getMarketData, providerOrder, INTERVALS, INTERVAL_SECONDS, type Kline, type MarketEnv } from "./market";
+import { getMarketData, providerOrder, INTERVALS, INTERVAL_SECONDS, type Kline, type MarketEnv } from "./market.ts";
 
 export interface SignalEnv extends MarketEnv {}
 
