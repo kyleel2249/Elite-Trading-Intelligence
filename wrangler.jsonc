@@ -5,6 +5,7 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   "vars": {
+    "ETI_KILL_SWITCH": "false",
     "ETI_EDGE": "native"
   }
 }
