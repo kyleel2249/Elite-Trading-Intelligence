@@ -6,6 +6,7 @@ drawdown, positions and freshness are never accepted.
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.market.service import MarketService
+from app.intelligence.council import TradingCouncil
 from app.risk.engine import OrderProposal, RiskEngine
 from app.security.auth import require_api_key
 from app.services.activity_store import ActivityStore
@@ -56,6 +58,43 @@ async def execution_preflight(
     risk_context = build_risk_context(
         db, settings, environment=req.environment, snapshot=snapshot,
     )
+    order_book = None
+    klines = None
+    if req.provider == "binance":
+        try:
+            order_book = await MarketService(settings).get_order_book(req.symbol, depth=20)
+        except Exception:
+            order_book = None
+        try:
+            klines = await MarketService(settings).get_history("binance", req.symbol, interval="1h", limit=100)
+        except Exception:
+            klines = None
+
+    # Disclosures are surfaced as evidence, never interpreted as an automatic
+    # buy/sell instruction. The trading gateway remains the only order path.
+    disclosures = ActivityStore(db).list_activities(ticker=req.symbol.upper(), limit=20)
+    high_impact = [
+        row for row in disclosures
+        if row.get("significance") in ("CRITICAL", "HIGH")
+        and row.get("verification_status") not in ("UNCONFIRMED", "DISPUTED", "INSUFFICIENT_INFORMATION")
+    ]
+    research_context = {
+        "investor_disclosures": high_impact[:10],
+        "risk_context": risk_context.to_dict(),
+        "market_provider": req.provider,
+    }
+    council = TradingCouncil().analyse(
+        symbol=req.symbol.upper(),
+        provider=req.provider,
+        price=snapshot.get("price"),
+        bid=snapshot.get("bid"),
+        ask=snapshot.get("ask"),
+        data_status=str(snapshot.get("data_status") or "unavailable"),
+        order_book=order_book,
+        klines=klines,
+        context=research_context,
+    )
+
     price = req.limit_price if req.limit_price is not None else snapshot.get("price")
     # A live order without a trustworthy reference quote is rejected even when
     # the limit is supplied: the quote is needed for freshness and sanity checks.
@@ -77,21 +116,18 @@ async def execution_preflight(
     )
     decision = RiskEngine(settings).evaluate(proposal)
 
-    # Disclosures are surfaced as evidence, never interpreted as an automatic
-    # buy/sell instruction. The trading gateway remains the only order path.
-    disclosures = ActivityStore(db).list_activities(ticker=req.symbol.upper(), limit=20)
-    high_impact = [
-        row for row in disclosures
-        if row.get("significance") in ("CRITICAL", "HIGH")
-        and row.get("verification_status") not in ("UNCONFIRMED", "DISPUTED", "INSUFFICIENT_INFORMATION")
-    ]
-
     reasons = list(decision.reasons)
+    if req.environment == "live" and council.risk_veto:
+        reasons.extend(council.risk_notes or ["Trading Council risk veto"])
     if req.environment == "live" and (snapshot.get("price") is None or risk_context.data_status in ("unavailable", "invalid", "stale", "incomplete")):
         reasons.append("Live preflight requires an available, valid, fresh market quote")
     approved = decision.approved and not (
         req.environment == "live"
-        and (snapshot.get("price") is None or risk_context.data_status in ("unavailable", "invalid", "stale", "incomplete"))
+        and (
+            snapshot.get("price") is None
+            or risk_context.data_status in ("unavailable", "invalid", "stale", "incomplete")
+            or council.risk_veto
+        )
     )
     return {
         "approved": approved,
@@ -111,6 +147,16 @@ async def execution_preflight(
             "high_impact_verified_count": len(high_impact),
             "activities": high_impact[:10],
             "interpretation": "Research context only; disclosures are not automatic trade signals.",
+        },
+        "market_research": {
+            "council_action": council.action.value,
+            "confidence": council.confidence,
+            "summary": council.summary,
+            "risk_veto": council.risk_veto,
+            "risk_notes": council.risk_notes,
+            "data_quality": council.data_quality,
+            "specialist_reports": [asdict(report) for report in council.specialist_reports],
+            "methodology_notes": council.methodology_notes,
         },
         "order": {
             "provider": req.provider, "environment": req.environment,
