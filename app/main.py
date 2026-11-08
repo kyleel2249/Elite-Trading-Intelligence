@@ -1,9 +1,11 @@
 """ETI FastAPI application entrypoint."""
+import asyncio
 import logging
+import math
 from contextlib import asynccontextmanager
 from typing import Literal, Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -41,7 +43,7 @@ from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
-from app.security.auth import require_api_key
+from app.security.auth import require_api_key, require_persistence_auth
 
 logger = logging.getLogger("eti")
 
@@ -71,11 +73,17 @@ async def lifespan(app: FastAPI):
     await _start_component("reconcile_job", reconcile_job.start)
     if settings.quiver_configured:
         await _start_component("investor_monitor_job", investor_monitor_job.start)
-    yield
-    await investor_monitor_job.stop()
-    await reconcile_job.stop()
-    await mtm_job.stop()
-    await stream_hub.stop()
+    try:
+        yield
+    finally:
+        # Keep cleaning up even if one component fails during shutdown.
+        results = await asyncio.gather(
+            investor_monitor_job.stop(), reconcile_job.stop(), mtm_job.stop(), stream_hub.stop(),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.warning("shutdown component failed: %s", type(result).__name__)
 
 
 app = FastAPI(
@@ -131,9 +139,9 @@ class OrderRequest(BaseModel):
 
 
 class ForecastScoreRequest(BaseModel):
-    symbol: str = "BTCUSDT"
-    provider: str = "binance"
-    realized_price: Optional[float] = None
+    symbol: str = Field("BTCUSDT", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
+    provider: Literal["binance", "alpaca"] = "binance"
+    realized_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -241,11 +249,11 @@ async def feeds_news(q: str = "markets OR bitcoin OR federal reserve", settings:
     return await fetch_news_headlines(query=q, settings=settings)
 
 
-@app.get("/api/market/snapshot")
+@app.get("/api/market/snapshot", dependencies=[Depends(require_persistence_auth)])
 async def market_snapshot(
     provider: str = "binance",
     symbol: str = "BTCUSDT",
-    persist: bool = True,
+    persist: bool = False,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
@@ -262,7 +270,7 @@ async def market_snapshot(
 @app.get("/api/market/order-book")
 async def market_order_book(
     symbol: str = "BTCUSDT",
-    depth: int = 20,
+    depth: int = Query(20, ge=1, le=1000),
     settings: Settings = Depends(get_settings),
 ):
     svc = MarketService(settings)
@@ -277,7 +285,7 @@ async def market_history(
     provider: str = "binance",
     symbol: str = "BTCUSDT",
     interval: str = "1h",
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=1000),
     settings: Settings = Depends(get_settings),
 ):
     svc = MarketService(settings)
@@ -292,11 +300,11 @@ async def intelligence_traders():
     return {"traders": list_trader_profiles()}
 
 
-@app.get("/api/intelligence/council")
+@app.get("/api/intelligence/council", dependencies=[Depends(require_persistence_auth)])
 async def run_council(
     symbol: str = "BTCUSDT",
     provider: str = "binance",
-    persist: bool = True,
+    persist: bool = False,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
@@ -368,7 +376,7 @@ async def run_council(
 
 
 @app.get("/api/intelligence/decisions")
-async def list_decisions(limit: int = 20, db: Session = Depends(get_db)):
+async def list_decisions(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
     rows = db.query(CouncilDecisionRecord).order_by(CouncilDecisionRecord.created_at.desc()).limit(min(limit, 100)).all()
     return [{"id": r.id, "symbol": r.symbol, "provider": r.provider, "action": r.action,
              "confidence": r.confidence, "summary": r.summary, "risk_veto": r.risk_veto,
@@ -376,10 +384,10 @@ async def list_decisions(limit: int = 20, db: Session = Depends(get_db)):
              "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
-@app.get("/api/intelligence/forecast")
+@app.get("/api/intelligence/forecast", dependencies=[Depends(require_persistence_auth)])
 async def intelligence_forecast(
     symbol: str = "BTCUSDT", provider: str = "binance", horizon: str = "intraday",
-    persist: bool = True, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
+    persist: bool = False, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
 ):
     mkt = MarketService(settings)
     try:
@@ -399,13 +407,20 @@ async def intelligence_forecast(
 
 
 @app.post("/api/intelligence/forecast/score")
-async def forecast_score(body: ForecastScoreRequest, settings: Settings = Depends(get_settings), db: Session = Depends(get_db)):
+async def forecast_score(body: ForecastScoreRequest, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
+                         _auth=Depends(require_api_key)):
     price = body.realized_price
     if price is None:
         snap = await MarketService(settings).get_snapshot(body.provider, body.symbol)
         price = snap.get("price")
         if price is None:
             raise HTTPException(status_code=422, detail="No realized price available")
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Realized price must be positive and finite")
+    if not math.isfinite(price) or price <= 0:
+        raise HTTPException(status_code=422, detail="Realized price must be positive and finite")
     svc = ForecastAccuracyService(db)
     scored = svc.score_pending(body.symbol, float(price), provider=body.provider)
     return {"symbol": body.symbol.upper(), "realized_price": price, "scored": scored,
@@ -420,10 +435,14 @@ async def forecast_accuracy(symbol: Optional[str] = None, db: Session = Depends(
 @app.get("/api/risk/evaluate")
 async def evaluate_risk_demo(symbol: str = "BTCUSDT", side: str = "buy", qty: float = 0.01,
                              environment: str = "paper", equity: float = 10000.0):
-    engine = RiskEngine()
+    settings = get_settings()
+    snapshot = await MarketService(settings).get_snapshot("binance", symbol)
+    ctx = build_risk_context(None, settings, environment=environment, snapshot=snapshot)
+    engine = RiskEngine(settings)
     proposal = OrderProposal(provider="binance", environment=environment, symbol=symbol, side=side,
                              qty=qty, equity=equity, current_open_positions=0, daily_realized_pnl_pct=0.0,
-                             current_drawdown_pct=0.0, data_age_seconds=10.0, data_status="fresh")
+                             current_drawdown_pct=0.0, data_age_seconds=ctx.data_age_seconds,
+                             data_status=ctx.data_status, reference_price=snapshot.get("price") if snapshot else None)
     decision = engine.evaluate(proposal)
     return {"decision": decision.decision.value, "approved": decision.approved, "reasons": decision.reasons,
             "risk_per_trade_pct": decision.risk_per_trade_pct, "notes": decision.notes, "officer": "Helena Frost"}
@@ -449,7 +468,7 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
     fill_hint = None
     if req.environment in ("paper", "testnet"):
         price = snapshot.get("price") if snapshot else None
-        fill_hint = price if price is not None else req.limit_price
+        fill_hint = price
 
     service = TradingService(settings, db=db)
     result = await service.place_order(
@@ -457,7 +476,8 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
         qty=req.qty, order_type=req.order_type, limit_price=req.limit_price, equity=ctx.equity,
         current_open_positions=ctx.current_open_positions, daily_realized_pnl_pct=ctx.daily_realized_pnl_pct,
         current_drawdown_pct=ctx.current_drawdown_pct, data_age_seconds=ctx.data_age_seconds,
-        data_status=ctx.data_status, fill_price_hint=fill_hint, thesis=req.thesis,
+        data_status=ctx.data_status, fill_price_hint=fill_hint,
+        reference_price=snapshot.get("price") if snapshot else None, thesis=req.thesis,
         council_action=req.council_action,
     )
     result["risk_inputs"] = {"source": "server", **ctx.to_dict()}
@@ -465,12 +485,12 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
 
 
 @app.post("/api/trading/reconcile")
-async def trading_reconcile(limit: int = 50, settings: Settings = Depends(get_settings),
+async def trading_reconcile(limit: int = Query(50, ge=1, le=200), settings: Settings = Depends(get_settings),
                             db: Session = Depends(get_db), _auth=Depends(require_api_key)):
     return await OrderReconciler(db, settings).reconcile_open(limit=limit)
 
 
-@app.get("/api/paper-trading/positions")
+@app.get("/api/paper-trading/positions", dependencies=[Depends(require_api_key)])
 async def paper_positions(environment: str = "paper", status: str = "open", db: Session = Depends(get_db)):
     rows = PortfolioService(db).list_positions(environment=environment, status=status)
     return [{"symbol": p.symbol, "side": p.side, "qty": p.qty, "avg_entry": p.avg_entry,
@@ -478,13 +498,13 @@ async def paper_positions(environment: str = "paper", status: str = "open", db: 
              "status": p.status, "provider": p.provider, "environment": p.environment} for p in rows]
 
 
-@app.get("/api/paper-trading/portfolio")
+@app.get("/api/paper-trading/portfolio", dependencies=[Depends(require_api_key)])
 async def paper_portfolio(environment: str = "paper", db: Session = Depends(get_db)):
     return PortfolioService(db).portfolio_summary(environment)
 
 
-@app.get("/api/paper-trading/journal")
-async def paper_journal(limit: int = 50, symbol: Optional[str] = None, event: Optional[str] = None,
+@app.get("/api/paper-trading/journal", dependencies=[Depends(require_api_key)])
+async def paper_journal(limit: int = Query(50, ge=1, le=200), symbol: Optional[str] = None, event: Optional[str] = None,
                         environment: Optional[str] = None, provider: Optional[str] = None,
                         side: Optional[str] = None, db: Session = Depends(get_db)):
     rows = PortfolioService(db).list_journal(limit=limit, symbol=symbol, event=event,
@@ -496,8 +516,8 @@ async def paper_journal(limit: int = 50, symbol: Optional[str] = None, event: Op
              "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
-@app.get("/api/paper-trading/history")
-async def paper_history(limit: int = 50, db: Session = Depends(get_db)):
+@app.get("/api/paper-trading/history", dependencies=[Depends(require_api_key)])
+async def paper_history(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
     from app.models import OrderRecord
     rows = db.query(OrderRecord).order_by(OrderRecord.created_at.desc()).limit(min(limit, 200)).all()
     return [{"client_order_id": r.client_order_id, "provider": r.provider, "environment": r.environment,
