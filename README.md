@@ -114,3 +114,35 @@ For Binance use `"broker":"binance"` and a Binance Spot Testnet symbol such as `
 **Before enabling order submission:** create paper/testnet API keys with trading-only permissions, disable withdrawals/transfers, and set the three credentials as Worker secrets using Wrangler or the Cloudflare dashboard. Never paste secrets into chat, commit them, or place them in browser code. The bearer token must be held only by a trusted authenticated backend/client; do not embed it in public dashboard JavaScript.
 
 Live trading is not implemented or enabled. A future live-trading release must be a separately reviewed change with explicit activation, separate live credentials, per-order confirmation and risk controls.
+
+
+## Execution attribution, audit history and gated live mode
+
+Every submitted order must include an `executionSource` object so the execution receipt identifies who or what initiated it:
+
+```json
+{
+  "executionSource": {
+    "actorType": "manual_user",
+    "actorId": "authenticated-user-id",
+    "sourceName": "ETI Order Console",
+    "strategyId": null,
+    "signalId": null,
+    "triggerReason": "User approved the order preview"
+  }
+}
+```
+
+Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, paper/testnet/live mode, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
+
+### Live trading is present but locked by default
+
+A separate `POST /api/orders/live` route exists. It is not activated by the default deployment. Live submission requires **all** of the following:
+
+1. Set Worker variable `ETI_LIVE_TRADING_ENABLED=true` only after paper/testnet validation and explicit owner authorization.
+2. Add secret `ETI_LIVE_ACTIVATION_TOKEN` and send it as `X-ETI-Live-Authorization` on each live request.
+3. Add separate live broker credentials as `ALPACA_LIVE_API_KEY`, `ALPACA_LIVE_SECRET_KEY`, `BINANCE_LIVE_API_KEY`, and `BINANCE_LIVE_SECRET_KEY`.
+4. Submit to `/api/orders/live` with `riskConfirmed:true`, a unique client order ID and the required `executionSource`.
+5. Keep the general `ETI_EXECUTION_TOKEN` authentication in place. The emergency `ETI_KILL_SWITCH=true` rejects both paper and live submissions.
+
+Paper/testnet remains the default `POST /api/orders` route. Never enable withdrawals, transfers, or wallet-management permissions on any broker API key. Live trading has not been activated or validated by this repository change. The execution history endpoint stores audit records in KV for 90 days; configure backups/retention separately if longer regulatory retention is required.
