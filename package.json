@@ -6,7 +6,8 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "check": "python -m compileall -q app tests && PYTHONPATH=. python -m pytest -q"
+    "check": "python -m compileall -q app tests && PYTHONPATH=. python -m pytest -q",
+    "test:security": "node --experimental-strip-types --test tests/worker_proxy.test.mjs tests/template_security.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
