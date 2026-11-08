@@ -49,6 +49,18 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section></div>
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:220px"><canvas id="depth"></canvas></div><small>Aggregated visible bid and ask liquidity. Not a full exchange order queue.</small></section></div>
 
+
+<section class="panel" id="signalPanel" style="margin-top:14px">
+<h2>ETI AI Signal Engine</h2>
+<div class="meta"><span>Decision <b id="signalAction">ANALYSING…</b></span><span>Score <b id="signalScore">—</b></span><span>Historical win rate <b id="signalWinRate">Not validated</b></span><span>Provider <b id="signalProvider">—</b></span></div>
+<div class="lower" style="margin-top:0">
+<div><div class="execution-note">Entry / reference</div><strong id="signalEntry">—</strong><div class="execution-note" style="margin-top:8px">Stop loss</div><strong id="signalStop">—</strong></div>
+<div><div class="execution-note">Take-profit levels</div><div id="signalTargets" class="execution-output">Awaiting validated candles…</div></div>
+</div>
+<div class="execution-note" id="signalSummary" style="margin-top:10px">Market-derived indicator confluence, not a guaranteed prediction.</div>
+<div class="execution-note" id="signalEvidence" style="margin-top:8px"></div>
+<div class="execution-note" id="signalAttribution" style="margin-top:8px"></div>
+</section>
 <section class="panel" style="margin-top:14px">
 <h2>Order Execution</h2>
 <div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
@@ -135,7 +147,7 @@ function connectWs(){
  sock.onclose=()=>{if(socket!==sock)return;const wait=Math.min(30000,1000*Math.pow(2,wsRetry++));setConn('WebSocket disconnected · REST polling active · reconnect in '+Math.round(wait/1000)+'s','#f59e0b');wsTimer=setTimeout(connectWs,wait);};
  sock.onerror=()=>sock.close();
 }
-function resetAndLoad(){reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();if(socket){socket.onclose=null;socket.close();socket=null;}load();}
+function resetAndLoad(){loadSignal();reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();if(socket){socket.onclose=null;socket.close();socket=null;}load();}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let preparedOrder=null, executionStatus=null;
 function selectedOrder(){
@@ -216,9 +228,36 @@ $('buyOrder').onclick=()=>submitOrder('buy');
 $('sellOrder').onclick=()=>submitOrder('sell');
 $('clearExecutionSecrets').onclick=()=>{$('executionToken').value='';$('liveActivationToken').value='';$('orderOutput').textContent='Credentials cleared from this page.';$('executionHistory').textContent='Enter your execution token, then refresh.';};
 $('refreshExecutionHistory').onclick=refreshExecutionHistory;
+async function loadSignal(){
+ const sym=$('symbol').value, iv=$('interval').value;
+ $('signalAction').textContent='ANALYSING…';
+ try{
+  const r=await fetch('/api/signals?symbol='+encodeURIComponent(sym)+'&interval='+encodeURIComponent(iv),{cache:'no-store'});
+  const d=await r.json();
+  if(!r.ok)throw Error(d.error||('HTTP '+r.status));
+  $('signalAction').textContent=d.action;
+  $('signalAction').style.color=d.action==='BUY'?'#21d69a':d.action==='SELL'?'#ff637d':'#f0c674';
+  $('signalScore').textContent=d.score+' / 100 · heuristic';
+  $('signalWinRate').textContent=d.historicalValidation.winRate===null?'Withheld · '+d.historicalValidation.sampleCount+' samples':d.historicalValidation.winRate+'% · n='+d.historicalValidation.sampleCount;
+  $('signalProvider').textContent=d.provider+' · '+d.interval;
+  $('signalEntry').textContent=d.entry===null?'No trade':fmt(d.entry);
+  $('signalStop').textContent=d.stopLoss===null?'—':fmt(d.stopLoss);
+  $('signalTargets').textContent=d.targets.length?d.targets.map(t=>'TP'+t.target+': '+fmt(t.price)+' ('+t.rewardRisk+'R)').join('\n'):'No targets · wait for confluence';
+  $('signalSummary').textContent='Confidence is a confluence score, not a probability. '+d.historicalValidation.note;
+  $('signalEvidence').textContent='Evidence: '+d.evidence.join(' · ');
+  $('signalAttribution').textContent='Documented methods: '+d.strategyAttribution.map(a=>a.trader+' — '+a.contribution).join(' | ');
+ }catch(e){
+  $('signalAction').textContent='UNAVAILABLE';
+  $('signalScore').textContent='—';$('signalWinRate').textContent='Not validated';
+  $('signalEntry').textContent='—';$('signalStop').textContent='—';$('signalTargets').textContent='No signal: '+e.message;
+  $('signalEvidence').textContent='Fail-closed: no trade recommendation without fresh, valid market candles.';
+ }
+}
 refreshExecutionStatus();
+loadSignal();
+setInterval(loadSignal,60000);
 
-$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();};$('interval').onchange=resetAndLoad;window.onresize=()=>{drawChart();drawDepth()};load();
+$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();};$('interval').onchange=()=>{resetAndLoad();loadSignal();};window.onresize=()=>{drawChart();drawDepth()};load();
 </script></body></html>`;
 
 export default {
