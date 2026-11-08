@@ -3,10 +3,18 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true
+  },
   "vars": {
     "ETI_KILL_SWITCH": "false",
-    "ETI_LIVE_TRADING_ENABLED": "false",
+    "ETI_LIVE_TRADING_ENABLED": "true",
     "ETI_EDGE": "native"
-  }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "ETI_EXECUTION_LOG",
+      "id": "da68ec381049420faa497428ea7f8180"
+    }
+  ]
 }
