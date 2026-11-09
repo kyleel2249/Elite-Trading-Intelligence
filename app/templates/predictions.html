@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETI — Prediction Accountability</title>
+  <style>
+    :root{--bg:#070b12;--card:rgba(18,28,45,.78);--text:#e8eef8;--muted:#8b9bb4;--cyan:#22d3ee;--green:#22c55e;--red:#ef4444;--gold:#fbbf24;--border:rgba(56,189,248,.15)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.45}
+    header{position:sticky;top:0;z-index:20;background:rgba(7,11,18,.92);border-bottom:1px solid var(--border);padding:.85rem 1.25rem;display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between}
+    h1{margin:0;font-size:1.1rem;color:var(--gold)} h2{font-size:.95rem;margin:1.4rem 0 .5rem;color:var(--cyan)}
+    .sub{color:var(--muted);font-size:.75rem}
+    a,.btn{color:var(--text);text-decoration:none;background:rgba(30,41,59,.85);border:1px solid var(--border);padding:.4rem .7rem;border-radius:8px;font-size:.78rem;cursor:pointer}
+    .nav{display:flex;gap:.45rem;flex-wrap:wrap}
+    main{max-width:1150px;margin:0 auto;padding:1rem 1.25rem 2.5rem}
+    .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem}
+    .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:.8rem 1rem}
+    .kpi .l{font-size:.68rem;text-transform:uppercase;color:var(--muted)} .kpi .v{font-size:1.35rem;font-weight:650}
+    .scroll{overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:14px}
+    table{border-collapse:collapse;width:100%;font-size:.78rem} th,td{padding:.45rem .6rem;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+    th{color:var(--muted);font-weight:600} td.wrap{white-space:normal;min-width:220px}
+    .up{color:var(--green)} .down{color:var(--red)} .warn{color:var(--gold);font-size:.75rem}
+    form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.55rem;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:.9rem}
+    label{font-size:.7rem;color:var(--muted);display:flex;flex-direction:column;gap:.2rem}
+    input,select,textarea{background:#0a1220;border:1px solid var(--border);color:var(--text);padding:.45rem .55rem;border-radius:8px;font-size:.8rem;font-family:inherit}
+    textarea{min-height:60px} .full{grid-column:1/-1}
+    .toast{position:fixed;bottom:1rem;right:1rem;background:#0f172a;border:1px solid var(--gold);padding:.7rem 1rem;border-radius:10px;font-size:.82rem;display:none;max-width:340px}
+    .toast.show{display:block} pre{white-space:pre-wrap;font-size:.72rem;background:#0a1220;padding:.75rem;border-radius:8px;overflow:auto}
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>ETI Prediction Accountability</h1>
+      <div class="sub">Append-only ledger · failed predictions are never deleted · research only · v{{ version }}</div></div>
+    <div class="nav"><a href="/">Main</a><a href="/data-intel">Command Centre</a><a href="/alerts">Alerts</a>
+      <button class="btn" id="btn-refresh">Refresh</button><button class="btn" id="btn-run">Run evaluator</button></div>
+  </header>
+  <main>
+    <div class="kpis" id="kpis"></div>
+    <div class="warn" id="warn"></div>
+
+    <h2>Performance breakdowns</h2>
+    <label class="sub" style="max-width:220px">View
+      <select id="group"><option value="by_asset">By asset</option><option value="by_timeframe">By timeframe</option>
+      <option value="by_regime">By market regime</option><option value="by_strategy">By strategy</option><option value="by_market">By market</option></select></label>
+    <div class="scroll" style="margin-top:.5rem"><table id="tbl-group"></table></div>
+
+    <h2>Probability calibration</h2>
+    <div class="scroll"><table id="tbl-cal"></table></div>
+
+    <h2>Predictions</h2>
+    <div class="scroll"><table id="tbl-pred"></table></div>
+
+    <h2>Monthly reports</h2>
+    <div class="scroll"><table id="tbl-rep"></table></div>
+    <pre id="report-body" style="display:none"></pre>
+
+    <h2>Record a prediction</h2>
+    <form id="form">
+      <label>Asset<input name="asset" required placeholder="BTCUSDT" /></label>
+      <label>Market<select name="market"><option>crypto</option><option>equity</option><option>fx</option><option>commodity</option><option>index</option><option>rates</option><option>other</option></select></label>
+      <label>Price feed<select name="provider"><option value="">none (settle manually)</option><option>binance</option><option>alpaca</option></select></label>
+      <label>Direction<select name="direction"><option>up</option><option>down</option><option>neutral</option></select></label>
+      <label>Entry reference<input name="entry_reference" type="number" step="any" min="0" required /></label>
+      <label>Horizon (hours)<input name="hours" type="number" step="any" min="0.02" required /></label>
+      <label>Target low<input name="target_low" type="number" step="any" /></label>
+      <label>Target high<input name="target_high" type="number" step="any" /></label>
+      <label>Probability (0.01–0.99)<input name="probability" type="number" step="0.01" min="0.01" max="0.99" required /></label>
+      <label>Invalidation price<input name="invalidation_price" type="number" step="any" /></label>
+      <label>Market regime<input name="market_regime" placeholder="weak_bull" /></label>
+      <label>Strategy<input name="strategy" placeholder="turtle_trend" /></label>
+      <label class="full">Reasoning<textarea name="reasoning" required minlength="10"></textarea></label>
+      <label class="full">Supporting sources (one per line)<textarea name="sources" required></textarea></label>
+      <label class="full">Invalidation criteria<textarea name="invalidation_criteria" required minlength="5"></textarea></label>
+      <label>API key<input id="api-key" type="password" placeholder="X-API-Key" /></label>
+      <div style="align-self:end"><button class="btn" type="submit">Record (cannot be edited later)</button></div>
+    </form>
+  </main>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    $('api-key').value = localStorage.getItem('eti_api_key') || '';
+    const pct = (x) => x == null ? 'n/a' : (x * 100).toFixed(1) + '%';
+    const num = (x, d = 4) => x == null ? 'n/a' : Number(x).toFixed(d);
+    function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3500); }
+    async function api(path, opts) {
+      const r = await fetch(path, opts); const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail || r.status));
+      return j;
+    }
+    function headers() { const h = {'Content-Type': 'application/json'}; const k = $('api-key').value.trim(); if (k) { h['X-API-Key'] = k; localStorage.setItem('eti_api_key', k); } return h; }
+    // All cell content goes through textContent: no HTML injection from stored data.
+    function table(el, cols, rows, cellClass) {
+      el.replaceChildren();
+      const thead = el.createTHead().insertRow();
+      cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; thead.appendChild(th); });
+      const tb = el.createTBody();
+      if (!rows.length) { const td = tb.insertRow().insertCell(); td.colSpan = cols.length; td.textContent = 'Nothing recorded yet.'; return; }
+      rows.forEach(r => { const tr = tb.insertRow(); r.forEach((v, i) => { const td = tr.insertCell(); td.textContent = v == null ? '' : String(v); if (cellClass) { const c = cellClass(i, v); if (c) td.className = c; } }); });
+    }
+    let METRICS = null;
+    function kpi(l, v) { const d = document.createElement('div'); d.className = 'kpi'; const a = document.createElement('div'); a.className = 'l'; a.textContent = l; const b = document.createElement('div'); b.className = 'v'; b.textContent = v; d.append(a, b); return d; }
+    function renderGroups() {
+      const g = METRICS[$('group').value] || {};
+      table($('tbl-group'), ['Group', 'Scored', 'Directional', 'Target hit', 'MAPE', 'Brier', 'Reliable?'],
+        Object.entries(g).map(([k, m]) => [k, m.n_scored, pct(m.directional_accuracy), pct(m.target_range_hit_rate), pct(m.mean_abs_pct_error), num(m.brier_score), m.sufficient_sample ? 'yes' : 'n<' + m.min_sample]));
+    }
+    async function load() {
+      METRICS = await api('/api/predictions/metrics');
+      const o = METRICS.overall;
+      $('kpis').replaceChildren(kpi('Scored', o.n_scored), kpi('Directional accuracy', pct(o.directional_accuracy)), kpi('Target-range hit', pct(o.target_range_hit_rate)),
+        kpi('Mean abs % error', pct(o.mean_abs_pct_error)), kpi('Brier score', num(o.brier_score)), kpi('Calibration error', num(o.expected_calibration_error)),
+        kpi('Late (excluded)', o.n_late_excluded), kpi('Invalidated', o.n_invalidated));
+      $('warn').textContent = o.warning || (o.n_scored === 0 ? 'No scored predictions yet — metrics appear once predictions reach their horizon.' : '');
+      renderGroups();
+      table($('tbl-cal'), ['Probability bin', 'N', 'Mean stated p', 'Observed frequency'], (o.calibration || []).map(b => [b.bin, b.n, num(b.mean_probability, 3), num(b.observed_frequency, 3)]));
+      const p = await api('/api/predictions?limit=100');
+      table($('tbl-pred'), ['Created (UTC)', 'Asset', 'Dir', 'Entry', 'Prob', 'Horizon', 'Regime', 'Strategy', 'Status', 'Realized', 'Correct'],
+        p.predictions.map(x => [x.created_at, x.asset, x.direction, x.entry_reference, x.probability, x.horizon_label, x.market_regime, x.strategy, x.status, x.realized_price, x.direction_correct == null ? '' : (x.direction_correct ? 'yes' : 'no')]),
+        (i, v) => i === 2 ? (v === 'up' ? 'up' : v === 'down' ? 'down' : '') : '');
+      const rp = await api('/api/predictions/reports');
+      table($('tbl-rep'), ['Period', 'Generated', 'Hash'], rp.reports.map(r => [r.period, r.generated_at, r.content_hash.slice(0, 16)]));
+      $('tbl-rep').querySelectorAll('tbody tr').forEach(tr => { tr.style.cursor = 'pointer'; tr.onclick = async () => {
+        const period = tr.cells[0].textContent; const r = await api('/api/predictions/reports/' + encodeURIComponent(period));
+        const pre = $('report-body'); pre.textContent = r.markdown; pre.style.display = 'block'; }; });
+    }
+    $('group').onchange = () => METRICS && renderGroups();
+    $('btn-refresh').onclick = () => load().then(() => toast('Refreshed')).catch(e => toast(e.message));
+    $('btn-run').onclick = async () => { try { const j = await api('/api/predictions/job/run', { method: 'POST', headers: headers() }); toast('Resolved ' + j.resolved + ' · skipped (no feed) ' + j.skipped_no_price + ' · errors ' + j.errors); await load(); } catch (e) { toast(e.message); } };
+    $('form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target); const n = (k) => f.get(k) === '' || f.get(k) == null ? null : Number(f.get(k));
+      const s = (k) => (f.get(k) || '').toString().trim() || null;
+      const body = { asset: s('asset'), market: s('market'), provider: s('provider'), direction: s('direction'), entry_reference: n('entry_reference'),
+        horizon_seconds: Math.round(n('hours') * 3600), target_low: n('target_low'), target_high: n('target_high'), probability: n('probability'),
+        invalidation_price: n('invalidation_price'), market_regime: s('market_regime'), strategy: s('strategy'), reasoning: s('reasoning'),
+        sources: (f.get('sources') || '').split('\n').map(x => x.trim()).filter(Boolean), invalidation_criteria: s('invalidation_criteria') };
+      try { const j = await api('/api/predictions', { method: 'POST', headers: headers(), body: JSON.stringify(body) }); toast('Recorded ' + j.prediction_uid.slice(0, 8)); ev.target.reset(); await load(); }
+      catch (e) { toast(e.message); }
+    });
+    load().catch(e => toast(e.message));
+  </script>
+</body>
+</html>
