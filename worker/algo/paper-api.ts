@@ -14,6 +14,7 @@ import type { Strategy } from "./timeframes.ts";
 import { STRATEGIES } from "./omni-api.ts";
 import { loadMinuteBars, loadSignalInputs } from "./market-inputs.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
+import { activeOptions, paramsOp } from "./params.ts";
 import { KVPaperStore, PaperEngine, type KVLike, type Preflight, type PreflightRequest } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
 
@@ -39,7 +40,7 @@ export function makeGatePreflight(env: ExecutionEnv, fetchImpl: typeof fetch = f
 
 export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps = {}): Promise<Response> {
   const url = new URL(req.url), now = (deps.now ?? Date.now)(), path = url.pathname.replace(/\/+$/, "");
-  const known: Record<string, string> = { "/api/paper/status": "GET", "/api/paper/performance": "GET", "/api/paper/audit": "GET", "/api/paper/evaluate": "POST", "/api/paper/tick": "POST", "/api/paper/kill": "POST" };
+  const known: Record<string, string> = { "/api/paper/status": "GET", "/api/paper/performance": "GET", "/api/paper/audit": "GET", "/api/paper/evaluate": "POST", "/api/paper/tick": "POST", "/api/paper/kill": "POST", "/api/paper/params": "GET", "/api/paper/params/propose": "POST", "/api/paper/params/promote": "POST", "/api/paper/params/rollback": "POST" };
   if (!(path in known)) return reply({ error: "not_found" }, 404);
   if (!(await authorized(req, env))) return reply({ error: "unauthorized" }, 401);
   if (req.method !== known[path]) return reply({ error: "method_not_allowed", allowed: known[path] }, 405);
@@ -76,6 +77,8 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
     return reply({ event: await engine.setKillSwitch(body.on, now), killSwitch: engine.state.killSwitch, envKillSwitch: envKill });
   }
 
+  if (path.startsWith("/api/paper/params")) { const r = await paramsOp(path.split("/").pop() === "params" ? "get" : (path.split("/").pop() as "propose" | "promote" | "rollback"), env.ETI_EXECUTION_LOG as any, body, now); return reply(r.body, r.status); }
+
   const symbol = symbolOf();
   if (!validSymbol(symbol)) return reply({ error: "invalid_symbol" }, 400);
   if (path === "/api/paper/tick") { const r = await tickSymbol(engine, env, symbol, now); return reply(r.body, r.status); }
@@ -100,10 +103,12 @@ export async function tickSymbol(engine: PaperEngine, env: PaperEnv, symbol: str
 }
 /** Analyse a symbol and, when `execute` is true, open a paper position if the plan is BUY/SELL and the risk gateway approves. */
 export async function evaluateSymbol(engine: PaperEngine, env: PaperEnv, symbol: string, strategy: Strategy, execute: boolean, now: number, envKill: boolean): Promise<OpResult> {
+  let active; try { active = await activeOptions(env.ETI_EXECUTION_LOG as any, () => now); } catch { return { status: 503, body: { error: "params_unavailable", message: "The parameter registry could not be read, so no new analysis or entry is made.", submitsOrder: false } }; }
   const inputs = await loadSignalInputs(env, symbol, strategy, null, now);
   if ("error" in inputs) return { status: 503, body: { decision: "DATA_UNRELIABLE", ...inputs, submitsOrder: false } };
-  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env) });
-  const out: Record<string, unknown> = { symbol, strategy, plan, executed: false, event: null, submitsOrder: false };
+  const { version, name, ...opts } = active;
+  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env), ...opts });
+  const out: Record<string, unknown> = { symbol, strategy, parameters: { version, name }, plan, executed: false, event: null, submitsOrder: false };
   if (!execute) return { status: 200, body: out };
   if (envKill) { out.event = { type: "REJECTED", reasons: ["Emergency kill switch (ETI_KILL_SWITCH) is active"] }; return { status: 423, body: out }; }
   if (plan.decision === "BUY" || plan.decision === "SELL") {

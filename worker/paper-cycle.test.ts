@@ -76,13 +76,13 @@ test("one symbol's data failure is isolated; the other symbols still run; total 
 });
 test("the Worker entrypoint exposes fetch and a scheduled handler that runs the cycle", async () => {
   assert.equal(typeof (main as any).fetch, "function"); assert.equal(typeof (main as any).scheduled, "function");
-  const env = mkEnv({ ETI_PAPER_SYMBOLS: "BTCUSDT" }) as any; let waited: Promise<unknown> | null = null;
-  await (main as any).scheduled({}, env, { waitUntil: (p: Promise<unknown>) => { waited = p; } }); await waited;
+  const env = mkEnv({ ETI_PAPER_SYMBOLS: "BTCUSDT" }) as any; const waited: Promise<unknown>[] = [];
+  await (main as any).scheduled({}, env, { waitUntil: (p: Promise<unknown>) => { waited.push(p); } }); await Promise.allSettled(waited);
   assert.ok(env.kv.m.has("eti:paper:lastrun"), "scheduled run recorded its summary");
   assert.equal((await (main as any).fetch(new Request("https://e/api/paper/status"), env)).status, 401);
 });
 test("scheduled handler never throws into the runtime when the cycle fails", async () => {
   const env = mkEnv({ ETI_PAPER_SYMBOLS: "BTCUSDT" }) as any; env.ETI_EXECUTION_LOG = { get: async () => { throw new Error("kv down"); }, put: async () => {}, list: async () => ({ keys: [] }) };
-  let waited: Promise<unknown> | null = null; await (main as any).scheduled({}, env, { waitUntil: (p: Promise<unknown>) => { waited = p; } });
-  await assert.doesNotReject(async () => { await waited; });
+  const waited: Promise<unknown>[] = []; await (main as any).scheduled({}, env, { waitUntil: (p: Promise<unknown>) => { waited.push(p); } });
+  await assert.doesNotReject(async () => { await Promise.all(waited); });
 });

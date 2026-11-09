@@ -133,3 +133,36 @@ test("the Worker router serves /api/paper/* and keeps it behind auth", async () 
   assert.equal((await worker.fetch(new Request("https://eti.test/api/paper/status"), env)).status, 401);
   assert.equal((await worker.fetch(new Request("https://eti.test/api/paper/status", { headers: { authorization: "Bearer " + TOKEN } }), env)).status, 200);
 });
+
+// ---- parameter registry API ----
+const recommendation = (name: string) => ({ challenger: { name }, promotion: { decision: "RECOMMEND_PROMOTION_PENDING_HUMAN_APPROVAL", reasons: [], autoApplied: false }, oosChallenger: { meanR: 0.3, trades: 40, bootstrap: { low95: 0.1 }, report: { maxDrawdownPct: 3 } }, oosChampion: {}, folds: [], caveats: [] });
+test("params API: auth required, defaults to the built-in champion, no live/risk fields", async () => {
+  const env = mkEnv();
+  assert.equal((await call(env, "/api/paper/params", "GET", undefined, null)).status, 401);
+  const g = await json(await call(env, "/api/paper/params"));
+  assert.equal(g.champion.name, "default"); assert.equal(g.champion.approvedBy, "system-default");
+  assert.equal((await call(env, "/api/paper/params", "POST", {})).status, 405);
+});
+test("params API: propose resolves candidates server-side; promotion needs a named human; rollback restores", async () => {
+  const env = mkEnv();
+  assert.equal((await call(env, "/api/paper/params/propose", "POST", { name: "evil", result: recommendation("evil") })).status, 400);
+  assert.equal((await call(env, "/api/paper/params/propose", "POST", { name: "default", result: recommendation("default") })).status, 400);
+  assert.equal((await call(env, "/api/paper/params/propose", "POST", { name: "tight_rr2", result: recommendation("other") })).status, 400);
+  const bad = await call(env, "/api/paper/params/propose", "POST", { name: "tight_rr2", result: { ...recommendation("tight_rr2"), promotion: { decision: "KEEP_CHAMPION", reasons: [], autoApplied: false } } });
+  assert.equal(bad.status, 409);
+  const p = await json(await call(env, "/api/paper/params/propose", "POST", { name: "tight_rr2", result: recommendation("tight_rr2") }));
+  assert.deepEqual(p.proposed.tighten, { minRiskReward: 2 }); assert.equal(p.champion.name, "default");
+  for (const who of [undefined, "", "claude", "AI"]) assert.equal((await call(env, "/api/paper/params/promote", "POST", { id: p.proposed.id, approver: who })).status, 409);
+  assert.equal((await call(env, "/api/paper/params/promote", "POST", { id: "x", approver: "Kyle" })).status, 400);
+  const pr = await json(await call(env, "/api/paper/params/promote", "POST", { id: p.proposed.id, approver: "Kyle" })); assert.equal(pr.champion.name, "tight_rr2");
+  const rb = await json(await call(env, "/api/paper/params/rollback", "POST", { reason: "test" })); assert.equal(rb.champion.name, "default");
+  assert.equal((await call(mkEnv(), "/api/paper/params/rollback", "POST", {})).status, 409); // nothing approved to return to
+});
+test("evaluate uses the champion parameters and reports their version; an unreadable registry fails closed", async () => {
+  const env = mkEnv(); let b = await json(await call(env, "/api/paper/evaluate", "POST", { symbol: "BTCUSDT" })); assert.deepEqual(b.parameters, { version: 1, name: "default" });
+  const p = await json(await call(env, "/api/paper/params/propose", "POST", { name: "tight_rr2_5", result: recommendation("tight_rr2_5") }));
+  await call(env, "/api/paper/params/promote", "POST", { id: p.proposed.id, approver: "Kyle" });
+  b = await json(await call(env, "/api/paper/evaluate", "POST", { symbol: "BTCUSDT" })); assert.equal(b.parameters.name, "tight_rr2_5");
+  const broken = mkEnv(); const kv = broken.ETI_EXECUTION_LOG as any, realGet = kv.get; kv.get = async (k: string) => { if (k === "algo:params:v1") throw new Error("kv down"); return realGet(k); };
+  const r = await call(broken, "/api/paper/evaluate", "POST", { symbol: "BTCUSDT", execute: true }); assert.equal(r.status, 503); assert.equal((await json(r)).error, "params_unavailable");
+});

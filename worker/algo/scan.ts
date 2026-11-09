@@ -3,6 +3,7 @@
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { loadSignalInputs } from "./market-inputs.ts";
+import { activeOptions } from "./params.ts";
 import { costBpsFrom, runOmnisignal, type FinalDecision, type OmnisignalResult } from "./omnisignal.ts";
 
 export const MAX_SCAN_SYMBOLS = 4;
@@ -29,12 +30,12 @@ export function parseSymbols(raw: string | null): { symbols: string[]; ignored: 
   return { symbols: good.slice(0, MAX_SCAN_SYMBOLS), ignored: [...all.filter(s => !good.includes(s)), ...good.slice(MAX_SCAN_SYMBOLS)] };
 }
 export async function scan(env: MarketEnv, symbols: string[], strategy: Strategy, now: number = Date.now()): Promise<ScanRow[]> {
-  const rows: ScanRow[] = [];
+  const rows: ScanRow[] = [], { version: _v, name: _n, ...opts } = await activeOptions((env as any).ETI_EXECUTION_LOG, () => now);
   for (const symbol of symbols) { // sequential on purpose: bounded subrequest burst, and one failing symbol never aborts the scan
     try {
       const inp = await loadSignalInputs(env, symbol, strategy, null, now);
       if ("error" in inp) { rows.push({ ...rowOf(symbol, { decision: "DATA_UNRELIABLE", validation: null, liquidity: null, riskRewardToTP3: null, confidence: 0, fusion: { agreement: null }, entryZone: null, stopLoss: null, reasons: [`Market data unavailable (${inp.error})`] } as unknown as OmnisignalResult) }); continue; }
-      rows.push(rowOf(symbol, runOmnisignal({ symbol, strategy, candles: inp.candles, depth: inp.depth, now }, { roundTripCostBps: costBpsFrom(env as any) })));
+      rows.push(rowOf(symbol, runOmnisignal({ symbol, strategy, candles: inp.candles, depth: inp.depth, now }, { ...opts, roundTripCostBps: costBpsFrom(env as any) })));
     } catch (e) { rows.push({ ...rowOf(symbol, { decision: "DATA_UNRELIABLE", validation: null, liquidity: null, riskRewardToTP3: null, confidence: 0, fusion: { agreement: null }, entryZone: null, stopLoss: null, reasons: [] } as unknown as OmnisignalResult), decision: "ERROR", reason: e instanceof Error ? e.message : "unknown error" }); }
   }
   return rankRows(rows);
