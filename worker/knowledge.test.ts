@@ -6,8 +6,11 @@ import { runModules, regimeOf, attributionFor, statEdge, kellySizing, MODULE_MET
 const get = async (path: string) => { const r = handleKnowledge(new Request("https://eti.test" + path))!; return { status: r.status, body: await r.json() as any }; };
 
 const REQUIRED_NAMES = ["George Soros","Stanley Druckenmiller","Paul Tudor Jones","Bruce Kovner","Richard Dennis","William Eckhardt","Ed Seykota","Mark Minervini","Nicolas Darvas","Jesse Livermore","Richard Wyckoff","William O'Neil","Larry Williams","Linda Bradford Raschke","Kathy Lien","Ray Dalio","Jim Simons","Warren Buffett","Charlie Munger","Peter Lynch","John Paulson","Michael Burry","David Tepper","John Templeton","Ed Thorp","Michael Steinhardt","Julian Robertson","David Shaw","Marty Schwartz","Tom Basso","Howard Marks","Chris Hohn","David Einhorn","John W. Henry","Robert Mercer"];
-// Additional traders whose profiles were deepened from template filler to substantive, classified notes.
-const DEEPENED_IDS = ["ed_thorp","michael_steinhardt","julian_robertson","david_shaw","marty_schwartz","tom_basso","howard_marks","chris_hohn","david_einhorn","john_w_henry","robert_mercer"];
+// Traders whose profiles were deepened from template filler to substantive, classified notes
+// (app/knowledge/profiles_deep4.py and profiles_deep5.py).
+const DEEPENED_IDS = ["ed_thorp","michael_steinhardt","julian_robertson","david_shaw","marty_schwartz","tom_basso","howard_marks","chris_hohn","david_einhorn","john_w_henry","robert_mercer",
+  "bruce_kovner","william_eckhardt","nicolas_darvas","jesse_livermore","larry_williams","linda_bradford_raschke","kathy_lien","john_paulson","david_tepper","john_templeton",
+  "bill_ackman","seth_klarman","van_tharp","alexander_elder","jack_schwager","nassim_taleb","steven_cohen"];
 
 test("knowledge directory serves the full registry and reports honest completeness", async () => {
   const { body } = await get("/api/intelligence/traders");
@@ -29,12 +32,17 @@ test("knowledge directory serves the full registry and reports honest completene
   assert.match(body.limitations, /No private algorithms/);
 });
 
-test("template filler is reported as placeholder, not as a completed field", async () => {
-  const { body } = await get("/api/intelligence/traders/bill_ackman");
-  assert.equal(body.profile.full_name, "Bill Ackman");
-  assert.ok(body.completeness.placeholder.length > 0, "filler profile must report placeholder fields");
-  assert.ok(body.completeness.fieldsPresent < 25);
-  assert.ok(body.completeness.fieldsStructural >= body.completeness.fieldsPresent);
+test("coverage report is consistent with the directory and lists any profile that still needs work", async () => {
+  const list = (await get("/api/intelligence/traders")).body;
+  const { status, body } = await get("/api/intelligence/coverage");
+  assert.equal(status, 200);
+  assert.equal(body.total, list.total);
+  assert.equal(body.fullyPopulated + body.needsWork.length, body.total);
+  const needs = new Set(body.needsWork.map((r: any) => r.id));
+  for (const id of DEEPENED_IDS) assert.ok(!needs.has(id), id + " should be fully populated");
+  for (const r of body.needsWork) assert.equal(r.fieldsPresent + r.placeholder.length + r.missing.length, 25, r.id);
+  assert.match(body.note, /placeholder/);
+  assert.equal((await handleKnowledge(new Request("https://eti.test/api/intelligence/coverage", { method: "POST" }))!.status), 405);
 });
 
 test("single profile route returns the full profile with classified performance notes", async () => {
