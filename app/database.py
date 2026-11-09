@@ -27,4 +27,5 @@ def init_db() -> None:
     from app.memory import models as memory_models  # noqa: F401  (ETI memory + adaptive-edge tables)
     from app.prediction_ledger import models as _ledger_models  # noqa: F401  (append-only prediction ledger + triggers)
     from app.strategies import store as _strategy_store  # noqa: F401  (strategy_validation_runs)
+    from app.alpha import db_models  # noqa: F401
     Base.metadata.create_all(bind=engine)

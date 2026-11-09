@@ -207,3 +207,8 @@ Example:
 curl 'https://<worker>.<subdomain>.workers.dev/api/signals?symbol=BTCUSDT&interval=1h'
 curl 'https://<worker>.<subdomain>.workers.dev/api/intelligence/traders?q=reflexivity'
 ```
+
+
+## Global Alpha Intelligence
+
+Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and risk-gated paper/testnet execution. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Live execution is off by default and needs two operator flags plus a per-request confirmation.

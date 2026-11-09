@@ -53,6 +53,8 @@ from app.api.strategies import router as strategies_router
 from app.prediction_ledger.api import router as predictions_router
 from app.prediction_ledger.job import prediction_resolver_job
 from app.prediction_ledger.service import record_from_forecast
+from app.api.alpha import router as alpha_router
+from app.alpha.research_job import alpha_research_job
 from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
@@ -162,7 +164,11 @@ async def lifespan(app: FastAPI):
         await _start_component("investor_monitor_job", investor_monitor_job.start)
     if settings.execution_enabled:
         await _start_component("execution_supervisor_job", execution_supervisor_job.start)
+    alpha_research_job.interval_seconds = settings.alpha_research_interval_seconds
+    if settings.alpha_research_enabled:
+        await _start_component("alpha_research_job", alpha_research_job.start)
     yield
+    await alpha_research_job.stop()
     await execution_supervisor_job.stop()
     await investor_monitor_job.stop()
     if adaptive_job is not None:
@@ -190,6 +196,7 @@ app.include_router(markets_router)
 app.include_router(analytics_router)
 app.include_router(strategies_router)
 app.include_router(predictions_router)
+app.include_router(alpha_router)
 
 # ETI persistent memory & learning, and the adaptive-edge API that feeds on it. Imported defensively
 # so an unexpected import problem is logged loudly instead of taking the whole service down.
@@ -267,6 +274,11 @@ async def data_intel_dashboard(request: Request):
         "data_intel.html",
         {"version": __version__},
     )
+
+
+@app.get("/alpha", response_class=HTMLResponse)
+async def alpha_dashboard(request: Request):
+    return templates.TemplateResponse(request, "alpha.html", {"version": __version__})
 
 
 @app.get("/alerts", response_class=HTMLResponse)
