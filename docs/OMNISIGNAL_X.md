@@ -89,3 +89,5 @@ The first 365-day BTCUSDT 15m replay on real Binance candles showed gross expect
 
 ## Real-data research workflow
 Actions -> "ETI Research" -> Run workflow (symbol, strategy, days, folds, run_optimizer). It runs the tests, the three-way replay and trade-level diagnostics (`scripts/diagnose.mjs`), and optionally the optimizer, all on real public candles, and prints the results to the job log and step summary. It places no orders and uses no secrets.
+
+The research workflow is now a matrix: `symbols` (default BTC, ETH, SOL, BNB, XRP) x `strategies` (default intraday, swing), at most 8 x 4 jobs. Each job logs a `POOLDUMP` line of per-trade R values so results can be pooled across symbols with a bootstrap interval. The optimizer step is off by default (`run_optimizer`).
