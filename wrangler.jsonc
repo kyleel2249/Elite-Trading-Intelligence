@@ -3,6 +3,9 @@
   "main": "worker/main.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
+  "build": {
+    "command": "node scripts/build-knowledge.mjs"
+  },
   "observability": {
     "enabled": true
   },
