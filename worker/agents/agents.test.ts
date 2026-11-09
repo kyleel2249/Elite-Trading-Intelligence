@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import { AGENT_IDS, AGENT_ROSTER, makeReport, noData, validateReport } from "./types.ts";
 import type { Depth, Integrity, Kline, MarketInput } from "./types.ts";
 import { buildProposal } from "./analysts.ts";
+import { fundamentalAnalyst } from "./fundamental.ts";
 import { evaluateDecision, riskManager, securityAnalyst } from "./controls.ts";
 import type { DecisionRecord } from "./controls.ts";
 import { deliberate, finalize } from "./commander.ts";
 import { analyze } from "./orchestrator.ts";
-import { withAgents } from "./route.ts";
+import { mergeSupplied, withAgents } from "./route.ts";
+import { applyFilters, parseBinanceFilters } from "./filters.ts";
+import { filterForAsset, parseFred, parseRss, valueDaysBefore, baseOf } from "./providers.ts";
 
 const NOW = Date.UTC(2026, 10, 9, 12, 0, 0);
 function lcg(seed: number) { let s = seed >>> 0; return () => (s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296; }
@@ -119,17 +122,61 @@ test("performance auditor replays outcomes stop-first", () => {
   assert.equal(evaluateDecision({ ...rec, action: "NO_TRADE" }, [fill]).status, "not_applicable");
 });
 
-test("routes: roster, passthrough, auth, and structural veto on execute", async () => {
+test("exchange filters: rounding, minimums, and fail-closed parsing", () => {
+  const f = { stepSize: 0.001, minQty: 0.001, tickSize: 0.01, minNotional: 10 };
+  const b = applyFilters({ side: "buy", quantity: 0.12345, limitPrice: 100.456 }, f);
+  assert.ok(b.ok); if (b.ok) { assert.equal(b.quantity, 0.123); assert.equal(b.limitPrice, 100.45); assert.equal(b.adjustments.length, 2); }
+  const s = applyFilters({ side: "sell", quantity: 0.5, limitPrice: 100.456 }, f);
+  assert.ok(s.ok); if (s.ok) assert.equal(s.limitPrice, 100.46);
+  assert.deepEqual(applyFilters({ side: "buy", quantity: 0.05, limitPrice: 100 }, f), { ok: false, reason: "below_min_notional" });
+  assert.deepEqual(applyFilters({ side: "buy", quantity: 0.0004, limitPrice: 100 }, f), { ok: false, reason: "quantity_or_price_rounds_to_zero" });
+  assert.equal(parseBinanceFilters({}), null);
+  const parsed = parseBinanceFilters({ symbols: [{ filters: [{ filterType: "LOT_SIZE", minQty: "0.001", maxQty: "9000", stepSize: "0.001" }, { filterType: "PRICE_FILTER", minPrice: "0.01", maxPrice: "1000000", tickSize: "0.01" }, { filterType: "NOTIONAL", minNotional: "5" }] }] });
+  assert.equal(parsed?.stepSize, 0.001); assert.equal(parsed?.minNotional, 5);
+});
+
+test("providers: RSS parsing, asset filtering, FRED helpers, symbol base", () => {
+  const xml = "<rss><channel><item><title><![CDATA[Bitcoin ETF inflows surge]]></title><pubDate>Mon, 09 Nov 2026 11:00:00 GMT</pubDate></item><item><title>Unrelated gadget news</title><pubDate>Mon, 09 Nov 2026 10:00:00 GMT</pubDate></item><item><title>No date item</title></item></channel></rss>";
+  const items = parseRss(xml, "Test");
+  assert.equal(items.length, 2); assert.equal(items[0].headline, "Bitcoin ETF inflows surge"); assert.equal(items[0].publishedAt, "2026-11-09T11:00:00.000Z");
+  assert.equal(filterForAsset(items, ["bitcoin"], "BTC").length, 1);
+  const obs = parseFred({ observations: [{ date: "2026-11-01", value: "2.0" }, { date: "2026-10-20", value: "." }, { date: "2026-10-01", value: "1.5" }] });
+  assert.equal(obs.length, 2); assert.equal(valueDaysBefore(obs, 30)?.value, 1.5); assert.equal(valueDaysBefore(obs, 400), undefined);
+  assert.equal(baseOf("ETHUSDT"), "ETH"); assert.equal(baseOf("SOLBTC"), "SOL");
+});
+
+test("fundamental agent can form a view from provider tokenomics alone, and abstains without data", () => {
+  const cs = candles(300, 0.002, 0.004), ctx = { market: market(cs), supplied: {}, now: NOW, integrity };
+  assert.equal(fundamentalAnalyst(ctx).status, "insufficient_data");
+  const r = fundamentalAnalyst({ ...ctx, supplied: { fundamentals: { tokenomics: { marketCapUsd: 1e9, fdvUsd: 4e9, circulatingSupply: 40, totalSupply: 100 } } } });
+  assert.equal(r.status, "ok"); assert.equal(r.stance, "bearish");
+});
+
+test("caller-supplied data wins over provider data", () => {
+  const m = mergeSupplied({ macro: { a: 1 }, news: { items: [] } }, { macro: { b: 2 } });
+  assert.deepEqual(m.macro, { b: 2 }); assert.deepEqual(m.news, { items: [] });
+});
+
+test("routes: dashboard, roster, providers feed agents, auth, and structural veto on execute", async () => {
   let baseCalls = 0, brokerCalls = 0;
   const base = { fetch: () => { baseCalls++; return new Response("base"); } };
-  const cs = candles(300, 0.002, 0.004);
-  const app = withAgents(base as any, { loadMarket: async () => market(cs), now: () => NOW });
+  const cs = candles(300, 0.002, 0.004), fresh = (h: string) => ({ headline: h, source: "T", publishedAt: new Date(NOW - 3_600_000).toISOString() });
+  const status = [{ provider: "rss:T", ok: true, latencyMs: 1, fetchedAt: new Date(NOW).toISOString(), items: 2 }];
+  const app = withAgents(base as any, {
+    loadMarket: async () => market(cs), now: () => NOW,
+    loadProviders: async () => ({ supplied: { news: { items: [fresh("Bitcoin ETF inflows surge"), fresh("Bitcoin rally continues")] } }, status }),
+    loadAccount: async () => ({}), loadFilters: async () => null,
+  });
   const env: any = { ETI_EXECUTION_TOKEN: "x".repeat(32), ETI_RISK_GATE_URL: "https://example.invalid", ETI_RISK_GATE_TOKEN: "t" };
   const realFetch = globalThis.fetch; globalThis.fetch = (async () => { brokerCalls++; return new Response("{}"); }) as any;
   try {
     assert.equal(await (await app.fetch(new Request("https://e.test/other"), env)).text(), "base"); assert.equal(baseCalls, 1);
+    const page = await app.fetch(new Request("https://e.test/agents"), env); assert.equal(page.status, 200); assert.match(await page.text(), /ETI Agent Intelligence Center/);
     const roster: any = await (await app.fetch(new Request("https://e.test/api/agents"), env)).json(); assert.equal(roster.agents.length, 12); assert.equal(roster.liveExecutionAllowed, false);
-    const a: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&interval=1h"), env)).json(); assert.equal(a.reports.length, 12);
+    const a: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&interval=1h"), env)).json();
+    assert.equal(a.reports.length, 12); assert.deepEqual(a.providers, status); assert.equal(a.reports.find((x: any) => x.agent === "news").status, "ok");
+    const off: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&providers=0"), env)).json();
+    assert.equal(off.reports.find((x: any) => x.agent === "news").status, "insufficient_data"); assert.deepEqual(off.providers, []);
     assert.equal((await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=bad!"), env)).status, 400);
     assert.equal((await app.fetch(new Request("https://e.test/api/agents/execute", { method: "POST", body: "{}" }), env)).status, 401);
     const body = JSON.stringify({ symbol: "BTCUSDT", interval: "1h", execution: { broker: "binance", clientOrderId: "test-order-0001", riskConfirmed: true } });

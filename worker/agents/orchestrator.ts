@@ -1,7 +1,8 @@
 /** Runs all twelve agents over one market snapshot and records every structured exchange on a message bus. */
 import { AGENT_IDS, MessageBus, errorReport, validateReport } from "./types.ts";
 import type { AccountState, AgentId, AgentMessage, AgentReport, Integrity, MarketInput, SuppliedData } from "./types.ts";
-import { cryptoIntelligence, buildProposal, eliteTraderResearcher, eventHazard, fundamentalAnalyst, macroIntelligence, newsIntelligence, quantitativeAnalyst, technicalAnalyst } from "./analysts.ts";
+import { cryptoIntelligence, buildProposal, eliteTraderResearcher, eventHazard, macroIntelligence, newsIntelligence, quantitativeAnalyst, technicalAnalyst } from "./analysts.ts";
+import { fundamentalAnalyst } from "./fundamental.ts";
 import { auditorReport, executionReport, prepareTicket, riskManager, riskReport, securityAnalyst } from "./controls.ts";
 import type { AuditSummary, DecisionRecord, ExecutionRequest, ExecutionReview, RiskDecision, SecurityReport } from "./controls.ts";
 import { commanderReport, deliberate, finalize } from "./commander.ts";
@@ -58,7 +59,7 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     schema: "eti.analysis/1", id, symbol: m.symbol, interval: m.interval, generatedAt: new Date(now).toISOString(), decision, deliberation: delib,
     reports: AGENT_IDS.map((a) => reports.get(a)!), risk, security, execution, messages: bus.messages,
     dataQuality: { provider: m.provider, candles: m.candles.length, lastCandleOpen: m.candles.length ? new Date(m.candles[m.candles.length - 1][0]).toISOString() : null, orderBook: m.depth ? "rest_snapshot" : "unavailable", priceCrossCheck: m.crossCheck ? m.crossCheck.provider : "not_performed", failures: m.failures },
-    disclosures: ["Agents are deterministic statistical/rule-based modules, not language models.", "Fundamental, macro, news and on-chain agents analyse only data supplied with the request; absent data is reported as insufficient, never invented.", "Outputs are analytical and are not financial advice. No outcome, return or win rate is guaranteed."],
+    disclosures: ["Agents are deterministic statistical/rule-based modules, not language models.", "Fundamental, macro, news and on-chain agents analyse only provider data or data supplied with the request; absent data is reported as insufficient, never invented.", "Outputs are analytical and are not financial advice. No outcome, return or win rate is guaranteed."],
   };
 }
 

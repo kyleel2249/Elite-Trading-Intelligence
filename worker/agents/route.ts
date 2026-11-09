@@ -1,9 +1,11 @@
 /**
- * HTTP surface for the multi-agent system. Wrapped around the existing application (worker/main.ts):
- *   GET  /api/agents                 roster, contracts, configuration needs
- *   GET|POST /api/agents/analyze     read-only analysis (POST accepts supplied research data and account state)
- *   POST /api/agents/execute         bearer-authenticated; only reaches /api/orders if Commander AND Risk Manager approve
- *   GET  /api/agents/audit           bearer-authenticated; Performance Auditor over recorded decisions
+ * HTTP surface for the multi-agent system (wrapped around the existing application by worker/main.ts):
+ *   GET  /agents                      Agent Intelligence Center dashboard
+ *   GET  /api/agents                  roster, integration status, latest audit summary
+ *   GET  /api/agents/providers        live health check of the research data providers
+ *   GET|POST /api/agents/analyze      read-only analysis (providers auto-fetched unless providers=0 / providers:false)
+ *   POST /api/agents/execute          bearer-authenticated; reaches /api/orders only if Commander AND Risk Manager approve and exchange filters pass
+ *   GET  /api/agents/audit            bearer-authenticated; Performance Auditor over recorded decisions
  */
 import { AllProvidersFailed, INTERVALS, getMarketData, providerOrder } from "../market.ts";
 import type { MarketEnv, Ticker } from "../market.ts";
@@ -16,11 +18,20 @@ import type { AnalysisResult } from "./orchestrator.ts";
 import { auditSummary, evaluateDecision } from "./controls.ts";
 import type { AuditSummary, DecisionRecord, ExecutionRequest } from "./controls.ts";
 import { finite } from "./math.ts";
+import { fetchProviderData } from "./providers.ts";
+import type { ProviderEnv, ProviderStatus } from "./providers.ts";
+import { loadBinanceTestnetAccount } from "./account.ts";
+import { applyFilters, loadBinanceFilters } from "./filters.ts";
+import type { SymbolFilters } from "./filters.ts";
+import { DASHBOARD_HTML } from "./dashboard.ts";
 
-export type AgentsEnv = MarketEnv & ExecutionEnv;
+export type AgentsEnv = MarketEnv & ExecutionEnv & ProviderEnv;
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 export type MarketLoader = (env: AgentsEnv, symbol: string, interval: string, opts: { provider?: string | null; benchmark?: string | null }) => Promise<MarketInput>;
-export interface AgentsDeps { loadMarket?: MarketLoader; now?: () => number }
+export type ProviderLoader = (env: AgentsEnv, symbol: string, now: number) => Promise<{ supplied: SuppliedData; status: ProviderStatus[] }>;
+export type AccountLoader = (env: AgentsEnv, symbol: string, lastPrice: number) => Promise<{ account?: AccountState; error?: string }>;
+export type FilterLoader = (symbol: string) => Promise<SymbolFilters | null>;
+export interface AgentsDeps { loadMarket?: MarketLoader; loadProviders?: ProviderLoader; loadAccount?: AccountLoader; loadFilters?: FilterLoader; now?: () => number }
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
@@ -67,6 +78,12 @@ function parseAccount(v: unknown): AccountState | undefined {
   return out;
 }
 const supplied = (b: Record<string, unknown>): SuppliedData => ({ fundamentals: b.fundamentals, macro: b.macro, news: b.news, onchain: b.onchain });
+/** Caller-supplied data always wins over provider data, key by key. */
+export function mergeSupplied(provider: SuppliedData, caller: SuppliedData): SuppliedData {
+  const out: SuppliedData = {};
+  for (const k of ["fundamentals", "macro", "news", "onchain"] as const) { const v = caller[k] !== undefined && caller[k] !== null ? caller[k] : provider[k]; if (v !== undefined) out[k] = v; }
+  return out;
+}
 
 async function readBody(req: Request): Promise<Record<string, unknown> | null> {
   const text = await req.text();
@@ -85,21 +102,34 @@ async function record(env: AgentsEnv, r: AnalysisResult, executed: boolean) {
 
 export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
   const load = deps.loadMarket ?? loadMarket, clock = deps.now ?? Date.now;
+  const loadProv: ProviderLoader = deps.loadProviders ?? ((env, symbol, now) => fetchProviderData(env, symbol, now));
+  const loadAcct: AccountLoader = deps.loadAccount ?? ((env, symbol, price) => loadBinanceTestnetAccount(env, symbol, price));
+  const loadFilt: FilterLoader = deps.loadFilters ?? loadBinanceFilters;
   return {
     async fetch(request, env) {
       const url = new URL(request.url), path = url.pathname;
+      if ((path === "/agents" || path === "/agents/") && request.method === "GET")
+        return new Response(DASHBOARD_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" } });
       if (!path.startsWith("/api/agents")) return base.fetch(request, env);
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...HEADERS, "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "authorization,content-type" } });
       const integrity = integrityFromEnv(env);
+      const stored = async (): Promise<AuditSummary | null> => { try { return env.ETI_EXECUTION_LOG ? JSON.parse((await env.ETI_EXECUTION_LOG.get("agentaudit:summary")) || "null") : null; } catch { return null; } };
 
       if (path === "/api/agents") {
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
-        const audit = env.ETI_EXECUTION_LOG ? JSON.parse((await env.ETI_EXECUTION_LOG.get("agentaudit:summary")) || "null") as AuditSummary | null : null;
-        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, endpoints: ["GET|POST /api/agents/analyze", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)"], integrity, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: audit });
+        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, endpoints: ["GET /agents (dashboard)", "GET|POST /api/agents/analyze", "GET /api/agents/providers", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)"], integrity, fredConfigured: !!env.FRED_API_KEY, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: await stored() });
       }
 
       const symbolOf = (v: unknown) => (typeof v === "string" ? v.toUpperCase() : "BTCUSDT");
       const intervalOf = (v: unknown) => (typeof v === "string" && v ? v : "1h");
+
+      if (path === "/api/agents/providers") {
+        if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+        const symbol = symbolOf(url.searchParams.get("symbol"));
+        if (!SYMBOL.test(symbol)) return reply({ error: "invalid_symbol" }, 400);
+        try { const p = await loadProv(env, symbol, clock()); return reply({ symbol, providers: p.status, provided: Object.keys(p.supplied) }); }
+        catch { return reply({ error: "provider_check_failed" }, 502); }
+      }
 
       if (path === "/api/agents/audit") {
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
@@ -127,7 +157,7 @@ export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps =
       if (isExec && integrity.killSwitch) return reply({ error: "execution_disabled", reason: "Emergency kill switch is active" }, 423);
       if (request.method === "POST") {
         try { const b = await readBody(request); if (!b) return reply({ error: "invalid_json" }, 400); body = b; }
-        catch (e) { return reply({ error: e instanceof Error && e.message === "body_too_large" ? "body_too_large" : "invalid_json" }, e instanceof Error && e.message === "body_too_large" ? 413 : 400); }
+        catch (e) { const big = e instanceof Error && e.message === "body_too_large"; return reply({ error: big ? "body_too_large" : "invalid_json" }, big ? 413 : 400); }
       }
       const symbol = symbolOf(request.method === "GET" ? url.searchParams.get("symbol") : body.symbol);
       const interval = intervalOf(request.method === "GET" ? url.searchParams.get("interval") : body.interval);
@@ -142,28 +172,47 @@ export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps =
       catch (e) {
         return reply({ error: "market_data_unavailable", decision: "DATA_UNRELIABLE", detail: e instanceof AllProvidersFailed ? e.attempts.map((a) => `${a.provider}:${a.errorClass}`) : "loader_error", submitsOrder: false }, 503);
       }
-      let audit: AuditSummary | null = null;
-      try { if (env.ETI_EXECUTION_LOG) audit = JSON.parse((await env.ETI_EXECUTION_LOG.get("agentaudit:summary")) || "null"); } catch { audit = null; }
+      const lastPrice = market.candles[market.candles.length - 1][4];
+      const wantProviders = request.method === "GET" ? url.searchParams.get("providers") !== "0" : body.providers !== false;
+      let pSup: SuppliedData = {}, pStatus: ProviderStatus[] = [];
+      if (wantProviders) {
+        try { const p = await loadProv(env, symbol, clock()); pSup = p.supplied; pStatus = p.status; }
+        catch { pStatus = [{ provider: "providers", ok: false, latencyMs: 0, fetchedAt: new Date(clock()).toISOString(), detail: "loader_error" }]; }
+      }
       const exReq = (body.execution && typeof body.execution === "object" ? body.execution : {}) as ExecutionRequest;
-      const maxQty = Number(env.ETI_MAX_ORDER_QUANTITY ?? "100");
-      const result = analyze({ market, supplied: supplied(body), account: parseAccount(body.account), integrity, audit, execution: isExec ? exReq : undefined, maxOrderQuantity: Number.isFinite(maxQty) && maxQty > 0 ? maxQty : undefined, now: clock() });
+      let account = parseAccount(body.account), accountNote: string | undefined;
+      if (isExec && exReq.broker === "binance" && env.BINANCE_API_KEY && env.BINANCE_SECRET_KEY && symbol.endsWith("USDT")) {
+        const f = await loadAcct(env, symbol, lastPrice);
+        account = { ...(f.account ?? {}), ...(account ?? {}) }; accountNote = f.error;
+      }
+      const audit = await stored(), maxQty = Number(env.ETI_MAX_ORDER_QUANTITY ?? "100");
+      const result = analyze({ market, supplied: mergeSupplied(pSup, supplied(body)), account, integrity, audit, execution: isExec ? exReq : undefined, maxOrderQuantity: Number.isFinite(maxQty) && maxQty > 0 ? maxQty : undefined, now: clock() });
 
       if (!isExec) {
         const recorded = authed && body.record === true ? await record(env, result, false).catch(() => false) : false;
-        return reply({ ...result, recorded });
+        return reply({ ...result, providers: pStatus, recorded });
       }
 
       // Execution path: the Risk Manager's veto is structural: no ticket exists unless risk.approved.
-      const blocked = !result.decision.executionEligible || !result.execution.eligible || !result.execution.ticket;
-      if (blocked) {
+      const block = async (reasons: string[]) => {
         await record(env, result, false).catch(() => false);
-        return reply({ error: "blocked_by_agents", vetoedBy: result.decision.vetoedBy, action: result.decision.action, reasons: result.decision.vetoedBy ? result.risk?.vetoes ?? [] : result.execution.blockers.length ? result.execution.blockers : result.decision.rationale, decision: result.decision, execution: result.execution, risk: result.risk }, 409);
-      }
-      const order = new Request(new URL("/api/orders", request.url).toString(), { method: "POST", headers: { "content-type": "application/json", authorization: request.headers.get("authorization") ?? "" }, body: JSON.stringify(result.execution.ticket) });
+        return reply({ error: "blocked_by_agents", vetoedBy: result.decision.vetoedBy, action: result.decision.action, reasons, accountNote, decision: result.decision, execution: result.execution, risk: result.risk }, 409);
+      };
+      if (!result.decision.executionEligible || !result.execution.eligible || !result.execution.ticket)
+        return block(result.decision.vetoedBy ? result.risk?.vetoes ?? [] : result.execution.blockers.length ? result.execution.blockers : result.decision.rationale);
+      let ticket = result.execution.ticket; const adjustments: string[] = [];
+      if (ticket.broker === "binance") {
+        const f = await loadFilt(ticket.symbol).catch(() => null);
+        if (!f) return block(["exchange_filters_unavailable"]);
+        const a = applyFilters(ticket, f);
+        if (!a.ok) return block([a.reason]);
+        ticket = { ...ticket, quantity: a.quantity, limitPrice: a.limitPrice }; adjustments.push(...a.adjustments);
+      } else adjustments.push("Alpaca order filters are not checked by the agent system.");
+      const order = new Request(new URL("/api/orders", request.url).toString(), { method: "POST", headers: { "content-type": "application/json", authorization: request.headers.get("authorization") ?? "" }, body: JSON.stringify(ticket) });
       const res = await handleExecution(order, env);
       const brokerBody = await res.json().catch(() => ({}));
       await record(env, result, res.status === 201).catch(() => false);
-      return reply({ ok: res.status === 201, status: res.status, broker: brokerBody, decision: result.decision, risk: result.risk, ticket: result.execution.ticket }, res.status);
+      return reply({ ok: res.status === 201, status: res.status, broker: brokerBody, decision: result.decision, risk: result.risk, ticket, adjustments, accountNote }, res.status);
     },
   };
 }
