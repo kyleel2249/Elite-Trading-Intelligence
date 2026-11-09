@@ -18,7 +18,7 @@ const RT = 2 * (DEFAULT_COSTS.feeBps + DEFAULT_COSTS.slippageBps) / 1e4; // 0.00
 const near = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} !~ ${b}`);
 
 test("long: TP1, TP2 and TP3 hit in sequence; partial R and costs are exact", () => {
-  const p = scripted(1, { 61: [100, 101.3, 99.5, 101], 62: [101, 102.3, 100.2, 102], 63: [102, 103.6, 101.5, 103.5] });
+  const p = scripted(1, { 61: [100, 101.3, 99.5, 101], 62: [101, 102.3, 100.5, 102], 63: [102, 103.6, 101.5, 103.5] });
   const t = simulate(p, P, 0, 130);
   assert.equal(t.length, 1); assert.equal(t[0].reason, "tp3"); assert.equal(t[0].targetsHit, 3);
   near(t[0].grossR, 0.4 * 1.2 + 0.3 * 2.2 + 0.3 * 3.5); near(t[0].costR, 100 * RT / 1); near(t[0].r, 2.19 - 0.3);
@@ -34,9 +34,10 @@ test("gap through the stop fills at the gap open, not at the stop", () => {
   near(t[0].exit, 97); near(t[0].grossR, -3);
 });
 
-test("break-even after TP1: the remainder exits at entry", () => {
+test("break-even after TP1 sits at entry plus round-trip fees (the paper engine's rule): the remainder exits there", () => {
   const t = simulate(scripted(1, { 61: [100, 101.3, 99.5, 101], 62: [100.5, 100.8, 99.9, 100.2] }), P, 0, 130);
-  assert.equal(t[0].reason, "breakeven"); near(t[0].grossR, 0.48); near(t[0].r, 0.18);
+  // fee buffer = 100 * (10 bps * 2) = 0.2, so the remaining 60% exits at 100.2 = +0.2R: 0.48 + 0.6 * 0.2
+  assert.equal(t[0].reason, "breakeven"); near(t[0].exit, 100.2); near(t[0].grossR, 0.6); near(t[0].r, 0.3);
 });
 
 test("no look-ahead: entry is the OPEN of the bar after the signal", () => {
@@ -57,7 +58,7 @@ test("flat market is closed by the time stop after the maximum holding period", 
 });
 
 test("higher costs reduce every trade's net R by exactly the cost difference; gross R unchanged", () => {
-  const p = scripted(1, { 61: [100, 101.3, 99.5, 101], 62: [100.5, 100.8, 99.9, 100.2] });
+  const p = scripted(1, { 61: [100, 101.3, 99.5, 101], 62: [101, 102.3, 100.9, 102], 63: [102, 103.6, 101.5, 103.5] });
   const a = simulate(p, P, 0, 130, { feeBps: 0, slippageBps: 0 })[0], b = simulate(p, P, 0, 130, { feeBps: 20, slippageBps: 10 })[0];
   near(a.grossR, b.grossR); near(a.r - b.r, 100 * (2 * 30 / 1e4)); near(a.costR, 0);
 });
@@ -69,6 +70,15 @@ test("metrics: win rate, profit factor, expectancy, averages, losing streak, dra
   near(m.avgWinR!, 6.5 / 3); near(m.avgLossR!, -1); near(m.avgRewardRisk!, 6.5 / 3); assert.equal(m.maxConsecutiveLosses, 3);
   assert.ok(m.maxDrawdownPct > 2.5 && m.maxDrawdownPct < 3.5); assert.equal(m.costsIncluded, true); assert.equal(m.label, "backtested");
   assert.equal(metrics([], 100, 1).winRate, null);
+  // The shared report (same code the paper/replay layers use) withholds rates below its minimum sample instead of showing them.
+  assert.equal(m.report.status, "insufficient_sample"); assert.equal(m.report.winRate, null); assert.ok(m.report.winRateInterval95);
+});
+
+test("shared report: with enough trades it matches the screen's own numbers (one definition of expectancy, profit factor, win rate)", () => {
+  const mk2 = (r: number): Trade => ({ entryIdx: 1, exitIdx: 3, dir: 1, entry: 100, stop0: 99, exit: 100, grossR: r, costR: 0, r, targetsHit: 0, reason: "stop" });
+  const rs = Array.from({ length: 40 }, (_, i) => (i % 5 === 0 ? 2.5 : -1)), m = metrics(rs.map(mk2), 400, 1);
+  assert.equal(m.report.status, "ok"); near(m.report.winRate!, m.winRate!); near(m.report.expectancyR!, m.expectancyR!, 1e-9); near(m.report.profitFactor!, m.profitFactor!, 1e-9);
+  assert.equal(m.report.maxConsecutiveLosses, m.maxConsecutiveLosses);
 });
 
 test("the optimisation grid has at least 144 combinations and can be expanded", () => {

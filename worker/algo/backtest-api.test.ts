@@ -27,6 +27,8 @@ test("backtest endpoint runs the 144+ combination lab on fetched candles and lab
   const j = await res.json() as any;
   assert.ok(j.report.combinationsEvaluated >= 144); assert.equal(j.report.crossMarket.length, 2); assert.equal(j.performanceLabel, "backtested_only");
   assert.equal(j.report.costs.feeBps, 10); assert.match(j.note, /paper-trading and verified live/i);
+  // The screen can nominate parameters but can never validate the live engines.
+  assert.equal(j.validatedExpectancy, null); assert.equal(j.scope, "parametric_screen_with_simplified_rules"); assert.match(j.validationSource, /replay/i);
 });
 
 test("backtest endpoint reports a failed extra market without hiding it, and 503s when the primary market is unavailable", async () => {

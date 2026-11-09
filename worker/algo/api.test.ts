@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleAlgoSignal } from "./api.ts";
+import { handleOmnisignal } from "./omni-api.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
@@ -31,18 +32,38 @@ test("algo endpoint returns a full signal from live-shaped exchange data and dis
   const res = await handleAlgoSignal(new Request("https://eti.test/api/algo/signal?symbol=BTCUSDT&strategy=swing"), {});
   assert.equal(res.status, 200);
   const s = await res.json() as any;
-  assert.equal(s.strategy, "swing"); assert.ok(["BUY", "SELL", "HOLD"].includes(s.action)); assert.equal(s.consensus.executionEligible, false);
+  assert.equal(s.strategy, "swing"); assert.ok(["BUY", "SELL", "HOLD"].includes(s.action));
+  assert.ok(["HIGH_CONVICTION", "CONFIRMED", "EARLY", "HOLD", "REJECTED"].includes(s.classification));
+  assert.ok(s.consensus === null || s.consensus.executionEligible === false);
   assert.equal(s.dataQuality.providerCrossCheck, "not_performed"); assert.ok(s.dataQuality.timeframesLoaded.includes("1d"));
-  assert.ok(s.liquidity && s.liquidity.status);
+  assert.ok(s.liquidity && s.liquidity.status); assert.equal(s.submitsOrder, false); assert.equal(s.liveExecutionAllowed, false);
 });
 
 test("algo endpoint degrades (not fabricates) when the order book is unavailable", async () => {
   mockExchange({ depth: false });
   const s = await (await handleAlgoSignal(new Request("https://eti.test/api/algo/signal?symbol=BTCUSDT&strategy=intraday"), {})).json() as any;
-  assert.equal(s.dataQuality.orderBook, "unavailable"); assert.equal(s.liveExecutionAllowed, false);
+  assert.equal(s.dataQuality.orderBook, "unavailable"); assert.equal(s.liveExecutionAllowed, false); assert.notEqual(s.action, "BUY"); assert.notEqual(s.action, "SELL");
 });
 
-test("algo endpoint returns 503 when execution-timeframe data cannot be fetched", async () => {
+test("algo endpoint returns 503 DATA_UNRELIABLE when execution-timeframe data cannot be fetched", async () => {
   globalThis.fetch = (async () => new Response("nope", { status: 500 })) as typeof fetch;
-  assert.equal((await handleAlgoSignal(new Request("https://eti.test/api/algo/signal?symbol=BTCUSDT"), {})).status, 503);
+  const res = await handleAlgoSignal(new Request("https://eti.test/api/algo/signal?symbol=BTCUSDT"), {});
+  assert.equal(res.status, 503); assert.equal(((await res.json()) as any).decision, "DATA_UNRELIABLE");
+});
+
+test("single signal path: /api/algo/signal and /api/omnisignal return the same decision and trade plan for the same data", async () => {
+  mockExchange();
+  for (const q of ["strategy=intraday", "strategy=swing", "strategy=scalp&engines=swift"]) {
+    const a = await (await handleAlgoSignal(new Request(`https://eti.test/api/algo/signal?symbol=BTCUSDT&${q}`), {})).json() as any;
+    const b = await (await handleOmnisignal(new Request(`https://eti.test/api/omnisignal?symbol=BTCUSDT&${q}`), {})).json() as any;
+    assert.equal(a.decision, b.decision, q); assert.deepEqual(a.stopLoss, b.stopLoss, q); assert.deepEqual(a.takeProfits, b.takeProfits, q); assert.equal(a.fusion.direction, b.fusion.direction, q);
+    assert.equal(a.action, a.decision === "BUY" || a.decision === "SELL" ? a.decision : "HOLD");
+  }
+});
+
+test("engines parameter is honoured and validated", async () => {
+  mockExchange();
+  const s = await (await handleAlgoSignal(new Request("https://eti.test/api/algo/signal?symbol=BTCUSDT&strategy=intraday&engines=swift"), {})).json() as any;
+  assert.equal(s.fusion.gainz.status, "NEUTRAL"); assert.match(s.fusion.gainz.evidence.join(" "), /disabled/i);
+  assert.equal((await handleAlgoSignal(new Request("https://eti.test/api/algo/signal?engines=magic"), {})).status, 400);
 });
