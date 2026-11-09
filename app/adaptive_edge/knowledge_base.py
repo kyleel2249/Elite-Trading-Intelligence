@@ -23,6 +23,9 @@ class AdaptiveKnowledgeBase:
     """
     Persist adaptive-edge events via SQLAlchemy models (AdaptiveEdgeEvent).
     Failed strategies are first-class knowledge.
+
+    The model lives in app.memory.models (the table is created by migration 0003 and by
+    ``init_db``); it is imported lazily so this module stays import-light.
     """
 
     def __init__(self, db: Session):
@@ -35,7 +38,7 @@ class AdaptiveKnowledgeBase:
         payload: dict[str, Any],
         tags: Optional[list[str]] = None,
     ) -> dict[str, Any]:
-        from app.models import AdaptiveEdgeEvent
+        from app.memory.models import AdaptiveEdgeEvent
 
         ts = datetime.now(timezone.utc)
         row = AdaptiveEdgeEvent(
@@ -62,9 +65,9 @@ class AdaptiveKnowledgeBase:
         event_type: Optional[str] = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        from app.models import AdaptiveEdgeEvent
+        from app.memory.models import AdaptiveEdgeEvent
 
-        q = self.db.query(AdaptiveEdgeEvent).order_by(AdaptiveEdgeEvent.created_at.desc())
+        q = self.db.query(AdaptiveEdgeEvent).order_by(AdaptiveEdgeEvent.created_at.desc(), AdaptiveEdgeEvent.id.desc())
         if event_type:
             q = q.filter(AdaptiveEdgeEvent.event_type == event_type)
         rows = q.limit(limit).all()
