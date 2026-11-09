@@ -77,6 +77,7 @@ class EvaluateRequest(BaseModel):
     # Model inputs must come from a licensed/real data source chosen by the caller.
     fair_value_inputs: dict[str, dict]
     sentiment: list[SentimentIn] = []
+    use_news: bool = False          # pull headlines from NewsAPI when no sentiment items are supplied
     components: dict[str, float] = {}
     engine_votes: dict[str, Literal["bullish", "bearish", "neutral"]] = {}
     win_probability: Optional[float] = Field(None, ge=0, le=1)
@@ -95,6 +96,9 @@ async def evaluate(req: EvaluateRequest, settings: Settings = Depends(get_settin
     cov = sc.coverage.get(req.symbol.upper())
     items = [SentimentItem(**{**i.model_dump(), "ts": i.ts if i.ts.tzinfo else i.ts.replace(tzinfo=timezone.utc)})
              for i in req.sentiment]
+    if not items and req.use_news:
+        from app.quant.news_sentiment import news_items
+        items = await news_items(req.symbol, settings)
     bankroll = req.bankroll
     if bankroll is None:
         try:
@@ -126,6 +130,23 @@ async def evaluate(req: EvaluateRequest, settings: Settings = Depends(get_settin
     if out.get("sizing"):
         store.save_kelly(req.symbol.upper(), {"bankroll": bankroll}, out["sizing"])
     return out
+
+
+@router.get("/sentiment/{symbol}")
+async def sentiment(symbol: str, settings: Settings = Depends(get_settings)):
+    """News sentiment from NewsAPI. Reports 'unavailable' honestly when the key is missing or the feed fails."""
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9./_-]{1,32}", symbol):
+        raise HTTPException(422, "invalid symbol")
+    from app.quant.news_sentiment import news_sentiment
+    return (await news_sentiment(symbol.upper(), settings)).to_dict()
+
+
+@router.post("/convergence/run")
+async def convergence_run(db: Session = Depends(get_db), settings: Settings = Depends(get_settings),
+                          _auth=Depends(require_api_key)):
+    from app.quant.convergence import track_open_alerts
+    return track_open_alerts(db, get_scanner(settings))
 
 
 @router.get("/overview")
