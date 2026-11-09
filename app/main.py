@@ -37,6 +37,7 @@ from app.streaming.manager import stream_hub
 from app.jobs.mark_to_market import mtm_job
 from app.jobs.reconcile import reconcile_job
 from app.jobs.investor_monitor import investor_monitor_job
+from app.jobs.execution_supervisor import execution_supervisor_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
 from app.models import CouncilDecisionRecord
 from app.api.knowledge import router as knowledge_router
@@ -44,10 +45,7 @@ from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
 from app.api.risk_gateway import router as risk_gateway_router
-from app.prediction_ledger.api import router as predictions_router
-from app.prediction_ledger.job import prediction_resolver_job
-from app.prediction_ledger.service import record_from_forecast
-from app.api.markets import router as markets_router
+from app.api.execution import router as execution_router
 from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
@@ -85,15 +83,17 @@ async def lifespan(app: FastAPI):
     mtm_job.interval_seconds = settings.mtm_interval_seconds
     reconcile_job.interval_seconds = settings.reconcile_interval_seconds
     investor_monitor_job.interval_seconds = settings.investor_monitor_interval_seconds
+    execution_supervisor_job.interval_seconds = settings.execution_supervisor_interval_seconds
     await _start_component("stream_hub", lambda: stream_hub.start(["btcusdt", "ethusdt"]))
     await _start_component("mtm_job", mtm_job.start)
     await _start_component("reconcile_job", reconcile_job.start)
-    await _start_component("prediction_resolver_job", prediction_resolver_job.start)
     if settings.quiver_configured:
         await _start_component("investor_monitor_job", investor_monitor_job.start)
+    if settings.execution_enabled:
+        await _start_component("execution_supervisor_job", execution_supervisor_job.start)
     yield
+    await execution_supervisor_job.stop()
     await investor_monitor_job.stop()
-    await prediction_resolver_job.stop()
     await reconcile_job.stop()
     await mtm_job.stop()
     await stream_hub.stop()
@@ -111,8 +111,7 @@ app.include_router(backtest_router)
 app.include_router(intelligence_data_router)
 app.include_router(stream_router)
 app.include_router(risk_gateway_router)
-app.include_router(predictions_router)
-app.include_router(markets_router)
+app.include_router(execution_router)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -192,15 +191,6 @@ async def alerts_page(request: Request):
     )
 
 
-@app.get("/predictions", response_class=HTMLResponse)
-async def predictions_page(request: Request):
-    return templates.TemplateResponse(
-        request,
-        "predictions.html",
-        {"version": __version__},
-    )
-
-
 @app.get("/api/system/health", response_model=HealthResponse)
 async def health(settings: Settings = Depends(get_settings)):
     return HealthResponse(
@@ -249,7 +239,7 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "mtm": mtm_job.status(),
         "reconcile": reconcile_job.status(),
         "investor_monitor": investor_monitor_job.status(),
-        "prediction_resolver": prediction_resolver_job.status(),
+        "execution_supervisor": execution_supervisor_job.status(),
         "fred_configured": settings.fred_configured,
         "news_configured": settings.news_configured,
         "quiver_configured": settings.quiver_configured,
@@ -426,15 +416,7 @@ async def intelligence_forecast(
             raise HTTPException(status_code=422, detail="Insufficient history for forecast scaffold")
         payload = fc.to_dict()
         if persist:
-            saved = save_forecast(db, payload)
-            # Every persisted forecast is also written to the append-only prediction ledger.
-            try:
-                closes = [float(k["close"]) for k in klines if k.get("close") and k.get("data_status") != "invalid"]
-                payload["ledger"] = record_from_forecast(db, payload, closes=closes, forecast_id=saved.id)
-            except Exception:
-                db.rollback()
-                logger.warning("prediction ledger write failed for %s", symbol, exc_info=True)
-                payload["ledger"] = {"error": "ledger_write_failed"}
+            save_forecast(db, payload)
         return payload
     except HTTPException:
         raise

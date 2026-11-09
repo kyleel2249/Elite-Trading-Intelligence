@@ -24,5 +24,5 @@ def get_db():
 
 def init_db() -> None:
     from app import models  # noqa: F401
-    from app.strategies import store  # noqa: F401  (registers strategy_validation_runs)
+    from app.execution import models as _execution_models  # noqa: F401  (execution engine tables)
     Base.metadata.create_all(bind=engine)
