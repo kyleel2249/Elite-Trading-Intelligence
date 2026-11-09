@@ -10,6 +10,61 @@ from app.config import Settings, get_settings
 from app.integrations.base import BaseProvider, NormalizedQuote
 
 
+def _px(v: float) -> str:
+    """Alpaca price increments: 2 decimals at/above $1, 4 below."""
+    return str(round(v, 2) if v >= 1 else round(v, 4))
+
+
+def build_order_body(
+    symbol: str,
+    qty: float,
+    side: str,
+    order_type: str = "market",
+    time_in_force: str = "day",
+    limit_price: Optional[float] = None,
+    client_order_id: Optional[str] = None,
+    stop_loss: Optional[float] = None,
+    take_profit: Optional[float] = None,
+) -> dict[str, Any]:
+    """Build the Alpaca order payload. Both exits => bracket; one exit => OTO (one-triggers-other).
+
+    Alpaca does not accept fractional quantities on bracket/OTO orders, so those are rejected here
+    rather than silently submitted without protection.
+    """
+    body: dict[str, Any] = {
+        "symbol": symbol.upper(),
+        "qty": str(qty),
+        "side": side.lower(),
+        "type": order_type.lower(),
+        "time_in_force": time_in_force,
+    }
+    if limit_price is not None:
+        body["limit_price"] = str(limit_price)
+    if client_order_id:
+        body["client_order_id"] = client_order_id
+    if stop_loss is not None or take_profit is not None:
+        if float(qty) != int(float(qty)):
+            raise ValueError("Alpaca bracket/OTO orders require whole-share quantities")
+        body["qty"] = str(int(float(qty)))
+        body["order_class"] = "bracket" if (stop_loss is not None and take_profit is not None) else "oto"
+        if take_profit is not None:
+            body["take_profit"] = {"limit_price": _px(take_profit)}
+        if stop_loss is not None:
+            body["stop_loss"] = {"stop_price": _px(stop_loss)}
+    return body
+
+
+def protective_status(resp: dict[str, Any], stop_loss: Optional[float], take_profit: Optional[float]) -> dict[str, Any]:
+    """Report protection only when Alpaca's response actually contains the exit legs."""
+    if stop_loss is None and take_profit is None:
+        return {"status": "not_requested"}
+    legs = resp.get("legs") or []
+    if legs:
+        return {"status": "attached", "method": f"alpaca_{resp.get('order_class') or 'bracket'}",
+                "legs": [{"id": leg.get("id"), "type": leg.get("type"), "status": leg.get("status")} for leg in legs]}
+    return {"status": "requested_unconfirmed", "reason": "provider response contained no exit legs"}
+
+
 class AlpacaClient(BaseProvider):
     name = "alpaca"
 
@@ -131,21 +186,17 @@ class AlpacaClient(BaseProvider):
         time_in_force: str = "day",
         limit_price: Optional[float] = None,
         client_order_id: Optional[str] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
     ) -> dict[str, Any]:
-        """Submit order to the configured Alpaca environment (paper or live)."""
+        """Submit order to the configured Alpaca environment (paper or live).
+
+        Optional ``stop_loss`` / ``take_profit`` attach exit legs (bracket, or OTO when only one is given).
+        """
         if not self.configured:
             raise RuntimeError("Alpaca not configured")
-        body: dict[str, Any] = {
-            "symbol": symbol.upper(),
-            "qty": str(qty),
-            "side": side.lower(),
-            "type": order_type.lower(),
-            "time_in_force": time_in_force,
-        }
-        if limit_price is not None:
-            body["limit_price"] = str(limit_price)
-        if client_order_id:
-            body["client_order_id"] = client_order_id
+        body = build_order_body(symbol, qty, side, order_type, time_in_force, limit_price,
+                                client_order_id, stop_loss, take_profit)
         async with httpx.AsyncClient(timeout=20.0) as client:
             r = await client.post(
                 f"{self.base_url}/v2/orders",
