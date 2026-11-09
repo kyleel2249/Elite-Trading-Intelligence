@@ -17,8 +17,9 @@ import { handleKnowledge } from "./knowledge.ts";
 import { handleReadiness } from "./readiness/api.ts";
 import type { ReadinessEnv } from "./readiness/api.ts";
 import type { MarketEnv } from "./market.ts";
+import { handleAlpha, type AlphaEnv } from "./alpha/routes.ts";
 
-export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv {
+export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv {
   ETI_EDGE?: string;
   MARKET_CACHE?: KVNamespace;
 }
@@ -54,7 +55,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 .ev{margin:6px 0 0;padding-left:18px}.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 3px 3px 0;background:#4a5d78;vertical-align:middle}.dot.win{background:#21d69a}.dot.loss{background:#ff637d}.dot.hc{outline:2px solid #f0c674}
 @media(max-width:850px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
 </style></head><body>
-<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div id="connection" class="status">Connecting…</div></header>
+<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
 <div class="toolbar"><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
@@ -567,6 +568,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
+    }
+    if (url.pathname === "/alpha" || url.pathname.startsWith("/api/alpha")) {
+      return handleAlpha(request, _env);
     }
     if (url.pathname.startsWith("/api/intelligence/")) {
       const knowledge = handleKnowledge(request);

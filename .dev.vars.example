@@ -1,0 +1,18 @@
+# Copy to .dev.vars for `wrangler dev`; set the same names with `wrangler secret put` in production.
+# Auth for /api/alpha mutating routes (falls back to ETI_EXECUTION_TOKEN when unset)
+ETI_ALPHA_TOKEN=
+ETI_EXECUTION_TOKEN=
+# SEC EDGAR requires a descriptive User-Agent with a contact email. Without it, SEC access stays OFF.
+SEC_USER_AGENT=ETI Research your-name your-email@example.com
+# Optional data sources (each unlocks a stated coverage item; absent = reported as not configured)
+ALPACA_API_KEY=
+ALPACA_SECRET_KEY=
+ALPACA_DATA_FEED=iex
+ALPHA_EQUITY_WATCHLIST=AAPL,MSFT,NVDA
+ETHERSCAN_API_KEY=
+OPENFIGI_API_KEY=
+# Per-run upstream request budget (5-900, default 40, applied to each scheduled job)
+ALPHA_SUBREQUEST_BUDGET=40
+# Paper/testnet brokers used by the execution bridge (never live keys)
+BINANCE_API_KEY=
+BINANCE_SECRET_KEY=

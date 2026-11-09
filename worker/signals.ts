@@ -75,7 +75,7 @@ export interface SignalResult {
   chart?: ChartPayload;
 }
 
-const MIN_CANDLES = 210;
+export const MIN_CANDLES = 210;
 const DEFAULT_WINDOW = 120;
 const MIN_WINDOW = 30;
 const MAX_WINDOW = 500;
@@ -128,7 +128,7 @@ function adx(rows: Kline[], period = 14): number {
   }
   return dx.length ? mean(dx.slice(-period)) : NaN;
 }
-function indicators(rows: Kline[]): IndicatorSnapshot | null {
+export function indicators(rows: Kline[]): IndicatorSnapshot | null {
   if (rows.length < MIN_CANDLES) return null;
   const close = rows.map(r => r[4]), volumes = rows.map(r => r[5]);
   const e20 = ema(close, 20), e50 = ema(close, 50), e200 = ema(close, 200);
@@ -400,6 +400,22 @@ function backtest(rows: Kline[], symbol: string, provider: string, interval: str
 
 const jsonError = (body: unknown, status: number) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+/** Full engine output (signal, replay validation, statistical edge, sizing) for already-validated candles. Shared by /api/signals and the Global Alpha layer. */
+export function signalFromCandles(rows: Kline[], symbol: string, provider: string, interval: string): { signal: SignalResult; trades: ReplayTrade[] } | null {
+  const signal = evaluate(rows, symbol, provider, interval);
+  if (!signal) return null;
+  const { trades, validation } = backtest(rows, symbol, provider, interval);
+  const hc = validation.highConviction;
+  validation.note = "Current conviction: " + signal.conviction.toUpperCase() + (signal.conviction === "low" ? " (directional lean, not a validated edge). " : ". ") +
+    (hc.winRate !== null ? "High-conviction-only win rate on this chart: " + hc.winRate + "% (n=" + hc.sampleCount + "). " : "") + validation.note;
+  signal.historicalValidation = validation;
+  const edge = statEdge(validation);
+  signal.statisticalEdge = edge;
+  signal.strategyAttribution.push(edgeAttribution(edge));
+  signal.positionSizing = kellySizing(validation, edge);
+  return { signal, trades };
+}
+
 export async function handleSignals(req: Request, env: SignalEnv): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname !== "/api/signals" || req.method !== "GET") return jsonError({ error: "not_found" }, 404);
@@ -418,17 +434,9 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
     const rows = result.data as Kline[];
     const latestAge = (Date.now() - rows.at(-1)![0]) / 1000;
     if (latestAge < -60 || latestAge > (INTERVAL_SECONDS[interval] || 60) * 3) return jsonError({ error: "stale_market_data", ageSeconds: Math.round(latestAge), maxAgeSeconds: (INTERVAL_SECONDS[interval] || 60) * 3 }, 503);
-    const signal = evaluate(rows, symbol, result.provider, interval);
-    if (!signal) return jsonError({ error: "insufficient_history", requiredCandles: MIN_CANDLES, received: rows.length }, 422);
-    const { trades, validation } = backtest(rows, symbol, result.provider, interval);
-    const hc = validation.highConviction;
-    validation.note = "Current conviction: " + signal.conviction.toUpperCase() + (signal.conviction === "low" ? " (directional lean, not a validated edge). " : ". ") +
-      (hc.winRate !== null ? "High-conviction-only win rate on this chart: " + hc.winRate + "% (n=" + hc.sampleCount + "). " : "") + validation.note;
-    signal.historicalValidation = validation;
-    const edge = statEdge(validation);
-    signal.statisticalEdge = edge;
-    signal.strategyAttribution.push(edgeAttribution(edge));
-    signal.positionSizing = kellySizing(validation, edge);
+    const built = signalFromCandles(rows, symbol, result.provider, interval);
+    if (!built) return jsonError({ error: "insufficient_history", requiredCandles: MIN_CANDLES, received: rows.length }, 422);
+    const { signal, trades } = built;
     const chart = buildChart(rows, windowSize, trades);
     if (chart) signal.chart = chart;
     return new Response(JSON.stringify(signal), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" } });
