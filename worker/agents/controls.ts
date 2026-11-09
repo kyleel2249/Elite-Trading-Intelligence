@@ -5,7 +5,7 @@
 import { INTERVAL_SECONDS } from "../market.ts";
 import { makeReport } from "./types.ts";
 import type { AccountState, AgentId, AgentReport, Ctx, Evidence, Integrity, Kline, MarketInput, Stance, TradeProposal } from "./types.ts";
-import { atrSeries, bookStats, clamp, correlation, finite, isNum, lastFinite, logReturns, mean, stdev, wilson } from "./math.ts";
+import { atrSeries, bookStats, clamp, finite, isNum, lastFinite, logReturns, mean, stdev, wilson } from "./math.ts";
 import type { EventHazard } from "./analysts.ts";
 
 // ------------------------------------------------------ 12. FRAUD & SECURITY
@@ -24,8 +24,8 @@ export function securityAnalyst(ctx: Ctx): SecurityReport {
     if (z > 5) flag("volume_spike", "medium", `Last closed candle volume is ${z.toFixed(1)}σ above its 50-bar mean (possible wash trading, pump or news shock).`);
     const a = lastFinite(atrSeries(cs.slice(0, L), 14));
     if (a > 0 && (cs[L][2] - cs[L][3]) / a > 6) flag("extreme_range", "medium", `Candle range is ${((cs[L][2] - cs[L][3]) / a).toFixed(1)}× ATR (possible manipulation wick or flash move).`);
-    const r = logReturns(cs.slice(-80).map((k) => k[4])), sdr = stdev(r.slice(0, -1));
-    if (sdr > 0 && Math.abs(r[r.length - 1]) / sdr > 6) flag("price_jump", "medium", "Latest return exceeds 6σ of recent returns.");
+    const r = logReturns(cs.slice(-80).map((k) => k[4])), prior = r.slice(0, -1), sdr = stdev(prior);
+    if (sdr > 0 && Math.abs(r[r.length - 1] - mean(prior)) / sdr > 6) flag("price_jump", "medium", "Latest return deviates more than 6σ from recent returns.");
   }
   if (cs.length && ctx.now - cs[cs.length - 1][0] > 3 * ivMs) flag("stale_feed", "high", "Latest candle is older than three intervals; data may be stale or the feed compromised.");
   if (depth) {
@@ -129,7 +129,6 @@ export function riskManager(i: RiskInput): RiskDecision {
     q = Math.floor(q * 1e6) / 1e6;
     add("position_size", q > 0, "veto", q > 0 ? `Sized ${q} units.` : "Computed size rounds to zero.");
     if (q > 0) sizing = { quantity: q, notionalUsd: q * pr.entry, riskUsd: q * sd, riskPctOfEquity: ((q * sd) / equity) * 100 };
-    if (q > 0 && q < desired * 0.999 && !notes.length) notes.push("size reduced");
   }
   const vetoes = checks.filter((c) => !c.passed && c.severity === "veto").map((c) => c.id);
   const warnings = [...checks.filter((c) => !c.passed && c.severity === "warn").map((c) => c.detail), ...notes];
@@ -245,4 +244,3 @@ export function auditorReport(s: AuditSummary | null, now: number): AgentReport 
   const evidence: Evidence[] = [{ label: "resolved_trades", value: s.resolved }, { label: "win_rate", value: s.winRate }, { label: "avg_r", value: s.avgR }, ...Object.entries(s.agentAccuracy).map(([k, a]) => ({ label: "accuracy:" + k, value: a ? a.accuracy : null, note: a ? `n=${a.n}, ${a.flag}` : undefined }))];
   return makeReport("auditor", { stance: "neutral", confidence: clamp(s.resolved / 50, 0, 1), summary: `${s.resolved} resolved decision(s), win rate ${s.winRate === null ? "n/a" : (s.winRate * 100).toFixed(0) + "%"}${flagged.length ? "; underperforming: " + flagged.join(", ") : ""}.`, evidence, warnings: s.notes }, now);
 }
-export { correlation as _unusedCorrelationForTreeShaking };
