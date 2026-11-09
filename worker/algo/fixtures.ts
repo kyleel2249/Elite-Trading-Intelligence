@@ -21,3 +21,14 @@ export function rangeSeries(n: number, opts: { base?: number; reversion?: number
   }
   return out;
 }
+/** Regime-switching series (trend legs and pauses) with seeded randomness, used to exercise the backtester. */
+export function regimeSeries(n: number, opts: { seed?: number; leg?: number; drift?: number; noise?: number; start?: number; stepMs?: number; end?: number } = {}): Kline[] {
+  const { seed = 3, leg = 90, drift = 0.35, noise = 0.35, start = 100, stepMs = 3600000, end = Date.now() } = opts;
+  const r = rng(seed); let p = start, d = drift; const out: Kline[] = [];
+  for (let i = 0; i < n; i++) {
+    if (i % leg === 0) { const x = r(); d = x < 0.4 ? drift : x < 0.8 ? -drift : 0; }
+    const open = p; p = Math.max(1, p + d + (r() - 0.5) * 2 * noise);
+    out.push([end - (n - 1 - i) * stepMs, open, Math.max(open, p) + r() * noise * 0.5, Math.min(open, p) - r() * noise * 0.5, p, 100 * (0.7 + r() * 0.6 + (Math.abs(p - open) > noise ? 0.4 : 0))]);
+  }
+  return out;
+}
