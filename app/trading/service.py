@@ -17,6 +17,9 @@ from app.integrations.binance import BinanceClient
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
 from app.trading.portfolio import PortfolioService
 
+_LONG = ("buy", "long")
+_SHORT = ("sell", "short")
+
 
 class TradingService:
     def __init__(self, settings: Optional[Settings] = None, db: Optional[Session] = None):
@@ -28,6 +31,32 @@ class TradingService:
 
     def _client_order_id(self) -> str:
         return f"eti-{uuid.uuid4().hex[:20]}"
+
+    def _reduces_exposure(self, provider: str, environment: str, symbol: str, side: str, qty: float) -> bool:
+        """True only when the order closes (part of) an existing opposite position.
+
+        Closing orders are never blocked by the single-position allocation cap; anything that
+        opens or adds exposure is. Fails closed (False) when the position cannot be determined.
+        """
+        if self.db is None:
+            return False
+        try:
+            from app.models import Position
+            rows = (
+                self.db.query(Position)
+                .filter(Position.provider == provider.lower(), Position.environment == environment.lower(),
+                        Position.symbol == symbol.upper(), Position.status == "open")
+                .all()
+            )
+        except Exception:
+            return False
+        side = side.lower()
+        for p in rows:
+            held = (p.side or "").lower()
+            opposite = (side in _SHORT and held in _LONG) or (side in _LONG and held in _SHORT)
+            if opposite and (p.qty or 0.0) + 1e-12 >= qty:
+                return True
+        return False
 
     async def place_order(
         self,
@@ -67,6 +96,9 @@ class TradingService:
             estimated_risk_amount=estimated_risk_amount,
             data_age_seconds=data_age_seconds,
             data_status=data_status,
+            # Server-side valuation of the order for the 6% position allocation cap.
+            reference_price=limit_price if limit_price is not None else fill_price_hint,
+            reduces_exposure=self._reduces_exposure(provider, environment, symbol, side, qty),
         )
 
         decision: RiskDecision = self.risk.evaluate(proposal)
