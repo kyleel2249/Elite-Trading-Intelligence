@@ -33,3 +33,17 @@ Open `/alpha` on the Worker. Code lives in `worker/alpha/`; API under `/api/alph
 
 ## Test
 `npm test` runs `worker/*.test.ts` and `worker/alpha/*.test.ts`.
+
+## Implementation report (12 points)
+1. **Architecture:** Discovery (scanner, early-alpha, DEX, SEC) -> Research (lab, flow, copy-trade) -> Decision (fusion, independent validator, risk gateway). Cloudflare Worker + KV, 15-minute cron.
+2. **Coverage:** crypto via Binance/Bybit/OKX; US equities via Alpaca (keys needed); DEX via DexScreener/GoPlus. Everything else is listed as a gap in `/api/alpha/coverage`. Not global.
+3. **Early-alpha engine:** 8 stages, 0-100 score, unavailable factors excluded and reported as evidence coverage. 12 tests.
+4. **Whale / on-chain / DEX:** order-flow and wash checks, wallet attribution only with sourced label at confidence >= 0.8, DEX monitoring-only. Live-unverified.
+5. **Public investors:** 15 watched entities (CIKs unverified until checked at runtime), 13F/Form 4/13D-G parsers, delay-aware copy-trade evaluation. Needs `SEC_USER_AGENT`. Live-unverified.
+6. **Trader database:** 35 foundational profiles present; 0 fully evidenced, 24 partial, 11 seed text; backlog is exposed in the UI. No fabricated records.
+7. **Strategy lab:** 18 strategies, walk-forward, cost-aware, multiple-testing-corrected threshold, compatibility engine. Fundamental/macro strategies marked not testable.
+8. **Fusion and validation:** hard-risk veto, validator independent of upstream scores, DEX never executable.
+9. **Execution:** token-gated, paper/testnet only via `/api/orders`; live endpoint not referenced (tested); exposure limits; virtual stops monitored by cron.
+10. **Monitoring:** prediction ledger (stop-first, later candles only), false-negative tracking, champion/challenger with rollback, model-version hash.
+11. **Verification:** 342 tests pass, including the 9 route tests, scan, state and fixture suites; headless-browser pass over all 12 tabs. Not verified: live APIs, Cloudflare build/deploy, behaviour under real load.
+12. **Known limits:** needs Workers Paid for CPU; subrequest-budgeted scans report partial; no LLM calls so no token savings to report; ranking scores are heuristics, not probabilities.
