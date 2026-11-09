@@ -38,10 +38,25 @@ Authenticated (`Authorization: Bearer $ETI_EXECUTION_TOKEN`), all paper/simulate
 every order is rejected (fail closed). Orders are preflighted as `provider=binance, environment=paper, order_type=limit`
 against the existing Python `POST /api/risk-gateway/preflight`.
 
+### Scheduled paper cycle (Cron Trigger, every 5 minutes)
+
+`wrangler.jsonc` registers `*/5 * * * *`; the Worker's `scheduled` handler runs one pass. It is **off by default**.
+
+| Variable | Effect |
+|---|---|
+| `ETI_PAPER_SYMBOLS` | Comma list (max 3 per run, validated). Unset = the cycle only manages already-open positions, otherwise does nothing |
+| `ETI_PAPER_STRATEGY` | `scalp` \| `intraday` (default) \| `swing` \| `position` |
+| `ETI_PAPER_AUTOEXECUTE` | Only the exact string `true` lets the cycle open positions. Otherwise it analyses only |
+
+Each pass: manage every open position first (always, even under a kill switch or after a symbol is removed), then evaluate the
+configured symbols. New entries still need gateway approval and are blocked by `ETI_KILL_SWITCH` or the API kill switch
+(recorded as `SKIPPED`). One symbol failing never stops the others. The last pass is visible at
+`GET /api/paper/status` -> `scheduler.lastRun`. The 3-symbol cap exists because the Workers free plan allows about
+50 subrequests per invocation and one symbol costs about 10.
+
 ### Known limits
 
 * State lives in KV, which is not transactional: send paper requests one at a time (a Durable Object would remove this limit).
-* Nothing runs `evaluate`/`tick` on a schedule yet; call them from a trusted client or add a Cron Trigger.
 * Position management uses closed 1-minute bars; the partial minute containing the fill is unmonitored.
 * Order-book depth is a REST snapshot; providers are not cross-checked.
 

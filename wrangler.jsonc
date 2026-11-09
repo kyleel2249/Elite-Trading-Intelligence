@@ -9,6 +9,9 @@
   "observability": {
     "enabled": true
   },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "vars": {
     "ETI_KILL_SWITCH": "false",
     "ETI_LIVE_TRADING_ENABLED": "false",

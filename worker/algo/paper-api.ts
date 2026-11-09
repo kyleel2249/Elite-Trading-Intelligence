@@ -17,7 +17,7 @@ import { runOmnisignal } from "./omnisignal.ts";
 import { KVPaperStore, PaperEngine, type KVLike, type Preflight, type PreflightRequest } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
 
-export interface PaperEnv extends ExecutionEnv, MarketEnv {}
+export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string }
 export interface PaperDeps { now?: () => number; fetchImpl?: typeof fetch }
 interface KVWithList extends KVLike { list(o: { prefix: string; limit?: number }): Promise<{ keys: { name: string }[] }> }
 
@@ -56,6 +56,7 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
     const s = engine.state;
     return reply({ mode: "paper", simulated: true, equity: s.equity, startingEquity: engine.cfg.startingEquity, openPositions: s.positions, closedTrades: s.closed.length, killSwitch: s.killSwitch || envKill, envKillSwitch: envKill,
       riskGateConfigured: !!(env.ETI_RISK_GATE_URL && env.ETI_RISK_GATE_TOKEN), config: engine.cfg, withdrawalPermissions: false, liveTradingAvailable: false, stateVersion: s.version,
+      scheduler: { ...(({ symbols, strategy, autoExecute, ignored }) => ({ symbols, strategy, autoExecute, ignoredSymbols: ignored }))(cycleConfig(env)), maxSymbolsPerRun: MAX_CYCLE_SYMBOLS, lastRun: await readLastRun(env) },
       note: "Simulated fills against live public prices; no broker is contacted. State is stored in KV without transactions, so issue paper requests one at a time." });
   }
   if (path === "/api/paper/performance") {
@@ -77,32 +78,82 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
 
   const symbol = symbolOf();
   if (!validSymbol(symbol)) return reply({ error: "invalid_symbol" }, 400);
-  if (path === "/api/paper/tick") {
-    const p = engine.state.positions.find(x => x.symbol === symbol);
-    if (!p) return reply({ symbol, events: [], position: null, message: "No open paper position on this symbol" });
-    let m; try { m = await loadMinuteBars(env, symbol, null, now); } catch (e) { return reply({ error: "market_data_unavailable", detail: e instanceof Error ? e.message : "unknown" }, 503); }
-    // Bars that opened before the fill are excluded (their range pre-dates the position); the partial minute containing the fill is unmonitored.
-    const bars = m.bars.filter(k => k[0] >= p.openedAt).map(k => ({ ts: k[0] + 60_000, high: k[2], low: k[3], close: k[4] }));
-    const pending = bars.filter(b => b.ts > (p.lastBarTs ?? p.openedAt)).length, events = await engine.processBars(symbol, bars);
-    return reply({ symbol, barsPending: pending, events, position: engine.state.positions.find(x => x.symbol === symbol) ?? null, equity: engine.state.equity,
-      granularity: "closed 1-minute bars; stop-first when a bar touches both stop and target" });
-  }
+  if (path === "/api/paper/tick") { const r = await tickSymbol(engine, env, symbol, now); return reply(r.body, r.status); }
 
-  // evaluate
   const strategy = String(body?.strategy ?? "intraday") as Strategy;
   if (!STRATEGIES.includes(strategy)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
   if (body?.execute !== undefined && typeof body.execute !== "boolean") return reply({ error: "invalid_request", message: "'execute' must be boolean" }, 400);
+  const r = await evaluateSymbol(engine, env, symbol, strategy, body?.execute === true, now, envKill);
+  return reply(r.body, r.status);
+}
+
+export interface OpResult { status: number; body: Record<string, unknown> }
+/** Advance an open position with closed 1-minute bars (each bar is applied once). */
+export async function tickSymbol(engine: PaperEngine, env: PaperEnv, symbol: string, now: number): Promise<OpResult> {
+  const p = engine.state.positions.find(x => x.symbol === symbol);
+  if (!p) return { status: 200, body: { symbol, events: [], position: null, message: "No open paper position on this symbol" } };
+  let m; try { m = await loadMinuteBars(env, symbol, null, now); } catch (e) { return { status: 503, body: { error: "market_data_unavailable", detail: e instanceof Error ? e.message : "unknown" } }; }
+  // Bars that opened before the fill are excluded (their range pre-dates the position); the partial minute containing the fill is unmonitored.
+  const bars = m.bars.filter(k => k[0] >= p.openedAt).map(k => ({ ts: k[0] + 60_000, high: k[2], low: k[3], close: k[4] }));
+  const pending = bars.filter(b => b.ts > (p.lastBarTs ?? p.openedAt)).length, events = await engine.processBars(symbol, bars);
+  return { status: 200, body: { symbol, barsPending: pending, events, position: engine.state.positions.find(x => x.symbol === symbol) ?? null, equity: engine.state.equity, granularity: "closed 1-minute bars; stop-first when a bar touches both stop and target" } };
+}
+/** Analyse a symbol and, when `execute` is true, open a paper position if the plan is BUY/SELL and the risk gateway approves. */
+export async function evaluateSymbol(engine: PaperEngine, env: PaperEnv, symbol: string, strategy: Strategy, execute: boolean, now: number, envKill: boolean): Promise<OpResult> {
   const inputs = await loadSignalInputs(env, symbol, strategy, null, now);
-  if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", ...inputs, submitsOrder: false }, 503);
+  if ("error" in inputs) return { status: 503, body: { decision: "DATA_UNRELIABLE", ...inputs, submitsOrder: false } };
   const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now });
   const out: Record<string, unknown> = { symbol, strategy, plan, executed: false, event: null, submitsOrder: false };
-  if (body?.execute === true) {
-    if (envKill) { out.event = { type: "REJECTED", reasons: ["Emergency kill switch (ETI_KILL_SWITCH) is active"] }; return reply(out, 423); }
-    if (plan.decision === "BUY" || plan.decision === "SELL") {
-      let m; try { m = await loadMinuteBars(env, symbol, null, now); } catch { m = { bars: [], price: null, provider: "unknown" }; }
-      out.event = m.price === null ? { type: "REJECTED", reasons: ["No fresh live price available for a paper fill"] } : await engine.open(plan, m.price, now);
-      out.executed = (out.event as { type: string }).type === "OPENED";
-    } else out.event = { type: "REJECTED", reasons: [`Decision is ${plan.decision}; nothing to execute`] };
+  if (!execute) return { status: 200, body: out };
+  if (envKill) { out.event = { type: "REJECTED", reasons: ["Emergency kill switch (ETI_KILL_SWITCH) is active"] }; return { status: 423, body: out }; }
+  if (plan.decision === "BUY" || plan.decision === "SELL") {
+    let m; try { m = await loadMinuteBars(env, symbol, null, now); } catch { m = { bars: [], price: null, provider: "unknown" }; }
+    out.event = m.price === null ? { type: "REJECTED", reasons: ["No fresh live price available for a paper fill"] } : await engine.open(plan, m.price, now);
+    out.executed = (out.event as { type: string }).type === "OPENED";
+  } else out.event = { type: "REJECTED", reasons: [`Decision is ${plan.decision}; nothing to execute`] };
+  return { status: 200, body: out };
+}
+
+// ---------- scheduled cycle ----------
+/** Free-plan Workers allow ~50 subrequests per invocation and one symbol costs ~10, so a run is capped. */
+export const MAX_CYCLE_SYMBOLS = 3;
+export interface CycleConfig { symbols: string[]; strategy: Strategy; autoExecute: boolean; ignored: string[] }
+export function cycleConfig(env: PaperEnv): CycleConfig {
+  const raw = (env.ETI_PAPER_SYMBOLS || "").split(",").map(x => x.trim().toUpperCase()).filter(Boolean), good = [...new Set(raw.filter(x => /^[A-Z0-9]{5,20}$/.test(x)))];
+  const strategy = STRATEGIES.includes(env.ETI_PAPER_STRATEGY as Strategy) ? (env.ETI_PAPER_STRATEGY as Strategy) : "intraday";
+  return { symbols: good.slice(0, MAX_CYCLE_SYMBOLS), strategy, autoExecute: env.ETI_PAPER_AUTOEXECUTE === "true", ignored: [...raw.filter(x => !good.includes(x)), ...good.slice(MAX_CYCLE_SYMBOLS)] };
+}
+export interface CycleItem { symbol: string; action: "tick" | "evaluate"; decision?: string; event?: string; reasons?: string[]; events?: string[]; error?: string }
+export interface CycleSummary { ran: boolean; reason?: string; at: string; autoExecute?: boolean; strategy?: Strategy; items: CycleItem[]; ignoredSymbols?: string[]; killSwitch?: boolean; equity?: number; openPositions?: number }
+const LASTRUN_KEY = "eti:paper:lastrun";
+
+/** One scheduled pass: manage every open position, then evaluate configured symbols. Disabled unless ETI_PAPER_SYMBOLS is set.
+ *  Opening new positions additionally requires ETI_PAPER_AUTOEXECUTE=true and no kill switch; managing open positions never stops. */
+export async function runPaperCycle(env: PaperEnv, deps: PaperDeps = {}): Promise<CycleSummary> {
+  const now = (deps.now ?? Date.now)(), at = new Date(now).toISOString(), cfg = cycleConfig(env);
+  if (!env.ETI_EXECUTION_LOG) return { ran: false, reason: "ETI_EXECUTION_LOG KV binding is not configured", at, items: [] };
+  const kv = env.ETI_EXECUTION_LOG as unknown as KVWithList, engine = await PaperEngine.create(new KVPaperStore(kv), makeGatePreflight(env, deps.fetchImpl ?? fetch), {}, now);
+  const open = engine.state.positions.map(p => p.symbol);
+  if (!cfg.symbols.length && !open.length) return { ran: false, reason: "ETI_PAPER_SYMBOLS is not set and there are no open positions", at, items: [] };
+  const envKill = env.ETI_KILL_SWITCH === "true", killed = envKill || engine.state.killSwitch, items: CycleItem[] = [];
+  const targets = [...new Set([...open, ...cfg.symbols])].slice(0, Math.max(MAX_CYCLE_SYMBOLS, open.length)); // open positions always get managed
+  for (const symbol of targets) {
+    const holds = engine.state.positions.some(p => p.symbol === symbol);
+    try {
+      if (holds) {
+        const r = await tickSymbol(engine, env, symbol, now), b = r.body as any;
+        items.push(r.status === 200 ? { symbol, action: "tick", events: (b.events ?? []).map((e: any) => e.type) } : { symbol, action: "tick", error: String(b.error ?? `HTTP ${r.status}`) });
+      } else if (cfg.symbols.includes(symbol)) {
+        const execute = cfg.autoExecute && !killed, r = await evaluateSymbol(engine, env, symbol, cfg.strategy, execute, now, envKill), b = r.body as any;
+        const skipped = cfg.autoExecute && killed && r.status === 200; // evaluated but deliberately not executed: say why
+        items.push(r.status === 200 || r.status === 423 ? { symbol, action: "evaluate", decision: b.plan?.decision, event: skipped ? "SKIPPED" : b.event?.type, reasons: skipped ? ["Kill switch active: new entries are disabled"] : b.event?.reasons } : { symbol, action: "evaluate", decision: b.decision, error: String(b.error ?? `HTTP ${r.status}`) });
+      }
+    } catch (e) { items.push({ symbol, action: holds ? "tick" : "evaluate", error: e instanceof Error ? e.message : "unknown" }); } // one symbol failing never stops the rest
   }
-  return reply(out);
+  const summary: CycleSummary = { ran: true, at, autoExecute: cfg.autoExecute, strategy: cfg.strategy, items, ignoredSymbols: cfg.ignored, killSwitch: killed, equity: engine.state.equity, openPositions: engine.state.positions.length };
+  try { await kv.put(LASTRUN_KEY, JSON.stringify(summary)); } catch { /* the summary is informational; trading state was already persisted */ }
+  return summary;
+}
+export async function readLastRun(env: PaperEnv): Promise<CycleSummary | null> {
+  try { const v = await (env.ETI_EXECUTION_LOG as unknown as KVWithList | undefined)?.get(LASTRUN_KEY); return v ? JSON.parse(v) : null; } catch { return null; }
 }
