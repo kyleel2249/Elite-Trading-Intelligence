@@ -21,6 +21,7 @@ from app.risk.engine import OrderProposal, RiskEngine
 from app.security.auth import require_api_key
 from app.services.activity_store import ActivityStore
 from app.trading.risk_context import build_risk_context
+from app.trading.service import TradingService
 
 router = APIRouter(prefix="/api/risk-gateway", tags=["risk-gateway"])
 
@@ -100,6 +101,8 @@ async def execution_preflight(
     price = req.limit_price if req.limit_price is not None else snapshot.get("price")
     # A live order without a trustworthy reference quote is rejected even when
     # the limit is supplied: the quote is needed for freshness and sanity checks.
+    # reference_price feeds the hard 6% single-position allocation cap in RiskEngine;
+    # orders that only close an existing opposite position are exempt from that cap.
     proposal = OrderProposal(
         provider=req.provider,
         environment=req.environment,
@@ -114,6 +117,9 @@ async def execution_preflight(
         current_drawdown_pct=risk_context.current_drawdown_pct,
         data_age_seconds=risk_context.data_age_seconds,
         data_status=risk_context.data_status,
+        reference_price=price,
+        reduces_exposure=TradingService(settings, db=db)._reduces_exposure(
+            req.provider, req.environment, req.symbol, req.side, req.quantity),
         meta={"reference_price": price},
     )
     decision = RiskEngine(settings).evaluate(proposal)
@@ -141,6 +147,7 @@ async def execution_preflight(
         "decision": "APPROVED" if approved else "REJECTED",
         "reasons": reasons,
         "risk_officer": "Helena Frost",
+        "position_allocation_pct": decision.position_allocation_pct,
         "risk_inputs": {"source": "server", **risk_context.to_dict()},
         "market": {
             "provider": snapshot.get("provider"),
