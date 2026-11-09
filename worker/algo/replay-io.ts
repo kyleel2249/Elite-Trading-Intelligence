@@ -4,15 +4,22 @@ import type { Kline } from "../market.ts";
 import { TF_SECONDS, type Timeframe } from "./timeframes.ts";
 
 export const BINANCE_HOST = "https://data-api.binance.vision";
+/** Public market-data mirrors tried in order; some networks (e.g. certain regions) are refused by one host but served by another. */
+export const BINANCE_HOSTS = [BINANCE_HOST, "https://api.binance.com", "https://api1.binance.com", "https://api2.binance.com", "https://api3.binance.com"];
 type FetchLike = (url: string) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 /** Page through public Binance klines. Drops the still-forming candle; throws on any HTTP/shape error instead of returning partial data silently. */
 export async function fetchBinanceKlines(symbol: string, tf: Timeframe, startMs: number, endMs: number, fetchImpl: FetchLike = fetch as unknown as FetchLike, now = Date.now()): Promise<Kline[]> {
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) throw new Error(`Invalid symbol ${symbol}`);
-  const ms = TF_SECONDS[tf] * 1000, out: Kline[] = []; let from = startMs;
+  const ms = TF_SECONDS[tf] * 1000, out: Kline[] = []; let from = startMs, preferred: string[] = [];
   for (let guard = 0; guard < 2000 && from < endMs; guard++) {
-    const res = await fetchImpl(`${BINANCE_HOST}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${from}&endTime=${endMs}&limit=1000`);
-    if (!res.ok) throw new Error(`Binance klines ${symbol} ${tf} failed with HTTP ${res.status}`);
+    let res: Awaited<ReturnType<FetchLike>> | null = null; const tried: string[] = [];
+    for (const host of preferred.length ? preferred : BINANCE_HOSTS) {
+      try { const r = await fetchImpl(`${host}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${from}&endTime=${endMs}&limit=1000`); if (r.ok) { res = r; preferred = [host]; break; } tried.push(`${host} HTTP ${r.status}`); }
+      catch (e) { tried.push(`${host} ${e instanceof Error ? e.message : "error"}`); }
+      if (preferred.length) break;
+    }
+    if (!res) throw new Error(`Binance klines ${symbol} ${tf} failed: ${tried.join("; ")}`);
     const rows = await res.json();
     if (!Array.isArray(rows)) throw new Error(`Binance klines ${symbol} ${tf}: unexpected response shape`);
     if (!rows.length) break;

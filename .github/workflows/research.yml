@@ -1,0 +1,52 @@
+name: ETI Research (real-data replay and walk-forward optimizer)
+
+# Manual, read-only research run on real public market data. It places no orders, uses no secrets and applies no parameters.
+on:
+  workflow_dispatch:
+    inputs:
+      symbol: { description: "Symbol, e.g. BTCUSDT", default: "BTCUSDT" }
+      strategy: { description: "scalp | intraday | swing | position", default: "intraday" }
+      days: { description: "History length in days", default: "365" }
+      folds: { description: "Walk-forward folds", default: "4" }
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Node version (type stripping needs >= 22.18)
+        run: node --version
+      - name: Market-data reachability
+        run: |
+          for h in data-api.binance.vision api.binance.com; do
+            echo "$h -> $(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://$h/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=1")"
+          done
+      - name: Unit tests
+        run: npm test
+      - name: Replay (swift_only / gainz_only / combined) on real data
+        env: { SYMBOL: "${{ inputs.symbol }}", STRATEGY: "${{ inputs.strategy }}", DAYS: "${{ inputs.days }}" }
+        run: node scripts/replay.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS" --compare --out replay.json > replay-summary.json
+      - name: Walk-forward optimizer on real data
+        env: { SYMBOL: "${{ inputs.symbol }}", STRATEGY: "${{ inputs.strategy }}", DAYS: "${{ inputs.days }}", FOLDS: "${{ inputs.folds }}" }
+        run: node scripts/optimize.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS" --folds "$FOLDS" --out optimize.json > /dev/null
+      - name: Summary
+        run: |
+          node -e '
+            const o=JSON.parse(require("fs").readFileSync("optimize.json","utf8")), r=JSON.parse(require("fs").readFileSync("replay-summary.json","utf8"));
+            const pick=x=>({trades:x.report.trades,status:x.report.status,expectancyR:x.report.expectancyR,profitFactor:x.report.profitFactor,winRate:x.report.winRate,maxDrawdownPct:x.maxDrawdownPct,strategyReturnPct:x.strategyReturnPct,buyAndHoldReturnPct:x.buyAndHoldReturnPct,oosTrades:x.outOfSample.trades,oosExpectancyR:x.outOfSample.expectancyR,bootstrapR:x.bootstrapExpectancyR});
+            const out={replay:Object.fromEntries(Object.entries(r).map(([k,v])=>[k,pick(v)])),replayPeriod:{start:new Date(r.combined.periodStart).toISOString(),end:new Date(r.combined.periodEnd).toISOString(),bars:r.combined.bars},optimizer:{folds:o.folds.map(f=>({fold:f.fold,chosen:f.chosen,oosChosenTrades:f.oosChosenTrades,trainTrades:f.trainTrades})),challenger:o.challenger&&{name:o.challenger.name,stability:o.challenger.selectionStability},oosChallenger:{trades:o.oosChallenger.trades,meanR:o.oosChallenger.meanR,bootstrap:o.oosChallenger.bootstrap},oosChampion:{trades:o.oosChampion.trades,meanR:o.oosChampion.meanR,bootstrap:o.oosChampion.bootstrap},promotion:o.promotion}};
+            const t=JSON.stringify(out,(k,v)=>v===Infinity?"Infinity":v,2); console.log(t);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,"```json\n"+t+"\n```\n");'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eti-research-${{ inputs.symbol }}-${{ inputs.strategy }}
+          path: |
+            replay.json
+            optimize.json

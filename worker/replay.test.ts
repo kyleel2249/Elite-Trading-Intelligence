@@ -119,3 +119,13 @@ test("CSV parser accepts headers and ms/seconds/ISO times, and rejects inconsist
   assert.throws(() => parseCsvKlines("1767225600000,100,101,99,x,10"), /line 1: non-numeric/);
   assert.throws(() => parseCsvKlines("1767225600000,100,101"), /expected 6 columns/);
 });
+
+import { BINANCE_HOSTS } from "./algo/replay-io.ts";
+test("fetchBinanceKlines falls back across hosts and reports every failure", async () => {
+  const row = (t: number) => [t, "1", "2", "0.5", "1.5", "10"], calls: string[] = [];
+  const f = async (u: string) => { calls.push(new URL(u).host); return u.includes("api.binance.com") ? { ok: true, status: 200, json: async () => [row(0), row(900000)] } : { ok: false, status: 451, json: async () => ({}) }; };
+  const k = await fetchBinanceKlines("BTCUSDT", "15m", 0, 3_600_000, f as any, 10_000_000);
+  assert.equal(k.length, 2); assert.deepEqual(calls.slice(0, 2), ["data-api.binance.vision", "api.binance.com"]);
+  const dead = async () => ({ ok: false, status: 403, json: async () => ({}) });
+  await assert.rejects(fetchBinanceKlines("BTCUSDT", "15m", 0, 3_600_000, dead as any), (e: Error) => BINANCE_HOSTS.every(h => e.message.includes(new URL(h).host)));
+});
