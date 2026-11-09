@@ -92,3 +92,20 @@ test("regime classifier: trends, range, abnormal, and abnormal blocks new entrie
   assert.equal(ab.regime, "abnormal"); assert.equal(ab.profile.allowNewEntries, false); assert.equal(ab.profile.exposureScale, 0);
   assert.equal(classifyRegime(series(30)).regime, "abnormal");
 });
+
+import { adaptiveBandsSeries, volFlowSeries } from "./indicators.ts";
+test("shared series implementations agree with the live single-point indicators on every tested series", () => {
+  for (const o of [{ drift: 0.5, noise: 0.3 }, { drift: -0.4, noise: 0.5, start: 400 }, { drift: 0, noise: 1.2, seed: 11 }]) {
+    const rows = series(300, o);
+    const fl = volFlowSeries(rows), vm = volumeMomentum(rows);
+    assert.ok(Math.abs(fl.at(-1)! - vm.score) < 0.01, `flow ${fl.at(-1)} vs ${vm.score}`);
+    const b = adaptiveBands(rows), bs = adaptiveBandsSeries(rows);
+    assert.equal(bs.trend.at(-1), b.trend); assert.equal(bs.upper.at(-1), b.upper); assert.equal(bs.lower.at(-1), b.lower);
+    assert.equal(bs.flips.filter(i => i > 299 - 50).length, b.flipsLast50);
+  }
+});
+test("series indicators are causal: truncating future bars never changes earlier values", () => {
+  const rows = series(300, { drift: 0.2, noise: 0.8, seed: 21 });
+  const full = volFlowSeries(rows), cut = volFlowSeries(rows.slice(0, 200)), fb = adaptiveBandsSeries(rows), cb = adaptiveBandsSeries(rows.slice(0, 200));
+  for (let i = 40; i < 200; i++) { assert.ok(Math.abs(full[i] - cut[i]) < 1e-9); assert.equal(fb.trend[i], cb.trend[i]); }
+});
