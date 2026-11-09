@@ -24,5 +24,5 @@ def get_db():
 
 def init_db() -> None:
     from app import models  # noqa: F401
-    from app.execution import models as _execution_models  # noqa: F401  (execution engine tables)
+    from app.memory import models as memory_models  # noqa: F401  (ETI memory + adaptive-edge tables)
     Base.metadata.create_all(bind=engine)
