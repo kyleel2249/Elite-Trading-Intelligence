@@ -6,8 +6,9 @@ route/submit -> acknowledgement -> fill reconciliation.
 
 An order is never "executed" because a request was sent: states are
 SUBMITTED, ACKNOWLEDGED, PARTIALLY_FILLED, FILLED, REJECTED, CANCELLED, FAILED.
-Provider bracket orders are not implemented, so protective stop / take-profit
-levels are *recorded and flagged as not attached* rather than claimed.
+Protective stop / take-profit orders are reported as attached only when the trading
+service says the provider confirmed the exit legs (Alpaca bracket/OTO). Otherwise the
+record stays ``not_attached`` and the levels are recorded for monitoring only.
 """
 from __future__ import annotations
 
@@ -211,6 +212,7 @@ class ExecutionEngine:
                 daily_realized_pnl_pct=ctx.daily_realized_pnl_pct,
                 current_drawdown_pct=ctx.current_drawdown_pct, data_age_seconds=sig.data_age_seconds,
                 data_status=sig.data_status, estimated_risk_amount=risk_amount, thesis=sig.thesis,
+                stop_loss=sig.stop_price, take_profit=sig.take_profits[0] if sig.take_profits else None,
                 fill_price_hint=sig.entry_price if sig.environment != "live" else None)
         except Exception as e:  # noqa: BLE001
             rec.reasons.append(f"submit error: {type(e).__name__}")
@@ -222,6 +224,8 @@ class ExecutionEngine:
         rec.latency_ms["exchange_ack"] = (t_ack - t_sub) / 1e6
         rec.latency_ms["signal_to_ack"] = (t_ack - t0) / 1e6
         rec.provider_response = resp
+        if resp.get("protective_orders"):          # only what the service reports; default stays not_attached
+            rec.protective_orders = resp["protective_orders"]
         rec.client_order_id = resp.get("client_order_id")
         if rec.client_order_id:
             self.by_client_id[rec.client_order_id] = rec
