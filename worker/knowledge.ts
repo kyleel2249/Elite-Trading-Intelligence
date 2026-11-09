@@ -29,8 +29,25 @@ const REQUIRED: [string, string[]][] = [
 ];
 const filled = (v: unknown) => Array.isArray(v) ? v.length > 0 : typeof v === "string" ? v.trim().length > 0 : v != null;
 
+// Template filler text that older profile files used to satisfy the schema. A field holding only these is
+// reported as a placeholder, never as a completed field.
+const FILLER = new Set([
+  "aligned with documented philosophy", "per documented public methodology", "thesis or system exit", "often unpublished in precise form",
+  "varies by firm/strategy", "firm/strategy specific", "not assumed without source", "see patterns", "see philosophy",
+  "style-favorable regimes", "outside competence / no edge", "outside edge", "process discipline", "source-dependent",
+  "usually not fully public", "media estimate if any", "see public case studies", "public case studies where available",
+  "evaluate dated claims individually", "timestamped evaluation only", "regime sensitivity", "attribution only when evidence matches",
+  "helena frost risk always applies",
+]);
+const FILLER_PREFIXES = ["modules:", "public career summary; deepen", "expand with primary sources"];
+const textOf = (x: unknown): string => typeof x === "string" ? x : x && typeof (x as any).claim === "string" ? (x as any).claim : "";
+const isFiller = (s: string) => { const t = s.trim().toLowerCase().replace(/\.$/, ""); return FILLER.has(t) || FILLER_PREFIXES.some(p => t.startsWith(p)); };
+const substantive = (v: unknown) => Array.isArray(v) ? v.some(x => { const t = textOf(x); return t.trim().length > 0 && !isFiller(t); }) : typeof v === "string" ? v.trim().length > 0 && !isFiller(v) : v != null;
+
 function describe(p: any) {
-  const missing = REQUIRED.filter(([, keys]) => !keys.some(k => filled(p[k]))).map(([label]) => label);
+  const status = REQUIRED.map(([label, keys]) => ({ label, present: keys.some(k => filled(p[k])), real: keys.some(k => substantive(p[k])) }));
+  const missing = status.filter(s => !s.present).map(s => s.label);
+  const placeholder = status.filter(s => s.present && !s.real).map(s => s.label);
   const perf = (k: string) => (p[k] || []) as { claim: string; classification: string; source: string | null }[];
   const counts: Record<string, number> = {};
   for (const k of ["historical_returns", "historical_drawdowns", "win_rates", "net_worth"]) for (const n of perf(k)) counts[n.classification] = (counts[n.classification] || 0) + 1;
@@ -38,7 +55,8 @@ function describe(p: any) {
   const hasDated = nw.some(n => /\$\d/.test(n.claim) && n.source && /(19|20)\d\d/.test(n.source));
   const netWorthStatus = hasDated ? "dated_estimate" : nw.some(n => /^deceased/i.test(n.claim)) ? "deceased" : nw.some(n => n.classification === "not_documented") ? "not_documented" : nw.length ? "undated_estimate" : "none";
   const sourced = ["historical_returns", "historical_drawdowns", "win_rates", "net_worth"].reduce((a, k) => a + perf(k).filter(n => n.source).length, 0);
-  return { completeness: { fieldsPresent: REQUIRED.length - missing.length, fieldsRequired: REQUIRED.length, missing }, evidenceCounts: counts, netWorthStatus, sourcedPerformanceNotes: sourced };
+  // fieldsPresent counts only substantive fields, so the dashboard shows an honest number.
+  return { completeness: { fieldsPresent: status.filter(s => s.real).length, fieldsStructural: status.filter(s => s.present).length, fieldsRequired: REQUIRED.length, missing, placeholder }, evidenceCounts: counts, netWorthStatus, sourcedPerformanceNotes: sourced };
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[-\s]+/g, "_");
