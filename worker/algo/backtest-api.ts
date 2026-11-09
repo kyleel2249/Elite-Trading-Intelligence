@@ -24,6 +24,7 @@ export async function handleAlgoBacktest(req: Request, env: MarketEnv): Promise<
   if (!markets[symbol]) return reply({ error: "market_data_unavailable", symbol, failures }, 503);
   const report = optimize(markets, { primary: symbol, costs: { feeBps: fee, slippageBps: slip } });
   return reply({ symbol, interval, candlesPerMarket: Object.fromEntries(Object.entries(markets).map(([k, v]) => [k, v.length])), failures, report,
-    validatedExpectancy: expectancyFromReport(report), performanceLabel: "backtested_only",
+    screenExpectancy: expectancyFromReport(report), performanceLabel: "backtested_only", scope: "parametric_screen_with_simplified_rules",
+    validatedExpectancy: null, validationSource: "Only a replay of the real engine chain (scripts/replay.mjs) or recorded paper-trading outcomes can validate the live engines. This screen uses simplified rules and never feeds the live validator.",
     note: "Backtested results only. Paper-trading and verified live performance are tracked separately and are not implied by this report." });
 }
