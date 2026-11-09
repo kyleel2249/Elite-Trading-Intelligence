@@ -1,10 +1,14 @@
-"""Persistence models for the global scanner / valuation / sizing / execution stack."""
+"""Persistence models for the global scanner / valuation / sizing / execution stack.
+
+The prediction ledger is NOT duplicated here: predictions are written through the existing
+append-only ``app.prediction_ledger`` service (tables ``predictions`` / ``prediction_outcomes``).
+"""
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, JSON, String, Text, event
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -84,48 +88,6 @@ class MispricingAlert(Base):
     status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open|converged|expired
     converged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-
-
-class PredictionLedger(Base):
-    """Append-only. Rows are never updated or deleted; outcomes live in PredictionOutcome."""
-    __tablename__ = "prediction_ledger"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    prediction_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # idempotent
-    symbol: Mapped[str] = mapped_column(String(64), index=True)
-    market_price: Mapped[float] = mapped_column(Float)
-    fair_value: Mapped[float] = mapped_column(Float)
-    mispricing_pct: Mapped[float] = mapped_column(Float)
-    confidence: Mapped[float] = mapped_column(Float)
-    horizon_days: Mapped[float] = mapped_column(Float)
-    expected_direction: Mapped[str] = mapped_column(String(8))
-    invalidation: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    model_version: Mapped[str] = mapped_column(String(32), default="fv-1")
-    strategy: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    asset_class: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-
-
-class PredictionOutcome(Base):
-    __tablename__ = "prediction_outcomes"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    prediction_id: Mapped[int] = mapped_column(Integer, index=True)
-    evaluated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    realized_price: Mapped[float] = mapped_column(Float)
-    direction_correct: Mapped[bool] = mapped_column(Boolean)
-    converged: Mapped[bool] = mapped_column(Boolean)
-    return_pct: Mapped[float] = mapped_column(Float)
-
-
-@event.listens_for(PredictionLedger, "before_update")
-def _block_ledger_update(mapper, connection, target):  # noqa: ARG001
-    raise ValueError("prediction_ledger is append-only: rows cannot be modified")
-
-
-@event.listens_for(PredictionLedger, "before_delete")
-def _block_ledger_delete(mapper, connection, target):  # noqa: ARG001
-    raise ValueError("prediction_ledger is append-only: rows cannot be deleted")
 
 
 class KellyCalculation(Base):

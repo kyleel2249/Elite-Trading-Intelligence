@@ -1,5 +1,7 @@
 """global scanner, valuation, sizing and execution tables
 
+Predictions are stored by the existing append-only prediction ledger (not duplicated here).
+
 Revision ID: 0003_quant
 Revises: 0002_investor
 """
@@ -61,22 +63,6 @@ def upgrade() -> None:
     op.create_index("ix_mispricing_alerts_status", "mispricing_alerts", ["status"])
     op.create_index("ix_mispricing_alerts_created_at", "mispricing_alerts", ["created_at"])
     op.create_index("ix_mispricing_symbol_status", "mispricing_alerts", ["symbol", "status"])
-    op.create_table("prediction_ledger", _id(),
-        sa.Column("prediction_key", sa.String(64), nullable=False), sa.Column("symbol", sa.String(64)),
-        sa.Column("market_price", sa.Float()), sa.Column("fair_value", sa.Float()),
-        sa.Column("mispricing_pct", sa.Float()), sa.Column("confidence", sa.Float()),
-        sa.Column("horizon_days", sa.Float()), sa.Column("expected_direction", sa.String(8)),
-        sa.Column("invalidation", sa.JSON(), nullable=True), sa.Column("model_version", sa.String(32)),
-        sa.Column("strategy", sa.String(64), nullable=True), sa.Column("asset_class", sa.String(32), nullable=True),
-        sa.Column("created_at", sa.DateTime()))
-    op.create_index("ix_prediction_ledger_prediction_key", "prediction_ledger", ["prediction_key"], unique=True)
-    op.create_index("ix_prediction_ledger_symbol", "prediction_ledger", ["symbol"])
-    op.create_index("ix_prediction_ledger_created_at", "prediction_ledger", ["created_at"])
-    op.create_table("prediction_outcomes", _id(),
-        sa.Column("prediction_id", sa.Integer()), sa.Column("evaluated_at", sa.DateTime()),
-        sa.Column("realized_price", sa.Float()), sa.Column("direction_correct", sa.Boolean()),
-        sa.Column("converged", sa.Boolean()), sa.Column("return_pct", sa.Float()))
-    op.create_index("ix_prediction_outcomes_prediction_id", "prediction_outcomes", ["prediction_id"])
     op.create_table("kelly_calculations", _id(),
         sa.Column("symbol", sa.String(64), nullable=True), sa.Column("approved", sa.Boolean()),
         sa.Column("final_allocation_pct", sa.Float()), sa.Column("inputs", sa.JSON(), nullable=True),
@@ -108,6 +94,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     for t in ("audit_events", "execution_events", "sentiment_assessments", "kelly_calculations",
-              "prediction_outcomes", "prediction_ledger", "mispricing_alerts", "fair_value_estimates",
-              "market_coverage", "scan_runs"):
+              "mispricing_alerts", "fair_value_estimates", "market_coverage", "scan_runs"):
         op.drop_table(t)
