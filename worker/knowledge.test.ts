@@ -6,42 +6,22 @@ import { runModules, regimeOf, attributionFor, statEdge, kellySizing, MODULE_MET
 const get = async (path: string) => { const r = handleKnowledge(new Request("https://eti.test" + path))!; return { status: r.status, body: await r.json() as any }; };
 
 const REQUIRED_NAMES = ["George Soros","Stanley Druckenmiller","Paul Tudor Jones","Bruce Kovner","Richard Dennis","William Eckhardt","Ed Seykota","Mark Minervini","Nicolas Darvas","Jesse Livermore","Richard Wyckoff","William O'Neil","Larry Williams","Linda Bradford Raschke","Kathy Lien","Ray Dalio","Jim Simons","Warren Buffett","Charlie Munger","Peter Lynch","John Paulson","Michael Burry","David Tepper","John Templeton","Ed Thorp","Michael Steinhardt","Julian Robertson","David Shaw","Marty Schwartz","Tom Basso","Howard Marks","Chris Hohn","David Einhorn","John W. Henry","Robert Mercer"];
-// Additional traders whose profiles were deepened from template filler to substantive, classified notes.
-const DEEPENED_IDS = ["ed_thorp","michael_steinhardt","julian_robertson","david_shaw","marty_schwartz","tom_basso","howard_marks","chris_hohn","david_einhorn","john_w_henry","robert_mercer"];
 
-test("knowledge directory serves the full registry and reports honest completeness", async () => {
+test("knowledge directory serves the full registry with all 25 required fields per profile", async () => {
   const { body } = await get("/api/intelligence/traders");
   assert.equal(body.source, "python-registry");
   const names = new Set(body.profiles.map((p: any) => p.name));
   for (const n of REQUIRED_NAMES) assert.ok(names.has(n), n);
   assert.ok(body.count >= 35);
-  for (const p of body.profiles) {
-    const c = p.completeness;
-    assert.equal(c.fieldsRequired, 25, p.name);
-    assert.ok(c.fieldsPresent <= c.fieldsStructural, p.name + " substantive cannot exceed structural");
-    assert.equal(c.fieldsPresent + c.placeholder.length + c.missing.length, 25, p.name + " field accounting");
-  }
-  for (const id of DEEPENED_IDS) {
-    const p = body.profiles.find((x: any) => x.id === id);
-    assert.ok(p, id + " present");
-    assert.equal(p.completeness.fieldsPresent, 25, p.name + " placeholder fields: " + p.completeness.placeholder.join(", ") + " missing: " + p.completeness.missing.join(", "));
-  }
+  for (const p of body.profiles) assert.equal(p.completeness.fieldsPresent, 25, p.name + " missing " + p.completeness.missing);
   assert.match(body.limitations, /No private algorithms/);
-});
-
-test("template filler is reported as placeholder, not as a completed field", async () => {
-  const { body } = await get("/api/intelligence/traders/bill_ackman");
-  assert.equal(body.profile.full_name, "Bill Ackman");
-  assert.ok(body.completeness.placeholder.length > 0, "filler profile must report placeholder fields");
-  assert.ok(body.completeness.fieldsPresent < 25);
-  assert.ok(body.completeness.fieldsStructural >= body.completeness.fieldsPresent);
 });
 
 test("single profile route returns the full profile with classified performance notes", async () => {
   const { status, body } = await get("/api/intelligence/traders/george_soros");
   assert.equal(status, 200);
   assert.equal(body.profile.full_name, "George Soros");
-  for (const k of ["historical_returns", "win_rates", "net_worth"]) for (const n of body.profile[k]) assert.ok(["verified", "reported", "estimate", "speculation"].includes(n.classification));
+  for (const k of ["historical_returns", "win_rates", "net_worth"]) for (const n of body.profile[k]) assert.ok(["verified", "reported", "estimate", "speculation", "not_documented"].includes(n.classification));
   assert.equal((await get("/api/intelligence/traders/nobody_here")).status, 404);
 });
 
@@ -90,4 +70,26 @@ test("statistical edge and Kelly sizing never invent an edge", () => {
   assert.equal(pos.verdict, "positive_edge");
   const k = kellySizing({ sampleCount: 100, winRate: 62 }, pos);
   assert.ok(k.suggestedRiskPercent > 0 && k.suggestedRiskPercent <= 1);
+});
+
+test("research pass: dated net-worth figures, deceased handling, and no placeholder win-rate speculation remain", async () => {
+  const list = (await get("/api/intelligence/traders")).body.profiles;
+  const status = (s: string) => list.filter((p: any) => p.netWorthStatus === s).length;
+  assert.ok(status("dated_estimate") >= 14, "dated estimates: " + status("dated_estimate"));
+  assert.ok(status("deceased") >= 7);
+  assert.equal(status("undated_estimate"), 0);
+  assert.equal(status("none"), 0);
+  const soros = (await get("/api/intelligence/traders/george_soros")).body;
+  assert.equal(soros.netWorthStatus, "dated_estimate");
+  assert.match(soros.profile.net_worth[0].claim, /8\.6B/);
+  assert.match(soros.profile.net_worth[0].source, /2026/);
+  assert.equal(soros.profile.win_rates[0].classification, "reported");
+  for (const p of list) {
+    const full = (await get("/api/intelligence/traders/" + p.id)).body.profile;
+    for (const n of full.net_worth) assert.ok(!/media estimate if any/i.test(n.claim), p.id);
+    for (const n of full.win_rates) assert.notEqual(n.classification, "speculation", p.id + " win rate still speculation");
+    for (const n of full.net_worth) if (n.classification === "estimate") assert.match(n.source || "", /(19|20)\d\d/, p.id + " undated estimate");
+  }
+  const simons = (await get("/api/intelligence/traders/jim_simons")).body.profile;
+  assert.match(simons.net_worth[0].claim, /family/i);
 });
