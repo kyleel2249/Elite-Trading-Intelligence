@@ -90,7 +90,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <p class="execution-note">Decides whether trading is advisable at all: now, today, tomorrow, in a session or in a particular hour. Standing aside is a valid outcome. Factors that cannot be verified are shown as not evaluated and lower the verdict instead of being assumed safe.</p>
 <div class="toolbar">
 <select id="rdMarket" aria-label="Market"><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="equities">Equities</option></select>
-<input id="rdSymbol" placeholder="Symbol (optional for Forex)" maxlength="20" autocomplete="off" style="width:170px" aria-label="Readiness symbol">
+<input id="rdSymbol" placeholder="Symbol: BTCUSDT, EURUSD, AAPL" maxlength="20" autocomplete="off" style="width:170px" aria-label="Readiness symbol">
 <select id="rdScope" aria-label="Window"><option value="now">Next 2 hours</option><option value="today">Today (UTC day)</option><option value="tomorrow">Tomorrow (UTC day)</option><option value="session">A trading session</option><option value="hour">A specific hour (UTC)</option></select>
 <select id="rdSession" style="display:none" aria-label="Session"><option value="asian">Asian session</option><option value="london">London session</option><option value="new_york">New York session</option><option value="london_ny_overlap">London/New York overlap</option><option value="sydney">Sydney session</option></select>
 <input id="rdHour" type="number" min="0" max="23" value="0" style="display:none;width:90px" aria-label="UTC hour">

@@ -5,7 +5,8 @@ import { HOUR, DAY, MIN, easterSunday, exchangeStatus, fxOpen, holidayFlags, lse
 import { eventHits, loadEvents, parseEvents, severityFor, type MarketEvent } from "./readiness/events.ts";
 import { assess, upcomingClosures, type AssessInput } from "./readiness/engine.ts";
 import { parseEvidence, summarizeEvidence } from "./readiness/evidence.ts";
-import { buildSnapshot, historyStats, returnCorrelation, slippageBps } from "./readiness/snapshot.ts";
+import { buildSnapshot, historyStats, quoteLiquidity, returnCorrelation, slippageBps } from "./readiness/snapshot.ts";
+import { alpacaSource, fxSource, parseCandleRows } from "./readiness/sources.ts";
 import { rateAssetSession, buildReport } from "./readiness/report.ts";
 import { handleReadiness } from "./readiness/api.ts";
 import { series } from "./algo/fixtures.ts";
@@ -258,4 +259,79 @@ test("the Worker routes /api/readiness and the dashboard exposes the readiness p
   const page = await (await worker.fetch(new Request("https://eti.test/"), {} as never)).text();
   assert.ok(page.includes("ETI Market Readiness Engine") && page.includes("/api/readiness?"));
 });
-void buildSnapshot;
+
+// ------------------------------------------------------------------ equities (Alpaca) and forex (operator adapter)
+const TFSEC: Record<string, number> = { "1Min": 60, "5Min": 300, "15Min": 900, "30Min": 1800, "1Hour": 3600, "4Hour": 14400, "1Day": 86400, "1Week": 604800 };
+function mockAlpaca(now: number) {
+  const seen: { url: string; headers: Record<string, string> }[] = [];
+  const lastClose = series(1000, { drift: 0.05, noise: 0.6, seed: 7, stepMs: HOUR, end: Math.floor(now / HOUR) * HOUR - HOUR }).at(-1)![4];
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const u = new URL(String((input as Request).url ?? input)); seen.push({ url: u.toString(), headers: (init?.headers ?? {}) as Record<string, string> });
+    if (u.hostname !== "data.alpaca.markets") return new Response("{}", { status: 404 });
+    if (u.pathname.endsWith("/bars")) {
+      const step = TFSEC[u.searchParams.get("timeframe")!] * 1000, n = Number(u.searchParams.get("limit"));
+      const rows = series(n, { drift: 0.05, noise: 0.6, seed: 7, stepMs: step, end: Math.floor(now / step) * step - step }).reverse(); // newest first, as sort=desc returns
+      return new Response(JSON.stringify({ bars: rows.map(r => ({ t: new Date(r[0]).toISOString(), o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] })) }), { status: 200 });
+    }
+    if (u.pathname.endsWith("/quotes/latest")) return new Response(JSON.stringify({ quote: { bp: lastClose * 0.9998, ap: lastClose * 1.0002, t: new Date(now - 5000).toISOString() } }), { status: 200 });
+    return new Response("{}", { status: 404 });
+  }) as unknown as typeof fetch;
+  return seen;
+}
+test("price-source adapters parse strictly, authenticate, and refuse non-https FX endpoints", async () => {
+  assert.equal(alpacaSource({}), null); assert.equal(fxSource({}), null); assert.equal(fxSource({ ETI_FX_CANDLES_URL: "http://x.example/{symbol}" }), null);
+  const t = utc(2026, 11, 9, 9);
+  assert.deepEqual(parseCandleRows([[t, 1, 2, 0.5, 1.5]])[0], [t, 1, 2, 0.5, 1.5, 0]); // missing volume stays 0 = unknown, never invented
+  assert.equal(parseCandleRows({ candles: [{ datetime: new Date(t).toISOString(), open: "1", high: "2", low: "0.5", close: "1.5", tick_volume: 7 }] })[0][5], 7);
+  assert.throws(() => parseCandleRows([{ time: t, open: 1 }])); assert.throws(() => parseCandleRows({}));
+  const seen = mockAlpaca(t), a = alpacaSource({ ALPACA_API_KEY: "KEY123", ALPACA_SECRET_KEY: "SECRET456" }, fetch, t)!;
+  const rows = await a.candles("AAPL", "1h", 120); assert.equal(rows.length, 120); assert.ok(rows[0][0] < rows.at(-1)![0]); // re-sorted ascending
+  assert.match(seen[0].url, /sort=desc/); assert.match(seen[0].url, /feed=iex/); assert.equal(seen[0].headers["APCA-API-KEY-ID"], "KEY123");
+  await assert.rejects(() => a.candles("BTC/USD", "1h", 10)); await assert.rejects(() => a.candles("AAPL", "7m" as never, 10));
+});
+test("quote-only liquidity verifies the spread and says depth is unknown", () => {
+  const now = utc(2026, 11, 9, 15), q = (bid: number, ask: number, ago = 1000) => quoteLiquidity({ bid, ask, time: now - ago }, 100, now, 15);
+  assert.equal(q(99.99, 100.01).status, "ok"); assert.equal(q(99.99, 100.01).depthKnown, false); assert.equal(q(99.5, 100.5).status, "degraded");
+  assert.equal(q(100, 100).status, "blocked"); assert.equal(q(99.99, 100.01, 20 * 60_000).status, "blocked"); assert.equal(q(79, 81).status, "blocked");
+  assert.equal(quoteLiquidity({ bid: 99.99, ask: 100.01, time: null }, 100, now, 15).status, "degraded");
+});
+test("equities with Alpaca data: live conditions, quote-only spread, no key leakage; without keys it stays unverified", async () => {
+  const now = utc(2026, 11, 9, 15, 30); Date.now = () => now as never; const seen = mockAlpaca(now);
+  const env = { ALPACA_API_KEY: "KEY123", ALPACA_SECRET_KEY: "SECRET456", ETI_EVENTS_JSON: "[]" };
+  const res = await get("/api/readiness?market=equities&symbol=AAPL", env), body = await res.text(), d = JSON.parse(body);
+  assert.equal(res.status, 200); assert.equal(d.dataQuality.priceData, "ok"); assert.equal(d.overall.liveConditionsApplied, true); assert.ok(!body.includes("KEY123") && !body.includes("SECRET456"));
+  const f10 = d.overall.factors.find((f: any) => f.id === 10); assert.match(f10.headline, /top-of-book quote only/); assert.equal(f10.rating, "supportive");
+  assert.ok(d.overall.evaluated >= 8); assert.ok(seen.some(c => /quotes\/latest/.test(c.url))); assert.ok(seen.some(c => /symbols=|\/SPY\/bars/.test(c.url))); // SPY reference for correlation
+  assert.equal(d.overall.factors.find((f: any) => f.id === 9).rating !== "not_evaluated", true);
+  const none = await (await get("/api/readiness?market=equities&symbol=AAPL", { ETI_EVENTS_JSON: "[]" })).json() as any;
+  assert.equal(none.dataQuality.priceData, "not_connected_for_this_market"); assert.ok(["UNCERTAIN", "HIGH_RISK", "AVOID_TRADING"].includes(none.overall.status));
+  Date.now = () => utc(2026, 11, 8, 15) as never; mockAlpaca(utc(2026, 11, 8, 15)); // Sunday
+  assert.equal(((await (await get("/api/readiness?market=equities&symbol=AAPL", env)).json()) as any).overall.status, "AVOID_TRADING");
+});
+test("forex with an operator feed: volume-less candles are not anomalies, spread needs a quote, token never leaks", async () => {
+  const now = utc(2026, 11, 9, 9, 30); Date.now = () => now as never; let auth = "";
+  const last = series(1000, { drift: 0.0002, noise: 0.0004, start: 1.1, seed: 9, stepMs: HOUR, end: Math.floor(now / HOUR) * HOUR - HOUR }).at(-1)![4];
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const u = new URL(String((input as Request).url ?? input)); auth = String((init?.headers as Record<string, string>)?.authorization);
+    if (u.pathname === "/candles") { const step = INTERVAL_SECONDS[u.searchParams.get("tf")!] * 1000, n = Number(u.searchParams.get("n")); const rows = series(n, { drift: 0.0002, noise: 0.0004, start: 1.1, seed: 9, stepMs: step, end: Math.floor(now / step) * step - step }); return new Response(JSON.stringify({ values: rows.map(r => ({ time: new Date(r[0]).toISOString(), open: r[1], high: r[2], low: r[3], close: r[4] })) }), { status: 200 }); }
+    if (u.pathname === "/quote") return new Response(JSON.stringify({ bid: last - 0.00003, ask: last + 0.00003, time: new Date(now - 2000).toISOString() }), { status: 200 });
+    return new Response("{}", { status: 404 });
+  }) as unknown as typeof fetch;
+  const base = { ETI_EVENTS_JSON: "[]", ETI_FX_CANDLES_URL: "https://fx.example/candles?pair={symbol}&tf={interval}&n={limit}", ETI_FX_DATA_TOKEN: "FXTOKEN789" };
+  const quoted = { ...base, ETI_FX_QUOTE_URL: "https://fx.example/quote?pair={symbol}" };
+  const res = await get("/api/readiness?market=forex&symbol=EURUSD", quoted), body = await res.text(), d = JSON.parse(body), f = (id: number) => d.overall.factors.find((x: any) => x.id === id);
+  assert.equal(auth, "Bearer FXTOKEN789"); assert.ok(!body.includes("FXTOKEN789")); assert.equal(d.dataQuality.priceData, "ok"); assert.equal(d.overall.liveConditionsApplied, true);
+  assert.notEqual(f(2).rating, "severe"); // flat zero volume must not be read as an abnormal market
+  assert.equal(f(3).rating, "not_evaluated"); assert.match(f(10).headline, /Spread/); assert.equal(f(10).rating, "supportive"); assert.equal(d.history === undefined, true);
+  const noQuote = await (await get("/api/readiness?market=forex&symbol=EURUSD", base)).json() as any;
+  assert.equal(noQuote.overall.factors.find((x: any) => x.id === 10).rating, "not_evaluated"); assert.ok(["UNCERTAIN", "HIGH_RISK", "AVOID_TRADING"].includes(noQuote.overall.status)); assert.ok(noQuote.overall.caps.some((c: string) => /spread/i.test(c)));
+  const sessions = await (await get("/api/readiness/sessions?market=forex&symbols=EURUSD", base)).json() as any;
+  assert.equal(sessions.sessions[0].assets[0].condition, "insufficient_data"); assert.match(sessions.sessions[0].assets[0].reasons[0], /no volume/);
+  const st = await (await get("/api/readiness/status", quoted)).json() as any; assert.match(st.markets.forex.priceData, /connected/);
+});
+test("stale candles are never treated as live conditions", () => {
+  const now = utc(2026, 11, 9, 9, 30), h = hourlyHistory(now); // last candle ~9.5 h old
+  const snap = buildSnapshot({ symbol: "TESTUSDT", now, strategy: "intraday", provider: "t", candles: { "1h": h.slice(-300) }, hourly: h, depth: null });
+  assert.ok(snap && snap.stale); const a = assess(base({ market: "crypto", symbol: "TESTUSDT", now, at: now, snapshot: snap, events: loaded([]) }));
+  assert.equal(a.liveConditionsApplied, false); assert.ok(["UNCERTAIN", "HIGH_RISK", "AVOID_TRADING"].includes(a.status));
+});

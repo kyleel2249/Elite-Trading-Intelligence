@@ -67,8 +67,8 @@ availability apply. The interface must not represent stale or disconnected data 
 `GET /api/readiness` (and the **ETI Market Readiness Engine** dashboard panel) decide whether trading is advisable now,
 in a session, in a given hour, today or tomorrow, and can recommend **not trading** with reasons. Verdicts:
 Favourable, Selectively favourable, Uncertain, High risk, Avoid trading. Twelve factors are evaluated; anything that cannot be
-verified is reported as *not evaluated* and lowers the verdict. Crypto has live price data; Forex and Equities are
-schedule/calendar based only until a price feed is connected. An economic-calendar feed must be configured
+verified is reported as *not evaluated* and lowers the verdict. Crypto has live price data; US stocks use Alpaca market data when the Alpaca keys are set, Forex needs an operator-configured
+price adapter (`ETI_FX_*`); without a feed those markets are schedule/calendar based only. An economic-calendar feed must be configured
 (`ETI_EVENT_FEED_URL` / `ETI_EVENTS_JSON`); without it the calendar is reported as unverified. A favourable rating is never an
 entry signal. See [docs/READINESS.md](docs/READINESS.md).
 

@@ -41,9 +41,17 @@ that names the blackout hours; two or more releases, or any central-bank decisio
 
 | Market | Price data | Evaluated |
 |---|---|---|
-| Crypto | Binance/Bybit/OKX public APIs (connected) | all 12 factors: ATR/regime volatility, order-book spread and slippage, 1h/4h/1d trend, validated setup, BTC/ETH correlation, ~40 days of hourly history for session/hour/weekday behaviour |
-| Forex | **not connected** | FX-week open/close, sessions, holidays, closures, calendar events. Verdict capped at `UNCERTAIN` when open |
-| Equities | **not connected** | NYSE hours, holidays, early closes, calendar events |
+| Crypto | Binance/Bybit/OKX public APIs (always on) | all 12 factors: ATR/regime volatility, order-book spread and slippage, 1h/4h/1d trend, validated setup, BTC/ETH correlation, ~40 days of hourly history for session/hour/weekday behaviour |
+| US stocks / ETFs | **Alpaca Market Data (IEX feed)** when `ALPACA_API_KEY` + `ALPACA_SECRET_KEY` are set; pass a US ticker as `symbol` | all factors except order-book depth (top-of-book spread only), SPY (QQQ for SPY) as correlation reference; NYSE hours, holidays and early closes |
+| Forex | **operator-configured adapter** (`ETI_FX_CANDLES_URL`, optional `ETI_FX_QUOTE_URL`); pass a pair as `symbol` | volatility, trend, structure, setups and history from candles; spread only with the quote URL; no order-book depth; no correlation reference |
+| Forex / equities without a feed (or without `symbol`) | none | FX-week open/close, sessions, holidays, closures, calendar events only. Verdict cannot be better than `UNCERTAIN` while open |
+
+Notes on the non-crypto sources:
+* **IEX volume is a fraction of consolidated volume.** Ratios are relative to the same symbol's own baseline, so they remain meaningful, absolute volumes do not.
+* Equities are assessed against **regular NYSE hours only**; pre-market and after-hours are treated as closed.
+* Many FX feeds carry no volume. Volume is then treated as *unknown* (never invented): liquidity is "not evaluated" and per-asset session ratings are `insufficient_data`.
+* If the newest candle is stale, or the market is open but live data is missing, the verdict cannot be better than `UNCERTAIN`.
+* Alpaca's free plan, rate limits and the exact response fields were implemented from its documented API and have only been exercised against mocks here.
 
 Session/hour/weekday statistics are **measured activity** (range and volume relative to the asset's own weekday baseline,
 directional efficiency) with sample sizes. They say nothing about profitability. Forex session fit is *structural*
@@ -60,6 +68,10 @@ closures; Tokyo public holidays are not built in.
 | `ETI_EVENT_FEED_URL` | Worker variable | HTTPS URL returning the event JSON below |
 | `ETI_EVENT_FEED_TOKEN` | **Worker secret** | optional bearer token for the feed |
 | `ETI_EVENTS_JSON` | Worker variable | inline events JSON (small lists, or for manual entry) |
+| `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | **Worker secrets** (existing) | also used read-only for US stock candles and quotes |
+| `ETI_FX_CANDLES_URL` | Worker variable | HTTPS candle endpoint template using `{symbol}`, `{interval}` (1m,5m,15m,30m,1h,4h,1d,1w) and `{limit}` |
+| `ETI_FX_QUOTE_URL` | Worker variable | optional HTTPS quote template using `{symbol}`; returns `{ "bid": n, "ask": n, "time": iso-or-epoch }` |
+| `ETI_FX_DATA_TOKEN` | **Worker secret** | optional bearer token for both FX URLs |
 | `ETI_EXECUTION_LOG` | KV binding (existing) | holds strategy evidence under `readiness:evidence:<SYMBOL>:<strategy>` |
 
 ETI contains **no** calendar data and never invents events. Without a feed the calendar is reported as unverified.
@@ -101,6 +113,6 @@ UTC day). Future windows use schedule, events and typical behaviour only; live c
 
 ## Verification status
 Covered by `worker/readiness.test.ts` (calendar rules, event zones, decisions, fail-safe behaviour, API with mocked
-market data). **Not verified:** behaviour against live exchange responses and a real calendar feed (no feed or network
-access to them from the build environment), and Workers Free CPU headroom in production (about 3-4 ms for a full-day
+market data). **Not verified:** behaviour against live exchange, Alpaca and FX-provider responses and a real calendar feed (no
+keys or network access to them from the build environment; only mocks were exercised), and Workers Free CPU headroom in production (about 3-4 ms for a full-day
 report measured locally in Node).

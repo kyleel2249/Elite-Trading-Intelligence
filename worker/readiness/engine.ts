@@ -47,11 +47,11 @@ export function evaluationWindow(i: Pick<AssessInput, "scope" | "at" | "now" | "
 }
 const dataIn = (h: HistoryStats | null, i: AssessInput, w: { start: number; end: number }) => {
   if (!h) return null;
-  if (i.scope === "session" && i.session) { const s = h.sessions.find(r => r.session === i.session); return s ? { kind: "session" as const, label: sessionLabel(i.session), range: s.rangeVsBaseline, volume: s.volumeVsBaseline, n: s.instances, ok: s.sampleOk, efficiency: s.efficiency } : null; }
-  if (i.scope === "day") { const d = h.weekdays.find(r => r.dow === new Date(w.start).getUTCDay()); return d && d.days ? { kind: "weekday" as const, label: "this weekday", range: d.rangeVsBaseline, volume: d.volumeVsBaseline, n: d.days, ok: d.days >= 4, efficiency: null } : null; }
+  if (i.scope === "session" && i.session) { const s = h.sessions.find(r => r.session === i.session); return s ? { kind: "session" as const, label: sessionLabel(i.session), range: s.rangeVsBaseline, volume: h.volumeKnown ? s.volumeVsBaseline : null, n: s.instances, ok: s.sampleOk, efficiency: s.efficiency } : null; }
+  if (i.scope === "day") { const d = h.weekdays.find(r => r.dow === new Date(w.start).getUTCDay()); return d && d.days ? { kind: "weekday" as const, label: "this weekday", range: d.rangeVsBaseline, volume: h.volumeKnown ? d.volumeVsBaseline : null, n: d.days, ok: d.days >= 4, efficiency: null } : null; }
   const at = Math.max(w.start, i.scope === "now" ? i.now : w.start), hr = new Date(at).getUTCHours(), s = h.hours[hr], wd = new Date(at).getUTCDay();
-  if (wd === 0 || wd === 6) { const d = h.weekdays.find(r => r.dow === wd); return d && d.days ? { kind: "weekday" as const, label: "this weekend day", range: d.rangeVsBaseline, volume: d.volumeVsBaseline, n: d.days, ok: d.days >= 4, efficiency: null } : null; } // hour statistics are weekday-only
-  return s && s.bars ? { kind: "hour" as const, label: `${String(hr).padStart(2, "0")}:00 UTC hour`, range: s.rangeVsBaseline, volume: s.volumeVsBaseline, n: s.bars, ok: s.bars >= 20, efficiency: null } : null;
+  if (wd === 0 || wd === 6) { const d = h.weekdays.find(r => r.dow === wd); return d && d.days ? { kind: "weekday" as const, label: "this weekend day", range: d.rangeVsBaseline, volume: h.volumeKnown ? d.volumeVsBaseline : null, n: d.days, ok: d.days >= 4, efficiency: null } : null; } // hour statistics are weekday-only
+  return s && s.bars ? { kind: "hour" as const, label: `${String(hr).padStart(2, "0")}:00 UTC hour`, range: s.rangeVsBaseline, volume: h.volumeKnown ? s.volumeVsBaseline : null, n: s.bars, ok: s.bars >= 20, efficiency: null } : null;
 };
 
 export function upcomingClosures(from: number, days = 14): Closure[] {
@@ -62,7 +62,7 @@ export function upcomingClosures(from: number, days = 14): Closure[] {
 
 export function assess(i: AssessInput): Assessment {
   const w = evaluationWindow(i), snap = i.snapshot, forward = Math.max(w.start, i.now), future = w.start > i.now + 2 * HOUR, past = w.end <= i.now;
-  const live = !!snap && snap.liveData && !future && !past, hist = snap?.history ?? null, stat = dataIn(hist, i, w);
+  const live = !!snap && snap.liveData && !snap.stale && !future && !past, hist = snap?.history ?? null, stat = dataIn(hist, i, w);
   const ctx = { market: i.market, symbol: i.symbol || undefined, currencies: currenciesOf(i.market, i.symbol || undefined) };
   const factors: FactorResult[] = [], F = (id: number, factor: string, rating: Rating, headline: string, detail: string[] = []) => { factors.push({ id, factor, rating, headline, detail }); };
   const when = (e: MarketEvent) => { const d = (e.time - i.now) / MIN; return Math.abs(d) <= 24 * 60 ? `${utcClock(e.time)} (${d >= 0 ? "in " : ""}${fmtDuration(d)}${d < 0 ? " ago" : ""})` : `${iso(e.time).slice(0, 16).replace("T", " ")} UTC`; };
@@ -90,9 +90,10 @@ export function assess(i: AssessInput): Assessment {
   // 3. Liquidity
   { const d: string[] = [], lt = new Date(w.start), wkend = i.market === "crypto" && [0, 6].includes(lt.getUTCDay()) && [0, 6].includes(new Date(w.end - 1).getUTCDay()); let r: Rating = "not_evaluated", head = "Liquidity could not be measured";
     const fl = holidayFlags(w.start); if (i.market !== "equities" && fl.length) d.push(...fl);
-    if (stat) { r = stat.volume < 0.4 && stat.ok ? "adverse" : stat.volume < 0.65 && stat.ok ? "caution" : "supportive"; head = `${stat.label}: volume ${x(stat.volume)} the weekday baseline`; d.push(`Measured over ${stat.n} samples${stat.ok ? "" : " (small sample)"}.`); }
+    if (stat && stat.volume === null) d.push("This price source supplies no volume, so participation cannot be measured.");
+    if (stat && stat.volume !== null) { r = stat.volume < 0.4 && stat.ok ? "adverse" : stat.volume < 0.65 && stat.ok ? "caution" : "supportive"; head = `${stat.label}: volume ${x(stat.volume)} the weekday baseline`; d.push(`Measured over ${stat.n} samples${stat.ok ? "" : " (small sample)"}.`); }
     if (wkend) { r = r === "adverse" ? r : "caution"; head = "Weekend: crypto liquidity is typically lower and moves can be erratic"; const wd = hist?.weekdays.find(q => q.dow === lt.getUTCDay()); if (wd?.days) d.push(`${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][wd.dow]} volume has averaged ${x(wd.volumeVsBaseline)} the weekday level (${wd.days} days).`); }
-    if (live && snap?.liquidity) { const l = snap.liquidity; if (l.status === "blocked") { r = "adverse"; head = "Order book unusable (stale, incomplete or inconsistent)"; } else if (l.status === "degraded" && r !== "adverse") { r = "caution"; head = "Order-book liquidity degraded"; } d.push(...l.issues); }
+    if (live && snap?.liquidity) { const l = snap.liquidity; if (l.status === "blocked") { r = "adverse"; head = "Market data unusable (stale, incomplete or inconsistent)"; } else if (l.status === "degraded" && r !== "adverse") { r = "caution"; head = "Order-book liquidity degraded"; } d.push(...l.issues); }
     if (fl.length && i.market !== "equities" && (r === "supportive" || r === "not_evaluated")) { r = "caution"; head = "Holiday-affected liquidity"; }
     if (i.market === "forex" && !fxOpen(w.start).open && !fxOpen(Math.max(w.start, w.end - 1)).open) { r = "severe"; head = "FX market closed: no liquidity"; }
     F(3, "Liquidity", r, head, d); }
@@ -128,7 +129,9 @@ export function assess(i: AssessInput): Assessment {
   else F(9, "Market correlations", "not_evaluated", "Cross-asset correlation not available for this market/window");
 
   // 10. Spreads and execution conditions
-  if (live && snap?.liquidity && snap.liquidity.spreadBps !== null) { const l = snap.liquidity, worst = Math.max(l.slippageBuyBps ?? 0, l.slippageSellBps ?? 0), thin = l.slippageBuyBps === null || l.slippageSellBps === null;
+  if (live && snap?.liquidity && snap.liquidity.spreadBps !== null && !snap.liquidity.depthKnown) { const l = snap.liquidity, r: Rating = l.status === "blocked" ? "adverse" : l.status === "degraded" ? "caution" : "supportive";
+    F(10, "Spreads and execution", r, `Spread ${l.spreadBps!.toFixed(1)} bps (top-of-book quote only; depth and slippage unverified)`, [`Quote age ${Math.round(l.ageMs / 1000)} s.`, ...l.issues, "Order-book depth is not available from this source: large orders may fill worse than the quoted spread."]); }
+  else if (live && snap?.liquidity && snap.liquidity.spreadBps !== null) { const l = snap.liquidity, worst = Math.max(l.slippageBuyBps ?? 0, l.slippageSellBps ?? 0), thin = l.slippageBuyBps === null || l.slippageSellBps === null;
     const r: Rating = l.status === "blocked" || worst > 30 ? "adverse" : l.status === "degraded" || worst > 10 || thin ? "caution" : "supportive";
     F(10, "Spreads and execution", r, `Spread ${l.spreadBps!.toFixed(1)} bps; est. slippage for ${l.referenceNotional.toLocaleString("en-US")} quote units ${thin ? "exceeds visible depth" : `up to ${worst.toFixed(1)} bps`}`, [`Book age ${Math.round(l.ageMs)} ms (REST snapshot, not guaranteed executable liquidity).`, ...l.issues]); }
   else F(10, "Spreads and execution", "not_evaluated", future ? "Live spreads cannot be known for a future window" : "No live order book: spreads and slippage unverified");
@@ -156,11 +159,12 @@ export function assess(i: AssessInput): Assessment {
   const count = (r: Rating) => factors.filter(f => f.rating === r).length, severe = factors.filter(f => f.rating === "severe"), adverse = factors.filter(f => f.rating === "adverse"), cautions = factors.filter(f => f.rating === "caution");
   const evaluated = factors.filter(f => f.rating !== "not_evaluated").length, caps: string[] = [], by = (id: number) => factors.find(f => f.id === id)!;
   let status: ReadinessStatus = severe.length ? "AVOID_TRADING" : adverse.length ? "HIGH_RISK" : cautions.length >= 2 ? "UNCERTAIN" : cautions.length === 1 ? "SELECTIVELY_FAVOURABLE" : count("supportive") >= 4 && evaluated >= 7 ? "FAVOURABLE" : "SELECTIVELY_FAVOURABLE";
-  const lim = (s: ReadinessStatus, why: string) => { const n = cap(status, s); if (n !== status) { status = n; caps.push(why); } };
-  if (by(1).rating === "not_evaluated") lim("SELECTIVELY_FAVOURABLE", "Verdict capped at SELECTIVELY FAVOURABLE because announcement risk is unverified (no economic calendar connected).");
-  if (live && (by(2).rating === "not_evaluated" || by(10).rating === "not_evaluated")) lim("UNCERTAIN", "Verdict capped at UNCERTAIN because live volatility or spread/execution data could not be verified.");
-  if (!live && by(2).rating === "not_evaluated" && by(3).rating === "not_evaluated") lim("UNCERTAIN", "Verdict capped at UNCERTAIN because neither measured history nor live data exists for this window.");
-  if (!past && evaluated < 5) lim("UNCERTAIN", "Verdict capped at UNCERTAIN because fewer than 5 of the 12 factors could be evaluated.");
+  const lim = (s: ReadinessStatus, why: string) => { status = cap(status, s); if (status === s) caps.push(why); }; // listed whenever it is what limits the verdict
+  if (by(1).rating === "not_evaluated") lim("SELECTIVELY_FAVOURABLE", "Verdict cannot be better than SELECTIVELY FAVOURABLE because announcement risk is unverified (no economic calendar connected).");
+  if (live && (by(2).rating === "not_evaluated" || by(10).rating === "not_evaluated")) lim("UNCERTAIN", "Verdict cannot be better than UNCERTAIN because live volatility or spread/execution data could not be verified.");
+  if (!future && !past && !live) lim("UNCERTAIN", "Verdict cannot be better than UNCERTAIN because live market data is unavailable or stale for a current window.");
+  if (!live && by(2).rating === "not_evaluated" && by(3).rating === "not_evaluated") lim("UNCERTAIN", "Verdict cannot be better than UNCERTAIN because neither measured history nor live data exists for this window.");
+  if (!past && evaluated < 5) lim("UNCERTAIN", "Verdict cannot be better than UNCERTAIN because fewer than 5 of the 12 factors could be evaluated.");
   if (status === "FAVOURABLE" && (by(6).rating !== "supportive" && by(6).rating !== "not_evaluated")) status = "SELECTIVELY_FAVOURABLE";
 
   const blockers = [...severe, ...adverse].map(f => f.headline), reasonsOf = (rs: Rating[]) => factors.filter(f => rs.includes(f.rating)).map(f => f.headline);

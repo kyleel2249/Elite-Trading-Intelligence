@@ -51,6 +51,7 @@ export function rateAssetSession(h: HistoryStats | null, id: SessionId, symbol: 
   if (!h || !s) return { symbol, condition: "insufficient_data", rangeVsBaseline: null, volumeVsBaseline: null, efficiency: null, samples: 0, reasons: ["No usable hourly history."] };
   const base = { symbol, rangeVsBaseline: s.rangeVsBaseline, volumeVsBaseline: s.volumeVsBaseline, efficiency: s.efficiency, samples: s.instances };
   if (!s.sampleOk) return { ...base, condition: "insufficient_data", reasons: [`Only ${s.instances} complete session instances measured (minimum 10).`] };
+  if (!h.volumeKnown) return { ...base, condition: "insufficient_data", reasons: ["This price source supplies no volume, so participation cannot be rated."] };
   const effs = h.sessions.map(q => q.efficiency).filter((v): v is number => v !== null), avgEff = effs.reduce((a, b) => a + b, 0) / effs.length;
   const reasons = [`Volume ${s.volumeVsBaseline.toFixed(2)}x and range ${s.rangeVsBaseline.toFixed(2)}x the asset's own weekday baseline over ${s.instances} sessions.`];
   const dir = s.efficiency !== null && s.efficiency >= avgEff;

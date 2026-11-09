@@ -15,10 +15,10 @@ const rangePct = (k: Kline) => ((k[2] - k[3]) / k[4]) * 100;
 export interface SessionStat { session: SessionId; bars: number; instances: number; avgRangePct: number; rangeVsBaseline: number; volumeVsBaseline: number; efficiency: number | null; sampleOk: boolean }
 export interface HourStat { hourUtc: number; bars: number; rangeVsBaseline: number; volumeVsBaseline: number }
 export interface DayStat { dow: number; days: number; avgRangePct: number; rangeVsBaseline: number; volumeVsBaseline: number }
-export interface HistoryStats { bars: number; days: number; baselineRangePct: number; sessions: SessionStat[]; hours: HourStat[]; weekdays: DayStat[] }
+export interface HistoryStats { bars: number; days: number; /** False when the source supplies no volume: volume ratios are then 1 and must not be interpreted. */ volumeKnown: boolean; baselineRangePct: number; sessions: SessionStat[]; hours: HourStat[]; weekdays: DayStat[] }
 
 /** Session / hour-of-day / weekday behaviour measured from closed hourly candles. Weekday-only for sessions and hours; weekends are reported separately. */
-export function historyStats(hourly: Kline[], now: number): HistoryStats | null {
+export function historyStats(hourly: Kline[], now: number, opts: { minBarsPerDay?: number; volumeKnown?: boolean } = {}): HistoryStats | null {
   const rows = hourly.filter(k => k[0] + HOUR <= now);
   if (rows.length < 24 * 14) return null;
   const wk = rows.filter(k => { const d = new Date(k[0]).getUTCDay(); return d >= 1 && d <= 5; });
@@ -33,10 +33,10 @@ export function historyStats(hourly: Kline[], now: number): HistoryStats | null 
   });
   const hours: HourStat[] = Array.from({ length: 24 }, (_, h) => { const b = wk.filter(k => new Date(k[0]).getUTCHours() === h); return { hourUtc: h, bars: b.length, rangeVsBaseline: mean(b.map(rangePct)) / baseRange, volumeVsBaseline: mean(b.map(k => k[5])) / baseVol }; });
   const byDay = new Map<string, Kline[]>(); for (const k of rows) { const key = new Date(k[0]).toISOString().slice(0, 10); (byDay.get(key) ?? byDay.set(key, []).get(key)!).push(k); }
-  const days = [...byDay.entries()].filter(([, g]) => g.length === 24).map(([key, g]) => ({ dow: new Date(key + "T00:00:00Z").getUTCDay(), range: ((Math.max(...g.map(k => k[2])) - Math.min(...g.map(k => k[3]))) / g[0][1]) * 100, vol: g.reduce((s, k) => s + k[5], 0) }));
+  const days = [...byDay.entries()].filter(([, g]) => g.length >= (opts.minBarsPerDay ?? 24)).map(([key, g]) => ({ dow: new Date(key + "T00:00:00Z").getUTCDay(), range: ((Math.max(...g.map(k => k[2])) - Math.min(...g.map(k => k[3]))) / g[0][1]) * 100, vol: g.reduce((s, k) => s + k[5], 0) }));
   const dailyRange = mean(days.filter(d => d.dow >= 1 && d.dow <= 5).map(d => d.range)), dailyVol = mean(days.filter(d => d.dow >= 1 && d.dow <= 5).map(d => d.vol));
   const weekdays: DayStat[] = [0, 1, 2, 3, 4, 5, 6].map(dow => { const g = days.filter(d => d.dow === dow); return { dow, days: g.length, avgRangePct: mean(g.map(d => d.range)), rangeVsBaseline: mean(g.map(d => d.range)) / dailyRange, volumeVsBaseline: mean(g.map(d => d.vol)) / dailyVol }; });
-  return { bars: rows.length, days: days.length, baselineRangePct: baseRange, sessions, hours, weekdays };
+  return { bars: rows.length, days: days.length, volumeKnown: opts.volumeKnown ?? true, baselineRangePct: baseRange, sessions, hours, weekdays };
 }
 
 /** Pearson correlation of hourly log returns over the most recent aligned bars. */
@@ -58,6 +58,21 @@ export function slippageBps(depth: DepthSnapshot, notional: number): { buyBps: n
   return { buyBps: walk(asks, 1), sellBps: walk(bids, -1) };
 }
 
+export interface QuoteInput { bid: number; ask: number; time: number | null }
+/** Liquidity view from a top-of-book quote only. Depth and slippage are NOT known and are reported as such. */
+export function quoteLiquidity(q: QuoteInput, price: number, now: number, maxSpreadBps: number): NonNullable<MarketSnapshot["liquidity"]> {
+  const out = (status: "ok" | "degraded" | "blocked", issues: string[], spread: number | null, age: number) => ({ status, issues, spreadBps: spread, ageMs: age, bidDepth: 0, askDepth: 0, slippageBuyBps: null, slippageSellBps: null, referenceNotional: 0, depthKnown: false });
+  const age = q.time === null ? Infinity : now - q.time;
+  if (!(q.bid > 0 && q.ask > 0) || q.bid >= q.ask) return out("blocked", ["Crossed, locked or invalid quote"], null, age);
+  const mid = (q.bid + q.ask) / 2, spread = (q.ask - q.bid) / mid * 1e4, issues: string[] = []; let status: "ok" | "degraded" | "blocked" = "ok";
+  if (Math.abs(mid - price) / price > 0.02) { status = "blocked"; issues.push("Quote differs from the last candle by more than 2%: possible wrong asset or stale data"); }
+  if (q.time === null) { status = status === "blocked" ? status : "degraded"; issues.push("Quote carries no timestamp: freshness unverified"); }
+  else if (age > 600_000) { status = "blocked"; issues.push(`Quote is stale (${Math.round(age / 1000)} s old)`); }
+  else if (age > 120_000 && status === "ok") { status = "degraded"; issues.push(`Quote is ${Math.round(age / 1000)} s old`); }
+  if (spread > maxSpreadBps && status === "ok") { status = "degraded"; issues.push(`Spread ${spread.toFixed(1)} bps exceeds limit ${maxSpreadBps}`); }
+  return out(status, issues, spread, Number.isFinite(age) ? age : 0);
+}
+
 export interface MarketSnapshot {
   symbol: string; provider: string; /** True only when the full live fetch (all timeframes, order book, reference asset) was attempted. */ liveData: boolean; generatedAt: number; lastCandleTime: number; dataAgeSec: number; stale: boolean; price: number;
   volatility: { atrPercent: number; percentile: number; classification: VolClass; expansion: boolean; contraction: boolean };
@@ -65,7 +80,7 @@ export interface MarketSnapshot {
   structure: { bias: "bull" | "bear" | "neutral"; support: number | null; resistance: number | null };
   trend: { direction: "bull" | "bear" | "neutral"; weightedScore: number; frames: { timeframe: Timeframe; trend: string; adx: number; reliability: number }[]; conflicts: string[]; unavailable: Timeframe[] };
   setup: Pick<AlgoSignal, "action" | "classification" | "confidence" | "tradeable" | "notes"> | null;
-  liquidity: (Pick<LiquidityAnalysis, "status" | "issues" | "spreadBps" | "ageMs" | "bidDepth" | "askDepth"> & { slippageBuyBps: number | null; slippageSellBps: number | null; referenceNotional: number }) | null;
+  liquidity: (Pick<LiquidityAnalysis, "status" | "issues" | "spreadBps" | "ageMs" | "bidDepth" | "askDepth"> & { slippageBuyBps: number | null; slippageSellBps: number | null; referenceNotional: number; /** False for top-of-book quote sources (stocks, forex): spread is verified, depth and slippage are not. */ depthKnown: boolean }) | null;
   ticker: { quoteVolume24h: number; changePct24h: number } | null;
   history: HistoryStats | null;
   correlation: { reference: string; corr: number; bars: number; referenceVolPercentile: number | null } | null;
@@ -74,14 +89,19 @@ export interface MarketSnapshot {
 export interface SnapshotInput {
   symbol: string; now: number; strategy: Strategy; provider: string; candles: Partial<Record<Timeframe, Kline[]>>; hourly: Kline[] | null; depth: DepthSnapshot | null;
   ticker?: { quoteVolume: number; priceChangePercent: number } | null; reference?: { symbol: string; hourly: Kline[] } | null; failures?: Record<string, string>; referenceNotional?: number; live?: boolean;
+  /** Top-of-book quote for sources without an order book. */ quote?: QuoteInput | null; maxSpreadBps?: number; minBarsPerDay?: number;
 }
 export function buildSnapshot(i: SnapshotInput): MarketSnapshot | null {
+  // Sources that give no volume (many FX feeds) must not look like zero-volume anomalies to the regime classifier: volume is neutralised
+  // to a constant and volume-based statistics are flagged unknown instead of being invented.
+  const volumeKnown = [...(i.hourly ?? []), ...Object.values(i.candles).flat()].some(k => !!k && k[5] > 0);
+  if (!volumeKnown) { const flat = (r: Kline[]) => r.map(k => [k[0], k[1], k[2], k[3], k[4], 1] as Kline); for (const tf of Object.keys(i.candles) as Timeframe[]) if (i.candles[tf]) i.candles[tf] = flat(i.candles[tf]!); if (i.hourly) i.hourly = flat(i.hourly); if (i.reference) i.reference = { ...i.reference, hourly: flat(i.reference.hourly) }; }
   const h = i.candles["1h"] ?? i.hourly;
   if (!h || h.length < 100) return null;
   const last = h.at(-1)!, price = last[4], vol = volatility(h), regime = classifyRegime(h), st = marketStructure(h);
   const analyses: Partial<Record<Timeframe, TimeframeAnalysis | null>> = {}; for (const tf of TIMEFRAMES) { const r = i.candles[tf]; analyses[tf] = r ? analyzeTimeframe(tf, r) : null; }
   const cons = buildConsensus(analyses, i.strategy);
-  const sig = buildSignal({ symbol: i.symbol, strategy: i.strategy, candles: i.candles, depth: i.depth, now: i.now, provider: i.provider });
+  const sig = buildSignal({ symbol: i.symbol, strategy: i.strategy, candles: i.candles, depth: i.depth ?? (i.quote ? undefined : null), now: i.now, provider: i.provider });
   const la = i.depth ? analyzeLiquidity(i.depth, price, i.now) : null, notional = i.referenceNotional ?? 10_000;
   const slip = i.depth ? slippageBps(i.depth, notional) : null;
   const refVol = i.reference && i.reference.hourly.length >= 100 ? volatility(i.reference.hourly).percentile : null;
@@ -94,9 +114,9 @@ export function buildSnapshot(i: SnapshotInput): MarketSnapshot | null {
     structure: { bias: st.bias, support: st.support, resistance: st.resistance },
     trend: { direction: cons.direction, weightedScore: cons.weightedScore, frames: TIMEFRAMES.flatMap(tf => (analyses[tf] ? [{ timeframe: tf, trend: analyses[tf]!.trend, adx: analyses[tf]!.adx, reliability: analyses[tf]!.reliability }] : [])), conflicts: cons.conflicts, unavailable: cons.unavailable },
     setup: { action: sig.action, classification: sig.classification, confidence: sig.confidence, tradeable: sig.tradeable, notes: sig.notes.slice(0, 6) },
-    liquidity: la ? { status: la.status, issues: la.issues, spreadBps: la.spreadBps, ageMs: la.ageMs, bidDepth: la.bidDepth, askDepth: la.askDepth, slippageBuyBps: slip?.buyBps ?? null, slippageSellBps: slip?.sellBps ?? null, referenceNotional: notional } : null,
+    liquidity: la ? { status: la.status, issues: la.issues, spreadBps: la.spreadBps, ageMs: la.ageMs, bidDepth: la.bidDepth, askDepth: la.askDepth, slippageBuyBps: slip?.buyBps ?? null, slippageSellBps: slip?.sellBps ?? null, referenceNotional: notional, depthKnown: true } : i.quote ? quoteLiquidity(i.quote, price, i.now, i.maxSpreadBps ?? 15) : null,
     ticker: i.ticker ? { quoteVolume24h: i.ticker.quoteVolume, changePct24h: i.ticker.priceChangePercent } : null,
-    history: i.hourly ? historyStats(i.hourly, i.now) : null,
+    history: i.hourly ? historyStats(i.hourly, i.now, { minBarsPerDay: i.minBarsPerDay, volumeKnown }) : null,
     correlation: i.reference && corr ? { reference: i.reference.symbol, corr: corr.corr, bars: corr.bars, referenceVolPercentile: refVol } : null,
     failures: i.failures ?? {},
   };
