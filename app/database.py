@@ -24,5 +24,5 @@ def get_db():
 
 def init_db() -> None:
     from app import models  # noqa: F401
-    from app.prediction_ledger import models as _ledger_models  # noqa: F401  (registers append-only ledger tables)
+    from app.strategies import store  # noqa: F401  (registers strategy_validation_runs)
     Base.metadata.create_all(bind=engine)
