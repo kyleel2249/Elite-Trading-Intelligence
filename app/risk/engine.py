@@ -3,6 +3,7 @@ Risk Engine — final veto authority on every order (paper or live).
 
 Hard rules:
 - Max risk per trade (default 1% of equity)
+- Max position allocation (absolute ceiling 6% of equity, enforced here, server-side)
 - Max daily loss
 - Max portfolio drawdown
 - Max open positions
@@ -19,6 +20,10 @@ from enum import Enum
 from typing import Any, Optional
 
 from app.config import Settings, get_settings
+
+# Absolute ceiling for a single position's notional as a share of equity.
+# Configuration (max_position_allocation_pct) can only lower it.
+HARD_MAX_POSITION_ALLOCATION_PCT = 6.0
 
 
 class Decision(str, Enum):
@@ -46,6 +51,10 @@ class OrderProposal:
     estimated_risk_amount: Optional[float] = None
     data_age_seconds: Optional[float] = None
     data_status: str = "unknown"
+    # Price used to value the order for the position-allocation cap.
+    reference_price: Optional[float] = None
+    # True when the order only reduces an existing position (never blocked by the cap).
+    reduces_exposure: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -56,6 +65,7 @@ class RiskDecision:
     risk_per_trade_pct: float
     approved_qty: Optional[float] = None
     notes: str = ""
+    position_allocation_pct: Optional[float] = None
 
     @property
     def approved(self) -> bool:
@@ -67,6 +77,10 @@ class RiskEngine:
 
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
+
+    def max_position_allocation_pct(self) -> float:
+        configured = getattr(self.settings, "max_position_allocation_pct", HARD_MAX_POSITION_ALLOCATION_PCT)
+        return max(0.0, min(float(configured), HARD_MAX_POSITION_ALLOCATION_PCT))
 
     def evaluate(self, proposal: OrderProposal) -> RiskDecision:
         reasons: list[str] = []
@@ -88,6 +102,20 @@ class RiskEngine:
             reasons.append("Side must be buy or sell")
         if proposal.equity <= 0:
             reasons.append("Account equity must be positive for risk sizing")
+
+        # --- Position allocation cap (hard 6% ceiling) ---
+        allocation_pct: Optional[float] = None
+        ref = proposal.reference_price or proposal.limit_price
+        if not proposal.reduces_exposure and proposal.equity > 0 and proposal.qty > 0:
+            if ref is not None and ref > 0:
+                allocation_pct = proposal.qty * ref / proposal.equity * 100.0
+                cap = self.max_position_allocation_pct()
+                if allocation_pct > cap + 1e-9:
+                    reasons.append(
+                        f"Position allocation {allocation_pct:.2f}% of equity exceeds cap {cap:.2f}%"
+                    )
+            elif proposal.environment == "live":
+                reasons.append("Live order requires a reference price to enforce the position allocation cap")
 
         # --- Position limits ---
         if proposal.current_open_positions >= s.max_open_positions:
@@ -133,6 +161,7 @@ class RiskEngine:
                 reasons=reasons,
                 risk_per_trade_pct=risk_pct,
                 notes="; ".join(reasons),
+                position_allocation_pct=allocation_pct,
             )
 
         return RiskDecision(
@@ -141,6 +170,7 @@ class RiskEngine:
             risk_per_trade_pct=risk_pct,
             approved_qty=proposal.qty,
             notes="Approved by RiskEngine",
+            position_allocation_pct=allocation_pct,
         )
 
     def position_size(
@@ -150,7 +180,7 @@ class RiskEngine:
         stop_price: float,
         risk_pct: Optional[float] = None,
     ) -> float:
-        """Simple fixed-fractional position size."""
+        """Simple fixed-fractional position size (callers must still pass the allocation cap in evaluate())."""
         risk_pct = risk_pct or self.settings.default_risk_per_trade_pct
         if equity <= 0 or entry_price <= 0:
             return 0.0
