@@ -1,10 +1,6 @@
 {
   "name": "elite-trading-intelligence-eti",
-  "main": "worker/index.ts",
-  "build": {
-    "command": "node scripts/build-knowledge.mjs",
-    "watch_dir": "app/knowledge"
-  },
+  "main": "worker/main.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
   "observability": {
