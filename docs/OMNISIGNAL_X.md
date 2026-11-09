@@ -69,3 +69,6 @@ node scripts/replay.mjs --csv btc_15m.csv --tf 15m --symbol BTCUSDT --strategy i
 
 Needs Node >= 22.18 and (without `--csv`) access to `data-api.binance.vision`. Replay has no historical order book,
 uses flat fee/slippage, stubs the risk gateway, and is **not** a forecast.
+
+## Dashboard (`/omnisignal`)
+Standalone page (`GET /omnisignal`, script at `GET /omnisignal.js`) under a strict CSP: no inline script, same-origin connections only, all values written with `textContent`. Shows both engines, agreement/decision, entry/SL/TP1-3, the eight-timeframe matrix, evidence families, validation, liquidity, and the paper panel (status, positions, performance, audit, kill switch). The paper API token is typed at runtime and held in memory only. It has no live-trading, testnet, withdrawal or transfer controls. Visual checks used synthetic fixtures, not real market data.
