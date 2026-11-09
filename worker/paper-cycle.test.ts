@@ -24,7 +24,7 @@ const fetchImpl = (async (input: any, init?: any) => {
 const realFetch = globalThis.fetch;
 test.beforeEach(() => { globalThis.fetch = fetchImpl; Object.assign(world, { clock: NOW, minuteOverride: null, gate: "approve", gateCalls: 0, fetched: [] }); world.failSymbols = new Set(); });
 test.afterEach(() => { globalThis.fetch = realFetch; });
-const mkEnv = (o: Partial<PaperEnv> = {}) => { const kv = kvStore(); return { ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_LOG: kv as any, ETI_RISK_GATE_URL: "https://gate.test/p", ETI_RISK_GATE_TOKEN: "k", ...o, kv } as PaperEnv & { kv: ReturnType<typeof kvStore> }; };
+const mkEnv = (o: Partial<PaperEnv> = {}) => { const kv = kvStore(); return { ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_LOG: kv as any, ETI_RISK_GATE_URL: "https://gate.test/p", ETI_RISK_GATE_TOKEN: "k", ETI_ROUND_TRIP_COST_BPS: "0", ...o, kv } as PaperEnv & { kv: ReturnType<typeof kvStore> }; };
 const cycle = (env: PaperEnv) => runPaperCycle(env, { now: () => world.clock, fetchImpl });
 const status = async (env: PaperEnv) => (await handlePaper(new Request("https://e/api/paper/status", { headers: { authorization: "Bearer " + TOKEN } }), env, { now: () => world.clock, fetchImpl })).json() as Promise<any>;
 

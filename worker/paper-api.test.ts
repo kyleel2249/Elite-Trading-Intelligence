@@ -34,7 +34,7 @@ const realFetch = globalThis.fetch;
 test.beforeEach(() => { globalThis.fetch = fetchImpl; world.clock = NOW; world.minuteOverride = null; world.gate = "approve"; world.gateCalls = []; world.depthOk = true; });
 test.afterEach(() => { globalThis.fetch = realFetch; });
 
-const mkEnv = (o: Partial<PaperEnv> = {}): PaperEnv & { kv: ReturnType<typeof fakeKV> } => { const kv = fakeKV(); return { ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_LOG: kv as any, ETI_RISK_GATE_URL: "https://gate.test/api/risk-gateway/preflight", ETI_RISK_GATE_TOKEN: "gate-secret", ...o, kv } as any; };
+const mkEnv = (o: Partial<PaperEnv> = {}): PaperEnv & { kv: ReturnType<typeof fakeKV> } => { const kv = fakeKV(); return { ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_LOG: kv as any, ETI_RISK_GATE_URL: "https://gate.test/api/risk-gateway/preflight", ETI_RISK_GATE_TOKEN: "gate-secret", ETI_ROUND_TRIP_COST_BPS: "0", ...o, kv } as any; };
 const call = (env: PaperEnv, path: string, method = "GET", body?: unknown, token: string | null = TOKEN) =>
   handlePaper(new Request("https://eti.test" + path, { method, headers: { ...(token ? { authorization: "Bearer " + token } : {}), "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }), env, { now: () => world.clock, fetchImpl });
 const json = async (r: Response) => r.json() as Promise<any>;

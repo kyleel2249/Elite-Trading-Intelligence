@@ -3,7 +3,7 @@
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { loadSignalInputs } from "./market-inputs.ts";
-import { runOmnisignal, type FinalDecision, type OmnisignalResult } from "./omnisignal.ts";
+import { costBpsFrom, runOmnisignal, type FinalDecision, type OmnisignalResult } from "./omnisignal.ts";
 
 export const MAX_SCAN_SYMBOLS = 4;
 export interface ScanRow { rank: number | null; symbol: string; decision: FinalDecision | "ERROR"; direction: "LONG" | "SHORT" | null; opportunityScore: number | null; validationScore: number | null; confidence: number; riskRewardToTP3: number | null; agreement: string | null; liquidity: string | null; entryZone: [number, number] | null; stopLoss: number | null; reason: string }
@@ -34,7 +34,7 @@ export async function scan(env: MarketEnv, symbols: string[], strategy: Strategy
     try {
       const inp = await loadSignalInputs(env, symbol, strategy, null, now);
       if ("error" in inp) { rows.push({ ...rowOf(symbol, { decision: "DATA_UNRELIABLE", validation: null, liquidity: null, riskRewardToTP3: null, confidence: 0, fusion: { agreement: null }, entryZone: null, stopLoss: null, reasons: [`Market data unavailable (${inp.error})`] } as unknown as OmnisignalResult) }); continue; }
-      rows.push(rowOf(symbol, runOmnisignal({ symbol, strategy, candles: inp.candles, depth: inp.depth, now })));
+      rows.push(rowOf(symbol, runOmnisignal({ symbol, strategy, candles: inp.candles, depth: inp.depth, now }, { roundTripCostBps: costBpsFrom(env as any) })));
     } catch (e) { rows.push({ ...rowOf(symbol, { decision: "DATA_UNRELIABLE", validation: null, liquidity: null, riskRewardToTP3: null, confidence: 0, fusion: { agreement: null }, entryZone: null, stopLoss: null, reasons: [] } as unknown as OmnisignalResult), decision: "ERROR", reason: e instanceof Error ? e.message : "unknown error" }); }
   }
   return rankRows(rows);

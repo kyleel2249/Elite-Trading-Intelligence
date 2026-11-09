@@ -7,12 +7,14 @@ import { rangeSeries, series } from "./algo/fixtures.ts";
 import { adaptiveThreshold, breakoutIntel, emaAlignment, gainzEngine, retestOf, rsiIntel, rsiSeries } from "./algo/gainz.ts";
 import { swiftEngine } from "./algo/swift.ts";
 import { classifyAgreement, fuseEngines, investigate } from "./algo/fusion.ts";
-import { runOmnisignal } from "./algo/omnisignal.ts";
+import { costBpsFrom, runOmnisignal } from "./algo/omnisignal.ts";
 import type { EngineSignal, FusionContext } from "./algo/engine.ts";
 import type { Kline } from "./market.ts";
 
 const NOW = Date.UTC(2026, 10, 8, 12, 0, 0);
 const candlesFor = (gen: (tf: Timeframe, stepMs: number) => Kline[]) => Object.fromEntries(TIMEFRAMES.map(tf => [tf, gen(tf, TF_SECONDS[tf] * 1000)])) as FusionContext["candles"];
+/** Synthetic fixtures have unrealistically tight stops (~0.2% of price); the cost gate has its own tests, so other tests disable it. */
+const NOCOST = { roundTripCostBps: 0 };
 const trendCtx = (drift: number, strategy: Strategy = "intraday", seed = 7): FusionContext => ({ symbol: "TESTUSDT", strategy, now: NOW, candles: candlesFor((tf, stepMs) => series(300, { drift, noise: 0.35, start: 100, seed, stepMs, end: NOW - 1000, vol: 100 })) });
 
 function sig(engine: "swift" | "gainz", status: EngineSignal["status"], direction: 1 | -1 | 0, price = 100): EngineSignal {
@@ -185,7 +187,7 @@ test("omnisignal reports DATA_UNRELIABLE for stale candles and for provider disa
 });
 test("omnisignal never submits an order or allows live execution, whatever the decision", () => {
   for (const drift of [0.25, 0, -0.25]) {
-    const ctx = trendCtx(drift); const r = runOmnisignal(ctx);
+    const ctx = trendCtx(drift); const r = runOmnisignal(ctx, NOCOST);
     assert.equal(r.submitsOrder, false); assert.equal(r.liveExecutionAllowed, false); assert.equal(r.calibration.status, "uncalibrated");
     assert.ok(["BUY", "SELL", "HOLD", "REJECTED", "DATA_UNRELIABLE"].includes(r.decision));
     if (r.decision === "BUY" || r.decision === "SELL") { assert.ok(r.stopLoss !== null && r.takeProfits?.length === 3 && r.entryZone); assert.ok(r.confidence >= 0 && r.confidence <= 100); }
@@ -194,10 +196,10 @@ test("omnisignal never submits an order or allows live execution, whatever the d
 });
 test("omnisignal rejects when account risk limits are breached, and holds on negative expectancy", () => {
   const ctx = trendCtx(0.25);
-  const base = runOmnisignal(ctx);
+  const base = runOmnisignal(ctx, NOCOST);
   if (base.decision === "BUY" || base.decision === "SELL") {
-    assert.equal(runOmnisignal(ctx, { risk: { withinLimits: false, reasons: ["Daily loss limit hit"] } }).decision, "REJECTED");
-    assert.equal(runOmnisignal(ctx, { expectancyR: -0.2, expectancySamples: 60 }).decision, "HOLD");
+    assert.equal(runOmnisignal(ctx, { ...NOCOST, risk: { withinLimits: false, reasons: ["Daily loss limit hit"] } }).decision, "REJECTED");
+    assert.equal(runOmnisignal(ctx, { ...NOCOST, expectancyR: -0.2, expectancySamples: 60 }).decision, "HOLD");
   } else assert.ok(["HOLD", "REJECTED"].includes(base.decision));
 });
 test("disabled engines are reported as neutral, so a disabled engine can never drive a trade alone", () => {
@@ -261,4 +263,18 @@ test("omnisignal endpoint reports DATA_UNRELIABLE for stale exchange data and 50
 });
 test("legacy algo endpoint is now routed and rejects bad input", async () => {
   assert.equal((await worker.fetch(R("/api/algo/signal?symbol=x"), {} as any)).status, 400);
+});
+
+test("cost gate: a stop too tight for fees and slippage is rejected as a hard failure, and the assumption is configurable", () => {
+  const ctx = trendCtx(0.25), free = runOmnisignal(ctx, NOCOST);
+  if (free.decision !== "BUY" && free.decision !== "SELL") return; // fixture-dependent; the unit checks below always run
+  const gated = runOmnisignal(ctx, { roundTripCostBps: 30 });
+  assert.equal(gated.decision, "REJECTED");
+  assert.ok(gated.validation!.hardFailures.some(f => /Round-trip costs/.test(f)));
+  assert.equal(runOmnisignal(ctx, { roundTripCostBps: 30, maxCostR: 1000 }).decision, free.decision); // limit is configurable, and a generous limit passes
+});
+test("costBpsFrom validates the environment value", () => {
+  assert.equal(costBpsFrom(undefined), 30); assert.equal(costBpsFrom({}), 30); assert.equal(costBpsFrom({ ETI_ROUND_TRIP_COST_BPS: "12.5" }), 12.5);
+  assert.equal(costBpsFrom({ ETI_ROUND_TRIP_COST_BPS: "0" }), 0);
+  for (const bad of ["", "abc", "-5", "NaN"]) assert.equal(costBpsFrom({ ETI_ROUND_TRIP_COST_BPS: bad }), 30, bad);
 });

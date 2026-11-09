@@ -13,11 +13,11 @@ import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { STRATEGIES } from "./omni-api.ts";
 import { loadMinuteBars, loadSignalInputs } from "./market-inputs.ts";
-import { runOmnisignal } from "./omnisignal.ts";
+import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { KVPaperStore, PaperEngine, type KVLike, type Preflight, type PreflightRequest } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
 
-export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string }
+export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string; ETI_ROUND_TRIP_COST_BPS?: string }
 export interface PaperDeps { now?: () => number; fetchImpl?: typeof fetch }
 interface KVWithList extends KVLike { list(o: { prefix: string; limit?: number }): Promise<{ keys: { name: string }[] }> }
 
@@ -102,7 +102,7 @@ export async function tickSymbol(engine: PaperEngine, env: PaperEnv, symbol: str
 export async function evaluateSymbol(engine: PaperEngine, env: PaperEnv, symbol: string, strategy: Strategy, execute: boolean, now: number, envKill: boolean): Promise<OpResult> {
   const inputs = await loadSignalInputs(env, symbol, strategy, null, now);
   if ("error" in inputs) return { status: 503, body: { decision: "DATA_UNRELIABLE", ...inputs, submitsOrder: false } };
-  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now });
+  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env) });
   const out: Record<string, unknown> = { symbol, strategy, plan, executed: false, event: null, submitsOrder: false };
   if (!execute) return { status: 200, body: out };
   if (envKill) { out.event = { type: "REJECTED", reasons: ["Emergency kill switch (ETI_KILL_SWITCH) is active"] }; return { status: 423, body: out }; }

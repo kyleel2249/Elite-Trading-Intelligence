@@ -6,14 +6,14 @@ import type { Kline } from "../market.ts";
 import { TF_SECONDS, TIMEFRAMES, type Strategy, type Timeframe } from "./timeframes.ts";
 import { EXECUTION_TF } from "./timeframes.ts";
 import { runOmnisignal } from "./omnisignal.ts";
-import { MemoryPaperStore, PaperEngine, type PaperConfig } from "./paper.ts";
+import { DEFAULT_PAPER_CONFIG, MemoryPaperStore, PaperEngine, type PaperConfig } from "./paper.ts";
 import { MIN_SAMPLE, computeReport, reportsByEngine, type ClosedTrade, type PerformanceReport } from "./performance.ts";
 import type { Weights } from "./validation.ts";
 
 export type History = Partial<Record<Timeframe, Kline[]>>;
 export interface ReplayConfig {
   symbol: string; strategy: Strategy; startingEquity?: number; stepBars?: number; windowCandles?: number; warmupBars?: number;
-  enabledEngines?: { swift: boolean; gainz: boolean }; weights?: Weights; paper?: Partial<PaperConfig>; outOfSampleFraction?: number; bootstrapSamples?: number; seed?: number;
+  enabledEngines?: { swift: boolean; gainz: boolean }; weights?: Weights; /** Round-trip cost assumption in bps for the validator gate. Default: derived from the paper fee and slippage. */ roundTripCostBps?: number; paper?: Partial<PaperConfig>; outOfSampleFraction?: number; bootstrapSamples?: number; seed?: number;
 }
 export interface Bootstrap { meanR: number; low95: number; high95: number; samples: number }
 export interface ReplayResult {
@@ -74,7 +74,7 @@ export async function replay(history: History, cfg: ReplayConfig): Promise<Repla
     const candles: History = {};
     for (const tf of TIMEFRAMES) { const rows = history[tf]; if (rows) { const w = closedWindow(rows, tf, now, win); if (w.length) candles[tf] = w; } }
     evaluations++;
-    const plan = runOmnisignal({ symbol: cfg.symbol, strategy: cfg.strategy, candles, now }, { enabledEngines: cfg.enabledEngines, weights: cfg.weights });
+    const plan = runOmnisignal({ symbol: cfg.symbol, strategy: cfg.strategy, candles, now }, { enabledEngines: cfg.enabledEngines, weights: cfg.weights, roundTripCostBps: cfg.roundTripCostBps ?? ((cfg.paper?.feeRate ?? DEFAULT_PAPER_CONFIG.feeRate) * 2 * 1e4 + (cfg.paper?.slippageBps ?? DEFAULT_PAPER_CONFIG.slippageBps) * 2) });
     tally(decisions, plan.decision); tally(agreements, plan.fusion.agreement);
     if (plan.decision !== "BUY" && plan.decision !== "SELL") continue;
     const next = exec[i + 1], ev = await eng.open(plan, next[1], next[0]); // fill at the NEXT bar's open

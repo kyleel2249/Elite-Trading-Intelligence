@@ -12,13 +12,15 @@ export type SignalClass = "HIGH_CONVICTION" | "CONFIRMED" | "EARLY" | "HOLD" | "
 export interface Weights { technical: number; consensus: number; volume: number; structure: number; liquidity: number; regime: number; riskReward: number; dataIntegrity: number }
 export const DEFAULT_VALIDATION_WEIGHTS: Weights = { technical: 20, consensus: 15, volume: 10, structure: 10, liquidity: 15, regime: 10, riskReward: 15, dataIntegrity: 5 };
 export interface Thresholds { early: number; confirmed: number; high: number; minRiskReward: number; maxSpreadBps: number }
+/** Costs above a quarter of the risk make a positive net expectancy implausible; fixed in advance, not fitted to results. */
+export const DEFAULT_MAX_COST_R = 0.25;
 export const DEFAULT_THRESHOLDS: Thresholds = { early: 50, confirmed: 65, high: 80, minRiskReward: 1.5, maxSpreadBps: 15 };
 
 export interface DataIntegrity { fresh: boolean; providersAgree: boolean; candlesComplete: boolean; ageSec: number; provider: string; notes?: string[] }
 export interface RiskContext { withinLimits: boolean; reasons: string[] }
 export interface ValidationInput {
   direction: 1 | -1; emaFilter: EmaFilter; bands: AdaptiveBands; volume: VolumeMomentum; structure: Structure; consensus: Consensus; regime: RegimeResult;
-  liquidity: LiquidityAnalysis | null; rewardRiskTP1: number; rewardRiskTP3: number; stopExceedsMax: boolean; data: DataIntegrity; risk: RiskContext;
+  liquidity: LiquidityAnalysis | null; rewardRiskTP1: number; rewardRiskTP3: number; stopExceedsMax: boolean; /** Round-trip fees and slippage as a multiple of the initial risk (R). Omitted = not evaluated. */ costR?: number | null; maxCostR?: number; data: DataIntegrity; risk: RiskContext;
   /** Validated expectancy in R per trade for this setup family; null when not yet measured (never assumed positive). */
   expectancyR: number | null; expectancySamples?: number; weights?: Weights; thresholds?: Thresholds;
 }
@@ -64,6 +66,8 @@ export function validateSignal(i: ValidationInput): ValidationResult {
   if (!i.data.candlesComplete) hard.push("Candle data incomplete or inconsistent");
   if (!i.regime.profile.allowNewEntries) hard.push(`Regime '${i.regime.regime}' suspends new entries`);
   if (i.rewardRiskTP3 < th.minRiskReward) hard.push(`Reward/risk to TP3 ${i.rewardRiskTP3.toFixed(2)} below minimum ${th.minRiskReward}`);
+  const maxCostR = i.maxCostR ?? DEFAULT_MAX_COST_R;
+  if (i.costR != null && i.costR > maxCostR) hard.push(`Round-trip costs consume ${i.costR.toFixed(2)}R of the risk (limit ${maxCostR}R): the stop is too tight for the fee and slippage level`);
   if (i.stopExceedsMax) hard.push("Structurally justified stop exceeds the maximum permitted stop distance");
   if (i.expectancyR !== null && i.expectancyR <= 0) hard.push(`Validated expectancy is not positive (${i.expectancyR.toFixed(2)}R over ${i.expectancySamples ?? "?"} samples)`);
   if (!i.risk.withinLimits) hard.push(...(i.risk.reasons.length ? i.risk.reasons : ["Account-level risk limits not satisfied"]));

@@ -52,7 +52,7 @@ test("calibration flags confidence that does not match realised outcomes", () =>
 // ---------- paper execution ----------
 function buyPlan(seed = 1): OmnisignalResult {
   const ctx: FusionContext = { symbol: "TESTUSDT", strategy: "intraday", now: NOW, candles: Object.fromEntries(TIMEFRAMES.map(tf => [tf, series(300, { drift: 0.25, noise: 0.35, seed, stepMs: TF_SECONDS[tf] * 1000, end: NOW - 1000 })])) as FusionContext["candles"] };
-  const r = runOmnisignal(ctx); assert.equal(r.decision, "BUY", "fixture must yield a real BUY through engines, fusion and validation"); return r;
+  const r = runOmnisignal(ctx, { roundTripCostBps: 0 }); assert.equal(r.decision, "BUY", "fixture must yield a real BUY through engines, fusion and validation"); return r;
 }
 const mid = (p: OmnisignalResult) => (p.entryZone![0] + p.entryZone![1]) / 2;
 const approve = (calls: PreflightRequest[] = []): Preflight => async req => { calls.push(req); return { approved: true, reasons: ["ok"] }; };

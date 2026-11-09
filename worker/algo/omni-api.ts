@@ -3,7 +3,7 @@
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { loadSignalInputs } from "./market-inputs.ts";
-import { runOmnisignal } from "./omnisignal.ts";
+import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { MAX_SCAN_SYMBOLS, parseSymbols, scan } from "./scan.ts";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
@@ -30,7 +30,7 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const inputs = await loadSignalInputs(env, symbol, strategy, url.searchParams.get("provider"));
   if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", error: inputs.error, executionTimeframe: inputs.executionTimeframe, failures: inputs.failures, submitsOrder: false, liveExecutionAllowed: false }, 503);
   const { candles, depth, provider, failures } = inputs;
-  const result = runOmnisignal({ symbol, strategy, candles, depth, now: Date.now() }, { enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") } });
+  const result = runOmnisignal({ symbol, strategy, candles, depth, now: Date.now() }, { roundTripCostBps: costBpsFrom(env as any), enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") } });
   return reply({ ...result, dataQuality: { provider, timeframesLoaded: Object.keys(candles), failures, orderBook: depth ? "rest_snapshot" : "unavailable", providerCrossCheck: "not_performed",
     note: "Single validated provider per request; cross-provider reconciliation is not performed and the REST order-book snapshot is timestamped at fetch time." },
     validationStatus: { expectancy: "unmeasured_until_backtest_lab", accountRisk: "not_evaluated_by_analytical_endpoint", execution: "Orders require POST /api/orders and the server-side risk-gateway preflight; live trading remains disabled by default." } });

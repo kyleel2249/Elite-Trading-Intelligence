@@ -14,7 +14,7 @@ import { fuseEngines, type FusionResult } from "./fusion.ts";
 export interface TimeframeSummary { trend: string; trendScore: number; momentum: number; emaAlignment: string; bandTrend: string; adx: number; atrPercent: number; relativeVolume: number; volumeConfirms: boolean; structureBias: string; divergence: string; choppy: boolean; signalStrength: number; reliability: number }
 const summarize = (a: TimeframeAnalysis | null | undefined): TimeframeSummary | null => (a ? { trend: a.trend, trendScore: a.trendScore, momentum: a.momentum, emaAlignment: a.emaAlignment, bandTrend: a.bandTrend, adx: a.adx, atrPercent: a.atrPercent, relativeVolume: a.relativeVolume, volumeConfirms: a.volumeConfirms, structureBias: a.structure.bias, divergence: a.divergence, choppy: a.choppy, signalStrength: a.signalStrength, reliability: a.reliability } : null);
 export type FinalDecision = "BUY" | "SELL" | "HOLD" | "REJECTED" | "DATA_UNRELIABLE";
-export interface OmnisignalOptions { risk?: RiskContext; expectancyR?: number | null; expectancySamples?: number; providersAgree?: boolean; weights?: Weights; maxSpreadBps?: number; enabledEngines?: { swift: boolean; gainz: boolean } }
+export interface OmnisignalOptions { risk?: RiskContext; expectancyR?: number | null; expectancySamples?: number; providersAgree?: boolean; weights?: Weights; maxSpreadBps?: number; /** Assumed round-trip fees plus slippage in basis points of notional (default 30 = 2x0.10% fee + 2x0.05% slippage). */ roundTripCostBps?: number; maxCostR?: number; enabledEngines?: { swift: boolean; gainz: boolean } }
 export interface OmnisignalResult {
   symbol: string; strategy: string; decision: FinalDecision; fusion: FusionResult; validation: ValidationResult | null; liquidity: LiquidityAnalysis | null;
   /** Compact per-timeframe evidence for the eight-timeframe matrix (null where fewer than the minimum candles exist). */
@@ -23,6 +23,9 @@ export interface OmnisignalResult {
   calibration: { status: "uncalibrated"; note: string }; reasons: string[]; generatedAt: string; expiresAt: string | null;
   submitsOrder: false; liveExecutionAllowed: false; intellectualProperty: string;
 }
+export const DEFAULT_ROUND_TRIP_COST_BPS = 30;
+/** Cost assumption from the environment: ETI_ROUND_TRIP_COST_BPS (non-negative number); invalid or missing values fall back to the default. */
+export function costBpsFrom(env: { ETI_ROUND_TRIP_COST_BPS?: string } | undefined): number { const v = Number(env?.ETI_ROUND_TRIP_COST_BPS); return env?.ETI_ROUND_TRIP_COST_BPS !== undefined && env.ETI_ROUND_TRIP_COST_BPS !== "" && Number.isFinite(v) && v >= 0 ? v : DEFAULT_ROUND_TRIP_COST_BPS; }
 const CAL = "Confidence is an analytical evidence score. It has not been calibrated against recorded outcomes and must not be read as a probability of profit.";
 
 export function runOmnisignal(ctx: FusionContext, o: OmnisignalOptions = {}): OmnisignalResult {
@@ -49,7 +52,7 @@ export function runOmnisignal(ctx: FusionContext, o: OmnisignalOptions = {}): Om
   const liquidity = ctx.depth === undefined ? null : analyzeLiquidity(ctx.depth, price, now, { maxSpreadBps: o.maxSpreadBps ?? DEFAULT_THRESHOLDS.maxSpreadBps });
   const stop = fusion.stopLoss!, tps = fusion.takeProfits!, entry = (fusion.entryZone![0] + fusion.entryZone![1]) / 2, stopPct = Math.abs(entry - stop) / entry * 100;
   const validation = validateSignal({ direction: dir, emaFilter: emaFilter(rows, [20, 50, 200], a), bands: adaptiveBands(rows), volume: volumeMomentum(rows), structure: marketStructure(rows), consensus: consensusFull, regime, liquidity,
-    rewardRiskTP1: tps[0].rewardRisk, rewardRiskTP3: tps[2].rewardRisk, stopExceedsMax: stopPct > 5, data: { fresh: true, providersAgree: o.providersAgree ?? true, candlesComplete: rows.length >= 100, ageSec: Math.round(age), provider: "unknown" },
+    costR: (o.roundTripCostBps ?? DEFAULT_ROUND_TRIP_COST_BPS) / 100 / stopPct, maxCostR: o.maxCostR, rewardRiskTP1: tps[0].rewardRisk, rewardRiskTP3: tps[2].rewardRisk, stopExceedsMax: stopPct > 5, data: { fresh: true, providersAgree: o.providersAgree ?? true, candlesComplete: rows.length >= 100, ageSec: Math.round(age), provider: "unknown" },
     risk: o.risk ?? { withinLimits: true, reasons: [] }, expectancyR: o.expectancyR ?? null, expectancySamples: o.expectancySamples, weights: o.weights });
   const ctxOut = { validation, liquidity, entryZone: fusion.entryZone, stopLoss: stop, takeProfits: tps, riskRewardToTP3: tps[2].rewardRisk };
   const reasons = [...fusion.reasoning, ...validation.reasoning, ...validation.warnings];
