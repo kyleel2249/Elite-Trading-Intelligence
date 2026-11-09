@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CANDIDATES, MemoryParamStore, ParamRegistry, autoRollbackIfDegraded, decidePromotion, makeWeights, rollbackCheck, sliceHistory, walkForward, weightsAllowed, type OptimizerResult, type Pooled } from "./algo/optimizer.ts";
+import { CANDIDATES, CANDIDATE_SET, TIGHTENINGS, candidateAllowed, tightenAllowed, MemoryParamStore, ParamRegistry, autoRollbackIfDegraded, decidePromotion, makeWeights, rollbackCheck, sliceHistory, walkForward, weightsAllowed, type OptimizerResult, type Pooled } from "./algo/optimizer.ts";
 import { DEFAULT_VALIDATION_WEIGHTS } from "./algo/validation.ts";
 import { aggregate, type History } from "./algo/replay.ts";
 import { regimeSeries } from "./algo/fixtures.ts";
@@ -44,7 +44,7 @@ test("sliceHistory never exposes candles beyond the cut", () => {
 });
 test("walk-forward runs, never auto-applies, and OOS trades open after the training boundary", async () => {
   const r = await walkForward(hist(), { folds: 3, minTrainTrades: 1, replay: { symbol: "TESTUSDT", strategy: "intraday", stepBars: 6 } });
-  assert.equal(r.folds.length, 3); assert.equal(r.candidatesTried, 5); assert.equal(r.promotion.autoApplied, false);
+  assert.equal(r.folds.length, 3); assert.equal(r.candidatesTried, 7); assert.equal(r.promotion.autoApplied, false);
   assert.ok(r.caveats.length >= 4);
   assert.equal(r.promotion.decision, "KEEP_CHAMPION"); // far too few trades on a small synthetic sample to clear the gates
 });
@@ -82,4 +82,24 @@ test("autoRollback only reverts to an approved version", async () => {
   assert.equal((await autoRollbackIfDegraded(reg, bad)).applied, false); // default champion, nothing approved before it
   const v = await reg.propose("trend_heavy", CANDIDATES.trend_heavy, rec("trend_heavy")); await reg.promote(v.id, "Kyle");
   const r = await autoRollbackIfDegraded(reg, bad); assert.equal(r.applied, true); assert.equal(reg.champion().name, "default");
+});
+
+test("tightenings can only make gates stricter; every shipped candidate is allowed", () => {
+  for (const [n, c] of Object.entries(CANDIDATE_SET)) assert.equal(candidateAllowed(c), null, n);
+  for (const t of Object.values(TIGHTENINGS)) assert.equal(tightenAllowed(t), null);
+  for (const bad of [{ minRiskReward: 1.0 }, { minRiskReward: 9 }, { confirmed: 50 }, { confirmed: 99 }, { maxCostR: 0.5 }, { maxCostR: 0 }, { maxCostR: NaN }, { killSwitch: 1 } as any, { minRiskReward: "2" } as any])
+    assert.ok(tightenAllowed(bad), JSON.stringify(bad));
+  assert.equal(tightenAllowed(undefined), null);
+});
+test("tightened candidates change the trade set while re-weighting does not (real-data finding, reproduced on the fixture)", async () => {
+  const h = hist(), cfg = { symbol: "TESTUSDT", strategy: "intraday" as const, stepBars: 6, roundTripCostBps: 0 };
+  const { replay } = await import("./algo/replay.ts");
+  const base = await replay(h, cfg), strict = await replay(h, { ...cfg, thresholds: { minRiskReward: 4, confirmed: 90 } });
+  assert.ok(strict.trades.length <= base.trades.length);
+  assert.ok(strict.decisions && (strict.decisions.BUY ?? 0) + (strict.decisions.SELL ?? 0) <= (base.decisions.BUY ?? 0) + (base.decisions.SELL ?? 0));
+});
+test("registry stores tighten-only parameters and rejects loosening", async () => {
+  const reg = await ParamRegistry.open(new MemoryParamStore()), r = rec("tight_rr2", CANDIDATES.default);
+  await assert.rejects(reg.propose("tight_rr2", CANDIDATES.default, r, { minRiskReward: 1 }), /tighten-only/);
+  const v = await reg.propose("tight_rr2", CANDIDATES.default, r, { minRiskReward: 2 }); assert.deepEqual(v.tighten, { minRiskReward: 2 });
 });

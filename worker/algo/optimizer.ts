@@ -2,7 +2,7 @@
 // Safety: the search space is a whitelist of bounded validator-weight profiles. It cannot touch risk limits, kill switch, permissions,
 // environments or live trading. A recommendation is never applied automatically: promotion needs a named human approver.
 // Rollback only ever returns to a previously approved configuration, so the automatic direction is the conservative one.
-import { DEFAULT_VALIDATION_WEIGHTS, type Weights } from "./validation.ts";
+import { DEFAULT_MAX_COST_R, DEFAULT_THRESHOLDS, DEFAULT_VALIDATION_WEIGHTS, type Weights } from "./validation.ts";
 import { EXECUTION_TF, TF_SECONDS } from "./timeframes.ts";
 import { MIN_SAMPLE, computeReport, type ClosedTrade, type PerformanceReport } from "./performance.ts";
 import { bootstrapMeanR, replay, type Bootstrap, type History, type ReplayConfig } from "./replay.ts";
@@ -40,11 +40,32 @@ export const CANDIDATES: Record<string, Weights> = {
   risk_averse: makeWeights({ riskReward: 1.4, regime: 1.5, liquidity: 1.2 }),
 };
 
-export interface OptimizerConfig { folds?: number; minTrainTrades?: number; minOosTrades?: number; marginR?: number; replay: Omit<ReplayConfig, "weights">; candidates?: Record<string, Weights> }
+/** Tighten-only gate adjustments. Each can only make the validator stricter than the defaults, never looser. */
+export interface Tighten { minRiskReward?: number; confirmed?: number; maxCostR?: number }
+export interface Candidate { weights: Weights; tighten?: Tighten }
+export function tightenAllowed(t: Tighten | undefined): string | null {
+  if (!t) return null;
+  const bad = (v: unknown) => v !== undefined && (typeof v !== "number" || !Number.isFinite(v));
+  if (Object.keys(t).some(k => !["minRiskReward", "confirmed", "maxCostR"].includes(k))) return "unknown tighten key";
+  if (bad(t.minRiskReward) || bad(t.confirmed) || bad(t.maxCostR)) return "tighten values must be finite numbers";
+  if (t.minRiskReward !== undefined && (t.minRiskReward < DEFAULT_THRESHOLDS.minRiskReward || t.minRiskReward > 4)) return `minRiskReward must be within ${DEFAULT_THRESHOLDS.minRiskReward}..4 (tighten-only)`;
+  if (t.confirmed !== undefined && (t.confirmed < DEFAULT_THRESHOLDS.confirmed || t.confirmed > 90)) return `confirmed must be within ${DEFAULT_THRESHOLDS.confirmed}..90 (tighten-only)`;
+  if (t.maxCostR !== undefined && (t.maxCostR > DEFAULT_MAX_COST_R || t.maxCostR < 0.05)) return `maxCostR must be within 0.05..${DEFAULT_MAX_COST_R} (tighten-only)`;
+  return null;
+}
+export function candidateAllowed(c: Candidate): string | null { return weightsAllowed(c.weights) ?? tightenAllowed(c.tighten); }
+/** Search space that actually changes which trades fire (re-weighting alone did not, on real data). All entries are tighten-only. */
+export const TIGHTENINGS: Record<string, Tighten> = { rr2: { minRiskReward: 2 }, rr2_5: { minRiskReward: 2.5 }, conf72: { confirmed: 72 }, conf80: { confirmed: 80 }, cost15: { maxCostR: 0.15 }, strict: { minRiskReward: 2, confirmed: 72, maxCostR: 0.15 } };
+/** Default search set: the default plus tightenings. The weight-only profiles stay exported in CANDIDATES but are left out because real-data runs showed they leave the trade set unchanged and only add multiple-comparison noise. */
+export const CANDIDATE_SET: Record<string, Candidate> = { default: { weights: CANDIDATES.default }, ...Object.fromEntries(Object.entries(TIGHTENINGS).map(([k, t]) => [`tight_${k}`, { weights: CANDIDATES.default, tighten: t }])) };
+const replayCfg = (c: Candidate): Pick<ReplayConfig, "weights" | "thresholds" | "maxCostR"> => ({ weights: c.weights, thresholds: { ...(c.tighten?.minRiskReward !== undefined ? { minRiskReward: c.tighten.minRiskReward } : {}), ...(c.tighten?.confirmed !== undefined ? { confirmed: c.tighten.confirmed } : {}) }, maxCostR: c.tighten?.maxCostR });
+const asCandidate = (x: Candidate | Weights): Candidate => ("weights" in x ? x as Candidate : { weights: x as Weights });
+
+export interface OptimizerConfig { folds?: number; minTrainTrades?: number; minOosTrades?: number; marginR?: number; replay: Omit<ReplayConfig, "weights">; candidates?: Record<string, Candidate | Weights> }
 export interface FoldResult { fold: number; trainBars: number; testBars: number; chosen: string | null; trainMeanR: Record<string, number | null>; trainTrades: Record<string, number>; oosChosenTrades: number; oosChampionTrades: number }
 export interface Pooled { trades: number; meanR: number | null; bootstrap: Bootstrap | null; report: PerformanceReport }
 export interface PromotionDecision { decision: "RECOMMEND_PROMOTION_PENDING_HUMAN_APPROVAL" | "KEEP_CHAMPION"; reasons: string[]; autoApplied: false }
-export interface OptimizerResult { symbol: string; strategy: string; folds: FoldResult[]; challenger: { name: string; weights: Weights; selectionStability: number } | null; oosChallenger: Pooled; oosChampion: Pooled; candidatesTried: number; promotion: PromotionDecision; caveats: string[] }
+export interface OptimizerResult { symbol: string; strategy: string; folds: FoldResult[]; challenger: { name: string; weights: Weights; tighten?: Tighten; selectionStability: number } | null; oosChallenger: Pooled; oosChampion: Pooled; candidatesTried: number; promotion: PromotionDecision; caveats: string[] }
 
 const rOf = (t: ClosedTrade) => (t.riskAmount > 0 ? t.pnl / t.riskAmount : null);
 export function meanR(trades: ClosedTrade[]): number | null { const rs = trades.map(rOf).filter((x): x is number => x !== null); return rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : null; }
@@ -71,8 +92,8 @@ export function decidePromotion(chal: Pooled, champ: Pooled, stability: number, 
 }
 
 export async function walkForward(history: History, cfg: OptimizerConfig): Promise<OptimizerResult> {
-  const cands = cfg.candidates ?? CANDIDATES, names = Object.keys(cands), strategy = cfg.replay.strategy, exec = history[EXECUTION_TF[strategy]];
-  for (const n of names) { const bad = weightsAllowed(cands[n]); if (bad) throw new Error(`Candidate ${n} rejected: ${bad}`); }
+  const cands: Record<string, Candidate> = Object.fromEntries(Object.entries(cfg.candidates ?? CANDIDATE_SET).map(([k, v]) => [k, asCandidate(v)])), names = Object.keys(cands), strategy = cfg.replay.strategy, exec = history[EXECUTION_TF[strategy]];
+  for (const n of names) { const bad = candidateAllowed(cands[n]); if (bad) throw new Error(`Candidate ${n} rejected: ${bad}`); }
   if (!names.includes("default")) throw new Error("The champion candidate 'default' is required");
   const K = Math.max(2, cfg.folds ?? 4), warm = cfg.replay.warmupBars ?? 120;
   if (!exec || exec.length < (K + 1) * 150) throw new Error(`Walk-forward needs at least ${(K + 1) * 150} execution candles for ${K} folds; received ${exec?.length ?? 0}`);
@@ -80,16 +101,16 @@ export async function walkForward(history: History, cfg: OptimizerConfig): Promi
   for (let j = 1; j <= K; j++) {
     const trainEnd = part * j, testEnd = j === K ? exec.length : part * (j + 1), trainH = sliceHistory(history, strategy, 0, trainEnd), testH = sliceHistory(history, strategy, trainEnd - warm, testEnd);
     const trainMean: Record<string, number | null> = {}, trainN: Record<string, number> = {};
-    for (const n of names) { const r = await replay(trainH, { ...cfg.replay, weights: cands[n] }); trainMean[n] = meanR(r.trades); trainN[n] = r.trades.length; }
+    for (const n of names) { const r = await replay(trainH, { ...cfg.replay, ...replayCfg(cands[n]) }); trainMean[n] = meanR(r.trades); trainN[n] = r.trades.length; }
     const eligible = names.filter(n => trainN[n] >= (cfg.minTrainTrades ?? 10) && trainMean[n] !== null).sort((a, b) => trainMean[b]! - trainMean[a]! || (a === "default" ? -1 : 1));
     const chosen = eligible[0] ?? null; if (chosen) wins[chosen] = (wins[chosen] ?? 0) + 1;
     // Out-of-sample: only trades that opened after the training boundary count.
-    const oos = async (n: string) => (await replay(testH, { ...cfg.replay, weights: cands[n] })).trades.filter(t => t.openedAt >= exec[trainEnd][0]);
+    const oos = async (n: string) => (await replay(testH, { ...cfg.replay, ...replayCfg(cands[n]) })).trades.filter(t => t.openedAt >= exec[trainEnd][0]);
     const cT = await oos(chosen ?? "default"), dT = chosen === "default" || !chosen ? cT : await oos("default");
     chalTrades.push(...cT); champTrades.push(...dT);
     folds.push({ fold: j, trainBars: trainEnd, testBars: testEnd - trainEnd, chosen, trainMeanR: trainMean, trainTrades: trainN, oosChosenTrades: cT.length, oosChampionTrades: dT.length });
   }
-  const last = folds.at(-1)!.chosen, challenger = last ? { name: last, weights: cands[last], selectionStability: (wins[last] ?? 0) / K } : null;
+  const last = folds.at(-1)!.chosen, challenger = last ? { name: last, weights: cands[last].weights, tighten: cands[last].tighten, selectionStability: (wins[last] ?? 0) / K } : null;
   const oosChallenger = pool(chalTrades, start), oosChampion = pool(champTrades, start), minOos = cfg.minOosTrades ?? MIN_SAMPLE;
   const promotion: PromotionDecision = !challenger ? { decision: "KEEP_CHAMPION", reasons: ["No candidate reached the minimum number of training trades in the latest fold"], autoApplied: false }
     : challenger.name === "default" ? { decision: "KEEP_CHAMPION", reasons: ["The default configuration remained the best candidate in the latest fold"], autoApplied: false }
@@ -98,11 +119,11 @@ export async function walkForward(history: History, cfg: OptimizerConfig): Promi
     "Anchored walk-forward: each fold trains on all earlier data and is scored only on the next unseen block; the pooled out-of-sample trades are what count.",
     "Picking the best of several candidates inflates results; the promotion gates (margin, interval above zero, drawdown, stability) are the guard against this, not a guarantee.",
     "Same replay limits apply: no historical order book, flat fees/slippage, local risk-gateway stub. Results are not a forecast.",
-    "The search space is limited to bounded validator weights. Risk limits, permissions and live-trading settings are not tunable here." ] };
+    "The search space is limited to bounded validator weights and tighten-only gate adjustments (minimum reward/risk, confirmation threshold, cost limit); none can loosen a default. Risk limits, permissions and live-trading settings are not tunable here." ] };
 }
 
 // ---------- champion/challenger registry with rollback ----------
-export interface ParamVersion { id: number; name: string; weights: Weights; createdAt: number; status: "champion" | "challenger" | "retired" | "rolled_back"; evidence: string; approvedBy: string | null; baselineMeanR: number | null; baselineMaxDrawdownPct: number | null }
+export interface ParamVersion { id: number; name: string; weights: Weights; tighten?: Tighten; createdAt: number; status: "champion" | "challenger" | "retired" | "rolled_back"; evidence: string; approvedBy: string | null; baselineMeanR: number | null; baselineMaxDrawdownPct: number | null }
 export interface RegistryState { versions: ParamVersion[]; audit: { ts: number; action: string; id: number | null; detail: string }[] }
 export interface ParamStore { load(): Promise<RegistryState | null>; save(s: RegistryState): Promise<void> }
 export class MemoryParamStore implements ParamStore { s: RegistryState | null = null; async load() { return this.s ? structuredClone(this.s) : null; } async save(s: RegistryState) { this.s = structuredClone(s); } }
@@ -121,10 +142,10 @@ export class ParamRegistry {
   }
   champion(): ParamVersion { return this.st.versions.find(v => v.status === "champion")!; }
   private log(action: string, id: number | null, detail: string) { this.st.audit.push({ ts: this.now(), action, id, detail }); }
-  async propose(name: string, weights: Weights, result: OptimizerResult): Promise<ParamVersion> {
-    const bad = weightsAllowed(weights); if (bad) throw new Error(`Rejected: ${bad}`);
+  async propose(name: string, weights: Weights, result: OptimizerResult, tighten?: Tighten): Promise<ParamVersion> {
+    const bad = candidateAllowed({ weights, tighten }); if (bad) throw new Error(`Rejected: ${bad}`);
     if (result.promotion.decision !== "RECOMMEND_PROMOTION_PENDING_HUMAN_APPROVAL" || result.challenger?.name !== name) throw new Error("Rejected: the optimizer did not recommend this challenger");
-    const v: ParamVersion = { id: Math.max(...this.st.versions.map(x => x.id)) + 1, name, weights: { ...weights }, createdAt: this.now(), status: "challenger", evidence: `OOS meanR ${result.oosChallenger.meanR?.toFixed(3)} over ${result.oosChallenger.trades} trades`, approvedBy: null, baselineMeanR: result.oosChallenger.meanR, baselineMaxDrawdownPct: result.oosChallenger.report.maxDrawdownPct };
+    const v: ParamVersion = { id: Math.max(...this.st.versions.map(x => x.id)) + 1, name, weights: { ...weights }, ...(tighten ? { tighten: { ...tighten } } : {}), createdAt: this.now(), status: "challenger", evidence: `OOS meanR ${result.oosChallenger.meanR?.toFixed(3)} over ${result.oosChallenger.trades} trades`, approvedBy: null, baselineMeanR: result.oosChallenger.meanR, baselineMaxDrawdownPct: result.oosChallenger.report.maxDrawdownPct };
     this.st.versions.push(v); this.log("propose", v.id, v.evidence); await this.store.save(this.st); return v;
   }
   /** Only a named human approver can promote, and only a proposed challenger. The AI cannot approve its own change. */
