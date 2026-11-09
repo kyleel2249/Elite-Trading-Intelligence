@@ -11,11 +11,13 @@ root = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root))
 
 from app.knowledge.registry import list_traders  # noqa: E402
+from app.knowledge.research_2026 import freshness  # noqa: E402
 from app.knowledge.strategies import STRATEGY_MODULES  # noqa: E402
 
 payload = {
     "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "source": "python-registry",
+    "freshness": freshness(),
     "profiles": list_traders(),
     "strategies": [m.to_dict() for m in STRATEGY_MODULES.values()],
 }

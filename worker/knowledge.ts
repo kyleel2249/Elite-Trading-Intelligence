@@ -8,7 +8,9 @@ import knowledgeData from "./knowledge.generated.json" with { type: "json" };
 import { handleTraderDirectory, TRADER_PROFILES } from "./traders.ts";
 import { MODULE_META } from "./strategies.ts";
 
-const data = knowledgeData as { generatedAt: string | null; source: string; profiles: any[]; strategies: any[] };
+type Freshness = { researchDate: string; netWorthLiveUpdatedAt: string | null; liveAsOf: Record<string, string> };
+const data = knowledgeData as { generatedAt: string | null; source: string; profiles: any[]; strategies: any[]; freshness?: Freshness };
+const STALE_AFTER_DAYS = 45;
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300", "access-control-allow-origin": "*" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
 
@@ -56,7 +58,29 @@ function describe(p: any) {
   const netWorthStatus = hasDated ? "dated_estimate" : nw.some(n => /^deceased/i.test(n.claim)) ? "deceased" : nw.some(n => n.classification === "not_documented") ? "not_documented" : nw.length ? "undated_estimate" : "none";
   const sourced = ["historical_returns", "historical_drawdowns", "win_rates", "net_worth"].reduce((a, k) => a + perf(k).filter(n => n.source).length, 0);
   // fieldsPresent counts only substantive fields, so the dashboard shows an honest number.
-  return { completeness: { fieldsPresent: status.filter(s => s.real).length, fieldsStructural: status.filter(s => s.present).length, fieldsRequired: REQUIRED.length, missing, placeholder }, evidenceCounts: counts, netWorthStatus, sourcedPerformanceNotes: sourced };
+  return { completeness: { fieldsPresent: status.filter(s => s.real).length, fieldsStructural: status.filter(s => s.present).length, fieldsRequired: REQUIRED.length, missing, placeholder }, evidenceCounts: counts, netWorthStatus, netWorthFreshness: freshnessOf(p), sourcedPerformanceNotes: sourced };
+}
+
+function ageDays(iso: string | null | undefined): number | null {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? Math.max(0, Math.floor((Date.now() - t) / 86400000)) : null;
+}
+// Net-worth freshness: auto-refreshed profiles use their own refresh date, everything else the research-pass date.
+function freshnessOf(p: any) {
+  const f = data.freshness;
+  const live = f?.liveAsOf?.[p.id] ?? null;
+  const asOf = live ?? f?.researchDate ?? null;
+  const age = ageDays(asOf);
+  return { asOf, ageDays: age, stale: age === null || age > STALE_AFTER_DAYS, autoRefreshed: live !== null };
+}
+function overallFreshness() {
+  const f = data.freshness;
+  const age = ageDays(f?.netWorthLiveUpdatedAt ?? f?.researchDate);
+  return {
+    researchDate: f?.researchDate ?? null, netWorthLiveUpdatedAt: f?.netWorthLiveUpdatedAt ?? null, ageDays: age, staleAfterDays: STALE_AFTER_DAYS,
+    stale: age === null || age > STALE_AFTER_DAYS, autoRefreshedProfiles: Object.keys(f?.liveAsOf ?? {}).length,
+    schedule: "weekly (Mondays 05:17 UTC) via the GitHub Actions workflow refresh-net-worth.yml; a refresh is tested before it is committed and deployed",
+  };
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[-\s]+/g, "_");
@@ -108,5 +132,5 @@ export function handleKnowledge(req: Request): Response | null {
   }
   const q = (url.searchParams.get("q") || "").toLowerCase().trim(), tag = (url.searchParams.get("tag") || "").toLowerCase(), market = (url.searchParams.get("market") || "").toLowerCase();
   const list = data.profiles.filter(p => matches(p, q, tag, market)).sort((a, b) => a.full_name.localeCompare(b.full_name));
-  return json({ source: data.source, generatedAt: data.generatedAt, count: list.length, total: data.profiles.length, limitations: LIMITATIONS, evidenceLegend: EVIDENCE_LEGEND, profiles: list.map(summary) });
+  return json({ source: data.source, generatedAt: data.generatedAt, count: list.length, total: data.profiles.length, freshness: overallFreshness(), limitations: LIMITATIONS, evidenceLegend: EVIDENCE_LEGEND, profiles: list.map(summary) });
 }

@@ -101,7 +101,7 @@ test("research pass: dated net-worth figures, deceased handling, and no placehol
   assert.equal(status("none"), 0);
   const soros = (await get("/api/intelligence/traders/george_soros")).body;
   assert.equal(soros.netWorthStatus, "dated_estimate");
-  assert.match(soros.profile.net_worth[0].claim, /8\.6B/);
+  assert.match(soros.profile.net_worth[0].claim, /\$\d+(\.\d+)?B/);
   assert.match(soros.profile.net_worth[0].source, /2026/);
   assert.equal(soros.profile.win_rates[0].classification, "reported");
   for (const p of list) {
@@ -112,4 +112,18 @@ test("research pass: dated net-worth figures, deceased handling, and no placehol
   }
   const simons = (await get("/api/intelligence/traders/jim_simons")).body.profile;
   assert.match(simons.net_worth[0].claim, /family/i);
+});
+
+test("net-worth freshness is reported per profile and overall, without depending on today's date", async () => {
+  const { body } = await get("/api/intelligence/traders");
+  const f = body.freshness;
+  assert.match(f.researchDate, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(f.staleAfterDays, 45);
+  assert.equal(f.stale, f.ageDays === null || f.ageDays > 45);
+  assert.match(f.schedule, /weekly/);
+  for (const p of body.profiles) {
+    const nf = p.netWorthFreshness;
+    assert.ok(typeof nf.asOf === "string" && Number.isInteger(nf.ageDays), p.id);
+    assert.equal(nf.stale, nf.ageDays > 45, p.id);
+  }
 });

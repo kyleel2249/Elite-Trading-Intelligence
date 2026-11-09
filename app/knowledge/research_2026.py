@@ -6,9 +6,14 @@ was found the note says so with classification "not_documented" instead of guess
 """
 from __future__ import annotations
 
+import json
+import pathlib
+
 from app.knowledge.schema import SourceNote, TraderKnowledgeProfile
 
 RESEARCH_DATE = "2026-11-08"
+# Written weekly by scripts/refresh_net_worth.py (GitHub Actions); absent until the first successful refresh.
+LIVE_FILE = pathlib.Path(__file__).resolve().parent.parent.parent / "data" / "net_worth_live.json"
 F400 = "Forbes 400 2026 (net worths as of 2026-09-04)"
 FWB = "Forbes World's Billionaires 2026 (as of 2026-03-01)"
 
@@ -86,6 +91,40 @@ WIN_RATES: dict[str, list[SourceNote]] = {
 }
 
 
+def load_live() -> dict:
+    """Read the auto-refreshed figures; any problem returns an empty result so the registry never breaks."""
+    try:
+        data = json.loads(LIVE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict) or not isinstance(data.get("entries"), dict):
+        return {}
+    good = {}
+    for pid, e in data["entries"].items():
+        if (isinstance(e, dict) and isinstance(e.get("valueUsd"), (int, float)) and e["valueUsd"] > 0
+                and isinstance(e.get("display"), str) and isinstance(e.get("asOf"), str) and isinstance(e.get("url"), str)):
+            good[pid] = e
+    return {"updatedAt": data.get("updatedAt"), "entries": good}
+
+
+def apply_live(profiles: dict[str, TraderKnowledgeProfile]) -> None:
+    """Prepend the freshest real-time figure; older Forbes-profile notes are replaced, dated list valuations are kept."""
+    for pid, e in load_live().get("entries", {}).items():
+        p = profiles.get(pid)
+        if p is None or pid in DECEASED:
+            continue
+        claim = (e["label"] + ": " if e.get("label") else "") + e["display"] + " (real-time)"
+        note = _n(claim, "estimate", "Forbes profile " + e["url"] + ", real-time net worth fetched " + e["asOf"],
+                  "Refreshed automatically each week; real-time estimates move daily and may lag the latest Forbes update.")
+        p.net_worth = [note] + [n for n in p.net_worth if not (n.source or "").startswith("Forbes profile")]
+
+
+def freshness() -> dict:
+    live = load_live()
+    return {"researchDate": RESEARCH_DATE, "netWorthLiveUpdatedAt": live.get("updatedAt"),
+            "liveAsOf": {k: v["asOf"] for k, v in live.get("entries", {}).items() if k not in DECEASED}}
+
+
 def apply(profiles: dict[str, TraderKnowledgeProfile]) -> None:
     for pid, p in profiles.items():
         if pid in NET_WORTH:
@@ -102,3 +141,4 @@ def apply(profiles: dict[str, TraderKnowledgeProfile]) -> None:
                 if note.classification == "speculation":
                     note.classification = "not_documented"
                     note.source = "Research pass " + RESEARCH_DATE + ": no verified or credibly reported trader-level figure located"
+    apply_live(profiles)
