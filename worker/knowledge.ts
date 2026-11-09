@@ -95,14 +95,33 @@ function matches(p: any, q: string, tag: string, market: string) {
   return true;
 }
 
+// Data-quality report: which profiles are fully populated, which still hold placeholder or missing fields.
+function coverageReport() {
+  const rows = data.profiles.map(p => { const d = describe(p); return { id: p.id, name: p.full_name, fieldsPresent: d.completeness.fieldsPresent, placeholder: d.completeness.placeholder, missing: d.completeness.missing, netWorthStatus: d.netWorthStatus }; });
+  const complete = rows.filter(r => r.fieldsPresent === 25);
+  const netWorth: Record<string, number> = {};
+  for (const r of rows) netWorth[r.netWorthStatus] = (netWorth[r.netWorthStatus] || 0) + 1;
+  return {
+    source: data.source, generatedAt: data.generatedAt, total: rows.length, fullyPopulated: complete.length,
+    needsWork: rows.filter(r => r.fieldsPresent < 25).sort((a, b) => a.fieldsPresent - b.fieldsPresent),
+    netWorthStatus: netWorth, freshness: overallFreshness(), limitations: LIMITATIONS,
+    note: "fieldsPresent counts only substantive fields; template filler text is reported as placeholder.",
+  };
+}
+
 export function handleKnowledge(req: Request): Response | null {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "");
   const isTraders = path === "/api/intelligence/traders" || path.startsWith("/api/intelligence/traders/");
   const isStrategies = path === "/api/intelligence/strategies";
-  if (!isTraders && !isStrategies) return null;
+  const isCoverage = path === "/api/intelligence/coverage";
+  if (!isTraders && !isStrategies && !isCoverage) return null;
   if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   const live = data.profiles.length > 0;
+
+  if (isCoverage) {
+    return live ? json(coverageReport()) : json({ source: "built-in-fallback", available: false, reason: "The generated registry is empty, so only the short built-in profiles are served. Rebuild with scripts/build-knowledge.mjs (needs python3).", limitations: LIMITATIONS }, 200);
+  }
 
   if (isStrategies) {
     const runtime = new Map(MODULE_META.map(m => [m.id, m]));
