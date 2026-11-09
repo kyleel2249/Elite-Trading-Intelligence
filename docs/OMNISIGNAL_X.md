@@ -75,3 +75,11 @@ Standalone page (`GET /omnisignal`, script at `GET /omnisignal.js`) under a stri
 
 ## Scanner and leaderboard
 `GET /api/omnisignal/scan?symbols=BTCUSDT,ETHUSDT&strategy=intraday` (max 4 symbols per request, about 10 subrequests each). Read-only. Only BUY/SELL rows are ranked, by opportunity score = 60% validator score + 25% reward/risk to TP3 (capped at 3R) + 15% liquidity. This ranks evidence quality, not predicted profit, and is uncalibrated. A failing symbol becomes DATA_UNRELIABLE without aborting the scan. Universe-wide scanning would need a scheduled job writing results to KV; it is not built.
+
+## Walk-forward optimizer, champion/challenger and rollback (offline)
+`node scripts/optimize.mjs --symbol BTCUSDT --strategy intraday --days 365 --folds 4` (Node >= 22.18; fetches public candles, so run it where Binance is reachable, or pass `--csv`).
+- **Search space:** five bounded validator-weight profiles (`default`, `trend_heavy`, `flow_heavy`, `structure_heavy`, `risk_averse`). Weights keep the default total, data integrity is pinned, and reward/risk keeps a floor. Risk limits, kill switch, permissions, environments and live trading are not tunable.
+- **Method:** anchored walk-forward. Each fold trains on earlier data and is scored only on the next unseen block; pooled out-of-sample trades decide.
+- **Promotion gates (all required):** at least 30 out-of-sample trades for both sides, mean-R improvement of at least 0.1R, bootstrap 95% interval above zero, drawdown no more than 25% worse than the champion, and the challenger winning at least half the folds. Passing only produces `RECOMMEND_PROMOTION_PENDING_HUMAN_APPROVAL`; `autoApplied` is always false.
+- **Registry (`ParamRegistry`, memory or KV store):** `propose` requires an optimizer recommendation, `promote` requires a named human approver (AI-like names are refused), `rollback` only returns to a previously approved version, and `rollbackCheck`/`autoRollbackIfDegraded` revert when at least 30 recent trades fall well below the approved baseline. Every change is audited.
+- **Not wired yet:** the scheduled paper cycle and `/api/omnisignal` still use the default weights. The registry is a tested library with no HTTP endpoint, and the optimizer has only been exercised on synthetic data.
