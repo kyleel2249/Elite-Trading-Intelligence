@@ -1,7 +1,6 @@
 """Persistence + orchestration for the quant stack."""
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -11,9 +10,11 @@ from app.quant import db_models as m
 from app.quant.fair_value import FairValueResult, estimate_fair_value
 from app.quant.kelly import KellyInput, KellyLimits, size_position
 from app.quant.mispricing import VerificationEvidence, evaluate_mispricing
-from app.quant.scanner import Coverage, GlobalScanner, ScanMetrics
+from app.quant.scanner import Coverage, ScanMetrics
 from app.quant.scoring import OpportunityInput, rank
 from app.quant.sentiment import SentimentItem, aggregate
+
+LEDGER_STRATEGY = "mispricing_gt_8pct"
 
 
 def _now() -> datetime:
@@ -91,50 +92,42 @@ class QuantStore:
         self.db.commit()
         return n
 
-    # ---- append-only prediction ledger ----
+    # ---- predictions: written through the EXISTING append-only ledger ----
     def record_prediction(self, *, symbol: str, market_price: float, fair_value: float, mispricing_pct: float,
                           confidence: float, horizon_days: float, direction: str, invalidation: list[str],
-                          strategy: Optional[str] = None, asset_class: Optional[str] = None) -> m.PredictionLedger:
+                          strategy: str = LEDGER_STRATEGY, asset_class: Optional[str] = None):
+        from app.prediction_ledger.service import create_prediction
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        key = hashlib.sha1(f"{symbol}|{direction}|{round(fair_value, 4)}|{day}".encode()).hexdigest()[:40]
-        existing = self.db.query(m.PredictionLedger).filter_by(prediction_key=key).first()
-        if existing:
-            return existing                       # retry-safe: no duplicate predictions
-        row = m.PredictionLedger(
-            prediction_key=key, symbol=symbol, market_price=market_price, fair_value=fair_value,
-            mispricing_pct=mispricing_pct, confidence=confidence, horizon_days=horizon_days,
-            expected_direction="up" if direction == "undervalued" else "down", invalidation=invalidation,
-            strategy=strategy, asset_class=asset_class)
-        self.db.add(row)
-        self.db.commit()
+        key = f"fv:{symbol}:{direction}:{round(fair_value, 4)}:{day}"      # retry-safe
+        row, _created = create_prediction(
+            self.db, asset=symbol, market=(asset_class or "equity"), direction="up" if direction == "undervalued" else "down",
+            entry_reference=market_price, horizon_seconds=int(max(1.0, horizon_days) * 86400),
+            probability=min(0.99, max(0.01, float(confidence))),
+            reasoning=f"Independent fair value {fair_value:.6g} vs market {market_price:.6g} "
+                      f"({mispricing_pct:+.2f}% mispricing). Probability field carries valuation-model confidence.",
+            sources=["internal:FairValueEngine:fv-1"], invalidation_criteria="; ".join(invalidation) or "n/a",
+            target_base=fair_value, strategy=strategy, model_version="fv-1", idempotency_key=key)
         return row
 
-    def score_prediction(self, prediction_id: int, realized_price: float) -> m.PredictionOutcome:
-        p = self.db.get(m.PredictionLedger, prediction_id)
-        if p is None:
-            raise ValueError("unknown prediction")
-        ret = (realized_price - p.market_price) / p.market_price * 100
-        correct = (ret > 0) if p.expected_direction == "up" else (ret < 0)
-        converged = abs(p.fair_value - realized_price) / p.fair_value * 100 <= 3.0
-        out = m.PredictionOutcome(prediction_id=prediction_id, realized_price=realized_price,
-                                  direction_correct=correct, converged=converged, return_pct=ret)
-        self.db.add(out)
-        self.db.commit()
-        return out
+    def ledger_rows(self, include_pending: bool = True) -> list[dict]:
+        from app.prediction_ledger.service import scored_rows
+        return [r for r in scored_rows(self.db, include_pending=include_pending) if r.get("strategy") == LEDGER_STRATEGY]
 
     def performance_summary(self) -> dict:
-        outs = self.db.query(m.PredictionOutcome).all()
-        n = len(outs)
-        total = self.db.query(m.PredictionLedger).count()
-        if not n:
-            return {"predictions": total, "scored": 0, "hit_rate": None, "convergence_rate": None,
+        rows = self.ledger_rows()
+        scored = [r for r in rows if r.get("status") != "pending" and r.get("direction_correct") is not None]
+        if not scored:
+            return {"predictions": len(rows), "scored": 0, "hit_rate": None, "convergence_rate": None,
                     "note": "no scored predictions yet; no performance is claimed"}
-        wins = [o.return_pct for o in outs if o.direction_correct]
-        losses = [o.return_pct for o in outs if not o.direction_correct]
-        return {"predictions": total, "scored": n,
-                "hit_rate": round(sum(1 for o in outs if o.direction_correct) / n, 4),
-                "convergence_rate": round(sum(1 for o in outs if o.converged) / n, 4),
-                "false_positive_rate": round(sum(1 for o in outs if not o.direction_correct) / n, 4),
+        wins = [r["return_pct"] for r in scored if r["direction_correct"] and r.get("return_pct") is not None]
+        losses = [r["return_pct"] for r in scored if not r["direction_correct"] and r.get("return_pct") is not None]
+        conv = [r for r in scored if r.get("target_base") and r.get("realized_price")
+                and abs(r["target_base"] - r["realized_price"]) / r["target_base"] * 100 <= 3.0]
+        n = len(scored)
+        return {"predictions": len(rows), "scored": n,
+                "hit_rate": round(sum(1 for r in scored if r["direction_correct"]) / n, 4),
+                "convergence_rate": round(len(conv) / n, 4),
+                "false_positive_rate": round(sum(1 for r in scored if not r["direction_correct"]) / n, 4),
                 "avg_win_pct": round(sum(wins) / len(wins), 3) if wins else None,
                 "avg_loss_pct": round(sum(losses) / len(losses), 3) if losses else None}
 
