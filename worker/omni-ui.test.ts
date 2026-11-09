@@ -38,3 +38,9 @@ test("routing: other paths null, non-GET 405, HEAD has no body", async () => {
 test("el() flattens child arrays (regression: tables rendered nothing)", () => {
   assert.match(OMNI_JS, /Array\.isArray\(c\)/);
 });
+
+test("scanner card present, GET-only, text-rendered", () => {
+  assert.match(OMNI_HTML, /id="scan-form"/);
+  assert.match(OMNI_JS, /\/api\/omnisignal\/scan\?/);
+  new vm.Script(OMNI_JS);
+});

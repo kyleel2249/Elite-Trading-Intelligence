@@ -72,3 +72,6 @@ uses flat fee/slippage, stubs the risk gateway, and is **not** a forecast.
 
 ## Dashboard (`/omnisignal`)
 Standalone page (`GET /omnisignal`, script at `GET /omnisignal.js`) under a strict CSP: no inline script, same-origin connections only, all values written with `textContent`. Shows both engines, agreement/decision, entry/SL/TP1-3, the eight-timeframe matrix, evidence families, validation, liquidity, and the paper panel (status, positions, performance, audit, kill switch). The paper API token is typed at runtime and held in memory only. It has no live-trading, testnet, withdrawal or transfer controls. Visual checks used synthetic fixtures, not real market data.
+
+## Scanner and leaderboard
+`GET /api/omnisignal/scan?symbols=BTCUSDT,ETHUSDT&strategy=intraday` (max 4 symbols per request, about 10 subrequests each). Read-only. Only BUY/SELL rows are ranked, by opportunity score = 60% validator score + 25% reward/risk to TP3 (capped at 3R) + 15% liquidity. This ranks evidence quality, not predicted profit, and is uncalibrated. A failing symbol becomes DATA_UNRELIABLE without aborting the scan. Universe-wide scanning would need a scheduled job writing results to KV; it is not built.

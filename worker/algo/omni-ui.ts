@@ -69,10 +69,11 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <section class="card s12"><h2>Eight-timeframe matrix</h2><div id="matrix" class="scroll muted">–</div></section>
 <section class="card s6"><h2>Momentum, EMA, volatility, breakout</h2><div id="indicators" class="muted">–</div></section>
 <section class="card s6"><h2>Liquidity and order book</h2><div id="liquidity" class="muted">–</div></section>
+<section class="card s12" id="scanner"><h2>Opportunity scanner and leaderboard</h2><form class="bar" id="scan-form" autocomplete="off"><label>Symbols (up to 4, comma separated)<input type="text" id="scan-symbols" value="BTCUSDT,ETHUSDT,SOLUSDT" maxlength="80" style="width:280px"></label><button type="submit" id="scan-go">Scan</button></form><div id="scan-body" class="muted">Ranks by evidence quality (validator score, reward/risk, liquidity), not by predicted profit. HOLD and REJECTED are valid outcomes and are not ranked.</div></section>
 <section class="card s12" id="paper"><h2>Paper trading (simulated)</h2>
 <form class="bar" id="paper-auth" autocomplete="off"><label>Paper API token (kept in memory only, never stored)<input type="password" id="token" autocomplete="off" spellcheck="false"></label><button type="submit">Connect</button><button type="button" id="p-eval">Evaluate (analyse only)</button><button type="button" id="p-open" class="primary">Evaluate &amp; open paper position</button><button type="button" id="p-tick">Tick position</button><button type="button" id="p-kill" class="danger">Engage kill switch</button></form>
 <div id="paper-body" class="muted">Enter the paper API token to load simulated positions, performance and the audit trail.</div></section>
-<section class="card s12"><h2>Not available yet (nothing here is simulated)</h2><div class="small muted">Strategy optimisation and model rollback, opportunity scanner and leaderboard, real-time alerts, exchange testnet execution, Elite Trader database inputs to fusion. Confidence is an evidence score, not a probability of profit.</div></section>
+<section class="card s12"><h2>Not available yet (nothing here is simulated)</h2><div class="small muted">Strategy optimisation and model rollback, real-time alerts, exchange testnet execution, Elite Trader database inputs to fusion. Confidence is an evidence score, not a probability of profit.</div></section>
 </div><p class="small muted">Analytical research tool, not financial advice. Simulated results do not guarantee future results.</p></div><script src="/omnisignal.js"></script></body></html>`;
 
 export const OMNI_JS = String.raw`(function(){
@@ -207,6 +208,17 @@ function paperAction(kind){
  setStatus("Sending…");api(path,{auth:true,method:"POST",body:body}).then(function(r){
   var b=r.body||{},m=r.ok?"Done":"HTTP "+r.status;if(b.event&&b.event.type)m=b.event.type+(b.event.reasons?": "+b.event.reasons.join("; "):"");else if(b.events&&b.events.length)m="Events: "+b.events.map(function(e){return e.type}).join(", ");else if(b.message)m=b.message;else if(b.error)m=b.error;
   setStatus(m,!r.ok&&r.status!==200);return loadPaper()}).catch(function(e){setStatus(e.message,true)})}
+
+function scanNow(){
+ var raw=$("scan-symbols").value,strategy=$("strategy").value;if(!raw.trim()){setStatus("Enter at least one symbol",true);return}
+ $("scan-go").disabled=true;setStatus("Scanning (a few seconds per symbol)…");
+ api("/api/omnisignal/scan?strategy="+strategy+"&symbols="+encodeURIComponent(raw)).then(function(r){
+  var b=r.body||{};if(!r.ok||!b.leaderboard){put("scan-body",note("Scan failed: "+(b.error||"HTTP "+r.status),"bad"));setStatus("Scan failed",true);return}
+  var box=el("div",null,paperTable(["Rank","Symbol","Decision","Score","Validator","R:R to TP3","Agreement","Liquidity","Note"],b.leaderboard.map(function(x){return [x.rank==null?"–":x.rank,x.symbol,x.decision+(x.direction?" "+x.direction:""),x.opportunityScore==null?"–":num(x.opportunityScore,1),x.validationScore==null?"–":num(x.validationScore,1),x.riskRewardToTP3==null?"–":num(x.riskRewardToTP3)+"R",String(x.agreement||"–").replace(/_/g," ").toLowerCase(),x.liquidity||"–",(x.reason||"").slice(0,90)]})));
+  if(b.ignoredSymbols&&b.ignoredSymbols.length)box.appendChild(note("Ignored (invalid or beyond the "+b.maxSymbols+"-symbol limit): "+b.ignoredSymbols.join(", "),"warn"));
+  box.appendChild(el("div",{class:"small muted",text:b.note}));put("scan-body",box);setStatus("Scan complete "+new Date().toLocaleTimeString())
+ }).catch(function(e){put("scan-body",note("Network error: "+e.message,"bad"));setStatus("Scan failed",true)}).then(function(){$("scan-go").disabled=false})}
+$("scan-form").addEventListener("submit",function(ev){ev.preventDefault();scanNow()});
 
 $("controls").addEventListener("submit",function(ev){ev.preventDefault();analyse()});
 $("auto").addEventListener("change",schedule);

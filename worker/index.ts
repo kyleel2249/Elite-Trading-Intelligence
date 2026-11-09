@@ -533,7 +533,7 @@ export default {
     if (url.pathname === "/omnisignal" || url.pathname === "/omnisignal.js") {
       return handleOmniUi(request) as Response;
     }
-    if (url.pathname === "/api/omnisignal") {
+    if (url.pathname === "/api/omnisignal" || url.pathname === "/api/omnisignal/scan") {
       return handleOmnisignal(request, _env);
     }
     if (url.pathname.startsWith("/api/market/")) {

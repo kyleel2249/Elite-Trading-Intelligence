@@ -4,6 +4,7 @@ import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { loadSignalInputs } from "./market-inputs.ts";
 import { runOmnisignal } from "./omnisignal.ts";
+import { MAX_SCAN_SYMBOLS, parseSymbols, scan } from "./scan.ts";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
@@ -11,6 +12,14 @@ export const STRATEGIES: Strategy[] = ["scalp", "intraday", "swing", "position"]
 
 export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(req.url);
+  if (url.pathname === "/api/omnisignal/scan") {
+    if (req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+    const strategy = (url.searchParams.get("strategy") || "intraday") as Strategy, { symbols, ignored } = parseSymbols(url.searchParams.get("symbols"));
+    if (!STRATEGIES.includes(strategy) || !symbols.length) return reply({ error: "invalid_strategy_or_symbols", maxSymbols: MAX_SCAN_SYMBOLS, strategies: STRATEGIES }, 400);
+    const leaderboard = await scan(env, symbols, strategy);
+    return reply({ strategy, scanned: symbols, ignoredSymbols: ignored, maxSymbols: MAX_SCAN_SYMBOLS, leaderboard, submitsOrder: false, liveExecutionAllowed: false,
+      note: "Ranked by evidence quality (validator score, reward/risk, liquidity), not by predicted profit. Only BUY/SELL rows are ranked; HOLD and REJECTED are valid outcomes. Scores are uncalibrated and are not win probabilities." });
+  }
   if (url.pathname !== "/api/omnisignal") return reply({ error: "not_found" }, 404);
   if (req.method !== "GET") return reply({ error: "method_not_allowed", note: "This endpoint is analytical and read-only; it cannot place orders." }, 405);
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
