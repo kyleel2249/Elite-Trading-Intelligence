@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
+from app.integrations.alpaca.client import protective_status
 from app.integrations.binance import BinanceClient
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
 from app.trading.portfolio import PortfolioService
@@ -78,6 +79,8 @@ class TradingService:
         fill_price_hint: Optional[float] = None,
         thesis: Optional[str] = None,
         council_action: Optional[str] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
     ) -> dict[str, Any]:
         client_order_id = self._client_order_id()
         proposal = OrderProposal(
@@ -130,6 +133,7 @@ class TradingService:
                 )
             return result
 
+        protective: Optional[dict[str, Any]] = None
         try:
             if provider.lower() == "alpaca":
                 if environment.lower() == "paper" and not self.settings.alpaca_paper:
@@ -144,6 +148,9 @@ class TradingService:
                         },
                         "provider_response": None,
                     }
+                alpaca_kwargs: dict[str, Any] = {}
+                if stop_loss is not None or take_profit is not None:
+                    alpaca_kwargs = {"stop_loss": stop_loss, "take_profit": take_profit}
                 resp = await self.alpaca.submit_order(
                     symbol=symbol,
                     qty=qty,
@@ -151,8 +158,11 @@ class TradingService:
                     order_type=order_type,
                     limit_price=limit_price,
                     client_order_id=client_order_id,
+                    **alpaca_kwargs,
                 )
                 fill_price = fill_price_hint
+                if alpaca_kwargs:
+                    protective = protective_status(resp, stop_loss, take_profit)
             elif provider.lower() == "binance":
                 use_testnet = environment.lower() in ("paper", "testnet")
                 # Paper without keys: simulate fill for journal/positions
@@ -175,6 +185,9 @@ class TradingService:
                         client_order_id=client_order_id,
                     )
                     fill_price = fill_price_hint
+                if stop_loss is not None or take_profit is not None:
+                    protective = {"status": "not_attached",
+                                  "reason": "Binance exit orders are not implemented; levels are recorded only"}
             else:
                 return {
                     "status": "rejected",
@@ -201,6 +214,8 @@ class TradingService:
                 "provider_response": resp,
                 "submitted_at": datetime.now(timezone.utc).isoformat(),
             }
+            if protective is not None:
+                result["protective_orders"] = protective
 
             if self.db is not None:
                 # For paper/sim: treat as filled when we have a price hint
