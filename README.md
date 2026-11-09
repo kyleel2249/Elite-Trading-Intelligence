@@ -82,9 +82,18 @@ limits. Do not silently rely on paid Workers features, Containers, or an externa
 - Live trading remains disabled unless a separate authenticated and risk-gated execution
   implementation is explicitly deployed and tested.
 
+## Multi-market intelligence
+
+ETI classifies and adapts to forex, precious metals, crypto, stocks, indices, commodities, futures and options:
+per-market trading hours (DST-correct), liquidity by time of day, spread/fee/slippage profiles, volatility-aware
+sizing and market-adjusted risk limits that are enforced inside the `RiskEngine`. Open `/markets` or call
+`/api/markets/assess?symbol=EURUSD`. Execution exists today only for crypto (Binance spot) and US stocks/ETFs
+(Alpaca); metals, indices and commodities route through labelled ETF proxies; forex, non-US stocks, futures and
+options are analysis-only until an adapter is added. See [docs/MARKETS.md](docs/MARKETS.md) for coverage, limits and API.
+
 ## Documentation
 
-See [Cloudflare deployment guide](docs/CLOUDFLARE.md).
+See [Cloudflare deployment guide](docs/CLOUDFLARE.md) and [multi-market guide](docs/MARKETS.md).
 
 
 ## Broker execution — paper/testnet only

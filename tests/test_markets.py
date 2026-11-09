@@ -1,0 +1,417 @@
+"""Multi-market intelligence: classification, sessions, profiles, sizing, routing, risk integration, API."""
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import Settings
+from app.main import app
+from app.markets import assess, classify, list_instruments, market_risk_review, profile_for, register_holidays, session_status
+from app.markets.live import route_snapshot
+from app.markets.providers import routes_for
+from app.markets.types import AssetClass
+from app.risk.engine import OrderProposal, RiskEngine
+
+U = timezone.utc
+
+
+def at(y, mo, d, h, mi=0):
+    return datetime(y, mo, d, h, mi, tzinfo=U)
+
+
+# ------------------------------------------------------------------ classification
+@pytest.mark.parametrize("raw,cls,tier,sym", [
+    ("EUR/USD", "forex", "major", "EURUSD"), ("gbpusd", "forex", "major", "GBPUSD"), ("USDJPY", "forex", "major", "USDJPY"),
+    ("AUDUSD", "forex", "major", "AUDUSD"), ("USDCAD", "forex", "major", "USDCAD"), ("USDCHF", "forex", "major", "USDCHF"),
+    ("NZDUSD", "forex", "major", "NZDUSD"), ("EURGBP", "forex", "minor", "EURGBP"), ("USDZAR", "forex", "exotic", "USDZAR"),
+    ("USDNGN", "forex", "exotic", "USDNGN"),
+    ("XAUUSD", "metal", "major", "XAUUSD"), ("XAG/USD", "metal", "silver", "XAGUSD"), ("XPTUSD", "metal", "other", "XPTUSD"),
+    ("BTCUSDT", "crypto", "major", "BTCUSDT"), ("ETHUSDT", "crypto", "major", "ETHUSDT"), ("SOLUSDT", "crypto", "large", "SOLUSDT"),
+    ("XRPUSDT", "crypto", "large", "XRPUSDT"), ("BNBUSDT", "crypto", "large", "BNBUSDT"), ("DOGEUSDT", "crypto", "large", "DOGEUSDT"),
+    ("1000SATSUSDT", "crypto", "meme", "1000SATSUSDT"), ("UNIUSDT", "crypto", "defi", "UNIUSDT"),
+    ("AAPL", "stock", "us_mega", "AAPL"), ("VOD.L", "stock", "developed", "LSE:VOD"), ("NPN.JO", "stock", "emerging", "JSE:NPN"),
+    ("NGX:DANGCEM", "stock", "frontier", "NGX:DANGCEM"), ("7203.T", "stock", "developed", "TSE:7203"),
+    ("SPX", "index", "us", "SPX"), ("NAS100", "index", "us", "NDX"), ("US30", "index", "us", "DJI"),
+    ("FTSE", "index", "developed", "FTSE100"), ("DAX", "index", "developed", "DAX"), ("N225", "index", "developed", "N225"),
+    ("WTI", "commodity", "crude", "WTI"), ("NATGAS", "commodity", "natgas", "NATGAS"), ("WHEAT", "commodity", "agri", "WHEAT"),
+    ("CLZ6", "future", "crude", "CLZ6"), ("ESH7", "future", "us", "ESH7"),
+    ("AAPL261218C00200000", "option", "equity", "AAPL261218C00200000"),
+])
+def test_classification(raw, cls, tier, sym):
+    i = classify(raw)
+    assert (i.asset_class.value, i.tier, i.symbol) == (cls, tier, sym)
+
+
+def test_names_and_bare_symbols():
+    assert classify("Gold").symbol == "XAUUSD"
+    assert classify("Bitcoin").symbol == "BTCUSDT"
+    assert classify("1000SATS").symbol == "1000SATSUSDT"
+    assert classify("XRP").symbol == "XRPUSDT"
+
+
+def test_alpaca_hint_keeps_us_tickers_as_stocks():
+    # CL / NG / BTC are real (or plausible) US tickers when the caller is an equity venue
+    assert classify("CL", provider_hint="alpaca").asset_class == AssetClass.STOCK
+    assert classify("NG", provider_hint="alpaca").asset_class == AssetClass.STOCK
+    assert classify("CL").asset_class == AssetClass.COMMODITY
+
+
+def test_unknown_crypto_is_emerging_not_silently_blessed():
+    i = classify("NEWCOINUSDT")
+    assert i.asset_class == AssetClass.CRYPTO and i.tier == "emerging" and i.confidence in ("pattern", "heuristic")
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "ZZZ!!", "A B C D E F G", "???"])
+def test_garbage_is_unknown_never_raises(bad):
+    assert classify(bad).asset_class == AssetClass.UNKNOWN
+
+
+def test_catalog_covers_every_requested_market():
+    found = {i.asset_class.value for i in list_instruments()}
+    assert {"forex", "metal", "crypto", "stock", "index", "commodity"} <= found
+    symbols = {i.symbol for i in list_instruments()}
+    for required in ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "XAUUSD", "XAGUSD", "BTCUSDT",
+                     "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "1000SATSUSDT", "DOGEUSDT", "SPX", "NDX", "DJI", "FTSE100",
+                     "DAX", "N225", "WTI", "NATGAS", "CORN"):
+        assert required in symbols, required
+
+
+# ------------------------------------------------------------------ sessions
+def test_us_equity_open_close_est_and_edt():
+    assert session_status("us_equity", at(2026, 11, 9, 14, 29)).state == "extended"   # 09:29 EST
+    s = session_status("us_equity", at(2026, 11, 9, 14, 30))                          # 09:30 EST
+    assert s.state == "open" and s.regime == "opening_volatility"
+    assert session_status("us_equity", at(2026, 7, 6, 13, 29)).state == "extended"    # 09:29 EDT
+    assert session_status("us_equity", at(2026, 7, 6, 13, 30)).state == "open"        # DST shifts the UTC open by 1h
+    assert session_status("us_equity", at(2026, 11, 9, 21, 0)).state == "extended"    # 16:00 EST close
+
+
+def test_us_holiday_weekend_and_early_close():
+    thanksgiving = session_status("us_equity", at(2026, 11, 26, 15))
+    assert thanksgiving.state == "closed" and thanksgiving.reason == "holiday"
+    weekend = session_status("us_equity", at(2026, 11, 7, 15))
+    assert weekend.state == "closed" and weekend.reason == "weekend"
+    assert session_status("us_equity", at(2026, 11, 27, 17, 59)).state == "open"       # 12:59 ET
+    assert session_status("us_equity", at(2026, 11, 27, 18, 1)).state != "open"        # after 13:00 ET early close
+
+
+def test_forex_weekly_boundaries():
+    assert session_status("fx_24x5", at(2026, 11, 6, 21, 59)).state == "open"
+    assert session_status("fx_24x5", at(2026, 11, 6, 22, 0)).state == "closed"         # Fri 17:00 ET
+    assert session_status("fx_24x5", at(2026, 11, 7, 12)).reason == "weekend"
+    assert session_status("fx_24x5", at(2026, 11, 8, 21, 59)).state == "closed"
+    assert session_status("fx_24x5", at(2026, 11, 8, 22, 0)).state == "open"           # Sun 17:00 ET
+
+
+def test_metals_daily_break_and_tokyo_lunch():
+    assert session_status("metals_otc", at(2026, 11, 9, 22, 30)).state == "closed"     # 17:30 ET break
+    assert session_status("metals_otc", at(2026, 11, 9, 23, 0)).state == "open"
+    lunch = session_status("tse", at(2026, 11, 9, 3, 0))                                # 12:00 JST
+    assert lunch.state == "closed" and lunch.reason == "intraday_break"
+    assert session_status("tse", at(2026, 11, 9, 1, 0)).state == "open"
+
+
+def test_egypt_trades_sunday_not_friday_and_crypto_always_open():
+    assert session_status("egx", at(2026, 11, 8, 9)).state == "open"
+    assert session_status("egx", at(2026, 11, 6, 9)).state == "closed"
+    s = session_status("crypto_24x7", at(2026, 11, 7, 3))
+    assert s.state == "open" and s.regime == "continuous"
+
+
+def test_holiday_calendar_honesty_and_registration():
+    assert session_status("us_equity", at(2027, 1, 5, 15)).holiday_calendar == "not_applied"
+    assert session_status("jse", at(2026, 11, 9, 9)).schedule_confidence == "approximate"
+    register_holidays("test_cal_dummy", {date(2026, 1, 1)})   # registering must not disturb other calendars
+    assert session_status("us_equity", at(2026, 11, 26, 15)).reason == "holiday"
+
+
+# ------------------------------------------------------------------ profiles
+def test_risk_posture_orders_by_market_quality():
+    major = profile_for(classify("BTCUSDT"))
+    meme = profile_for(classify("1000SATSUSDT"))
+    new = profile_for(classify("1000SATSUSDT"), listing_age_days=3)
+    frontier = profile_for(classify("NGX:DANGCEM"))
+    assert major.notional_cap_multiplier > meme.notional_cap_multiplier > new.notional_cap_multiplier
+    assert new.key == "crypto.new_listing" and new.liquidity == "very_low"
+    assert frontier.liquidity == "very_low" and frontier.risk_multiplier < 0.5
+    assert profile_for(classify("BTCUSDT"), listing_age_days=1).key == "crypto.major"   # majors are never "new"
+    for p in (major, meme, new, frontier):
+        assert p.source == "planning_default"
+
+
+def test_measured_volume_reclassifies_thin_us_stock():
+    assert profile_for(classify("XYZ"), avg_daily_volume_usd=1_000_000).key == "stock.emerging"
+    assert profile_for(classify("XYZ"), avg_daily_volume_usd=500_000_000).key == "stock.us_mega"
+
+
+# ------------------------------------------------------------------ assessment
+W = at(2026, 11, 9, 15)  # Monday 15:00 UTC: London + New York open
+
+
+def test_forex_sizing_is_capped_and_analysis_only():
+    a = assess("EURUSD", now=W, price=1.085, stop_price=1.08, account_equity=10000)
+    assert a["verdict"] == "analysis_only" and a["execution"]["executable"] is False
+    z = a["sizing"]
+    assert z["notional_usd"] <= 600.0 + 1.1 and z["risk_amount_usd"] <= 100.0 + 1e-6
+    assert a["session"]["active_centres"] == ["London", "New York"] and a["session"]["liquidity_factor"] == 1.0
+
+
+def test_usd_base_pair_converts_quote_currency():
+    a = assess("USDJPY", now=W, price=150.0, stop_price=149.0)
+    assert a["sizing"]["status"] == "ok" and a["sizing"]["notional_usd"] <= 601
+
+
+def test_non_usd_quote_requires_rate_instead_of_guessing():
+    a = assess("EURGBP", now=W, price=0.87, stop_price=0.865)
+    assert a["verdict"] == "blocked" and "quote_to_usd" in a["reasons"][0]
+    ok = assess("EURGBP", now=W, price=0.87, stop_price=0.865, quote_to_usd=1.27)
+    assert ok["sizing"]["status"] == "ok"
+
+
+def test_never_exceeds_global_caps_for_any_market():
+    for sym, px in [("BTCUSDT", 95000), ("1000SATSUSDT", 0.05), ("XAUUSD", 4000), ("AAPL", 230), ("WTI", 65), ("XAGUSD", 50)]:
+        a = assess(sym, now=W, price=px, account_equity=10000, risk_pct=1.0)
+        z = a["sizing"]
+        assert z["notional_usd"] <= 600.0 + 1e-6, sym
+        assert z["risk_amount_usd"] <= 100.0 + 1e-6, sym
+
+
+def test_riskier_markets_get_smaller_positions():
+    n = {s: assess(s, now=W, price=p, account_equity=100000)["sizing"]["notional_usd"]
+         for s, p in [("BTCUSDT", 95000), ("1000SATSUSDT", 0.05)]}
+    assert n["1000SATSUSDT"] < n["BTCUSDT"]
+    new = assess("1000SATSUSDT", now=W, price=0.05, account_equity=100000, listing_age_days=2)
+    assert new["sizing"]["notional_usd"] < n["1000SATSUSDT"] and new["verdict"] == "caution"
+
+
+def test_closed_market_waits_and_weekend_gold_etf_route_is_closed():
+    a = assess("AAPL", now=at(2026, 11, 8, 15), price=230.0)
+    assert a["verdict"] == "wait_for_session" and "weekend" in a["reasons"][0]
+    gold = assess("XAUUSD", now=at(2026, 11, 8, 23), price=4000.0, atr=40)     # spot gold trades Sun night; GLD does not
+    assert gold["session"]["state"] == "open" and gold["verdict"] == "wait_for_session"
+    assert gold["execution"]["routes"][0]["kind"] == "etf_proxy"
+
+
+def test_costs_scale_with_session_liquidity_and_measured_spread_wins():
+    busy = assess("EURUSD", now=at(2026, 11, 9, 14), price=1.08)["costs"]["spread_bps"]       # London+NY
+    quiet = assess("EURUSD", now=at(2026, 11, 9, 22, 30), price=1.08)["costs"]["spread_bps"]  # post-NY, pre-Tokyo
+    assert quiet > busy
+    m = assess("EURUSD", now=W, price=1.08, measured_spread_bps=0.4)["costs"]
+    assert m["spread_bps"] == 0.4 and m["spread_source"] == "measured"
+
+
+def test_exotic_costs_dwarf_major_costs():
+    maj = assess("EURUSD", now=W, price=1.08)["costs"]["round_trip_bps"]
+    exo = assess("USDZAR", now=W, price=18.0)["costs"]["round_trip_bps"]
+    assert exo > 10 * maj
+
+
+def test_frontier_stock_flags_and_minimum_size_guidance():
+    a = assess("NGX:DANGCEM", now=at(2026, 11, 9, 11), price=800.0, quote_to_usd=0.00065, avg_daily_volume_usd=40000)
+    assert a["verdict"] == "analysis_only"
+    assert any("limits" in w.lower() or "liquidity" in w.lower() for w in a["warnings"])
+    idx = assess("SPX", now=W, price=6900, account_equity=10000)
+    assert idx["verdict"] == "blocked" and "minimum_order" in idx["sizing"]
+    assert idx["sizing"]["minimum_order"]["equity_for_notional_cap_usd"] > 10000
+
+
+def test_invalid_inputs_are_rejected_not_sized():
+    assert assess("BTCUSDT", now=W, price=95000, stop_price=96000)["verdict"] == "blocked"        # stop above a long
+    assert assess("BTCUSDT", now=W, price=95000, side="sell", stop_price=94000)["verdict"] == "blocked"
+    assert assess("ZZZ!!", now=W, price=1)["verdict"] == "blocked"
+
+
+def test_futures_and_options_sizing_use_multipliers():
+    es = assess("ESZ6", now=W, price=6900, account_equity=500000)       # one E-mini is ~$345k: correctly too big for $500k
+    assert es["instrument"]["contract_multiplier"] == 50.0 and es["sizing"]["quantity"] == 0.0
+    assert es["verdict"] == "blocked" and es["sizing"]["minimum_order"]["notional_usd"] == 345000.0
+    mes = assess("MESZ6", now=W, price=6900, account_equity=1_000_000)  # micro contract fits
+    assert mes["instrument"]["contract_multiplier"] == 5.0 and mes["sizing"]["quantity"] == 1.0
+    assert mes["sizing"]["notional_usd"] == 6900 * 5 and mes["execution"]["executable"] is False
+    opt = assess("AAPL261218C00200000", now=W, price=12.5, account_equity=100000)
+    assert opt["instrument"]["contract_multiplier"] == 100.0 and opt["sizing"]["stop_source"] == "full_premium_at_risk"
+
+
+# ------------------------------------------------------------------ routing honesty
+def test_routes_match_the_adapters_that_exist():
+    assert [r["provider"] for r in routes_for(classify("BTCUSDT"))] == ["binance"]
+    assert [r["provider"] for r in routes_for(classify("AAPL"))] == ["alpaca"]
+    assert routes_for(classify("EURUSD")) == [] and routes_for(classify("VOD.L")) == [] and routes_for(classify("ESZ6")) == []
+    gold = routes_for(classify("XAUUSD"))[0]
+    assert (gold["symbol"], gold["kind"]) == ("GLD", "etf_proxy")
+    assert routes_for(classify("SPX"))[0]["symbol"] == "SPY" and routes_for(classify("WTI"))[0]["symbol"] == "USO"
+    assert routes_for(classify("GCZ6")) == []   # futures never route to an ETF: contracts != shares
+
+
+def test_proxy_routes_carry_notional_sizing_not_a_misleading_quantity():
+    a = assess("XAUUSD", now=W, price=4000.0, atr=40)
+    p = a["sizing"]["proxy_sizing"]
+    assert p["symbol"] == "GLD" and p["size_by_notional_usd"] == a["sizing"]["notional_usd"]
+    assert "Do not submit the quantity above" in p["instruction"]
+    assert "proxy_sizing" not in assess("BTCUSDT", now=W, price=95000, atr=1500)["sizing"]
+
+
+class _FakeMarket:
+    async def get_snapshot(self, provider, symbol):
+        return {"provider": provider, "symbol": symbol, "price": 100.0, "data_status": "fresh", "ts_utc": W.isoformat()}
+
+
+@pytest.mark.asyncio
+async def test_snapshot_labels_proxies_and_invents_nothing():
+    gold = await route_snapshot("XAUUSD", market_service=_FakeMarket())
+    assert gold["is_proxy"] is True and gold["symbol"] == "GLD" and "not the underlying" in gold["proxy_notice"]
+    fx = await route_snapshot("EURUSD", market_service=_FakeMarket())
+    assert fx["price"] is None and fx["data_status"] == "provider_not_integrated"
+    btc = await route_snapshot("BTCUSDT", market_service=_FakeMarket())
+    assert btc["provider"] == "binance" and btc["price"] == 100.0 and "is_proxy" not in btc
+
+
+# ------------------------------------------------------------------ RiskEngine integration
+def _settings(**kw):
+    base = dict(live_trading_enabled=True, alpaca_paper=False, binance_live_trading_enabled=True, require_live_confirmation=True)
+    base.update(kw)
+    return Settings(**base)
+
+
+def _prop(**kw):
+    base = dict(provider="binance", environment="paper", symbol="BTCUSDT", side="buy", qty=0.001, equity=10000.0,
+                data_age_seconds=5, data_status="fresh", meta={"ref_price": 95000})
+    base.update(kw)
+    return OrderProposal(**base)
+
+
+def test_engine_rejects_asset_class_the_provider_cannot_trade():
+    d = RiskEngine(_settings()).evaluate(_prop(provider="binance", symbol="AAPL", qty=1, meta={"ref_price": 230}))
+    assert not d.approved and any("cannot trade" in r for r in d.reasons)
+    d2 = RiskEngine(_settings()).evaluate(_prop(provider="alpaca", symbol="EURUSD", qty=1000, meta={"ref_price": 1.08}))
+    assert not d2.approved
+    d3 = RiskEngine(_settings()).evaluate(_prop(provider="alpaca", symbol="VOD.L", qty=10, meta={"ref_price": 70}))
+    assert not d3.approved
+
+
+def test_engine_still_approves_the_normal_paths():
+    assert RiskEngine(_settings()).evaluate(_prop()).approved
+    assert RiskEngine(_settings()).evaluate(_prop(provider="alpaca", symbol="AAPL", qty=2, meta={"ref_price": 230})).approved
+    assert RiskEngine(_settings()).evaluate(_prop(provider="alpaca", symbol="GLD", qty=1, meta={"ref_price": 400})).approved
+
+
+def test_engine_tightens_notional_cap_for_risky_markets_only():
+    eng = RiskEngine(_settings())
+    # 5.5% of equity: fine for BTC (cap 6%) but over the 3% cap for a meme token (6% x 0.5)
+    assert eng.evaluate(_prop(symbol="BTCUSDT", qty=0.005789, meta={"ref_price": 95000})).approved
+    d = eng.evaluate(_prop(symbol="1000SATSUSDT", qty=11000, meta={"ref_price": 0.05}))
+    assert not d.approved and any("exceeds max 3" in r for r in d.reasons)
+
+
+def test_engine_tightens_risk_per_trade_for_risky_markets():
+    eng = RiskEngine(_settings())
+    ok = eng.evaluate(_prop(estimated_risk_amount=100.0))                                 # 1.0% on a major: allowed
+    assert ok.approved
+    bad = eng.evaluate(_prop(symbol="1000SATSUSDT", qty=100, estimated_risk_amount=100.0, meta={"ref_price": 0.05}))
+    assert not bad.approved and any("Risk per trade" in r for r in bad.reasons)
+
+
+def test_live_order_blocked_when_market_closed_but_paper_only_warns():
+    sunday = at(2026, 11, 8, 15)
+    review_live = market_risk_review("AAPL", "alpaca", "live", now=sunday)
+    review_paper = market_risk_review("AAPL", "alpaca", "paper", now=sunday)
+    assert any("closed" in r for r in review_live.blocking_reasons) and review_live.tradeable_now is False
+    assert review_paper.blocking_reasons == [] and any("closed" in w for w in review_paper.warnings)
+    # crypto never closes, so it is never blocked on session grounds
+    assert market_risk_review("BTCUSDT", "binance", "live", now=sunday).blocking_reasons == []
+
+
+def test_engine_fails_closed_if_market_review_breaks(monkeypatch):
+    import app.risk.engine as eng_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("market data layer down")
+
+    monkeypatch.setattr(eng_mod, "market_risk_review", boom)
+    d = RiskEngine(_settings()).evaluate(_prop())
+    assert not d.approved and any("fail-closed" in r for r in d.reasons)
+
+
+def test_unknown_symbols_do_not_get_hard_blocked_by_classification():
+    r = market_risk_review("ZZZ123", "alpaca", "paper")
+    assert r.blocking_reasons == [] and r.warnings
+    assert market_risk_review("RANDOMTICKER", "alpaca", "paper").blocking_reasons == []   # heuristic US ticker passes
+
+
+# ------------------------------------------------------------------ API
+@pytest.fixture(scope="module")
+def client():
+    return TestClient(app)
+
+
+def test_markets_page_renders(client):
+    r = client.get("/markets")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "Multi-Market" in r.text and "{{" not in r.text and "{%" not in r.text
+
+
+def test_overview_lists_every_market_and_clock(client):
+    j = client.get("/api/markets/overview").json()
+    assert {"forex", "metal", "crypto", "stock", "index", "commodity", "future", "option"} <= set(j["asset_classes"])
+    assert j["asset_classes"]["crypto"]["execution"] and not j["asset_classes"]["forex"]["execution"]
+    assert j["asset_classes"]["forex"]["gap"] and {"us_equity", "fx_24x5", "crypto_24x7", "ngx"} <= set(j["sessions"])
+
+
+def test_instruments_filter_and_search(client):
+    j = client.get("/api/markets/instruments", params={"asset_class": "crypto", "q": "sats"}).json()
+    assert j["count"] >= 1 and all(i["asset_class"] == "crypto" for i in j["instruments"])
+    assert client.get("/api/markets/instruments", params={"asset_class": "bogus"}).status_code == 422
+
+
+def test_classify_sessions_profile_assess_endpoints(client):
+    assert client.get("/api/markets/classify", params={"symbol": "xau/usd"}).json()["symbol"] == "XAUUSD"
+    assert client.get("/api/markets/sessions", params={"symbol": "BTCUSDT"}).json()["state"] == "open"
+    assert client.get("/api/markets/sessions", params={"session_id": "nope"}).status_code == 404
+    assert client.get("/api/markets/profile", params={"symbol": "SOLUSDT"}).json()["profile"]["key"] == "crypto.large"
+    j = client.get("/api/markets/assess", params={"symbol": "BTCUSDT", "price": 95000, "atr": 1500}).json()
+    assert j["sizing"]["notional_usd"] <= 600.0 + 1e-6 and j["planning_only"] is True
+
+
+@pytest.mark.parametrize("params", [
+    {"symbol": "ZZZ!!"}, {"symbol": "BTC USDT; DROP"}, {"symbol": "EURUSD", "price": -1}, {"symbol": "EURUSD", "price": "nan"},
+    {"symbol": "EURUSD", "price": "inf"}, {"symbol": "EURUSD", "risk_pct": 50}, {"symbol": "EURUSD", "side": "hold"},
+    {"symbol": "A" * 200},
+])
+def test_assess_rejects_bad_input(client, params):
+    assert client.get("/api/markets/assess", params=params).status_code == 422
+
+
+def test_snapshot_for_unintegrated_market_is_honest(client):
+    j = client.get("/api/markets/snapshot", params={"symbol": "EURUSD"}).json()
+    assert j["price"] is None and j["data_status"] == "provider_not_integrated"
+
+
+def test_risk_gateway_exposes_market_context_without_new_client_inputs(monkeypatch):
+    import asyncio
+
+    from app.api import risk_gateway
+
+    class _Market:
+        def __init__(self, settings):
+            pass
+
+        async def get_snapshot(self, provider, symbol):
+            return {"provider": provider, "symbol": symbol, "price": 100.0, "data_status": "fresh",
+                    "ts_utc": datetime.now(U).isoformat()}
+
+    class _Activities:
+        def __init__(self, db):
+            pass
+
+        def list_activities(self, **kwargs):
+            return []
+
+    monkeypatch.setattr(risk_gateway, "MarketService", _Market)
+    monkeypatch.setattr(risk_gateway, "ActivityStore", _Activities)
+    req = risk_gateway.PreflightRequest(provider="binance", environment="paper", symbol="BTCUSDT", side="buy", quantity=0.01)
+    result = asyncio.run(risk_gateway.execution_preflight(req, settings=Settings(paper_starting_equity=10000.0), db=None, _auth=None))
+    assert result["market_context"]["asset_class"] == "crypto" and result["market_context"]["tier"] == "major"
+    assert "warnings" in result and result["submits_order"] is False
+    assert set(risk_gateway.PreflightRequest.model_fields) == {"provider", "environment", "symbol", "side", "quantity", "order_type", "limit_price"}

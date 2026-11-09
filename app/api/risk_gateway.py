@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.market.service import MarketService
+from app.markets.assessment import market_risk_review
 from app.intelligence.council import TradingCouncil
 from app.risk.engine import OrderProposal, RiskEngine
 from app.security.auth import require_api_key
@@ -117,6 +118,7 @@ async def execution_preflight(
         meta={"reference_price": price},
     )
     decision = RiskEngine(settings).evaluate(proposal)
+    market_review = market_risk_review(req.symbol, req.provider, req.environment)
 
     reasons = list(decision.reasons)
     quote_price = snapshot.get("price")
@@ -141,6 +143,8 @@ async def execution_preflight(
         "decision": "APPROVED" if approved else "REJECTED",
         "reasons": reasons,
         "risk_officer": "Helena Frost",
+        "warnings": decision.warnings,
+        "market_context": market_review.to_dict(),
         "risk_inputs": {"source": "server", **risk_context.to_dict()},
         "market": {
             "provider": snapshot.get("provider"),

@@ -10,15 +10,22 @@ Hard rules:
 - Data freshness for live orders
 - Quantity / precision sanity
 - Explicit environment targeting (paper/testnet/live)
+- Market-aware limits (app.markets): venue/asset-class support, session state for live
+  orders, and per-market tightening of the notional and risk caps (never loosening)
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
 from app.config import Settings, get_settings
+from app.markets.assessment import market_risk_review
+from app.markets.types import MarketReview
+
+logger = logging.getLogger("eti.risk")
 
 
 class Decision(str, Enum):
@@ -56,6 +63,7 @@ class RiskDecision:
     risk_per_trade_pct: float
     approved_qty: Optional[float] = None
     notes: str = ""
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def approved(self) -> bool:
@@ -71,6 +79,17 @@ class RiskEngine:
     def evaluate(self, proposal: OrderProposal) -> RiskDecision:
         reasons: list[str] = []
         s = self.settings
+
+        # --- Market-aware review (venue support, session state, per-market cap tightening) ---
+        # A failure here must never silently widen limits: fail closed.
+        try:
+            review = market_risk_review(proposal.symbol, proposal.provider, proposal.environment)
+        except Exception:
+            logger.exception("market review failed for %s; failing closed", proposal.symbol)
+            review = MarketReview()
+            reasons.append("Market review unavailable; order rejected (fail-closed)")
+        reasons.extend(review.blocking_reasons)
+        warnings: list[str] = list(review.warnings)
 
         # --- Kill switch (all environments) ---
         if getattr(s, "kill_switch", False):
@@ -103,7 +122,7 @@ class RiskEngine:
             reasons.append("Account equity must be positive for risk sizing")
 
         # --- Max position notional (6% default) ---
-        max_notional_pct = getattr(s, "max_position_notional_pct", 6.0)
+        max_notional_pct = getattr(s, "max_position_notional_pct", 6.0) * review.notional_cap_multiplier
         if proposal.equity > 0 and proposal.qty > 0:
             px = proposal.limit_price or (proposal.meta or {}).get("ref_price")
             if px and float(px) > 0:
@@ -136,9 +155,10 @@ class RiskEngine:
         risk_pct = s.default_risk_per_trade_pct
         if proposal.estimated_risk_amount is not None and proposal.equity > 0:
             risk_pct = (proposal.estimated_risk_amount / proposal.equity) * 100
-            if risk_pct > s.default_risk_per_trade_pct:
+            risk_limit = s.default_risk_per_trade_pct * review.risk_multiplier
+            if risk_pct > risk_limit + 1e-9:
                 reasons.append(
-                    f"Risk per trade {risk_pct:.2f}% exceeds limit {s.default_risk_per_trade_pct}%"
+                    f"Risk per trade {risk_pct:.2f}% exceeds limit {risk_limit:g}%"
                 )
 
         # --- Data freshness (live only) ---
@@ -158,6 +178,7 @@ class RiskEngine:
                 reasons=reasons,
                 risk_per_trade_pct=risk_pct,
                 notes="; ".join(reasons),
+                warnings=warnings,
             )
 
         return RiskDecision(
@@ -166,6 +187,7 @@ class RiskEngine:
             risk_per_trade_pct=risk_pct,
             approved_qty=proposal.qty,
             notes="Approved by RiskEngine",
+            warnings=warnings,
         )
 
     def position_size(

@@ -164,6 +164,7 @@ class TradingService:
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
                     "notes": decision.notes,
+                    "warnings": decision.warnings,
                     "officer": "Helena Frost",
                 },
                 "provider_response": resp,
