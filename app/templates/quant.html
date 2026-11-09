@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ETI — Global Market Intelligence Command Center</title>
+<style>
+:root{--bg:#0b0f17;--card:#141b29;--ink:#e6edf7;--mut:#8a97ad;--ok:#2ecc71;--warn:#f1c40f;--bad:#e74c3c;--acc:#4c8dff}
+@media(prefers-color-scheme:light){:root{--bg:#f4f6fa;--card:#fff;--ink:#14213a;--mut:#5b6980}}
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:14px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #2a3550}
+h1{font-size:18px;margin:0;flex:1}main{padding:14px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{background:var(--card);border-radius:10px;padding:14px;overflow:auto}.card h2{margin:0 0 10px;font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 12px}.kv span:nth-child(odd){color:var(--mut)}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:4px 6px;border-bottom:1px solid #2a3550}
+.pill{padding:2px 8px;border-radius:99px;font-size:11px}.ACTIVE{background:#1d5e3a}.STALE{background:#6b5a12}.UNAVAILABLE,.NEVER_SCANNED{background:#7a2b25}
+input,select,button{background:var(--bg);color:var(--ink);border:1px solid #2a3550;border-radius:6px;padding:6px 8px}button{cursor:pointer;background:var(--acc);border:0;color:#fff}
+button.danger{background:var(--bad)}.full{grid-column:1/-1}.note{color:var(--mut);font-size:12px}.err{color:var(--bad)}
+label{display:flex;flex-direction:column;font-size:11px;color:var(--mut);gap:2px}.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+</style></head><body>
+<header><h1>Global Market Intelligence Command Center</h1>
+<input id="key" type="password" placeholder="API key (for actions)" size="18">
+<button onclick="refresh()">Refresh</button><button onclick="scanNow()">Run scan</button>
+<button id="ks" class="danger" onclick="toggleKill()">Kill switch</button><span id="msg" class="note"></span></header>
+<main>
+<section class="card"><h2>Global overview</h2><div class="kv" id="ov">Loading…</div></section>
+<section class="card"><h2>Provider health</h2><table id="prov"><tbody></tbody></table></section>
+<section class="card"><h2>Position sizing (Kelly, 6% cap)</h2>
+<div class="form">
+<label>Bankroll<input id="k_bank" value="100000"></label><label>Entry<input id="k_entry" value="100"></label>
+<label>Stop<input id="k_stop" value="95"></label><label>Target<input id="k_tgt" value="115"></label>
+<label>Win prob<input id="k_p" value="0.58"></label><label>Samples<input id="k_n" value="200"></label>
+<label>Side<select id="k_side"><option>buy</option><option>sell</option></select></label></div>
+<p><button onclick="kelly()">Calculate</button></p><div class="kv" id="kout"></div></section>
+<section class="card"><h2>Execution monitor</h2><div class="kv" id="exm">Loading…</div></section>
+<section class="card full"><h2>Mispricing opportunities (&gt; 8%)</h2>
+<div class="form"><label>Direction<select id="f_dir" onchange="loadMis()"><option value="">all</option><option>undervalued</option><option>overvalued</option></select></label>
+<label>Verification<select id="f_conf" onchange="loadMis()"><option value="">all</option><option value="true">confirmed</option><option value="false">unconfirmed</option></select></label></div>
+<table id="mis"><thead><tr><th>Symbol</th><th>Direction</th><th>Mispricing %</th><th>Band</th><th>Price @ discovery</th><th>Fair value</th><th>Confirmed</th><th>Open checks</th></tr></thead><tbody></tbody></table></section>
+<section class="card full"><h2>Market coverage registry</h2>
+<div class="form"><label>Status<select id="c_status" onchange="loadCov()"><option value="">all</option><option>ACTIVE</option><option>STALE</option><option>UNAVAILABLE</option><option>NEVER_SCANNED</option></select></label>
+<label>Asset class<select id="c_ac" onchange="loadCov()"><option value="">all</option><option>crypto</option><option>equity</option><option>etf</option><option>forex</option><option>commodity</option></select></label>
+<label>Exchange<input id="c_ex" onchange="loadCov()" placeholder="e.g. BINANCE"></label></div>
+<p class="note" id="covtot"></p>
+<table id="cov"><thead><tr><th>Symbol</th><th>Class</th><th>Exchange</th><th>Provider</th><th>Failover</th><th>Status</th><th>Price</th><th>Age s</th><th>Quality</th><th>Last valid data</th></tr></thead><tbody></tbody></table></section>
+<section class="card full"><h2>Prediction ledger (append-only, existing ledger)</h2><p class="note" id="perf"></p>
+<table id="led"><thead><tr><th>Asset</th><th>Entry ref</th><th>Fair value</th><th>Valuation confidence</th><th>Direction</th><th>Horizon</th><th>Status</th><th>Recorded</th></tr></thead><tbody></tbody></table></section>
+<section class="card full"><h2>Recent orders</h2><table id="ord"><thead><tr><th>Signal</th><th>Symbol</th><th>Env</th><th>State</th><th>Signal→ack ms</th><th>Time</th></tr></thead><tbody></tbody></table></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);let killOn=false;
+const H=()=>({"Content-Type":"application/json",...($("key").value?{"X-API-Key":$("key").value}:{})});
+const esc=s=>String(s??"—").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const kv=(o)=>Object.entries(o).map(([k,v])=>`<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
+async function j(u,o){const r=await fetch(u,o);if(!r.ok){throw new Error(u+" → "+r.status+" "+(await r.text()).slice(0,120))}return r.json()}
+function say(t,bad){$("msg").textContent=t;$("msg").className=bad?"err":"note"}
+async function loadOv(){try{const o=await j("/api/quant/overview");killOn=o.controls.kill_switch;
+$("ks").textContent=killOn?"Release kill switch":"Kill switch";
+$("ov").innerHTML=kv({"Markets monitored":o.markets_monitored,"Actively scanned (fresh)":o.markets_actively_scanned,
+"Scan completion %":o.scan_completion_pct,"Last full scan":o.last_full_scan||"never","Scan job running":o.scan_job_running,"Scan enabled (config)":o.scan_enabled,
+"Fresh ratio":o.freshness.fresh_ratio,"Open mispricing >8%":o.mispricing_open_above_8pct,"Confirmed":o.mispricing_confirmed,
+"Undervalued / Overvalued":o.undervalued+" / "+o.overvalued,"Status counts":JSON.stringify(o.status_counts),
+"Asset classes":JSON.stringify(o.asset_classes),"Live trading":o.live_trading_enabled?"ENABLED":"disabled","Position cap %":o.position_cap_pct,
+"Fractional Kelly":o.kelly_fraction,"Trading blocked":o.controls.blocked||"no"});
+$("prov").querySelector("tbody").innerHTML=Object.entries(o.provider_health).map(([n,h])=>`<tr><td>${esc(n)}</td><td>ok ${h.ok} / err ${h.errors}</td><td>${esc(h.last_error||"")}</td></tr>`).join("")||"<tr><td>no providers</td></tr>";
+}catch(e){say(e.message,1)}}
+async function loadMis(){try{const q=new URLSearchParams();if($("f_dir").value)q.set("direction",$("f_dir").value);if($("f_conf").value)q.set("confirmed",$("f_conf").value);
+const r=await j("/api/quant/mispricing?"+q);$("mis").querySelector("tbody").innerHTML=r.map(a=>`<tr><td>${esc(a.symbol)}</td><td>${esc(a.direction)}</td><td>${a.mispricing_pct.toFixed(2)}</td><td>${esc(a.band)}</td><td>${a.market_price_at_discovery}</td><td>${a.fair_value_at_discovery}</td><td>${a.confirmed?"yes":"no"}</td><td>${esc([...(a.failed_checks||[]),...(a.unverified_checks||[])].join(", "))}</td></tr>`).join("")||"<tr><td colspan=8>No open mispricing alerts</td></tr>"}catch(e){say(e.message,1)}}
+async function loadCov(){try{const q=new URLSearchParams({limit:"200"});if($("c_status").value)q.set("status",$("c_status").value);if($("c_ac").value)q.set("asset_class",$("c_ac").value);if($("c_ex").value)q.set("exchange",$("c_ex").value);
+const r=await j("/api/quant/coverage?"+q);$("covtot").textContent=`${r.total} instruments match (showing ${r.items.length})`;
+$("cov").querySelector("tbody").innerHTML=r.items.map(c=>`<tr><td>${esc(c.symbol)}</td><td>${esc(c.asset_class)}</td><td>${esc(c.exchange)}</td><td>${esc(c.provider)}</td><td>${esc(c.failover_provider)}</td><td><span class="pill ${esc(c.status)}">${esc(c.status)}</span></td><td>${esc(c.price)}</td><td>${c.data_age_seconds==null?"—":Math.round(c.data_age_seconds)}</td><td>${c.quality_score}</td><td>${esc(c.last_valid_data_ts)}</td></tr>`).join("")}catch(e){say(e.message,1)}}
+async function loadLed(){try{const [l,p]=await Promise.all([j("/api/quant/ledger"),j("/api/quant/performance")]);
+$("perf").textContent=p.scored?`Scored ${p.scored}/${p.predictions}: hit rate ${p.hit_rate}, convergence ${p.convergence_rate}`:(p.note||"");
+$("led").querySelector("tbody").innerHTML=l.map(r=>`<tr><td>${esc(r.asset)}</td><td>${r.entry_reference}</td><td>${esc(r.target_base)}</td><td>${r.probability}</td><td>${esc(r.direction)}</td><td>${esc(r.horizon_label)}</td><td>${esc(r.status)}</td><td>${esc(r.created_at)}</td></tr>`).join("")||"<tr><td colspan=8>No predictions recorded</td></tr>"}catch(e){say(e.message,1)}}
+async function loadExec(){try{const [m,o]=await Promise.all([j("/api/quant/execution/metrics"),j("/api/quant/execution/orders")]);
+$("exm").innerHTML=kv({"Orders (this process)":m.orders,"States":JSON.stringify(m.state_counts),"Rejection rate":m.rejection_rate,"Partial-fill rate":m.partial_fill_rate,
+"Avg signal→risk ms":m.avg_signal_to_risk_ms,"Avg risk→submit ms":m.avg_risk_to_submit_ms,"Avg exchange ack ms":m.avg_exchange_ack_ms,"Avg slippage bps":m.avg_slippage_bps});
+$("ord").querySelector("tbody").innerHTML=o.map(r=>`<tr><td>${esc(r.signal_id)}</td><td>${esc(r.symbol)}</td><td>${esc(r.environment)}</td><td>${esc(r.state)}</td><td>${r.latency_ms&&r.latency_ms.signal_to_ack!=null?r.latency_ms.signal_to_ack.toFixed(1):"—"}</td><td>${esc(r.ts)}</td></tr>`).join("")||"<tr><td colspan=6>No orders</td></tr>"}catch(e){say(e.message,1)}}
+async function kelly(){try{const b={bankroll:+$("k_bank").value,entry_price:+$("k_entry").value,stop_price:+$("k_stop").value,target_price:+$("k_tgt").value,win_probability:+$("k_p").value,sample_size:+$("k_n").value,side:$("k_side").value};
+const r=await j("/api/quant/kelly",{method:"POST",headers:H(),body:JSON.stringify(b)});
+$("kout").innerHTML=kv({"Approved":r.approved,"Reasons":r.reasons.join("; "),"Bankroll":r.bankroll,"Full Kelly %":r.full_kelly_pct.toFixed(2),"Fractional Kelly %":r.fractional_kelly_pct.toFixed(3),
+"Final allocation %":r.final_allocation_pct.toFixed(3),"Notional":r.position_notional.toFixed(2),"Quantity":r.quantity.toFixed(4),"Max loss at stop":r.max_loss_at_stop.toFixed(2),
+"Binding constraint":r.binding_constraint,"Exposure after %":r.portfolio_exposure_after_pct.toFixed(2)})}catch(e){say(e.message,1)}}
+async function scanNow(){say("Scanning…");try{const m=await j("/api/quant/scan/run",{method:"POST",headers:H()});say(`Scan done in ${m.duration_seconds}s: ${m.scanned_ok} ok, ${m.stale} stale, ${m.unavailable} unavailable`);refresh()}catch(e){say(e.message,1)}}
+async function toggleKill(){try{await j("/api/quant/controls/kill-switch",{method:"POST",headers:H(),body:JSON.stringify({engage:!killOn,reason:"dashboard"})});refresh()}catch(e){say(e.message,1)}}
+function refresh(){loadOv();loadMis();loadCov();loadLed();loadExec()}
+refresh();setInterval(()=>{loadOv();loadExec()},15000);
+</script></body></html>
