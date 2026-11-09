@@ -72,9 +72,11 @@ class GlobalScanJob:
         self.interval_seconds = 600
         self._task: Optional[asyncio.Task] = None
         self.last_error: Optional[str] = None
+        self.last_convergence: Optional[dict] = None
 
     async def run_once(self) -> dict:
         from app.database import SessionLocal
+        from app.quant.convergence import track_open_alerts
         from app.quant.service import QuantStore
         sc = get_scanner()
         if not sc.universe:
@@ -84,9 +86,10 @@ class GlobalScanJob:
         db = SessionLocal()
         try:
             QuantStore(db).save_scan(m, sc.coverage)
+            self.last_convergence = track_open_alerts(db, sc)
         finally:
             db.close()
-        return m.to_dict()
+        return {**m.to_dict(), "convergence": self.last_convergence}
 
     async def _loop(self):
         while True:
@@ -109,7 +112,8 @@ class GlobalScanJob:
 
     def status(self) -> dict:
         return {"running": self._task is not None, "interval_seconds": self.interval_seconds,
-                "last_error": self.last_error, **get_scanner().status()}
+                "last_error": self.last_error, "last_convergence": self.last_convergence,
+                **get_scanner().status()}
 
 
 scan_job = GlobalScanJob()
