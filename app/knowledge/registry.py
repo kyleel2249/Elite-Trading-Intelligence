@@ -12,6 +12,7 @@ from app.knowledge import profiles_deep3 as d3
 from app.knowledge import profiles_deep4 as d4
 from app.knowledge import profiles_more as m
 from app.knowledge.strategies import STRATEGY_MODULES
+from app.knowledge.research_2026 import apply as apply_research
 
 
 def _all_profiles() -> dict[str, TraderKnowledgeProfile]:
@@ -25,6 +26,7 @@ def _all_profiles() -> dict[str, TraderKnowledgeProfile]:
     # d4 deepens the additional traders that previously held template filler; later update wins.
     out.update(d4.DEEP_PROFILES)
     out.pop("paul_tudor_secondary_note", None)
+    apply_research(out)
     return out
 
 
