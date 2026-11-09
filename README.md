@@ -62,6 +62,16 @@ public WebSocket streams for live updates. It is read-only and does not require 
 credentials. Exchange connectivity, browser networking, public API limits and stream
 availability apply. The interface must not represent stale or disconnected data as live.
 
+## Trade / no-trade intelligence: ETI Market Readiness Engine
+
+`GET /api/readiness` (and the **ETI Market Readiness Engine** dashboard panel) decide whether trading is advisable now,
+in a session, in a given hour, today or tomorrow, and can recommend **not trading** with reasons. Verdicts:
+Favourable, Selectively favourable, Uncertain, High risk, Avoid trading. Twelve factors are evaluated; anything that cannot be
+verified is reported as *not evaluated* and lowers the verdict. Crypto has live price data; Forex and Equities are
+schedule/calendar based only until a price feed is connected. An economic-calendar feed must be configured
+(`ETI_EVENT_FEED_URL` / `ETI_EVENTS_JSON`); without it the calendar is reported as unverified. A favourable rating is never an
+entry signal. See [docs/READINESS.md](docs/READINESS.md).
+
 ## Important feature boundary
 
 This Cloudflare edge deployment is a working market dashboard foundation, not a completed

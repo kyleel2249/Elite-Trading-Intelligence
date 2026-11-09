@@ -14,9 +14,11 @@ import { handleOmnisignal } from "./algo/omni-api.ts";
 import { handlePaper } from "./algo/paper-api.ts";
 import { handleOmniUi } from "./algo/omni-ui.ts";
 import { handleKnowledge } from "./knowledge.ts";
+import { handleReadiness } from "./readiness/api.ts";
+import type { ReadinessEnv } from "./readiness/api.ts";
 import type { MarketEnv } from "./market.ts";
 
-export interface Env extends ExecutionEnv, MarketEnv {
+export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv {
   ETI_EDGE?: string;
   MARKET_CACHE?: KVNamespace;
 }
@@ -81,6 +83,20 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <div class="execution-note" id="signalSummary" style="margin-top:10px">Market-derived indicator confluence, not a guaranteed prediction.</div>
 <div class="execution-note" id="signalEvidence" style="margin-top:8px"></div>
 <div class="execution-note" id="signalAttribution" style="margin-top:8px"></div>
+</section>
+<section class="panel" id="readinessPanel" style="margin-top:14px">
+<style>.rdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:10px}.rdcard{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0b1422}.rdchip{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11px;border:1px solid currentColor;white-space:nowrap}.rdhours{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px;margin-top:8px}.rdhours span{height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#06101c;font-weight:700}.rdtable td,.rdtable th{text-align:left;vertical-align:top}.rdtable details{margin-top:4px;color:var(--muted)}@media(max-width:850px){.rdhours{grid-template-columns:repeat(6,minmax(0,1fr))}}</style>
+<div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Market Readiness Engine</h2><span class="muted" id="rdMeta">Loading...</span></div>
+<p class="execution-note">Decides whether trading is advisable at all: now, today, tomorrow, in a session or in a particular hour. Standing aside is a valid outcome. Factors that cannot be verified are shown as not evaluated and lower the verdict instead of being assumed safe.</p>
+<div class="toolbar">
+<select id="rdMarket" aria-label="Market"><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="equities">Equities</option></select>
+<input id="rdSymbol" placeholder="Symbol (optional for Forex)" maxlength="20" autocomplete="off" style="width:170px" aria-label="Readiness symbol">
+<select id="rdScope" aria-label="Window"><option value="now">Next 2 hours</option><option value="today">Today (UTC day)</option><option value="tomorrow">Tomorrow (UTC day)</option><option value="session">A trading session</option><option value="hour">A specific hour (UTC)</option></select>
+<select id="rdSession" style="display:none" aria-label="Session"><option value="asian">Asian session</option><option value="london">London session</option><option value="new_york">New York session</option><option value="london_ny_overlap">London/New York overlap</option><option value="sydney">Sydney session</option></select>
+<input id="rdHour" type="number" min="0" max="23" value="0" style="display:none;width:90px" aria-label="UTC hour">
+<button id="rdRefresh" class="active">Assess readiness</button><button id="rdTextBtn">Text report</button></div>
+<div id="rdOut" role="status" aria-live="polite"><span class="muted">Waiting for assessment...</span></div>
+<pre id="rdText" class="execution-output" style="display:none"></pre>
 </section>
 <section class="panel" style="margin-top:14px">
 <h2>Order Execution</h2>
@@ -503,6 +519,41 @@ async function showTrader(id){
 }
 $('traderSelect').onchange=function(){showTrader($('traderSelect').value);};
 $('traderSearch').oninput=function(){clearTimeout(traderTimer);traderTimer=setTimeout(loadTraders,300);};
+/* ===== ETI Market Readiness Engine panel ===== */
+const RD_COL={FAVOURABLE:'#21d69a',SELECTIVELY_FAVOURABLE:'#a3e635',UNCERTAIN:'#f0c674',HIGH_RISK:'#ff9a52',AVOID_TRADING:'#ff637d'};
+const RD_RATE={supportive:'#21d69a',neutral:'#8fa3bd',caution:'#f0c674',adverse:'#ff9a52',severe:'#ff637d',not_evaluated:'#56a8ff'};
+let rdSeq=0,rdTimer=null;
+function rdQuery(){const m=$('rdMarket').value,s=$('rdSymbol').value.trim().toUpperCase(),sc=$('rdScope').value;let q='market='+encodeURIComponent(m);if(s)q+='&symbol='+encodeURIComponent(s);
+ if(sc==='now')q+='&scope=now';else if(sc==='today')q+='&scope=day&day=today';else if(sc==='tomorrow')q+='&scope=day&day=tomorrow';else if(sc==='session')q+='&scope=session&session='+encodeURIComponent($('rdSession').value);else q+='&scope=hour&hour='+Number($('rdHour').value||0);return q;}
+function rdChip(t,c){return '<span class="rdchip" style="color:'+c+'">'+esc(t)+'</span>';}
+function rdRender(d){
+ const o=d.overall,col=RD_COL[o.status]||'#8fa3bd';
+ let h='<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0 10px"><span style="font-size:20px;font-weight:700;color:'+col+';border:1px solid '+col+';border-radius:10px;padding:6px 14px">'+esc(o.statusLabel)+'</span><span class="muted">'+esc(d.market)+(d.symbol?' '+esc(d.symbol):'')+' | '+esc(o.label)+' | '+o.evaluated+' of 12 factors evaluated | '+(o.liveConditionsApplied?'live conditions applied':'schedule and history only')+'</span></div>';
+ h+='<div><b>Reason</b><ul class="ev">'+((o.reasons||[]).slice(0,8).map(r=>'<li>'+esc(r)+'</li>').join('')||'<li>No factor could be evaluated.</li>')+'</ul></div>';
+ if((o.caps||[]).length)h+='<ul class="ev" style="color:#ffb08c">'+o.caps.map(c=>'<li>'+esc(c)+'</li>').join('')+'</ul>';
+ h+='<div style="margin:8px 0"><b>Recommendation</b><div>'+esc(o.recommendation)+'</div><div class="execution-note">Do not enter simply because conditions are rated favourably. Wait for a valid setup and confirmation.</div></div>';
+ h+='<div class="scroll"><table class="rdtable"><tr><th>#</th><th>Factor</th><th>Rating</th><th>Finding</th></tr>'+o.factors.map(f=>'<tr><td>'+f.id+'</td><td>'+esc(f.factor)+'</td><td>'+rdChip(f.rating.replace('_',' '),RD_RATE[f.rating]||'#8fa3bd')+'</td><td>'+esc(f.headline)+((f.detail||[]).length?'<details><summary>Details</summary>'+f.detail.map(x=>'<div>'+esc(x)+'</div>').join('')+'</details>':'')+'</td></tr>').join('')+'</table></div>';
+ h+='<div style="margin-top:12px"><b>Trading sessions</b><div class="rdgrid">'+d.sessions.map(s=>{const a=s.assessment,c=RD_COL[a.status]||'#8fa3bd',m=s.measured;return '<div class="rdcard"><div style="display:flex;justify-content:space-between;gap:6px;align-items:center"><b>'+esc(s.label)+'</b>'+rdChip(a.statusLabel,c)+'</div><div class="execution-note">'+(s.activeNow?'Active now. ':'')+esc(a.label)+'</div><ul class="ev">'+(a.reasons||[]).slice(0,3).map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul>'+(m?'<div class="execution-note">Measured: range '+m.rangeVsBaseline.toFixed(2)+'x, volume '+m.volumeVsBaseline.toFixed(2)+'x baseline over '+m.instances+' sessions'+(m.sampleOk?'':' (small sample)')+'</div>':'')+(s.structuralFit?'<div class="execution-note">Structural fit for '+esc(d.symbol)+': '+esc(s.structuralFit)+' (schedule-based, not measured)</div>':'')+'</div>';}).join('')+'</div></div>';
+ if(d.hours)h+='<div style="margin-top:12px"><b>Hour by hour (UTC)</b><div class="rdhours">'+d.hours.map(x=>'<span title="'+esc(String(x.hourUtc).padStart(2,'0')+':00 UTC '+x.statusLabel+(x.topReason?' - '+x.topReason:''))+'" style="background:'+(RD_COL[x.status]||'#8fa3bd')+'">'+String(x.hourUtc).padStart(2,'0')+'</span>').join('')+'</div></div>';
+ if(o.eventHits&&o.eventHits.length)h+='<div style="margin-top:12px"><b>Events affecting this window</b><ul class="ev">'+o.eventHits.map(e=>'<li>'+esc(e.title)+' ['+esc(e.impact)+', '+esc(e.severity.replace('_',' '))+'] '+esc(e.time.slice(0,16).replace('T',' '))+' UTC</li>').join('')+'</ul></div>';
+ if(o.closures&&o.closures.length)h+='<div class="execution-note" style="margin-top:10px">Upcoming closures: '+o.closures.map(c=>esc(c.date+' '+c.exchange+' '+c.name)).join('; ')+'</div>';
+ if(o.notEvaluated&&o.notEvaluated.length)h+='<div class="execution-note" style="margin-top:8px">Not evaluated: '+o.notEvaluated.map(esc).join('; ')+'</div>';
+ h+='<div class="execution-note" style="margin-top:8px">'+esc((d.disclaimers||[])[0]||'')+'</div>';
+ $('rdOut').innerHTML=h;$('rdText').textContent=d.text||'';
+ const q=d.dataQuality||{};$('rdMeta').textContent='Generated '+d.generatedAt.slice(11,19)+' UTC | calendar: '+((q.economicCalendar||{}).status||'unknown')+' | price data: '+(q.priceData||'unknown');
+}
+async function loadReadiness(){
+ const seq=++rdSeq;$('rdMeta').textContent='Assessing...';
+ try{const r=await fetch('/api/readiness?'+rdQuery(),{cache:'no-store'}),d=await r.json();if(seq!==rdSeq)return;if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));rdRender(d);}
+ catch(e){if(seq!==rdSeq)return;$('rdOut').innerHTML='<span style="color:#ffb08c">Readiness unavailable: '+esc(e.message)+'. Treat this as UNVERIFIED and do not assume conditions are safe.</span>';$('rdMeta').textContent='Unavailable';}
+}
+function rdSync(){const sc=$('rdScope').value;$('rdSession').style.display=sc==='session'?'':'none';$('rdHour').style.display=sc==='hour'?'':'none';if(sc==='hour'&&!$('rdHour').dataset.set){$('rdHour').value=(new Date().getUTCHours()+1)%24;$('rdHour').dataset.set='1';}}
+$('rdScope').onchange=()=>{rdSync();loadReadiness();};$('rdSession').onchange=loadReadiness;$('rdHour').onchange=loadReadiness;$('rdRefresh').onclick=loadReadiness;
+$('rdMarket').onchange=()=>{$('rdSymbol').value=$('rdMarket').value==='crypto'?$('symbol').value:'';loadReadiness();};
+$('rdSymbol').onchange=()=>{$('rdSymbol').value=$('rdSymbol').value.trim().toUpperCase();loadReadiness();};
+$('rdTextBtn').onclick=()=>{const t=$('rdText');t.style.display=t.style.display==='none'?'block':'none';};
+$('symbol').addEventListener('change',()=>{if($('rdMarket').value==='crypto'){$('rdSymbol').value=$('symbol').value;loadReadiness();}});
+$('rdSymbol').value=$('symbol').value;rdSync();loadReadiness();rdTimer=setInterval(loadReadiness,120000);
 loadTraders();
 refreshExecutionStatus();
 loadSignal();
@@ -523,6 +574,9 @@ export default {
     }
     if (url.pathname === "/api/signals") {
       return handleSignals(request, _env);
+    }
+    if (url.pathname === "/api/readiness" || url.pathname.startsWith("/api/readiness/")) {
+      return handleReadiness(request, _env);
     }
     if (url.pathname === "/api/algo/signal") {
       return handleAlgoSignal(request, _env);
