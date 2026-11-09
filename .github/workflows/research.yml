@@ -8,6 +8,7 @@ on:
       strategy: { description: "scalp | intraday | swing | position", default: "intraday" }
       days: { description: "History length in days", default: "365" }
       folds: { description: "Walk-forward folds", default: "4" }
+      run_optimizer: { description: "Run the walk-forward optimizer (slow)", default: "true" }
 
 permissions:
   contents: read
@@ -33,10 +34,14 @@ jobs:
       - name: Replay (swift_only / gainz_only / combined) on real data
         env: { SYMBOL: "${{ inputs.symbol }}", STRATEGY: "${{ inputs.strategy }}", DAYS: "${{ inputs.days }}" }
         run: node scripts/replay.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS" --compare --out replay.json > replay-summary.json
+      - name: Trade-level diagnostics (what costs take versus what signals earn)
+        run: node scripts/diagnose.mjs replay.json combined
       - name: Walk-forward optimizer on real data
+        if: ${{ inputs.run_optimizer == 'true' }}
         env: { SYMBOL: "${{ inputs.symbol }}", STRATEGY: "${{ inputs.strategy }}", DAYS: "${{ inputs.days }}", FOLDS: "${{ inputs.folds }}" }
         run: node scripts/optimize.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS" --folds "$FOLDS" --out optimize.json > /dev/null
       - name: Summary
+        if: ${{ inputs.run_optimizer == 'true' }}
         run: |
           node -e '
             const o=JSON.parse(require("fs").readFileSync("optimize.json","utf8")), r=JSON.parse(require("fs").readFileSync("replay-summary.json","utf8"));
