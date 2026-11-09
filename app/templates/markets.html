@@ -15,11 +15,11 @@
     .nav a,.btn{text-decoration:none;color:var(--text);background:rgba(30,41,59,.85);border:1px solid var(--border);padding:.4rem .7rem;border-radius:8px;font-size:.78rem;cursor:pointer}
     .nav a:hover,.btn:hover{border-color:var(--cyan)}
     .btn.primary{border-color:rgba(34,211,238,.45);color:var(--cyan)}
-    main{max-width:1180px;margin:0 auto;padding:1.1rem 1.25rem 2.5rem;display:grid;gap:1rem}
-    .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1rem}
+    main{max-width:1180px;margin:0 auto;padding:1.1rem 1.25rem 2.5rem;display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}
+    .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1rem;min-width:0}
     .panel h2{margin:0 0 .7rem;font-size:.95rem}
     .grid{display:grid;gap:.6rem;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
-    .tile{background:rgba(10,18,32,.7);border:1px solid var(--border);border-radius:10px;padding:.65rem .75rem;font-size:.78rem}
+    .tile{background:rgba(10,18,32,.7);border:1px solid var(--border);border-radius:10px;padding:.65rem .75rem;font-size:.78rem;min-width:0;overflow-wrap:anywhere}
     .tile .t{font-weight:600;margin-bottom:.2rem}
     .tile .m{color:var(--muted);font-size:.7rem;line-height:1.35}
     .pill{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.68rem;font-weight:600;border:1px solid}
@@ -40,7 +40,9 @@
     ul.notes{margin:.4rem 0 0;padding-left:1.1rem;color:var(--muted);font-size:.74rem;line-height:1.45}
     .warn li{color:#fcd98a}
     .reason{color:#fda4af}
-    .kv{display:grid;grid-template-columns:auto 1fr;gap:.15rem .8rem;font-size:.76rem}
+    .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.15rem .8rem;font-size:.76rem}
+    .kv span{overflow-wrap:anywhere;min-width:0}
+    .sub,.m,ul.notes{overflow-wrap:anywhere}
     .kv span:nth-child(odd){color:var(--muted)}
     .err{color:var(--red);font-size:.78rem}
     footer{text-align:center;color:var(--muted);font-size:.72rem;padding:1rem}
@@ -104,7 +106,8 @@
 (function(){
   function h(tag, cls, text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!==undefined&&text!==null) e.textContent=String(text); return e; }
   function clear(n){ while(n.firstChild) n.removeChild(n.firstChild); }
-  function api(path){ return fetch(path,{headers:{'Accept':'application/json'}}).then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.detail||('HTTP '+r.status)); return j; }); }); }
+  function detailText(d,status){ if(typeof d==='string') return d; if(Array.isArray(d)&&d.length){ return d.map(function(x){ var f=(x&&x.loc&&x.loc.length)?String(x.loc[x.loc.length-1]):'input'; return f+': '+((x&&x.msg)||'invalid value'); }).join('; '); } return 'Request failed (HTTP '+status+')'; }
+  function api(path){ return fetch(path,{headers:{'Accept':'application/json'}}).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok) throw new Error(detailText(j.detail,r.status)); return j; }); }); }
   function fmt(v){ return (v===null||v===undefined)?'—':v; }
   function pill(text, cls){ return h('span','pill '+String(cls||text).replace(/[^a-z_]/g,''),text); }
   function list(items, cls){ var u=h('ul','notes '+(cls||'')); items.forEach(function(x){ u.appendChild(h('li',cls==='reason'?'reason':'',x)); }); return u; }
