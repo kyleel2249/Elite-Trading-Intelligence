@@ -20,6 +20,11 @@ Connect this GitHub repository to Cloudflare Workers Builds and configure:
 
 Use the Cloudflare Workers Free plan. Ensure the workers.dev subdomain is enabled.
 
+`wrangler.jsonc` defines `build.command` (`node scripts/build-knowledge.mjs`), so every
+`wrangler deploy` first generates `worker/knowledge.generated.json` from the Python knowledge
+registry (`app/knowledge/*`). The generated file is not committed. If `python3` is unavailable the
+generator writes an empty stub and the Worker serves its built-in profiles (`source: built-in-fallback`).
+
 ### GitHub Actions deployment
 
 Add these repository Actions secrets:
@@ -101,9 +106,27 @@ sizing and market-adjusted risk limits that are enforced inside the `RiskEngine`
 (Alpaca); metals, indices and commodities route through labelled ETF proxies; forex, non-US stocks, futures and
 options are analysis-only until an adapter is added. See [docs/MARKETS.md](docs/MARKETS.md) for coverage, limits and API.
 
+## Prediction tracking and accountability (FastAPI service)
+
+The Python/FastAPI service keeps an **append-only prediction ledger**: every forecast is stored with its
+server timestamp, asset, market, direction, entry reference, horizon, expected price range, probability,
+reasoning, sources, invalidation criteria, regime and strategy. Outcomes are written once when the horizon
+expires. Predictions and outcomes can never be updated or deleted (ORM guards plus SQLite/PostgreSQL
+triggers), so failed predictions stay on record and forecasts are never rewritten after the result is known.
+
+- Metrics: directional accuracy, price-target hit rate, mean error, Brier score, calibration, and breakdowns
+  by asset, timeframe, market regime and strategy (`GET /api/predictions/metrics`).
+- Monthly performance reports, published once after each month ends (`GET /api/predictions/reports`).
+- Dashboard: `/predictions`. A background job scores matured predictions (`PREDICTION_RESOLVE_INTERVAL_SECONDS`).
+- Run `alembic upgrade head` on existing databases (migration `0004_prediction_ledger`).
+
+Statistics on small samples are flagged as unreliable; this is research output, not investment advice.
+See [docs/PREDICTION_LEDGER.md](docs/PREDICTION_LEDGER.md).
+
 ## Documentation
 
-See [Cloudflare deployment guide](docs/CLOUDFLARE.md) and [multi-market guide](docs/MARKETS.md).
+See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs/MARKETS.md) and
+[prediction ledger guide](docs/PREDICTION_LEDGER.md).
 
 
 ## Broker execution — paper/testnet only
