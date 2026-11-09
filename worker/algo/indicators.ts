@@ -89,6 +89,24 @@ export function volumeMomentum(rows: Kline[], lookback = 14): VolumeMomentum {
   return { score: Number(score.toFixed(2)), buyingPressure: bp, sellingPressure: sp, relativeVolume: rv, volumeAcceleration: accel, exhaustion, unusualVolume: rv >= 2.5, divergence, volumeConfirmsPrice: confirms };
 }
 
+/** Causal per-bar version of the volume-flow score (same formula as volumeMomentum().score), via prefix sums. NaN until enough history. */
+export function volFlowSeries(rows: Kline[], lookback = 14): number[] {
+  const n = rows.length, out: number[] = new Array(n).fill(NaN);
+  const pb: number[] = [0], ps: number[] = [0], pv: number[] = [0];
+  for (const r of rows) {
+    const range = r[2] - r[3], clv = range > 0 ? ((r[4] - r[3]) - (r[2] - r[4])) / range : 0;
+    pb.push(pb.at(-1)! + r[5] * (1 + clv) / 2); ps.push(ps.at(-1)! + r[5] * (1 - clv) / 2); pv.push(pv.at(-1)! + r[5]);
+  }
+  for (let i = lookback * 2; i < n; i++) {
+    const lo = i - lookback + 1, buy = pb[i + 1] - pb[lo], sell = ps[i + 1] - ps[lo], tot = buy + sell || 1, net = (buy - sell) / tot;
+    const baseVol = (pv[i] - pv[i - lookback * 2]) / (lookback * 2), rv = baseVol > 0 ? rows[i][5] / baseVol : 0;
+    const priceChange = rows[i][4] - rows[lo][4], confirms = Math.sign(priceChange) === 0 || Math.sign(net) === Math.sign(priceChange);
+    const participation = clamp(rv, 0.3, 1.5) / 1.5;
+    out[i] = clamp(net * 100 * (0.5 + 0.5 * participation) * (confirms ? 1 : 0.6), -100, 100);
+  }
+  return out;
+}
+
 // ---------- B. Dual EMA momentum ----------
 export interface DualEma {
   fast: number; slow: number; separationAtr: number; slope: number;
@@ -143,25 +161,33 @@ export interface AdaptiveBands {
   trend: "bull" | "bear"; upper: number; lower: number; active: number;
   flipped: boolean; barsInTrend: number; flipsLast50: number; choppy: boolean; reversalConfirmed: boolean;
 }
-export function adaptiveBands(rows: Kline[], period = 14, mult = 2.5, flipBuffer = 0.25): AdaptiveBands {
-  const a = atrSeries(rows, period);
-  let trend: "bull" | "bear" = "bull", upper = NaN, lower = NaN, since = 0, flipped = false;
+export interface BandsSeries { trend: ("bull" | "bear" | null)[]; upper: number[]; lower: number[]; flips: number[]; firstIdx: number }
+/** Causal per-bar adaptive bands (value at index i uses only data up to i). Shared by the live engine and the backtester. */
+export function adaptiveBandsSeries(rows: Kline[], period = 14, mult = 2.5, flipBuffer = 0.25): BandsSeries {
+  const a = atrSeries(rows, period), n = rows.length;
+  const trendArr: ("bull" | "bear" | null)[] = new Array(n).fill(null), upArr: number[] = new Array(n).fill(NaN), loArr: number[] = new Array(n).fill(NaN);
+  let trend: "bull" | "bear" = "bull", upper = NaN, lower = NaN;
   const flips: number[] = [];
-  for (let i = period + 1; i < rows.length; i++) {
+  let first = -1;
+  for (let i = period + 1; i < n; i++) {
     const r = rows[i], hl2 = (r[2] + r[3]) / 2, d = a[i] * mult;
     const bu = hl2 + d, bl = hl2 - d, prevClose = rows[i - 1][4];
-    if (Number.isNaN(upper)) { upper = bu; lower = bl; trend = r[4] >= hl2 ? "bull" : "bear"; since = 0; continue; }
+    if (Number.isNaN(upper)) { upper = bu; lower = bl; trend = r[4] >= hl2 ? "bull" : "bear"; first = i; trendArr[i] = trend; upArr[i] = upper; loArr[i] = lower; continue; }
     // Ratchet: bands only tighten in the direction of the trend.
     lower = prevClose > lower ? Math.max(bl, lower) : bl;
     upper = prevClose < upper ? Math.min(bu, upper) : bu;
-    flipped = false;
     // Hysteresis: a flip needs a close beyond the band by flipBuffer*ATR, which suppresses sideways whipsaw.
-    if (trend === "bull" && r[4] < lower - flipBuffer * a[i]) { trend = "bear"; flipped = true; since = 0; flips.push(i); upper = bu; }
-    else if (trend === "bear" && r[4] > upper + flipBuffer * a[i]) { trend = "bull"; flipped = true; since = 0; flips.push(i); lower = bl; }
-    else since++;
+    if (trend === "bull" && r[4] < lower - flipBuffer * a[i]) { trend = "bear"; flips.push(i); upper = bu; }
+    else if (trend === "bear" && r[4] > upper + flipBuffer * a[i]) { trend = "bull"; flips.push(i); lower = bl; }
+    trendArr[i] = trend; upArr[i] = upper; loArr[i] = lower;
   }
-  const n = rows.length - 1, recent = flips.filter(i => i > n - 50).length;
-  const last = rows[n][4];
+  return { trend: trendArr, upper: upArr, lower: loArr, flips, firstIdx: first };
+}
+export function adaptiveBands(rows: Kline[], period = 14, mult = 2.5, flipBuffer = 0.25): AdaptiveBands {
+  const a = atrSeries(rows, period), bs = adaptiveBandsSeries(rows, period, mult, flipBuffer);
+  const n = rows.length - 1, trend = (bs.trend[n] ?? "bull") as "bull" | "bear", upper = bs.upper[n], lower = bs.lower[n];
+  const flipped = bs.flips.at(-1) === n, since = n - (bs.flips.at(-1) ?? (bs.firstIdx < 0 ? n : bs.firstIdx));
+  const recent = bs.flips.filter(i => i > n - 50).length;
   // Independent evidence for a reversal: volume flow and EMA slope must agree with the new direction.
   const vm = volumeMomentum(rows), de = dualEma(rows, 12, 26, a[n]);
   const dir = trend === "bull" ? 1 : -1;
@@ -189,7 +215,7 @@ export function emaFilter(rows: Kline[], periods = [20, 50, 200], atrNow = NaN):
   const lastBars = close.slice(-50), mid = e[1].slice(-50);
   const consistency = lastBars.filter((c, i) => Math.sign(c - mid[i]) === side).length / lastBars.length;
   const strength = clamp((alignment === "mixed" ? 0.3 : 0.7) * 50 + Math.min(spread, 10) * 3 + consistency * 20 - (alignment === "mixed" ? 10 : 0), 0, 100);
-  return { short, intermediate: inter, long, alignment, slope, strength: Number(strength.toFixed(1)), consistency, countertrendAllowedAgainst: alignment === "mixed" ? "neutral" : alignment };
+  return { short, intermediate: inter, long, alignment, slope, strength: Number(strength.toFixed(1)), consistency, countertrendAllowedAgainst: alignment };
 }
 /** Countertrend setups are only allowed when reversal evidence AND reward/risk are both strong. */
 export function countertrendAllowed(filter: EmaFilter, direction: 1 | -1, reversalEvidence: number, rewardRisk: number): boolean {
