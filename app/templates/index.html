@@ -59,6 +59,7 @@
       <button data-panel="dataintel">Data Intel</button>
       <a class="navlink" href="/data-intel">Command Centre ↗</a>
       <a class="navlink" href="/alerts">Alerts ↗</a>
+      <a class="navlink" href="/predictions">Predictions ↗</a>
       <button data-panel="backtest">Backtest</button>
       <button data-panel="portfolio">Portfolio</button>
       <button data-panel="traders">Elite Desk</button>
@@ -137,7 +138,7 @@
     <section id="risk" class="panel"><div class="card"><div class="row"><input id="r-symbol" value="BTCUSDT" /><select id="r-env"><option>paper</option><option>testnet</option><option>live</option></select><input id="r-qty" type="number" value="0.01" /><input id="r-equity" type="number" value="10000" /><button class="action" id="r-eval">Evaluate</button></div><pre id="r-out">—</pre></div></section>
     <section id="providers" class="panel"><div class="card"><h2>Diagnostics</h2><pre id="prov-out">—</pre></div></section>
   </main>
-  <footer>Helena Frost risk-gates live. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a></footer>
+  <footer>Helena Frost risk-gates live. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a> · <a href="/predictions" style="color:#a78bfa">Predictions</a></footer>
   <script>
     const $ = (id) => document.getElementById(id);
     const apiKey = localStorage.getItem('eti_api_key') || '';
