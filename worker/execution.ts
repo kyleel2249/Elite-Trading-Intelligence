@@ -25,7 +25,7 @@ export interface ExecutionEnv {
 const headers = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status=200) => new Response(JSON.stringify(body), {status,headers});
 const num = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? v : NaN;
-async function authorized(req: Request, env: ExecutionEnv): Promise<boolean> {
+export async function authorized(req: Request, env: ExecutionEnv): Promise<boolean> {
   const token=env.ETI_EXECUTION_TOKEN;
   const supplied=req.headers.get("authorization")?.replace(/^Bearer\s+/i,"");
   if(!token||!supplied||supplied.length!==token.length) return false;

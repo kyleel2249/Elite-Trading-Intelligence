@@ -20,7 +20,7 @@ export type Preflight = (req: PreflightRequest) => Promise<{ approved: boolean; 
 export interface PaperPosition {
   clientOrderId: string; symbol: string; direction: 1 | -1; qty: number; remainingQty: number; entry: number; stop: number; initialStop: number;
   targets: { label: "TP1" | "TP2" | "TP3"; price: number; fraction: number; hit: boolean }[]; hitTargets: number; highWater: number; trailDistance: number;
-  realizedPnl: number; fees: number; slippage: number; openedAt: number; engine: ClosedTrade["engine"]; confidence: number; regime?: string; riskAmount: number;
+  realizedPnl: number; fees: number; slippage: number; openedAt: number; /** Close time of the last bar already applied via processBars (prevents double-processing). */ lastBarTs?: number; engine: ClosedTrade["engine"]; confidence: number; regime?: string; riskAmount: number;
 }
 export interface PaperState { equity: number; positions: PaperPosition[]; closed: ClosedTrade[]; orderIds: string[]; lastStopOut: Record<string, number>; killSwitch: boolean; dayKey: string; dayStartEquity: number; version: number }
 export interface AuditEntry { ts: number; type: string; symbol?: string; clientOrderId?: string; detail: Record<string, unknown> }
@@ -103,6 +103,18 @@ export class PaperEngine {
     s.positions.push(pos); s.orderIds.push(id); s.equity -= fee;
     await this.persist({ ts: now, type: "OPENED", symbol: plan.symbol, clientOrderId: id, detail: { fill, qty, stop: plan.stopLoss, targets: plan.takeProfits, fee, riskAmount: pos.riskAmount, reasoning: plan.reasons.slice(0, 12), preflight: pf.reasons } });
     return { type: "OPENED", symbol: plan.symbol, clientOrderId: id, price: fill };
+  }
+
+  /** Apply several closed bars in order, skipping any already applied. Callers pass only bars that opened at or after the fill. */
+  async processBars(symbol: string, bars: { ts: number; high: number; low: number; close: number }[]): Promise<PaperEvent[]> {
+    const out: PaperEvent[] = [];
+    for (const b of [...bars].sort((x, y) => x.ts - y.ts)) {
+      const p = this.state.positions.find(x => x.symbol === symbol); if (!p) break;
+      if (b.ts <= (p.lastBarTs ?? p.openedAt)) continue;
+      p.lastBarTs = b.ts;
+      out.push(...await this.onBar(symbol, b));
+    }
+    return out;
   }
 
   /** Advance a position with one completed or in-progress candle. Stop-first when stop and target are both touched in a bar. */

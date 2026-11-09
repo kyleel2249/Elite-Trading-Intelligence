@@ -11,6 +11,7 @@ import { handleMarket } from "./market.ts";
 import { handleSignals } from "./signals.ts";
 import { handleAlgoSignal } from "./algo/api.ts";
 import { handleOmnisignal } from "./algo/omni-api.ts";
+import { handlePaper } from "./algo/paper-api.ts";
 import { handleKnowledge } from "./knowledge.ts";
 import type { MarketEnv } from "./market.ts";
 
@@ -524,6 +525,9 @@ export default {
     }
     if (url.pathname === "/api/algo/signal") {
       return handleAlgoSignal(request, _env);
+    }
+    if (url.pathname.startsWith("/api/paper")) {
+      return handlePaper(request, _env);
     }
     if (url.pathname === "/api/omnisignal") {
       return handleOmnisignal(request, _env);
