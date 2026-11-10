@@ -38,9 +38,9 @@ Authenticated (`Authorization: Bearer $ETI_EXECUTION_TOKEN`), all paper/simulate
 every order is rejected (fail closed). Orders are preflighted as `provider=binance, environment=paper, order_type=limit`
 against the existing Python `POST /api/risk-gateway/preflight`.
 
-### Scheduled paper cycle (Cron Trigger, every 5 minutes)
+### Scheduled paper cycle (Cron Trigger, every 15 minutes)
 
-`wrangler.jsonc` registers `*/5 * * * *`; the Worker's `scheduled` handler runs one pass. It is **off by default**.
+`wrangler.jsonc` registers `*/15 * * * *` for this cycle (the `* * * * *` trigger is the futures monitor and `*/5 * * * *` is the universe scan below); the Worker's `scheduled` handler runs one pass. It is **off by default**.
 
 | Variable | Effect |
 |---|---|
@@ -97,3 +97,43 @@ The research workflow is now a matrix: `symbols` (default BTC, ETH, SOL, BNB, XR
 - `POST /api/paper/params/propose {name, result}` where `name` must be a server-side whitelisted candidate (`tight_rr2`, `tight_rr2_5`, `tight_conf72`, `tight_conf80`, `tight_cost15`, `tight_strict`) and `result` is the optimizer output recommending it. Weights and gates are resolved from the whitelist, never from the request.
 - `POST /api/paper/params/promote {id, approver}` needs a named human approver (AI-like names are refused). `POST /api/paper/params/rollback {reason}` returns to the previous approved version.
 - The champion's weights and tighten-only gates are used by `/api/paper/evaluate`, the scheduled cycle, `/api/omnisignal` and the scanner; responses include `parameters: {version, name}`. No registry means the built-in defaults. If the registry cannot be read, new analysis and entries fail closed (HTTP 503). Nothing here can change risk limits, permissions or live trading.
+
+
+## Exchange execution steps (Phase 8)
+
+`POST /api/omnisignal/execute {symbol, strategy, accountId, riskUsd, maxNotionalUsd}` (bearer token) analyses with the champion parameters and,
+for a BUY plan only (spot cannot short), submits to the Python engine (`ETI_EXECUTION_API_URL`, else the origin of `ETI_RISK_GATE_URL`; key `ETI_RISK_GATE_TOKEN`).
+It refuses `live` accounts (403), halted accounts (409) and an active kill switch. Size = the smaller of `riskUsd / (entry - stop)` and `maxNotionalUsd / entry`.
+The engine then runs: risk authorization, balance, precision and minimum-notional checks, acknowledgement, fill verification, **protective orders** and reconciliation.
+Protective orders are three Binance spot SELL OCO tranches (40/30/30 targets sharing the stop), sized to the quantity actually filled minus a fee buffer
+(`reconcile_tolerance_pct`, default 0.25%). If protection cannot be placed the account is halted and the result is `filled_unprotected`.
+Limits: stops are static on the exchange (no break-even or trailing adjustment); working protective legs reserve the sellable balance.
+**Verification status:** tested only against a fake venue that follows Binance's documented REST shapes (`tests/test_protective_execution.py`). It has not been run against the real Binance testnet; that needs testnet keys.
+
+## Elite Trader assessment (Phase 5)
+
+Every directional plan carries `elite`: the documented methodologies in the Elite Trader research database (`worker/knowledge.generated.json`, built from `app/knowledge`)
+checked against the candle-testable strategy modules (turtle, Seykota, Minervini, Darvas, Wyckoff, PTJ) and nine principle checks (trend following, momentum, breakout,
+reversal, capital preservation, position sizing, portfolio management, entry/exit, statistical validation, plus the volume footprint). It reports `supports | mixed | opposes | unavailable`.
+It is **advisory** unless `eliteGate: true` is passed (replay/options), in which case an `opposes` alignment downgrades the trade to HOLD. It never claims a trader would take the trade,
+attributes no position or performance to anyone, and investor disclosures are reported as `not_available` for crypto spot (no verified feed). Whether the gate helps is untested; run it through the research workflow before enabling.
+
+## Volume footprint (Phase 5)
+
+`flow` reports abnormal activity (volume/range z-scores), absorption (heavy volume, narrow range, close location after a move), thin moves, climaxes and a volume-weighted
+close-location pressure proxy. It is derived from candles only: it is **not** aggressor (taker) flow and cannot identify institutions. The Kline type carries no taker-buy field; adding it would be the next step toward true flow.
+
+## Confidence calibration
+
+Scores stay `uncalibrated` until `POST /api/paper/calibration/fit` (token) fits a monotone reliability map from this system's own closed paper trades (clients cannot supply outcomes).
+Requirements: at least 100 outcomes, 20 per bin, and the map must beat the base rate (Brier score) on a later 30% holdout, otherwise the status is `no_skill` and no probability is shown.
+When calibrated, a plan shows the observed fraction of similar past trades that closed net-positive with a Wilson 95% interval and mean R. That is a past frequency, not a forecast or an expectancy.
+`GET /api/paper/calibration` shows the table. Given the research findings (no demonstrated edge), expect `no_skill` until the system has one.
+
+## Universe scanning
+
+`GET /api/omnisignal/universe?limit=25` returns the stored leaderboard and coverage; `POST /api/omnisignal/universe/refresh` (token) runs one batch.
+The universe is built from Binance's 24h ticker (one request): USDT pairs, excluding stablecoins and leveraged tokens, with minimum quote volume (default 5M), trade count and a maximum spread (25 bps), capped at 150 by volume.
+A dedicated `*/5 * * * *` cron analyses a rotating batch (never-analysed first, then active movers, then the stalest) and stores rows in KV. It is **off unless `ETI_UNIVERSE_ENABLED=true`**.
+`ETI_UNIVERSE_BATCH` (default 3, max 25; each symbol costs about 10 subrequests, so mind the plan limit of 50 free / 1000 paid), `ETI_UNIVERSE_MAX_SYMBOLS`, `ETI_UNIVERSE_MIN_QUOTE_VOLUME`, `ETI_UNIVERSE_MAX_SPREAD_BPS`, `ETI_UNIVERSE_STRATEGY`.
+Rows older than 8 hours are not ranked; coverage reports fresh, stale and never-analysed counts. At the default batch of 3, full coverage of 150 symbols takes about 4 hours, so raise the batch on a paid plan for a fresher board.
