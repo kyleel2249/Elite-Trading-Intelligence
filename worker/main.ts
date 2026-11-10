@@ -14,6 +14,7 @@ import { withFutures } from "./agents/futures-route.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runPaperCycle } from "./algo/paper-api.ts";
 import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
+import { maintain as maintainAuth } from "./auth/session.ts";
 
 const app = withAlgo(withFutures(withAgents(base as any) as any) as any);
 const inner: any = base;
@@ -23,6 +24,7 @@ export default {
   fetch: (request: Request, env: any) => app.fetch(request, env),
   async scheduled(event: { cron?: string }, env: any, ctx: { waitUntil(p: Promise<unknown>): void }) {
     if (event.cron === MONITOR_CRON) { ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined)); return; }
+    ctx.waitUntil(maintainAuth(env, Date.now()).then(() => undefined, () => undefined)); // rotate an aged signing key, retire old ones
     // Other cron ticks: paper-trading cycle (off unless ETI_PAPER_SYMBOLS is set) and the Global Alpha research loop.
     // Each pass is isolated so one failing never blocks the other.
     ctx.waitUntil(runPaperCycle(env).then(() => undefined, e => console.error("paper cycle failed", e instanceof Error ? e.message : e)));

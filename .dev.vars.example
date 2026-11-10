@@ -16,3 +16,14 @@ ALPHA_SUBREQUEST_BUDGET=40
 # Paper/testnet brokers used by the execution bridge (never live keys)
 BINANCE_API_KEY=
 BINANCE_SECRET_KEY=
+
+# --- Execution authorization (see docs/EXECUTION_AUTH.md) ---
+# Signs short-lived execution sessions. Generate with: node scripts/provision-secrets.mjs --session-secret
+# When unset the Worker generates a random key and keeps it in KV (still automatic, but secret storage is preferred).
+ETI_SESSION_SECRET=
+# Only during a rotation: the previous ETI_SESSION_SECRET value
+ETI_SESSION_SECRET_PREVIOUS=
+# off | paper | paper_testnet (default). What the Worker may authorise without a manually typed token.
+ETI_AUTO_SESSIONS=paper_testnet
+# Age after which the KV-held signing key rotates by itself (days)
+ETI_KEY_ROTATION_DAYS=7

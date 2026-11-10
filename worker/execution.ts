@@ -3,6 +3,9 @@
  * No withdrawal, transfer, funding or wallet-management endpoints are exposed.
  */
 import { readinessForOrder } from "./readiness/api.ts";
+import { authenticate, can, constantTimeEqual, rateLimit, type EnvScope } from "./auth/session.ts";
+import { credentialReport, markInvalid } from "./auth/credentials.ts";
+import { loadMinuteBars } from "./algo/market-inputs.ts";
 /** off | advisory (default: readiness is recorded on every order, never blocks) | enforce (AVOID TRADING and HIGH RISK block paper and live orders; a readiness failure blocks too) */
 export type ReadinessGateMode = "off" | "advisory" | "enforce";
 export interface ExecutionEnv {
@@ -25,7 +28,17 @@ export interface ExecutionEnv {
   BINANCE_LIVE_API_KEY?: string;
   BINANCE_LIVE_SECRET_KEY?: string;
   ETI_EXECUTION_LOG?: KVNamespace;
+  /** Cloudflare secret used to sign execution sessions (a random key is kept in KV when unset). */
+  ETI_SESSION_SECRET?: string;
+  ETI_SESSION_SECRET_PREVIOUS?: string;
+  /** off | paper | paper_testnet (default). */
+  ETI_AUTO_SESSIONS?: string;
+  ETI_KEY_ROTATION_DAYS?: string;
+  ETI_ROUND_TRIP_COST_BPS?: string;
 }
+export const EXEC_ENVIRONMENTS = ["internal_paper","exchange_testnet","live"] as const;
+export type ExecEnvironment = typeof EXEC_ENVIRONMENTS[number];
+export interface ExecDeps { now?: () => number; fetchImpl?: typeof fetch; priceOf?: (symbol: string) => Promise<number | null> }
 const headers = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status=200) => new Response(JSON.stringify(body), {status,headers});
 const num = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? v : NaN;
@@ -37,6 +50,11 @@ export async function authorized(req: Request, env: ExecutionEnv): Promise<boole
   const aa=new Uint8Array(a),bb=new Uint8Array(b);let diff=0;
   for(let i=0;i<aa.length;i++) diff|=aa[i]^bb[i];
   return diff===0;
+}
+async function secretEquals(a: string, b: string): Promise<boolean> {
+  if(a.length!==b.length) return false;
+  const [x,y]=await Promise.all([a,b].map(v=>crypto.subtle.digest("SHA-256",new TextEncoder().encode(v))));
+  return constantTimeEqual(new Uint8Array(x),new Uint8Array(y));
 }
 async function hmac(secret: string, query: string) {
   const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(secret),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
@@ -71,28 +89,39 @@ export function validateLiveOrderLimits(input: {
     return { ok: false, reason: "live_notional_limit_exceeded" };
   return { ok: true, notionalUsd };
 }
-export async function handleExecution(req: Request, env: ExecutionEnv): Promise<Response> {
-  const url=new URL(req.url);
+export async function handleExecution(req: Request, env: ExecutionEnv, deps: ExecDeps = {}): Promise<Response> {
+  const url=new URL(req.url), now=(deps.now??Date.now)();
   if(url.pathname==="/api/execution/status" && req.method==="GET") {
-    return reply({mode:"paper_testnet_default",live_trading_enabled:env.ETI_LIVE_TRADING_ENABLED==="true",paper_risk_gate_required:false,live_risk_gate_configured:!!(env.ETI_RISK_GATE_URL&&env.ETI_RISK_GATE_TOKEN),readiness_gate:["off","enforce"].includes((env.ETI_READINESS_GATE||"").toLowerCase())?(env.ETI_READINESS_GATE||"").toLowerCase():"advisory",live_activation_configured:!!env.ETI_LIVE_ACTIVATION_TOKEN,alpaca_paper_configured:!!(env.ALPACA_API_KEY&&env.ALPACA_SECRET_KEY),binance_testnet_configured:!!(env.BINANCE_API_KEY&&env.BINANCE_SECRET_KEY),live_credentials_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY&&env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),alpaca_live_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY),binance_live_configured:!!(env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),audit_log_configured:!!env.ETI_EXECUTION_LOG,kill_switch:env.ETI_KILL_SWITCH==="true",withdrawal_permissions:false});
+    return reply({mode:"paper_testnet_default",live_trading_enabled:env.ETI_LIVE_TRADING_ENABLED==="true",paper_risk_gate_required:false,live_risk_gate_configured:!!(env.ETI_RISK_GATE_URL&&env.ETI_RISK_GATE_TOKEN),readiness_gate:["off","enforce"].includes((env.ETI_READINESS_GATE||"").toLowerCase())?(env.ETI_READINESS_GATE||"").toLowerCase():"advisory",live_activation_configured:!!env.ETI_LIVE_ACTIVATION_TOKEN,alpaca_paper_configured:!!(env.ALPACA_API_KEY&&env.ALPACA_SECRET_KEY),binance_testnet_configured:!!(env.BINANCE_API_KEY&&env.BINANCE_SECRET_KEY),live_credentials_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY&&env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),alpaca_live_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY),binance_live_configured:!!(env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),audit_log_configured:!!env.ETI_EXECUTION_LOG,kill_switch:env.ETI_KILL_SWITCH==="true",withdrawal_permissions:false,transfers:false,internal_paper_available:true,auto_sessions:(env.ETI_AUTO_SESSIONS||"paper_testnet")});
   }
   if(url.pathname==="/api/execution/history") {
     if(req.method!=="GET") return reply({error:"method_not_allowed"},405);
-    if(!await authorized(req,env)) return reply({error:"unauthorized"},401);
+    const auth=await authenticate(req,env,now);
+    if(!auth.master&&auth.scopes.size===0) return reply({error:"unauthorized"},401);
     if(!env.ETI_EXECUTION_LOG) return reply({error:"audit_log_not_configured"},503);
-    const listed=await env.ETI_EXECUTION_LOG.list({prefix:"order:",limit:100});
-    const records=await Promise.all(listed.keys.map(async key=>JSON.parse((await env.ETI_EXECUTION_LOG!.get(key.name))||"null")));
-    return reply({records:records.filter(Boolean).sort((a,b)=>b.executedAt.localeCompare(a.executedAt))});
+    // Separate records per environment. A session sees only its own environment; the master token may ask for any.
+    const asked=url.searchParams.get("environment");
+    const allowed:ExecEnvironment[]=auth.master?[...EXEC_ENVIRONMENTS]:[...(auth.scopes.has("paper")?["internal_paper" as const]:[]),...(auth.scopes.has("testnet")?["exchange_testnet" as const]:[])];
+    const want:ExecEnvironment[]=asked&&(allowed as string[]).includes(asked)?[asked as ExecEnvironment]:allowed;
+    const prefixes=want.map(e=>e==="internal_paper"?"exec:paper:rec:":e==="live"?"exec:live:rec:":"order:");
+    const lists=await Promise.all(prefixes.map(prefix=>env.ETI_EXECUTION_LOG!.list({prefix,limit:100})));
+    const records=await Promise.all(lists.flatMap(l=>l.keys).map(async key=>JSON.parse((await env.ETI_EXECUTION_LOG!.get(key.name))||"null")));
+    const environmentOf=(r:any):ExecEnvironment=>r.environment||(r.mode==="live"?"live":r.mode==="internal_paper"?"internal_paper":"exchange_testnet");
+    return reply({environments:want,records:records.filter(Boolean).filter((r:any)=>want.includes(environmentOf(r))).sort((a:any,b:any)=>b.executedAt.localeCompare(a.executedAt)).slice(0,100)});
   }
   if(url.pathname!=="/api/orders" && url.pathname!=="/api/orders/live") return reply({error:"not_found"},404);
   if(req.method!=="POST") return reply({error:"method_not_allowed"},405);
   if(env.ETI_KILL_SWITCH==="true") return reply({error:"execution_disabled",reason:"Emergency kill switch is active"},423);
-  if(!await authorized(req,env)) return reply({error:"unauthorized"},401);
+  const auth=await authenticate(req,env,now);
+  if(!auth.master&&auth.scopes.size===0) return reply({error:"unauthorized",message:"No valid ETI session or execution token. Open the dashboard to start an automatic session."},401);
   const requestedLive=url.pathname==="/api/orders/live";
+  // Live is never reachable through a session: it needs the master token AND the activation secret AND the Worker live switch.
+  if(requestedLive && !auth.master) return reply({error:"live_requires_master_credentials",message:"Sessions can never authorise live orders."},403);
   if(requestedLive) {
     const supplied=req.headers.get("x-eti-live-authorization")||"";
     const expected=env.ETI_LIVE_ACTIVATION_TOKEN||"";
-    if(env.ETI_LIVE_TRADING_ENABLED!=="true" || !expected || supplied!==expected)
+    const same=!!expected&&await secretEquals(supplied,expected);
+    if(env.ETI_LIVE_TRADING_ENABLED!=="true" || !expected || !same)
       return reply({error:"live_trading_locked",message:"Live trading requires the Worker live switch, separate live credentials, and the live activation secret."},423);
   }
   if(!env.ETI_EXECUTION_LOG) return reply({error:"audit_log_not_configured",message:"Configure the ETI_EXECUTION_LOG KV binding before submitting orders."},503);
@@ -107,10 +136,13 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
   const sourceTypes=["manual_user","strategy","system","automation"];
   if(!source || !sourceTypes.includes(source.actorType) || typeof source.actorId!=="string" || !source.actorId.trim() || typeof source.sourceName!=="string" || !source.sourceName.trim())
     return reply({error:"execution_source_required",message:"Identify who or what initiated the order using executionSource.actorType, actorId and sourceName."},400);
-  if(!["alpaca","binance"].includes(broker) || !/^[A-Z0-9._-]{2,24}$/.test(symbol) ||
+  if(!["alpaca","binance","eti_paper"].includes(broker) || (requestedLive&&broker==="eti_paper") || !/^[A-Z0-9._-]{2,24}$/.test(symbol) ||
     !["buy","sell"].includes(side) || !["market","limit"].includes(type) ||
     !Number.isFinite(quantity) || quantity<=0 || !safeOrderId(clientOrderId) || !riskConfirmed)
     return reply({error:"invalid_order",message:"Provide broker, symbol, buy/sell, market/limit, positive quantity, unique clientOrderId (8–36 safe characters), and riskConfirmed:true after user review."},400);
+  const internal=broker==="eti_paper", needScope:EnvScope=internal?"paper":"testnet";
+  if(!requestedLive && !can(auth,needScope)) return reply({error:"environment_scope_mismatch",required_session:needScope,message:internal?"Internal paper orders need an INTERNAL PAPER session.":"Exchange testnet orders need an EXCHANGE TESTNET session. Sessions are isolated per environment."},403);
+  if(!auth.master){ const rl=await rateLimit(env,"order:"+(auth.refs[needScope]||"anon"),60,600,now); if(!rl.ok) return reply({error:"rate_limited",message:"Too many orders from this session; wait and retry."},429); }
   const maxQty=Number(env.ETI_MAX_ORDER_QUANTITY??"100");
   if(!Number.isFinite(maxQty)||maxQty<=0||quantity>maxQty) return reply({error:"risk_limit_exceeded",limit:"max_quantity",max:maxQty},403);
   if(type==="limit" && (!Number.isFinite(num(body.limitPrice)) || num(body.limitPrice)<=0))
@@ -139,7 +171,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       return reply({error:"risk_gate_not_configured",message:"Live order submission requires the ETI server-side portfolio risk preflight service."},503);
     let gateResponse:Response;
     try {
-      gateResponse=await fetch(gateUrl,{method:"POST",headers:{"content-type":"application/json","x-api-key":gateToken},body:JSON.stringify({
+      gateResponse=await (deps.fetchImpl??fetch)(gateUrl,{method:"POST",headers:{"content-type":"application/json","x-api-key":gateToken},body:JSON.stringify({
         provider:broker,environment:"live",symbol,side,quantity,order_type:type,limit_price:body.limitPrice??null
       })});
     } catch {
@@ -168,6 +200,35 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       }
     }
   }
+  const authRef:any={kind:auth.master?"master_token":"session",sessionRef:auth.master?null:(auth.refs[needScope]||null)};
+  const execSource={actorType:source.actorType,actorId:source.actorId,sourceName:source.sourceName,strategyId:source.strategyId??null,signalId:source.signalId??null,triggerReason:source.triggerReason??null};
+  /** ETI INTERNAL PAPER: simulated fill at the live public price. No exchange or broker is contacted and none is claimed. */
+  const fillInternal=async(fallback:any):Promise<Response>=>{
+    if(await env.ETI_EXECUTION_LOG!.get("exec:paper:id:"+clientOrderId)) return reply({error:"duplicate_client_order_id"},409);
+    let px:number|null=null;
+    try { px=deps.priceOf?await deps.priceOf(symbol):(await loadMinuteBars(env as any,symbol,null,now)).price; } catch { px=null; }
+    if(!(typeof px==="number"&&px>0)) return reply({error:"price_unavailable",exchangeOrderPlaced:false,message:"No fresh public market price for "+symbol+". Internal paper fills need one (crypto symbols are supported)."},503);
+    const half=(Number(env.ETI_ROUND_TRIP_COST_BPS??"10")||10)/2/10000;
+    let fillPrice:number;
+    if(type==="limit") {
+      const lp=num(body.limitPrice);
+      if(!(side==="buy"?lp>=px:lp<=px)) return reply({error:"limit_not_marketable",exchangeOrderPlaced:false,marketPrice:px,message:"Internal paper fills only marketable limit orders; resting orders are not simulated."},422);
+      fillPrice=side==="buy"?Math.min(lp,px*(1+half)):Math.max(lp,px*(1-half));
+    } else fillPrice=side==="buy"?px*(1+half):px*(1-half);
+    const executedAt=new Date(now).toISOString();
+    const rec={executedAt,broker:"eti_paper",environment:"internal_paper",mode:"internal_paper",simulated:true,exchangeOrderPlaced:false,symbol,side,type,quantity,clientOrderId,marketPrice:px,fillPrice,notionalUsd:fillPrice*quantity,costModelBps:half*2*10000,readiness:readinessEvidence,brokerOrderId:"paper-"+clientOrderId,fallback,executionSource:execSource,auth:authRef,riskGateEvidence};
+    await env.ETI_EXECUTION_LOG!.put("exec:paper:rec:"+executedAt+":"+clientOrderId,JSON.stringify(rec),{expirationTtl:60*60*24*90});
+    await env.ETI_EXECUTION_LOG!.put("exec:paper:id:"+clientOrderId,"1",{expirationTtl:60*60*24*90});
+    return reply({ok:true,broker:"eti_paper",mode:"internal_paper",environment:"internal_paper",simulated:true,exchangeOrderPlaced:false,fill:{price:fillPrice,marketPrice:px,quantity,notionalUsd:fillPrice*quantity},fallback,
+      notice:fallback?"Exchange credentials unavailable ("+fallback.reason+"): this order was filled in ETI INTERNAL PAPER mode. No exchange testnet order was placed.":"Simulated fill in ETI internal paper mode. No exchange was contacted.",executionSource:execSource,executedAt,live_trading:false,readiness:readinessEvidence},201);
+  };
+  if(internal) return fillInternal(null);
+  // Sessions (and API clients that set fallbackToPaper:true) fall back to internal paper when exchange credentials are missing or rejected.
+  const allowFallback=!requestedLive&&(!auth.master||body.fallbackToPaper===true);
+  if(allowFallback) {
+    const rep=await credentialReport(env as any,broker,{validate:true,fetchImpl:deps.fetchImpl,now});
+    if(rep.status==="missing"||rep.status==="invalid") return fillInternal({from:rep.environment,reason:rep.status==="missing"?"exchange_credentials_missing":"exchange_credentials_invalid"});
+  }
   try {
     let result:any, mode:string;
     if(broker==="alpaca") {
@@ -176,8 +237,9 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       if(!apiKey||!secret) return reply({error:"broker_not_configured",broker,mode:requestedLive?"live":"paper"},503);
       const payload:any={symbol,qty:String(quantity),side,type,time_in_force:body.timeInForce==="gtc"?"gtc":"day",client_order_id:clientOrderId};
       if(type==="limit") payload.limit_price=String(body.limitPrice);
-      const r=await fetch(requestedLive?"https://api.alpaca.markets/v2/orders":"https://paper-api.alpaca.markets/v2/orders",{method:"POST",headers:{"content-type":"application/json","APCA-API-KEY-ID":apiKey,"APCA-API-SECRET-KEY":secret},body:JSON.stringify(payload)});
+      const r=await (deps.fetchImpl??fetch)(requestedLive?"https://api.alpaca.markets/v2/orders":"https://paper-api.alpaca.markets/v2/orders",{method:"POST",headers:{"content-type":"application/json","APCA-API-KEY-ID":apiKey,"APCA-API-SECRET-KEY":secret},body:JSON.stringify(payload)});
       const data=await r.json().catch(()=>({}));
+      if(!r.ok&&allowFallback&&(r.status===401||r.status===403)){ await markInvalid(env as any,"alpaca",now); return fillInternal({from:"alpaca_paper",reason:"exchange_credentials_invalid"}); }
       if(!r.ok) return reply({error:"broker_rejected",broker,status:r.status,detail:data,mode:requestedLive?"live":"paper"},502);
       result=data; mode=requestedLive?"live":"paper";
     } else {
@@ -188,13 +250,14 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
     if(type==="limit"){params.set("price",String(body.limitPrice));params.set("timeInForce",body.timeInForce==="ioc"?"IOC":"GTC");}
     const signature=await hmac(secret,params.toString());
     params.set("signature",signature);
-    const r=await fetch(requestedLive?"https://api.binance.com/api/v3/order":"https://testnet.binance.vision/api/v3/order",{method:"POST",headers:{"X-MBX-APIKEY":apiKey,"content-type":"application/x-www-form-urlencoded"},body:params.toString()});
+    const r=await (deps.fetchImpl??fetch)(requestedLive?"https://api.binance.com/api/v3/order":"https://testnet.binance.vision/api/v3/order",{method:"POST",headers:{"X-MBX-APIKEY":apiKey,"content-type":"application/x-www-form-urlencoded"},body:params.toString()});
     const data=await r.json().catch(()=>({}));
+    if(!r.ok&&allowFallback&&(r.status===401||[-2014,-2015,-1022].includes(Number(data?.code)))){ await markInvalid(env as any,"binance",now); return fillInternal({from:"binance_testnet",reason:"exchange_credentials_invalid"}); }
     if(!r.ok) return reply({error:"broker_rejected",broker,status:r.status,detail:data,mode:requestedLive?"live":"testnet"},502);
     result=data; mode=requestedLive?"live":"testnet";
     }
-    const record={executedAt:new Date().toISOString(),broker,mode,symbol,side,type,quantity,clientOrderId,readiness:readinessEvidence,brokerOrderId:result?.id??result?.orderId??null,executionSource:{actorType:source.actorType,actorId:source.actorId,sourceName:source.sourceName,strategyId:source.strategyId??null,signalId:source.signalId??null,triggerReason:source.triggerReason??null},riskGateEvidence,order:result};
-    await env.ETI_EXECUTION_LOG!.put("order:"+record.executedAt+":"+clientOrderId,JSON.stringify(record),{expirationTtl:60*60*24*90});
+    const record={executedAt:new Date(now).toISOString(),environment:requestedLive?"live":"exchange_testnet",simulated:false,exchangeOrderPlaced:true,auth:authRef,broker,mode,symbol,side,type,quantity,clientOrderId,readiness:readinessEvidence,brokerOrderId:result?.id??result?.orderId??null,executionSource:execSource,riskGateEvidence,order:result};
+    await env.ETI_EXECUTION_LOG!.put((requestedLive?"exec:live:rec:":"order:")+record.executedAt+":"+clientOrderId,JSON.stringify(record),{expirationTtl:60*60*24*90});
     return reply({ok:true,broker,mode,order:result,executionSource:record.executionSource,executedAt:record.executedAt,live_trading:requestedLive,readiness:readinessEvidence},201);
   } catch(e) { return reply({error:"execution_upstream_error",message:e instanceof Error?e.message:"Unknown error"},502); }
 }

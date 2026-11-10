@@ -8,7 +8,8 @@
 //   POST /api/paper/kill       {on}                            engage/release the paper kill switch
 //   GET  /api/paper/performance
 //   GET  /api/paper/audit?limit=100
-import { authorized, type ExecutionEnv } from "../execution.ts";
+import type { ExecutionEnv } from "../execution.ts";
+import { authenticate, can } from "../auth/session.ts";
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { STRATEGIES } from "./omni-api.ts";
@@ -42,7 +43,7 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
   const url = new URL(req.url), now = (deps.now ?? Date.now)(), path = url.pathname.replace(/\/+$/, "");
   const known: Record<string, string> = { "/api/paper/status": "GET", "/api/paper/performance": "GET", "/api/paper/audit": "GET", "/api/paper/evaluate": "POST", "/api/paper/tick": "POST", "/api/paper/kill": "POST", "/api/paper/params": "GET", "/api/paper/params/propose": "POST", "/api/paper/params/promote": "POST", "/api/paper/params/rollback": "POST" };
   if (!(path in known)) return reply({ error: "not_found" }, 404);
-  if (!(await authorized(req, env))) return reply({ error: "unauthorized" }, 401);
+  { const a = await authenticate(req, env, now); if (!can(a, "paper")) return reply({ error: a.scopes.size ? "environment_scope_mismatch" : "unauthorized", message: "The paper-trading API needs an INTERNAL PAPER session or the master execution token." }, a.scopes.size ? 403 : 401); }
   if (req.method !== known[path]) return reply({ error: "method_not_allowed", allowed: known[path] }, 405);
   if (!env.ETI_EXECUTION_LOG) return reply({ error: "audit_log_not_configured", message: "Bind the ETI_EXECUTION_LOG KV namespace; paper state and audit trail are stored there." }, 503);
   const kv = env.ETI_EXECUTION_LOG as unknown as KVWithList, store = new KVPaperStore(kv);
