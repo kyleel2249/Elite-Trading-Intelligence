@@ -148,3 +148,15 @@ Rows older than 8 hours are not ranked; coverage reports fresh, stale and never-
 and the first real run (run 42908373572) was rejected for that reason after the keys were read correctly. Run it from a machine in an eligible region
 (`pip install -r requirements.txt`, export the two variables, `python scripts/testnet_verify.py`) or from a self-hosted runner there. The same applies to wherever the Python execution backend runs.
 ETI does not route around the restriction.
+
+## Thesis-invalidation exit (Phase 9)
+
+`POST /api/omnisignal/manage {accountId, strategy?, close?}` (bearer token) re-analyses each position ETI opened (up to 3 per call) using the Python engine's `GET /api/execution/accounts/{id}/managed-positions`.
+A long is **invalidated** when: both engines and the validator confirm a SELL; or the Elite Trader modules and the volume footprint both oppose it while the buy case is gone; or liquidity is blocked and deteriorating;
+or the multi-timeframe consensus is bearish at 60+/100 without degradation and the buy case is gone. Unreliable data is never an invalidation and neither confirms nor clears the counter.
+It must hold on **consecutive evaluations** (`ETI_INVALIDATION_CONFIRMATIONS`, default 2, readings no more than 3 hours apart) before anything is done.
+Closing only happens with `close: true` (or `ETI_MANAGE_AUTOCLOSE=true` for the scheduled run); otherwise the outcome is `report_only`. Live accounts are refused.
+The close is `POST /api/execution/accounts/{id}/positions/{symbol}/close`: venue protective orders are cancelled (they reserve the balance), then a reduce-only sell of at most what ETI holds is sent. It cannot open or add exposure and does not halt the account.
+If the sell fails after protection was cancelled, the account is halted with `failed_unprotected_halted`. Fee dust left in the ledger after a full exit is not treated as a position.
+Scheduled monitoring: set `ETI_MANAGE_ACCOUNTS` (comma separated account ids, max 3) and optionally `ETI_MANAGE_STRATEGY`; it runs on the `*/5` cron alongside the universe scan, so mind the subrequest budget (about 10 per position).
+Not built: partial reductions on a weakened thesis (only full exits on invalidation), and exits driven by anything except the conditions above. Tested against the fake venue only, not the real testnet.

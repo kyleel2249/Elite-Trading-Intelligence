@@ -640,6 +640,85 @@ class ExecutionEngine:
         self._log(acct.account_id, "protective_adjusted", entry.client_order_id, symbol=symbol, tranche=int(idx) + 1, stage=tag, from_stop=round(old_stop, 8), to_stop=stop)
         return True
 
+    # ------------------------------------------------------------------ thesis-invalidation exit (Phase 9)
+    def managed_positions(self, account_id: str) -> list:
+        """Positions ETI opened and still holds according to its own ledger, with the average entry and the venue protection in place."""
+        ledger = self._ledger(account_id)
+        rows = self.store.list_orders(account_id, limit=100_000)
+        acct = self.store.get_account(account_id)
+        tol = (acct.policy.reconcile_tolerance_pct / 100.0) if acct else 0.0025
+        out = []
+        for sym, qty in sorted(ledger.items()):
+            buys = [r for r in rows if r.symbol == sym and r.side == "buy" and r.filled_qty > 0 and r.origin != "protective"]
+            fq = sum(r.filled_qty for r in buys)
+            if qty <= max(_EPS, tol * fq):       # fee dust left in the ledger after a full exit is not a position
+                continue
+            entry = sum(r.filled_qty * (r.avg_fill_price or r.limit_price or 0.0) for r in buys) / fq if fq else None
+            prot = [r for r in rows if r.symbol == sym and r.origin == "protective" and r.status in ("submitted", "partially_filled")]
+            out.append({"symbol": sym, "qty": qty, "entry_price": entry, "protective_orders": len(prot)})
+        return out
+
+    async def close_position(self, account_id: str, symbol: str, reason: str, by: str = "system") -> dict:
+        """Close ETI's position in one symbol because its thesis was invalidated. Reduces exposure only and does not halt the account.
+
+        Venue-side protective orders reserve the balance, so they are cancelled first. If the closing order then fails the position is
+        bare, so the account is halted loudly instead of pretending all is well."""
+        sym = symbol.upper()
+        async with self._lock(account_id):
+            acct = self.store.get_account(account_id)
+            if acct is None:
+                return {"status": "unknown_account"}
+            adapter = self._adapter(acct)
+            held = next((p["qty"] for p in self.managed_positions(account_id) if p["symbol"] == sym), 0.0)
+            if held <= _EPS:
+                return {"status": "no_managed_position", "symbol": sym}
+            now = self.clock()
+            key = f"invalidate|{account_id}|{sym}|{int(now.timestamp() // 60)}"
+            cid = "eti-" + hashlib.sha256(key.encode()).hexdigest()[:24]
+            existing = self.store.get_order(cid)
+            if existing is not None:
+                return {"status": "already_sent_this_minute", "symbol": sym, "client_order_id": cid, "order_status": existing.status}
+            canceled, failed = [], []
+            for r in self.store.list_orders(account_id, statuses=[s.value for s in OrderStatus if s.working], symbol=sym):
+                if r.origin != "protective":
+                    continue
+                try:
+                    await retry_async(lambda: adapter.cancel_order(sym, r.client_order_id, r.provider_order_id), attempts=3, sleep=self._sleep)
+                    self.store.update_order(r.client_order_id, status=OrderStatus.CANCELED.value, error="cancelled: thesis invalidated")
+                    canceled.append(r.client_order_id)
+                except Exception as e:
+                    failed.append({"cancel": r.client_order_id, "error": type(e).__name__})
+            if failed:
+                self._log(account_id, "invalidation_exit_failed", symbol=sym, stage="cancel_protection", failed=failed)
+                return {"status": "failed", "symbol": sym, "failed": failed, "note": "protective orders could not be cancelled; the position is unchanged"}
+            try:
+                positions = await self._read(acct, adapter.get_positions)
+                rules = await self._read(acct, lambda: adapter.get_rules(sym))
+                pos = next((p.qty for p in positions if p.symbol.upper() == sym), 0.0)
+                qty = guards.round_down(min(held, pos), rules.step_size) or 0.0
+                if qty <= _EPS:
+                    raise OrderRejectedError("nothing sellable after rounding to the lot size")
+                otype, price, side = OrderType.MARKET, None, Side.SELL
+                if not acct.policy.emergency_use_market:
+                    q = await self._read(acct, lambda: adapter.get_quote(sym))
+                    otype = OrderType.LIMIT
+                    price = guards.round_price(guards.protective_limit(side, q, EMERGENCY_SLIPPAGE_BPS), rules.tick_size, side)
+                row, _ = self.store.reserve_order(OrderRow(
+                    cid, key, account_id, acct.provider, acct.environment, sym, side.value, qty, otype.value, price,
+                    mode=acct.policy.mode.value, origin="invalidation_exit", strategy="invalidation_exit", thesis=reason[:300],
+                    created_at=now, updated_at=now))
+                row = await self._submit_row(acct, adapter, row, otype, price, reduce_only=True)
+                if row.status in ("rejected", "unknown"):
+                    raise OrderRejectedError(row.error or "closing order not confirmed")
+            except Exception as e:
+                msg = f"Invalidation exit failed after protection was cancelled; position may be unprotected: {type(e).__name__}: {e}"[:300]
+                self.store.save_account(self._with_halt(self.store.get_account(account_id) or acct, msg))
+                self._log(account_id, "invalidation_exit_failed", symbol=sym, stage="close", error=msg)
+                return {"status": "failed_unprotected_halted", "symbol": sym, "error": msg, "canceled_protection": canceled}
+            self._log(account_id, "invalidation_exit", cid, symbol=sym, qty=qty, reason=reason[:300], by=by, canceled_protection=len(canceled), status=row.status)
+            return {"status": "closing_order_sent" if row.status != "filled" else "closed", "symbol": sym, "client_order_id": cid, "qty": qty,
+                    "order_status": row.status, "canceled_protection": canceled}
+
     # ------------------------------------------------------------------ position reconciliation
     def _ledger(self, account_id) -> dict:
         net: dict = {}

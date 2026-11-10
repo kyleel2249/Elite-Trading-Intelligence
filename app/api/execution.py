@@ -1,6 +1,7 @@
 """Execution engine API. Every route requires X-API-Key; nothing here ever returns credentials."""
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -94,6 +95,10 @@ class SignalBody(BaseModel):
     reduce_only: bool = False
     stop_loss: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
     take_profits: list[TakeProfit] = Field(default_factory=list, max_length=3)
+
+
+class CloseBody(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=300)
 
 
 class EmergencyBody(BaseModel):
@@ -291,6 +296,21 @@ async def emergency(account_id: str, body: EmergencyBody, who: str = Depends(ope
     if body.confirm != f"FLATTEN {account_id}":
         raise HTTPException(422, f"confirm must equal: FLATTEN {account_id}")
     return await get_engine().emergency_flatten(account_id, body.reason, who, body.scope)
+
+
+@router.get("/accounts/{account_id}/managed-positions")
+async def managed_positions(account_id: str):
+    _account(account_id)
+    return {"account_id": account_id, "positions": get_engine().managed_positions(account_id)}
+
+
+@router.post("/accounts/{account_id}/positions/{symbol}/close")
+async def close_position(account_id: str, symbol: str, body: CloseBody, x_operator: Optional[str] = Header(default=None)):
+    """Reduce-only close of an ETI-managed position whose thesis was invalidated. Cannot open or increase exposure."""
+    _account(account_id)
+    if not re.fullmatch(r"[A-Za-z0-9]{3,20}", symbol):
+        raise HTTPException(422, "invalid symbol")
+    return await get_engine().close_position(account_id, symbol, body.reason, x_operator or "api")
 
 
 @router.post("/accounts/{account_id}/reconcile")

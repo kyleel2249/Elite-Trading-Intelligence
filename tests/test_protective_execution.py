@@ -19,7 +19,8 @@ PLAN = {"stop_loss": 99.0, "take_profits": [{"price": 101.0, "fraction": 0.4}, {
 
 class FakeVenue:
     """Minimal Binance spot emulation: books, balances, IOC limit buys, OCO lists, order lookup, cancel."""
-    def __init__(self, *, fill_fraction=1.0, oco="ok", usdt=10000.0):
+    def __init__(self, *, fill_fraction=1.0, oco="ok", usdt=10000.0, sell="ok"):
+        self.sell = sell
         self.orders, self.calls, self.fill_fraction, self.oco, self.usdt, self.base = {}, [], fill_fraction, oco, usdt, 0.0
         self.bid, self.ask = 99.99, 100.01
 
@@ -41,6 +42,11 @@ class FakeVenue:
             o = {"clientOrderId": p["newClientOrderId"], "orderId": len(self.orders) + 1, "origQty": p["quantity"], "executedQty": str(qty),
                  "cummulativeQuoteQty": str(qty * self.ask), "status": "FILLED" if self.fill_fraction >= 1 else ("EXPIRED" if qty == 0 else "EXPIRED")}
             self.orders[p["newClientOrderId"]] = o
+            if p["side"] == "SELL":
+                if self.sell == "reject":
+                    return 400, {"code": -2010, "msg": "Account has insufficient balance for requested action."}
+                self.base -= qty; self.usdt += qty * self.bid
+                return 200, o
             self.base += qty * 0.999        # fee taken in the base asset
             self.usdt -= qty * self.ask
             return 200, o
@@ -333,3 +339,40 @@ def test_pure_stop_planner():
     assert protective.plan_stop_adjustment(1, 100.0, 101.0, 97.0, 100.1, r)[2]                                               # market too close
     s, l, why = protective.plan_stop_adjustment(2, 100.0, 101.0, 100.25, 108.0, r); assert why is None and abs(s - 101.0) < 0.011
     assert protective.plan_stop_adjustment(2, 100.0, None, 97.0, 108.0, r)[2] == "no reference level for the new stop"
+
+
+# ---------- Phase 9: thesis-invalidation exit ----------
+def test_managed_positions_report_entry_and_protection():
+    v = FakeVenue(); eng, store, _ = build(v)
+    assert run(eng.submit_signal(intent(1.0))).status == "filled"
+    (p,) = eng.managed_positions("acc")
+    assert p["symbol"] == "BTCUSDT" and abs(p["qty"] - 1.0) < 1e-9 and abs(p["entry_price"] - 100.01) < 0.02 and p["protective_orders"] == 6
+
+
+def test_invalidation_exit_cancels_protection_sells_and_does_not_halt():
+    v = FakeVenue(); eng, store, _ = build(v)
+    assert run(eng.submit_signal(intent(1.0))).status == "filled"
+    res = run(eng.close_position("acc", "btcusdt", "opposing validated signal on two evaluations", "test"))
+    assert res["status"] == "closed" and len(res["canceled_protection"]) >= 3, res
+    assert not [o for o in v.orders.values() if o["status"] == "NEW"]                         # no stop or target left working
+    sells = [c for c in v.calls if c[0] == "POST" and c[1] == "/api/v3/order" and c[2].get("side") == "SELL"]
+    assert len(sells) == 1 and float(sells[0][2]["quantity"]) <= 0.999 + 1e-9                 # never more than the base actually held
+    assert v.base < 0.002 and not store.get_account("acc").halted
+    assert store.list_logs("acc", event="invalidation_exit")
+    assert eng.managed_positions("acc") == []
+    assert run(eng.close_position("acc", "BTCUSDT", "again"))["status"] == "no_managed_position"
+
+
+def test_invalidation_exit_without_a_position_does_nothing():
+    v = FakeVenue(); eng, store, _ = build(v)
+    assert run(eng.close_position("acc", "BTCUSDT", "nothing held"))["status"] == "no_managed_position"
+    assert not any(c[0] == "POST" for c in v.calls)
+
+
+def test_failed_close_after_protection_was_cancelled_halts_loudly():
+    v = FakeVenue(sell="reject"); eng, store, _ = build(v)
+    assert run(eng.submit_signal(intent(1.0))).status == "filled"
+    res = run(eng.close_position("acc", "BTCUSDT", "thesis invalidated"))
+    assert res["status"] == "failed_unprotected_halted"
+    a = store.get_account("acc"); assert a.halted and "unprotected" in a.halted_reason
+    assert store.list_logs("acc", event="invalidation_exit_failed")
