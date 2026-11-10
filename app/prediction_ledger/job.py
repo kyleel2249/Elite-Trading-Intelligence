@@ -1,4 +1,4 @@
-"""Background evaluator: scores matured predictions and publishes last month's report."""
+"""Background evaluator: scores matured predictions and publishes completed monthly reports."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,8 @@ from typing import Any, Optional
 from app.config import get_settings
 from app.database import SessionLocal
 from app.market.service import MarketService
-from app.prediction_ledger.reports import get_report, previous_period, publish_report
+from app.prediction_ledger.queries import due_report_periods
+from app.prediction_ledger.reports import publish_report
 from app.prediction_ledger.service import kline_resolution, pending_matured, resolve_prediction
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ class PredictionResolverJob:
     async def run_once(self) -> dict[str, Any]:
         db = SessionLocal()
         res: dict[str, Any] = {"resolved": 0, "resolved_from_candles": 0, "skipped_no_price": 0, "errors": 0,
-                               "report_published": None}
+                               "reports_published": []}
         try:
             mkt = MarketService(get_settings())
             prices: dict[tuple[str, str], Optional[float]] = {}
@@ -110,10 +111,16 @@ class PredictionResolverJob:
                     db.rollback()
                     res["errors"] += 1
                     logger.warning("resolve failed for %s", p.prediction_uid, exc_info=True)
-            period = previous_period()
-            if get_report(db, period) is None:
-                _, created = publish_report(db, period)
-                res["report_published"] = period if created else None
+            # Publish every completed month that is due (catches up after outages; waits for pending results).
+            for period in due_report_periods(db):
+                try:
+                    _, created = publish_report(db, period)
+                    if created:
+                        res["reports_published"].append(period)
+                except Exception:
+                    db.rollback()
+                    res["errors"] += 1
+                    logger.warning("report publish failed for %s", period, exc_info=True)
             self.last_error = None
         except Exception as e:  # keep the loop alive
             self.last_error = type(e).__name__

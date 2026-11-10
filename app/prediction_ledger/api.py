@@ -15,6 +15,7 @@ from app.prediction_ledger import reports as rpt
 from app.prediction_ledger.evaluation import breakdowns, compute_metrics
 from app.prediction_ledger.job import prediction_resolver_job
 from app.prediction_ledger.models import PredictionRecord, PredictionReport
+from app.prediction_ledger.queries import list_page
 from app.prediction_ledger.service import (create_prediction, get_outcome, naive_utc, outcome_to_dict,
                                            prediction_to_dict, resolve_prediction, scored_rows, verify_hash)
 from app.security.auth import require_api_key
@@ -64,7 +65,10 @@ class PredictionCreate(BaseModel):
 class OutcomeCreate(BaseModel):
     realized_price: float = Field(..., gt=0, allow_inf_nan=False)
     price_source: str = Field(..., min_length=2, max_length=64)
-    observed_at: Optional[datetime] = None
+    observed_at: Optional[datetime] = Field(
+        default=None,
+        description="When the realized price was observed (UTC). Use the price at/just after expiry; omitted = now, "
+                    "which is recorded as late (and excluded from accuracy) if that is long after expiry.")
     notes: Optional[str] = Field(default=None, max_length=2000)
 
 
@@ -82,17 +86,15 @@ def create(body: PredictionCreate, db: Session = Depends(get_db), _auth=Depends(
 
 
 @router.get("")
-def list_predictions(asset: Optional[str] = None, status: Optional[Literal["pending", "resolved", "invalidated", "late"]] = None,
+def list_predictions(asset: Optional[str] = Query(None, max_length=32),
+                     status: Optional[Literal["pending", "resolved", "invalidated", "late"]] = None,
                      limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
-    rows = scored_rows(db, asset=asset, include_pending=True)
-    if status:
-        rows = [r for r in rows if r["status"] == status]
-    rows.sort(key=lambda r: r["created_at"], reverse=True)
-    return {"total": len(rows), "predictions": rows[offset:offset + limit]}
+    total, rows = list_page(db, asset=asset, status=status, limit=limit, offset=offset)
+    return {"total": total, "limit": limit, "offset": offset, "predictions": rows}
 
 
 @router.get("/metrics")
-def metrics(asset: Optional[str] = None, db: Session = Depends(get_db)):
+def metrics(asset: Optional[str] = Query(None, max_length=32), db: Session = Depends(get_db)):
     rows = scored_rows(db, asset=asset)
     return {"overall": compute_metrics(rows), **breakdowns(rows)}
 
