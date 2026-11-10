@@ -15,6 +15,7 @@ import { withFutures } from "./agents/futures-route.ts";
 import { withCommand } from "./command/route.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runPaperCycle } from "./algo/paper-api.ts";
+import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
 import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
 import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
@@ -26,6 +27,7 @@ export const MONITOR_CRON = "* * * * *";
 export default {
   fetch: (request: Request, env: any) => app.fetch(request, env),
   async scheduled(event: { cron?: string }, env: any, ctx: { waitUntil(p: Promise<unknown>): void }) {
+    if (event.cron === UNIVERSE_CRON) { if (env.ETI_UNIVERSE_ENABLED === "true" && env.ETI_EXECUTION_LOG) ctx.waitUntil(runUniverseBatch(env, env.ETI_EXECUTION_LOG, Date.now(), (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday")).then(() => undefined, e => console.error("universe batch failed", e instanceof Error ? e.message : e))); return; }
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills

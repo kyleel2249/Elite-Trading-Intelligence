@@ -69,6 +69,7 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <section class="card s12"><h2>Eight-timeframe matrix</h2><div id="matrix" class="scroll muted">–</div></section>
 <section class="card s6"><h2>Momentum, EMA, volatility, breakout</h2><div id="indicators" class="muted">–</div></section>
 <section class="card s6"><h2>Liquidity and order book</h2><div id="liquidity" class="muted">–</div></section>
+<section class="card s12" id="universe"><h2>Universe scan (all liquid USDT pairs)</h2><div class="bar"><button type="button" id="uni-go">Load universe leaderboard</button></div><div id="uni-body" class="muted">Shows the stored, rolling scan of the whole liquid universe with coverage and data age. Rows older than the staleness limit are not ranked.</div></section>
 <section class="card s12"><h2>Elite Trader research</h2><div id="elite" class="muted">–</div></section>
 <section class="card s12" id="scanner"><h2>Opportunity scanner and leaderboard</h2><form class="bar" id="scan-form" autocomplete="off"><label>Symbols (up to 4, comma separated)<input type="text" id="scan-symbols" value="BTCUSDT,ETHUSDT,SOLUSDT" maxlength="80" style="width:280px"></label><button type="submit" id="scan-go">Scan</button></form><div id="scan-body" class="muted">Ranks by evidence quality (validator score, reward/risk, liquidity), not by predicted profit. HOLD and REJECTED are valid outcomes and are not ranked.</div></section>
 <section class="card s12" id="paper"><h2>Paper trading (simulated)</h2>
@@ -229,6 +230,15 @@ function scanNow(){
   if(b.ignoredSymbols&&b.ignoredSymbols.length)box.appendChild(note("Ignored (invalid or beyond the "+b.maxSymbols+"-symbol limit): "+b.ignoredSymbols.join(", "),"warn"));
   box.appendChild(el("div",{class:"small muted",text:b.note}));put("scan-body",box);setStatus("Scan complete "+new Date().toLocaleTimeString())
  }).catch(function(e){put("scan-body",note("Network error: "+e.message,"bad"));setStatus("Scan failed",true)}).then(function(){$("scan-go").disabled=false})}
+function loadUniverse(){
+ $("uni-go").disabled=true;api("/api/omnisignal/universe?limit=25").then(function(r){var b=r.body||{};
+  if(!r.ok){put("uni-body",note("Universe unavailable: "+(b.error||"HTTP "+r.status),"bad"));return}
+  var c=b.coverage,box=el("div");box.appendChild(kv([["Universe size",c.universeSize],["Fresh / stale / never analysed",c.fresh+" / "+c.stale+" / "+c.neverAnalysed],["Actionable now",b.actionable],["Oldest row",c.oldestAgeMs==null?"–":Math.round(c.oldestAgeMs/60000)+" min"],["Strategy",c.strategy||"–"],["Universe built",c.builtAt||"–"]]));
+  if(b.leaderboard&&b.leaderboard.length)box.appendChild(paperTable(["Rank","Symbol","Decision","Score","Validator","R:R to TP3","Liquidity"],b.leaderboard.map(function(x){return [x.rank==null?"–":x.rank,x.symbol,x.decision+(x.direction?" "+x.direction:""),x.opportunityScore==null?"–":num(x.opportunityScore,1),x.validationScore==null?"–":num(x.validationScore,1),x.riskRewardToTP3==null?"–":num(x.riskRewardToTP3)+"R",x.liquidity||"–"]})));
+  if(c.rejected&&Object.keys(c.rejected).length)box.appendChild(el("details",null,el("summary",{text:"Why symbols were excluded"}),list(Object.keys(c.rejected).map(function(k){return k.replace(/_/g," ")+": "+c.rejected[k]}))));
+  box.appendChild(el("div",{class:"small muted",text:b.note}));put("uni-body",box)
+ }).catch(function(e){put("uni-body",note("Network error: "+e.message,"bad"))}).then(function(){$("uni-go").disabled=false})}
+$("uni-go").addEventListener("click",loadUniverse);
 $("scan-form").addEventListener("submit",function(ev){ev.preventDefault();scanNow()});
 
 $("controls").addEventListener("submit",function(ev){ev.preventDefault();analyse()});

@@ -6,6 +6,8 @@ import { loadSignalInputs } from "./market-inputs.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions } from "./params.ts";
 import { MAX_SCAN_SYMBOLS, parseSymbols, scan } from "./scan.ts";
+import { authorized } from "../execution.ts";
+import { leaderboardOf, loadUniverse, runUniverseBatch } from "./universe.ts";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
@@ -13,6 +15,20 @@ export const STRATEGIES: Strategy[] = ["scalp", "intraday", "swing", "position"]
 
 export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(req.url);
+  if (url.pathname === "/api/omnisignal/universe" || url.pathname === "/api/omnisignal/universe/refresh") {
+    const kv = (env as any).ETI_EXECUTION_LOG; if (!kv) return reply({ error: "storage_not_configured", message: "Bind the ETI_EXECUTION_LOG KV namespace; universe results are stored there." }, 503);
+    const now = Date.now();
+    if (url.pathname.endsWith("/refresh")) {
+      if (req.method !== "POST") return reply({ error: "method_not_allowed", allowed: "POST" }, 405);
+      if (!(await authorized(req, env as any))) return reply({ error: "unauthorized", message: "Refreshing spends market-data requests and needs the execution token." }, 401);
+      const strategy = (url.searchParams.get("strategy") || "intraday") as Strategy; if (!STRATEGIES.includes(strategy)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
+      try { return reply({ ...(await runUniverseBatch(env as any, kv, now, strategy)), submitsOrder: false }); } catch (e) { return reply({ error: "universe_refresh_failed", message: e instanceof Error ? e.message : "error", submitsOrder: false }, 502); }
+    }
+    if (req.method !== "GET") return reply({ error: "method_not_allowed", allowed: "GET" }, 405);
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(url.searchParams.get("limit") ?? 25)) || 25));
+    const state = await loadUniverse(kv).catch(() => null), r = leaderboardOf(state, now, limit);
+    return reply({ ...r, submitsOrder: false, liveExecutionAllowed: false, note: state ? "Ranked by evidence quality, not predicted profit. Only rows analysed within the staleness window are ranked; coverage shows how much of the universe is fresh. Scores are uncalibrated unless the calibration status says otherwise." : "No universe scan has run yet. Enable ETI_UNIVERSE_ENABLED=true for the scheduled scan, or POST /api/omnisignal/universe/refresh." });
+  }
   if (url.pathname === "/api/omnisignal/scan") {
     if (req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
     const strategy = (url.searchParams.get("strategy") || "intraday") as Strategy, { symbols, ignored } = parseSymbols(url.searchParams.get("symbols"));
