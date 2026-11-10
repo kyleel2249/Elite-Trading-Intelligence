@@ -41,19 +41,24 @@ const html = `<!doctype html>
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#14233b,#080d16 55%);color:#eaf2ff;font:14px Inter,system-ui,sans-serif}
 header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}h1{font-size:22px;margin:0}small,.muted{color:var(--muted)}main{padding:22px 4vw;max-width:1600px;margin:auto}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}input,select,button{background:#0b1422;color:#eaf2ff;border:1px solid var(--line);border-radius:8px;padding:10px}button{cursor:pointer}button.active{border-color:var(--green);color:var(--green)}
-.grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:14px}.panel{background:linear-gradient(145deg,#121e30,#0d1624);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.panel h2{font-size:15px;margin:0 0 12px}.chart{height:350px;width:100%}canvas{width:100%;height:100%}.lower{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(280px,3fr);gap:14px;align-items:start}.panel{background:linear-gradient(145deg,#121e30,#0d1624);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.panel h2{font-size:15px;margin:0 0 12px}.chart{height:350px;width:100%}canvas{width:100%;height:100%}.lower{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:8px 5px;text-align:right;border-bottom:1px solid #1d2a3e;font-size:12px}th:first-child,td:first-child{text-align:left}.bid{color:var(--green)}.ask,.sell{color:var(--red)}.buy{color:var(--green)}.status{color:var(--green)}.meta{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);margin:8px 0 14px}.scroll{max-height:360px;overflow:auto}
-@media(max-width:850px){.grid,.lower{grid-template-columns:1fr}.chart{height:280px}}
+@media(max-width:1100px){.lower{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.grid,.lower{grid-template-columns:1fr}.chart{height:280px}}
 
 .execution-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.execution-grid label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}.execution-grid input,.execution-grid select{width:100%;min-width:0}.execution-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.execution-actions button{font-weight:650}.btn-buy{background:#123b32;border-color:#1c8d6c;color:#62e6b7}.btn-sell{background:#401e2a;border-color:#a63e58;color:#ff8da0}.btn-live{border-color:#b65c38;color:#ffb08c}.execution-note{font-size:12px;color:var(--muted);line-height:1.5}.execution-output{white-space:pre-wrap;overflow-wrap:anywhere;background:#09111d;border:1px solid var(--line);border-radius:8px;padding:10px;min-height:42px}.history-table{max-height:320px;overflow:auto}
-@media(max-width:850px){.execution-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.execpanel{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;padding:14px}.execpanel .execution-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.execpanel .execution-grid input,.execpanel .execution-grid select{padding:8px}.execpanel summary{cursor:pointer;color:var(--muted);font-size:12px}.execpanel details{margin:0 0 10px}.execpanel .meta{margin:6px 0 10px;gap:6px 14px}
+.pxbar{display:flex;gap:8px 14px;flex-wrap:wrap;align-items:center;color:var(--muted);margin:0 0 8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0b1422}.pxbar b{color:#eaf2ff;font-variant-numeric:tabular-nums}.pxbar button{padding:3px 8px;font-size:12px;margin-left:auto}
+.execpanel .execution-actions{position:sticky;bottom:-14px;background:linear-gradient(#0d1624d9,#0d1624);padding:10px 0 12px;margin:10px 0 0;z-index:2}.execpanel .execution-actions button{flex:1 1 30%}
+@media(max-width:1024px){.execpanel .execution-grid{grid-template-columns:1fr}.execpanel .execution-grid>label[style*="span 2"]{grid-column:auto!important}}
+@media(max-width:700px){.execpanel{position:static;max-height:none;overflow:visible}.execpanel .execution-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.execpanel .execution-actions{position:static;padding:0;background:none}}
 
 .legend{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}.legend button{padding:4px 10px;font-size:12px;border-radius:999px;color:var(--muted)}.legend button.on{border-color:var(--blue);color:#cfe3ff;background:#10223a}
 .stack{position:relative}.stack canvas{display:block}.chart.big{height:430px}.paneBox{height:96px;border-top:1px solid #1d2a3e}
 .tip{position:absolute;display:none;z-index:5;pointer-events:none;background:#0b1422f2;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.55;white-space:nowrap;box-shadow:0 6px 24px #0008}
 .sigcharts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:8px 0 14px}.sigcharts canvas{height:210px}.sigcharts .execution-note{margin-bottom:4px}
 .ev{margin:6px 0 0;padding-left:18px}.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 3px 3px 0;background:#4a5d78;vertical-align:middle}.dot.win{background:#21d69a}.dot.loss{background:#ff637d}.dot.hc{outline:2px solid #f0c674}
-@media(max-width:850px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
+@media(max-width:700px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
@@ -64,8 +69,35 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <span id="overlayNote" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px;margin-bottom:8px"></span>
 <div id="stack" class="stack"><div class="chart big"><canvas id="chart" role="img" aria-label="Candlestick chart with ETI signal engine overlays"></canvas></div><div class="paneBox"><canvas id="paneRsi" role="img" aria-label="RSI 14 with engine momentum zones"></canvas></div><div class="paneBox"><canvas id="paneMacd" role="img" aria-label="MACD histogram and lines"></canvas></div><div class="paneBox"><canvas id="paneAdx" role="img" aria-label="ADX 14 trend strength"></canvas></div><div class="paneBox"><canvas id="paneScore" role="img" aria-label="ETI engine score per candle"></canvas></div><div id="tip" class="tip" role="status"></div></div>
 <div class="execution-note" style="margin-top:8px">Every layer is the engine's own per-candle output. Ribbon: colour = BUY/SELL lean, opacity = |score|. Triangles: filled = high-conviction (|score| 55+) setup, hollow = lean flip. Green/red boxes = reward/risk of the latest signal (1R/2R/3R). Dashed green/red = prior 20-candle high/low. Dots with ✓/✕ = walk-forward replay trades (TP1 before stop).</div></section>
-<section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section></div>
-<div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
+<aside class="panel execpanel" id="executionPanel" aria-label="Order Execution">
+<h2>Order Execution</h2>
+<div class="pxbar" aria-live="polite"><span>Chart symbol <b id="orderChartSymbol">—</b></span><span>Market price <b id="orderMarketPrice">—</b></span><button type="button" id="useMarketPrice" title="Copy the live chart price into the limit price field">Use as limit</button></div>
+<div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
+<details class="execution-note"><summary>Execution safeguards (read before trading)</summary><p class="execution-note">Orders are sent only after you preview and confirm them. Paper/Testnet is the recommended starting mode. Live mode requires the live switch, broker-specific live credentials, the execution token, and the separate live activation secret. Protect this dashboard with Cloudflare Access before entering credentials. Never enter withdrawal or transfer credentials here.</p></details>
+<div class="execution-grid">
+<label>Broker<select id="orderBroker"><option value="alpaca">Alpaca</option><option value="binance">Binance</option></select></label>
+<label>Mode<select id="orderMode"><option value="paper_testnet">Paper / Testnet</option><option value="live">Live trading</option></select></label>
+<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off"></label>
+<label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option></select></label>
+<label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
+<label id="limitPriceWrap" style="display:none">Limit price<input id="orderLimitPrice" type="number" min="0" step="any" placeholder="Enter limit price"></label>
+<label>Time in force<select id="orderTif"><option value="gtc">GTC</option><option value="day">DAY (Alpaca)</option><option value="ioc">IOC (Binance)</option></select></label>
+<label>Operator ID<input id="operatorId" value="dashboard-operator" maxlength="80"></label>
+</div>
+<div class="execution-grid" style="margin-top:10px">
+<label style="grid-column:span 2">Execution token (not saved)<input id="executionToken" type="password" autocomplete="off" placeholder="Paste ETI_EXECUTION_TOKEN"></label>
+<label id="liveTokenWrap" style="grid-column:span 2;display:none">Live activation secret (not saved)<input id="liveActivationToken" type="password" autocomplete="off" placeholder="Paste ETI_LIVE_ACTIVATION_TOKEN"></label>
+</div>
+<div class="execution-actions">
+<button id="previewOrder" class="active">Preview order</button>
+<button id="buyOrder" class="btn-buy">Buy</button>
+<button id="sellOrder" class="btn-sell">Sell</button>
+<button id="clearExecutionSecrets">Clear credentials</button>
+</div>
+<div style="margin-top:12px"><strong>Order preview / response</strong><div id="orderOutput" class="execution-output" style="margin-top:7px">No order prepared.</div></div>
+</aside>
+</div>
+<div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
 
 <section class="panel" id="signalPanel" style="margin-top:14px">
@@ -98,32 +130,6 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <button id="rdRefresh" class="active">Assess readiness</button><button id="rdTextBtn">Text report</button></div>
 <div id="rdOut" role="status" aria-live="polite"><span class="muted">Waiting for assessment...</span></div>
 <pre id="rdText" class="execution-output" style="display:none"></pre>
-</section>
-<section class="panel" style="margin-top:14px">
-<h2>Order Execution</h2>
-<div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
-<p class="execution-note">Orders are sent only after you preview and confirm them. Paper/Testnet is the recommended starting mode. Live mode requires the live switch, broker-specific live credentials, the execution token, and the separate live activation secret. Protect this dashboard with Cloudflare Access before entering credentials. Never enter withdrawal or transfer credentials here.</p>
-<div class="execution-grid">
-<label>Broker<select id="orderBroker"><option value="alpaca">Alpaca</option><option value="binance">Binance</option></select></label>
-<label>Mode<select id="orderMode"><option value="paper_testnet">Paper / Testnet</option><option value="live">Live trading</option></select></label>
-<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off"></label>
-<label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option></select></label>
-<label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
-<label id="limitPriceWrap" style="display:none">Limit price<input id="orderLimitPrice" type="number" min="0" step="any" placeholder="Enter limit price"></label>
-<label>Time in force<select id="orderTif"><option value="gtc">GTC</option><option value="day">DAY (Alpaca)</option><option value="ioc">IOC (Binance)</option></select></label>
-<label>Operator ID<input id="operatorId" value="dashboard-operator" maxlength="80"></label>
-</div>
-<div class="execution-grid" style="margin-top:10px">
-<label style="grid-column:span 2">Execution token (not saved)<input id="executionToken" type="password" autocomplete="off" placeholder="Paste ETI_EXECUTION_TOKEN"></label>
-<label id="liveTokenWrap" style="grid-column:span 2;display:none">Live activation secret (not saved)<input id="liveActivationToken" type="password" autocomplete="off" placeholder="Paste ETI_LIVE_ACTIVATION_TOKEN"></label>
-</div>
-<div class="execution-actions">
-<button id="previewOrder" class="active">Preview order</button>
-<button id="buyOrder" class="btn-buy">Buy</button>
-<button id="sellOrder" class="btn-sell">Sell</button>
-<button id="clearExecutionSecrets">Clear credentials</button>
-</div>
-<div style="margin-top:12px"><strong>Order preview / response</strong><div id="orderOutput" class="execution-output" style="margin-top:7px">No order prepared.</div></div>
 </section>
 <section class="panel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Execution Audit History</h2><button id="refreshExecutionHistory">Refresh audit history</button></div>
@@ -454,7 +460,11 @@ async function submitOrder(side){
 $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').value==='limit'?'flex':'none';};
 $('orderMode').onchange=()=>{$('liveTokenWrap').style.display=$('orderMode').value==='live'?'flex':'none';};
 $('orderBroker').onchange=()=>{$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';if(executionStatus){const ready=$('orderBroker').value==='alpaca'?executionStatus.alpaca_live_configured:executionStatus.binance_live_configured;$('executionStatus').textContent=executionStatus.live_trading_enabled?(ready?'Live switch ON · broker credentials configured':'Live switch ON · live broker credentials missing'):'Paper/Testnet default';$('executionStatus').style.color=executionStatus.live_trading_enabled?(ready?'#21d69a':'#ffb08c'):'#21d69a';}};
-$('orderSymbol').onchange=()=>{};
+function syncOrderMarket(){const l=$('last').textContent;$('orderMarketPrice').textContent=l;$('orderChartSymbol').textContent=$('symbol').value;}
+new MutationObserver(syncOrderMarket).observe($('last'),{childList:true,characterData:true,subtree:true});syncOrderMarket();
+$('useMarketPrice').onclick=()=>{const v=Number(String($('last').textContent).replace(/,/g,''));if(!Number.isFinite(v)||v<=0){$('orderOutput').textContent='No live market price is available yet.';return;}$('orderType').value='limit';$('orderType').onchange();$('orderLimitPrice').value=String(v);};
+$('orderSymbol').onchange=()=>{const v=$('orderSymbol').value.trim().toUpperCase();$('orderSymbol').value=v;const opt=Array.prototype.find.call($('symbol').options,o=>o.value===v);if(opt&&$('symbol').value!==v){$('symbol').value=v;resetAndLoad();}syncOrderMarket();};
+$('symbol').addEventListener('change',syncOrderMarket);
 $('previewOrder').onclick=()=>{const o=selectedOrder();const problem=orderValidation(o,false);if(problem){$('orderOutput').textContent=problem;return;}renderPreview(o);};
 $('buyOrder').onclick=()=>submitOrder('buy');
 $('sellOrder').onclick=()=>submitOrder('sell');
