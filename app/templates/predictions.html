@@ -27,6 +27,7 @@
     textarea{min-height:60px} .full{grid-column:1/-1}
     .toast{position:fixed;bottom:1rem;right:1rem;background:#0f172a;border:1px solid var(--gold);padding:.7rem 1rem;border-radius:10px;font-size:.82rem;display:none;max-width:340px}
     .toast.show{display:block} pre{white-space:pre-wrap;font-size:.72rem;background:#0a1220;padding:.75rem;border-radius:8px;overflow:auto}
+    .pager{display:flex;gap:.5rem;align-items:center;margin-top:.5rem}
   </style>
 </head>
 <body>
@@ -52,15 +53,18 @@
     <h2>Predictions</h2>
     <div class="sub">Click a row to verify its integrity hash and copy its UID into the settle form.</div>
     <div class="scroll"><table id="tbl-pred"></table></div>
+    <div class="pager"><button class="btn" id="pg-prev">Newer</button><button class="btn" id="pg-next">Older</button><span class="sub" id="pg-info"></span></div>
 
     <h2>Monthly reports</h2>
     <div class="scroll"><table id="tbl-rep"></table></div>
     <pre id="report-body" style="display:none"></pre>
 
     <h2>Settle a matured prediction (no price feed)</h2>
+    <div class="sub">Enter the price at (or just after) the prediction's expiry and the UTC time it refers to. A price observed long after expiry is stored as "late" and excluded from accuracy.</div>
     <form id="settle">
       <label>Prediction UID<input name="uid" required /></label>
       <label>Realized price<input name="realized_price" type="number" step="any" min="0" required /></label>
+      <label>Price as of (UTC)<input name="observed_at" type="datetime-local" step="1" required /></label>
       <label>Price source<input name="price_source" required minlength="2" placeholder="e.g. exchange close" /></label>
       <label class="full">Notes<textarea name="notes"></textarea></label>
       <div style="align-self:end"><button class="btn" type="submit">Settle (final, cannot be edited)</button></div>
@@ -92,6 +96,7 @@
   <script>
     const $ = (id) => document.getElementById(id);
     $('api-key').value = localStorage.getItem('eti_api_key') || '';
+    const PAGE = 50; let offset = 0;
     const pct = (x) => x == null ? 'n/a' : (x * 100).toFixed(1) + '%';
     const num = (x, d = 4) => x == null ? 'n/a' : Number(x).toFixed(d);
     function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 4500); }
@@ -117,6 +122,19 @@
       table($('tbl-group'), ['Group', 'Scored', 'Directional', 'Target hit', 'MAPE', 'Brier', 'Reliable?'],
         Object.entries(g).map(([k, m]) => [k, m.n_scored, pct(m.directional_accuracy), pct(m.target_range_hit_rate), pct(m.mean_abs_pct_error), num(m.brier_score), m.sufficient_sample ? 'yes' : 'n<' + m.min_sample]));
     }
+    async function loadPredictions() {
+      const p = await api('/api/predictions?limit=' + PAGE + '&offset=' + offset);
+      table($('tbl-pred'), ['Created (UTC)', 'Asset', 'Dir', 'Entry', 'Prob', 'Horizon', 'Regime', 'Strategy', 'Status', 'Realized', 'Correct', 'UID'],
+        p.predictions.map(x => [x.created_at, x.asset, x.direction, x.entry_reference, x.probability, x.horizon_label, x.market_regime, x.strategy, x.status, x.realized_price, x.direction_correct == null ? '' : (x.direction_correct ? 'yes' : 'no'), x.prediction_uid]),
+        (i, v) => i === 2 ? (v === 'up' ? 'up' : v === 'down' ? 'down' : '') : '');
+      $('tbl-pred').querySelectorAll('tbody tr').forEach(tr => { tr.style.cursor = 'pointer'; tr.onclick = async () => {
+        const uid = tr.cells[11] && tr.cells[11].textContent; if (!uid) return;
+        $('settle').elements.uid.value = uid;
+        try { const v = await api('/api/predictions/' + encodeURIComponent(uid) + '/verify'); toast(v.intact ? 'Integrity hash verified' : 'WARNING: stored hash does not match the record'); } catch (e) { toast(e.message); } }; });
+      const end = Math.min(offset + PAGE, p.total);
+      $('pg-info').textContent = p.total ? ('Showing ' + (offset + 1) + '–' + end + ' of ' + p.total) : '';
+      $('pg-prev').disabled = offset === 0; $('pg-next').disabled = offset + PAGE >= p.total;
+    }
     async function load() {
       METRICS = await api('/api/predictions/metrics');
       const o = METRICS.overall;
@@ -126,27 +144,23 @@
       $('warn').textContent = o.warning || (o.n_scored === 0 ? 'No scored predictions yet — metrics appear once predictions reach their horizon.' : '');
       renderGroups();
       table($('tbl-cal'), ['Probability bin', 'N', 'Mean stated p', 'Observed frequency'], (o.calibration || []).map(b => [b.bin, b.n, num(b.mean_probability, 3), num(b.observed_frequency, 3)]));
-      const p = await api('/api/predictions?limit=100');
-      table($('tbl-pred'), ['Created (UTC)', 'Asset', 'Dir', 'Entry', 'Prob', 'Horizon', 'Regime', 'Strategy', 'Status', 'Realized', 'Correct', 'UID'],
-        p.predictions.map(x => [x.created_at, x.asset, x.direction, x.entry_reference, x.probability, x.horizon_label, x.market_regime, x.strategy, x.status, x.realized_price, x.direction_correct == null ? '' : (x.direction_correct ? 'yes' : 'no'), x.prediction_uid]),
-        (i, v) => i === 2 ? (v === 'up' ? 'up' : v === 'down' ? 'down' : '') : '');
-      $('tbl-pred').querySelectorAll('tbody tr').forEach(tr => { tr.style.cursor = 'pointer'; tr.onclick = async () => {
-        const uid = tr.cells[11] && tr.cells[11].textContent; if (!uid) return;
-        $('settle').elements.uid.value = uid;
-        try { const v = await api('/api/predictions/' + encodeURIComponent(uid) + '/verify'); toast(v.intact ? 'Integrity hash verified' : 'WARNING: stored hash does not match the record'); } catch (e) { toast(e.message); } }; });
+      await loadPredictions();
       const rp = await api('/api/predictions/reports');
       table($('tbl-rep'), ['Period', 'Generated', 'Hash'], rp.reports.map(r => [r.period, r.generated_at, r.content_hash.slice(0, 16)]));
       $('tbl-rep').querySelectorAll('tbody tr').forEach(tr => { tr.style.cursor = 'pointer'; tr.onclick = async () => {
         const period = tr.cells[0].textContent; const r = await api('/api/predictions/reports/' + encodeURIComponent(period));
         const pre = $('report-body'); pre.textContent = r.markdown; pre.style.display = 'block'; }; });
     }
+    $('pg-prev').onclick = () => { offset = Math.max(0, offset - PAGE); loadPredictions().catch(e => toast(e.message)); };
+    $('pg-next').onclick = () => { offset += PAGE; loadPredictions().catch(e => toast(e.message)); };
     $('group').onchange = () => METRICS && renderGroups();
     $('btn-refresh').onclick = () => load().then(() => toast('Refreshed')).catch(e => toast(e.message));
-    $('btn-run').onclick = async () => { try { const j = await api('/api/predictions/job/run', { method: 'POST', headers: headers() }); toast('Resolved ' + j.resolved + ' (' + (j.resolved_from_candles || 0) + ' from candles) · no feed ' + j.skipped_no_price + ' · errors ' + j.errors); await load(); } catch (e) { toast(e.message); } };
+    $('btn-run').onclick = async () => { try { const j = await api('/api/predictions/job/run', { method: 'POST', headers: headers() }); toast('Resolved ' + j.resolved + ' (' + (j.resolved_from_candles || 0) + ' from candles) · no feed ' + j.skipped_no_price + ' · errors ' + j.errors + ' · reports ' + ((j.reports_published || []).length)); await load(); } catch (e) { toast(e.message); } };
     $('settle').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target); const notes = (f.get('notes') || '').toString().trim();
-      const body = { realized_price: Number(f.get('realized_price')), price_source: (f.get('price_source') || '').toString().trim(), notes: notes || null };
+      let asOf = (f.get('observed_at') || '').toString(); if (asOf.length === 16) asOf += ':00';   // datetime-local without seconds
+      const body = { realized_price: Number(f.get('realized_price')), price_source: (f.get('price_source') || '').toString().trim(), observed_at: asOf + 'Z', notes: notes || null };
       try { const j = await api('/api/predictions/' + encodeURIComponent(f.get('uid').toString().trim()) + '/outcome', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
         toast('Settled: ' + j.status); ev.target.reset(); await load(); } catch (e) { toast(e.message); }
     });
@@ -158,7 +172,7 @@
         horizon_seconds: Math.round(n('hours') * 3600), target_low: n('target_low'), target_high: n('target_high'), probability: n('probability'),
         invalidation_price: n('invalidation_price'), market_regime: s('market_regime'), strategy: s('strategy'), reasoning: s('reasoning'),
         sources: (f.get('sources') || '').split('\n').map(x => x.trim()).filter(Boolean), invalidation_criteria: s('invalidation_criteria') };
-      try { const j = await api('/api/predictions', { method: 'POST', headers: headers(), body: JSON.stringify(body) }); toast('Recorded ' + j.prediction_uid.slice(0, 8)); ev.target.reset(); await load(); }
+      try { const j = await api('/api/predictions', { method: 'POST', headers: headers(), body: JSON.stringify(body) }); toast('Recorded ' + j.prediction_uid.slice(0, 8)); ev.target.reset(); offset = 0; await load(); }
       catch (e) { toast(e.message); }
     });
     load().catch(e => toast(e.message));
