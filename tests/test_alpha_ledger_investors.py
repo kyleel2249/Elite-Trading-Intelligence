@@ -239,11 +239,22 @@ def test_explorer_errors_do_not_leak_api_key():
 
 def test_research_overlay_adds_only_cited_reported_notes_and_keeps_gaps_honest():
     from app.knowledge.registry import get_trader
-    for pid in ("stanley_druckenmiller", "peter_lynch", "jim_simons"):
+    for pid in ("stanley_druckenmiller", "peter_lynch", "jim_simons", "john_paulson", "charlie_munger"):
         p = get_trader(pid)
-        cited = [n for n in p["historical_returns"] if "2026-11-09" in (n.get("source") or "")]
+        cited = [n for n in p["historical_returns"] if "2026-11-09" in (n.get("source") or "") or "2026-11-10" in (n.get("source") or "")]
         assert cited and all(n["classification"] == "reported" and n["source"] for n in cited)
-        assert any("fund-level" in n["claim"] or "fund-level" in (n.get("notes") or "") for n in cited)  # fund vs personal never blurred
+        assert any(("fund-level" in n["claim"] or "partnership-level" in n["claim"] or "personal" in (n.get("notes") or "")) for n in cited)  # fund vs personal never blurred
     a = audit_profiles(None, ["peter_lynch"])["results"][0]
     assert "drawdowns" in a["research_gaps"]  # no source found, so it is still reported as a gap, not invented
     assert audit_profiles(None, ["stanley_druckenmiller"])["results"][0]["categories"]["drawdowns"]["status"] == "DOCUMENTED"
+
+
+def test_loss_records_keep_their_caveats_and_derived_numbers_are_labelled_estimates():
+    from app.knowledge.registry import get_trader
+    pa = get_trader("john_paulson")["historical_drawdowns"]
+    assert any("51%" in n["claim"] and n["classification"] == "reported" and "declined to comment" in (n["notes"] or "") for n in pa)
+    mu = get_trader("charlie_munger")["historical_drawdowns"]
+    derived = [n for n in mu if "-53%" in n["claim"]]
+    assert derived and derived[0]["classification"] == "estimate" and "derived" in derived[0]["notes"] + derived[0]["claim"]
+    for pid in ("john_paulson", "charlie_munger"):
+        assert audit_profiles(None, [pid])["results"][0]["categories"]["drawdowns"]["status"] == "DOCUMENTED"
