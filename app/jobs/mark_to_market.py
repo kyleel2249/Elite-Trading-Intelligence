@@ -21,6 +21,7 @@ class MarkToMarketJob:
         self.last_run: Optional[str] = None
         self.last_error: Optional[str] = None
         self.last_marked: int = 0
+        self.last_protection: list = []
 
     async def start(self) -> None:
         if self._running:
@@ -45,6 +46,7 @@ class MarkToMarketJob:
             "last_run": self.last_run,
             "last_marked": self.last_marked,
             "last_error": self.last_error,
+            "last_protection_sweep": self.last_protection,
             "owner": "Claire Bennett / Omar Diallo process",
         }
 
@@ -56,6 +58,7 @@ class MarkToMarketJob:
             open_pos = portfolio.list_positions(status="open")
             if not open_pos:
                 self.last_marked = 0
+                await self._protect(db, settings)
                 return 0
             mkt = MarketService(settings)
             marks = {}
@@ -69,6 +72,7 @@ class MarkToMarketJob:
                     logger.warning("MTM snapshot failed %s %s: %s", p.provider, p.symbol, e)
             portfolio.mark_positions(marks)
             self.last_marked = len(marks)
+            await self._protect(db, settings)
             from datetime import datetime, timezone
 
             self.last_run = datetime.now(timezone.utc).isoformat()
@@ -80,6 +84,15 @@ class MarkToMarketJob:
             return 0
         finally:
             db.close()
+
+    async def _protect(self, db, settings) -> None:
+        """Capital Protection sweep (stop-loss enforcement, emergency rules, strategy quarantine). Never breaks MTM."""
+        try:
+            from app.trading.protection_runner import run_protection_sweep
+
+            self.last_protection = await run_protection_sweep(db, settings)
+        except Exception:
+            logger.error("Capital protection sweep failed", exc_info=True)
 
     async def _loop(self) -> None:
         while self._running:
