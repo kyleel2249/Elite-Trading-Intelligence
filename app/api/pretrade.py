@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/pretrade", tags=["pretrade"])
 
 
 class PretradeRequest(BaseModel):
-    provider: Literal["alpaca", "binance"]
+    provider: Literal["alpaca", "binance", "oanda"]
     environment: Literal["paper", "testnet", "live"]
     symbol: str = Field(min_length=2, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
     side: Literal["buy", "sell"]
@@ -69,6 +69,11 @@ async def pretrade_check(
             order_book = None
         try:
             klines = await MarketService(settings).get_history("binance", req.symbol, interval="1h", limit=100)
+        except Exception:
+            klines = None
+    elif req.provider == "oanda":
+        try:
+            klines = await MarketService(settings).get_history("oanda", req.symbol, interval="1h", limit=100)
         except Exception:
             klines = None
 

@@ -40,8 +40,11 @@ def market_risk_review(symbol: str, provider: Optional[str], environment: str, *
 
     supports = provider_supports(provider, inst)
     if supports is False:
-        msg = f"{provider} cannot trade {inst.asset_class.value} instrument {inst.symbol} (no adapter for this market)"
+        msg = f"{provider} cannot trade {inst.asset_class.value} instrument {inst.symbol} (no adapter for this market, or not offered by this provider)"
         (review.warnings if inst.confidence == "heuristic" else review.blocking_reasons).append(msg)
+
+    if (provider or "").lower() == "oanda" and (environment or "").lower() == "testnet":
+        review.blocking_reasons.append("OANDA has no testnet environment; use environment=paper (OANDA practice account) or live")
 
     if inst.session_id in SESSIONS:
         status = session_status(inst.session_id, now)
@@ -157,7 +160,7 @@ def assess(symbol: str, *, now: Optional[datetime] = None, price: Optional[float
            measured_spread_bps: Optional[float] = None, avg_daily_volume_usd: Optional[float] = None,
            listing_age_days: Optional[float] = None, quote_to_usd: Optional[float] = None,
            max_notional_pct: float = 6.0, max_adv_participation_pct: float = 1.0,
-           provider: Optional[str] = None, environment: str = "paper") -> dict:
+           provider: Optional[str] = None, environment: str = "paper", settings=None) -> dict:
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     side = (side or "buy").lower()
     inst = classify(symbol, provider_hint=provider)
@@ -172,7 +175,7 @@ def assess(symbol: str, *, now: Optional[datetime] = None, price: Optional[float
     prof = profile_for(inst, listing_age_days=listing_age_days, avg_daily_volume_usd=avg_daily_volume_usd)
     factor, liq_ctx = liquidity_factor(inst.asset_class.value, status, now)
     smult = spread_multiplier(factor)
-    all_routes = routes_for(inst)
+    all_routes = routes_for(inst, settings)
     routes = [r for r in all_routes if not provider or r["provider"] == provider.lower()]
 
     if measured_spread_bps is not None:
@@ -200,7 +203,8 @@ def assess(symbol: str, *, now: Optional[datetime] = None, price: Optional[float
                 costs["cost_to_risk_ratio"] = round(ratio, 3)
                 if ratio > COST_TO_RISK_WARN:
                     warnings.append(f"Round-trip costs consume {ratio:.0%} of the risk budget; a tight edge here is eaten by friction")
-        proxy_route = next((r for r in routes if r["kind"] == "etf_proxy"), None)
+        # Only when the ETF is the *primary* route: an OANDA CFD or spot route takes the quantity in underlying units as-is.
+        proxy_route = routes[0] if routes and routes[0]["kind"] == "etf_proxy" else None
         if proxy_route and sizing.get("notional_usd"):
             # The quantity above is in underlying units; the executable instrument is the ETF. Size it by notional.
             sizing["proxy_sizing"] = {
@@ -227,10 +231,14 @@ def assess(symbol: str, *, now: Optional[datetime] = None, price: Optional[float
             via = "" if first.session_id == inst.session_id else f" (execution route trades in {first.name} hours)"
             reasons.append(f"Execution market is {first.state} ({first.reason or first.regime}){via}"
                            + (f"; next open {first.next_open_utc}" if first.next_open_utc else ""))
+        elif not any(r["setup"]["configured"] for r in routes):
+            verdict = "needs_setup"
+            r0 = routes[0]
+            reasons.append(f"{r0['provider']} route exists but is not configured: set {', '.join(r0['setup']['missing'])}")
         elif warnings or prof.liquidity in ("low", "very_low") or status.state != "open":
             verdict = "caution"
             if status.state != "open":
-                warnings.append(f"The underlying market itself is {status.state}; the proxy may not reflect current prices")
+                warnings.append(f"The underlying market itself is {status.state}; the execution route may not reflect current prices")
 
     # Warnings that apply regardless of verdict
     if status.regime in ("opening_volatility", "closing_flow"):
@@ -254,8 +262,10 @@ def assess(symbol: str, *, now: Optional[datetime] = None, price: Optional[float
     if status.holiday_calendar == "not_applied":
         warnings.append("No holiday calendar applied for this market; it may be closed on a public holiday.")
     for r in routes:
-        if r["kind"] == "etf_proxy":
+        if r["kind"] in ("etf_proxy", "cfd"):
             warnings.append(r["note"])
+        if r["setup"].get("note"):
+            warnings.append(f"{r['provider']}: {r['setup']['note']}")
     if inst.asset_class in (AssetClass.FUTURE, AssetClass.OPTION):
         warnings.extend(inst.notes)
     if provider and not routes and all_routes:
@@ -270,7 +280,7 @@ def assess(symbol: str, *, now: Optional[datetime] = None, price: Optional[float
         "costs": costs,
         "sizing": sizing,
         "execution": {"executable": bool(routes), "routes": routes, "environment_requested": environment,
-                      "data": data_coverage(inst), "live_trading": "disabled unless explicitly enabled and risk-gated"},
+                      "data": data_coverage(inst, settings), "live_trading": "disabled unless explicitly enabled and risk-gated"},
         "verdict": verdict,
         "reasons": reasons,
         "warnings": list(dict.fromkeys(warnings)),

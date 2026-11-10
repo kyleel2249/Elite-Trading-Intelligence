@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.oanda import OandaClient
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
 from app.trading.portfolio import PortfolioService
 
@@ -143,6 +144,15 @@ class TradingService:
                         client_order_id=client_order_id,
                     )
                     fill_price = fill_price_hint
+            elif provider.lower() == "oanda":
+                # paper -> OANDA practice account; live host is reachable only for environment="live" (risk-gated)
+                client = OandaClient(self.settings, use_practice=environment.lower() != "live")
+                resp = await client.submit_order(
+                    symbol=symbol, qty=qty, side=side, order_type=order_type,
+                    limit_price=limit_price, client_order_id=client_order_id,
+                )
+                # Only a real fill price counts: a pending limit order must not be journaled as filled at the market price.
+                fill_price = resp.get("fill_price")
             else:
                 return {
                     "status": "rejected",

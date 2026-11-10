@@ -30,6 +30,7 @@ async def route_snapshot(symbol: str, provider: Optional[str] = None, *, market_
     snap = await market_service.get_snapshot(route["provider"], route["symbol"])
     market = session_status(route["session_id"]).to_dict()
     out = {**base, **snap, "route": route, "execution_market": market}
+    out.setdefault("price", None)          # an unconfigured provider returns no price: say so explicitly, never omit the key
     if route["kind"] == "etf_proxy":
         out["is_proxy"] = True
         out["proxy_notice"] = (f"Price shown is {route['symbol']}, an ETF stand-in for {inst.symbol}; "

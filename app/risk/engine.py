@@ -103,6 +103,8 @@ class RiskEngine:
                 reasons.append("Alpaca is configured for paper (ALPACA_PAPER=true); set ALPACA_PAPER=false for live")
             if proposal.provider == "binance" and not s.binance_live_trading_enabled:
                 reasons.append("BINANCE_LIVE_TRADING_ENABLED is false")
+            if proposal.provider == "oanda" and not getattr(s, "oanda_live_trading_enabled", False):
+                reasons.append("OANDA_LIVE_TRADING_ENABLED is false")
             # Live requires limit orders by default for controllable entry
             if proposal.order_type == "market":
                 reasons.append("Live orders require limit order_type (market blocked on live path)")
@@ -191,7 +193,7 @@ class RiskEngine:
                 reasons.append(
                     f"Data too stale ({proposal.data_age_seconds:.0f}s > {s.data_max_age_seconds}s)"
                 )
-            if proposal.data_status in ("stale", "invalid", "unavailable", "incomplete"):
+            if proposal.data_status in ("stale", "invalid", "unavailable", "incomplete", "market_closed"):
                 reasons.append(f"Data status not acceptable for live: {proposal.data_status}")
 
         if reasons:

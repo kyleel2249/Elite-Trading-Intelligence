@@ -6,6 +6,7 @@ from typing import Any, Optional
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.oanda import OandaClient
 from app.market.data_quality import assess_quote, assess_kline
 from app.market.normalization import normalize_order_book, normalize_binance_kline
 
@@ -15,6 +16,7 @@ class MarketService:
         self.settings = settings or get_settings()
         self.alpaca = AlpacaClient(self.settings)
         self.binance = BinanceClient(self.settings)
+        self.oanda = OandaClient(self.settings)
 
     async def get_snapshot(self, provider: str, symbol: str) -> dict[str, Any]:
         provider = provider.lower()
@@ -48,6 +50,28 @@ class MarketService:
                 "bid": q.bid,
                 "ask": q.ask,
                 "data_status": q.data_status,
+                "ts_utc": q.ts_utc.isoformat(),
+                "retrieved_at": q.retrieved_at.isoformat(),
+                "exchange": q.exchange,
+                "quote_currency": q.quote_currency,
+            }
+        if provider == "oanda":
+            if not self.oanda.configured:
+                return {"provider": "oanda", "symbol": symbol, "data_status": "unavailable", "error": "not_configured"}
+            q = await self.oanda.get_quote(symbol)
+            was_closed = q.data_status == "market_closed"
+            q = assess_quote(q, self.settings.data_max_age_seconds)
+            status = "market_closed" if was_closed and q.data_status in ("fresh", "delayed") else q.data_status
+            return {
+                "provider": q.provider,
+                "symbol": q.symbol,
+                "venue_symbol": (q.meta or {}).get("venue_symbol"),
+                "asset_class": q.asset_class,
+                "price": q.price,
+                "bid": q.bid,
+                "ask": q.ask,
+                "data_status": status,
+                "tradeable": (q.meta or {}).get("tradeable"),
                 "ts_utc": q.ts_utc.isoformat(),
                 "retrieved_at": q.retrieved_at.isoformat(),
                 "exchange": q.exchange,
@@ -87,4 +111,7 @@ class MarketService:
                 nk = normalize_binance_kline(row, symbol, interval)
                 out.append(assess_kline(nk))
             return out
+        if provider == "oanda":
+            raw = await self.oanda.get_candles(symbol, interval=interval, limit=limit)
+            return [assess_kline(normalize_binance_kline(row, symbol, interval)) for row in raw]
         raise ValueError(f"History not yet implemented for provider: {provider}")

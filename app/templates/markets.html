@@ -24,7 +24,7 @@
     .tile .m{color:var(--muted);font-size:.7rem;line-height:1.35}
     .pill{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.68rem;font-weight:600;border:1px solid}
     .open,.ready{color:var(--green);border-color:rgba(34,197,94,.5)}
-    .extended,.caution,.wait_for_session{color:var(--gold);border-color:rgba(251,191,36,.5)}
+    .extended,.caution,.wait_for_session,.needs_setup,.partial{color:var(--gold);border-color:rgba(251,191,36,.5)}
     .closed,.blocked{color:var(--red);border-color:rgba(239,68,68,.5)}
     .analysis_only{color:var(--cyan);border-color:rgba(34,211,238,.5)}
     form{display:grid;gap:.6rem;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));align-items:end}
@@ -127,7 +127,7 @@
       Object.keys(o.asset_classes).forEach(function(k){
         var c=o.asset_classes[k], tr=h('tr');
         tr.appendChild(h('td','',k+(c.execution_scope?' ('+c.execution_scope+')':'')));
-        tr.appendChild(h('td','',c.direct_providers.join(', ')||'—'));
+        tr.appendChild(h('td','',(c.direct_providers.join(', ')||'—')+(c.cfd_providers&&c.cfd_providers.length?(' · CFD: '+c.cfd_providers.join(', ')):'')));
         tr.appendChild(h('td','',c.etf_proxy_via.join(', ')||'—'));
         var td=h('td'); td.appendChild(pill(c.execution?'yes':'analysis only', c.execution?'open':'analysis_only')); tr.appendChild(td);
         tr.appendChild(h('td','',c.gap||''));

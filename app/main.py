@@ -21,6 +21,7 @@ from app.schemas import HealthResponse
 from app.risk.engine import RiskEngine, OrderProposal
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.oanda import OandaClient
 from app.integrations.quiver.client import QuiverClient
 from app.integrations.liquid.client import LiquidClient
 from app.trading.service import TradingService
@@ -238,7 +239,7 @@ except RuntimeError:
 
 
 class OrderRequest(BaseModel):
-    provider: Literal["binance", "alpaca"] = Field(..., examples=["binance", "alpaca"])
+    provider: Literal["binance", "alpaca", "oanda"] = Field(..., examples=["binance", "alpaca", "oanda"])
     environment: Literal["paper", "testnet", "live"] = Field(..., examples=["paper", "testnet", "live"])
     symbol: str = Field(..., min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
     side: Literal["buy", "sell"]
@@ -368,6 +369,7 @@ async def providers_status(settings: Settings = Depends(get_settings)):
     return {
         "alpaca": await alpaca.health(),
         "binance": await binance.health(),
+        "oanda": await OandaClient(settings).health(),
         "quiver": await quiver.health(),
         "liquid": await liquid.health(),
         "live_trading_enabled": settings.live_trading_enabled,
@@ -473,6 +475,8 @@ async def run_council(
         if provider == "binance":
             book = await mkt.get_order_book(symbol, depth=20)
             klines = await mkt.get_history("binance", symbol, interval="1h", limit=48)
+        elif provider == "oanda":
+            klines = await mkt.get_history("oanda", symbol, interval="1h", limit=48)
         fred = await fetch_fred_series(settings=settings)
         news = await fetch_news_headlines(query=f"{symbol} OR markets", settings=settings)
         context = {"fred": fred, "news": news}

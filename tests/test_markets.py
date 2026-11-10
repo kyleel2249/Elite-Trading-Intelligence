@@ -121,7 +121,8 @@ def test_egypt_trades_sunday_not_friday_and_crypto_always_open():
 
 
 def test_holiday_calendar_honesty_and_registration():
-    assert session_status("us_equity", at(2027, 1, 5, 15)).holiday_calendar == "not_applied"
+    assert session_status("us_equity", at(2028, 1, 5, 15)).holiday_calendar == "not_applied"   # beyond loaded years
+    assert session_status("us_equity", at(2027, 1, 5, 15)).holiday_calendar == "applied"        # official 2027 calendar
     assert session_status("jse", at(2026, 11, 9, 9)).schedule_confidence == "approximate"
     register_holidays("test_cal_dummy", {date(2026, 1, 1)})   # registering must not disturb other calendars
     assert session_status("us_equity", at(2026, 11, 26, 15)).reason == "holiday"
@@ -148,11 +149,15 @@ def test_measured_volume_reclassifies_thin_us_stock():
 
 # ------------------------------------------------------------------ assessment
 W = at(2026, 11, 9, 15)  # Monday 15:00 UTC: London + New York open
+NO_CREDS = Settings(oanda_api_token=None, oanda_account_id=None, alpaca_api_key=None, alpaca_secret_key=None)
+WITH_CREDS = Settings(oanda_api_token="t", oanda_account_id="101-001-0000000-001", alpaca_api_key="k", alpaca_secret_key="s")
 
 
-def test_forex_sizing_is_capped_and_analysis_only():
-    a = assess("EURUSD", now=W, price=1.085, stop_price=1.08, account_equity=10000)
-    assert a["verdict"] == "analysis_only" and a["execution"]["executable"] is False
+def test_forex_sizing_is_capped_and_needs_setup_without_oanda_credentials():
+    a = assess("EURUSD", now=W, price=1.085, stop_price=1.08, account_equity=10000, settings=NO_CREDS)
+    assert a["verdict"] == "needs_setup" and a["execution"]["executable"] is True
+    assert a["execution"]["routes"][0]["provider"] == "oanda" and "OANDA_API_TOKEN" in a["reasons"][0]
+    assert a["execution"]["data"]["status"] == "needs_setup"
     z = a["sizing"]
     assert z["notional_usd"] <= 600.0 + 1.1 and z["risk_amount_usd"] <= 100.0 + 1e-6
     assert a["session"]["active_centres"] == ["London", "New York"] and a["session"]["liquidity_factor"] == 1.0
@@ -189,9 +194,12 @@ def test_riskier_markets_get_smaller_positions():
 def test_closed_market_waits_and_weekend_gold_etf_route_is_closed():
     a = assess("AAPL", now=at(2026, 11, 8, 15), price=230.0)
     assert a["verdict"] == "wait_for_session" and "weekend" in a["reasons"][0]
-    gold = assess("XAUUSD", now=at(2026, 11, 8, 23), price=4000.0, atr=40)     # spot gold trades Sun night; GLD does not
-    assert gold["session"]["state"] == "open" and gold["verdict"] == "wait_for_session"
-    assert gold["execution"]["routes"][0]["kind"] == "etf_proxy"
+    sunday_night = at(2026, 11, 8, 23)                                           # spot gold trades Sun night; GLD does not
+    etf_only = assess("XAUUSD", now=sunday_night, price=4000.0, atr=40, provider="alpaca", settings=WITH_CREDS)
+    assert etf_only["session"]["state"] == "open" and etf_only["verdict"] == "wait_for_session"
+    assert etf_only["execution"]["routes"][0]["kind"] == "etf_proxy"
+    spot = assess("XAUUSD", now=sunday_night, price=4000.0, atr=40, settings=WITH_CREDS)   # OANDA spot route is open
+    assert spot["execution"]["routes"][0]["provider"] == "oanda" and spot["verdict"] in ("ready", "caution")
 
 
 def test_costs_scale_with_session_liquidity_and_measured_spread_wins():
@@ -238,19 +246,27 @@ def test_futures_and_options_sizing_use_multipliers():
 def test_routes_match_the_adapters_that_exist():
     assert [r["provider"] for r in routes_for(classify("BTCUSDT"))] == ["binance"]
     assert [r["provider"] for r in routes_for(classify("AAPL"))] == ["alpaca"]
-    assert routes_for(classify("EURUSD")) == [] and routes_for(classify("VOD.L")) == [] and routes_for(classify("ESZ6")) == []
-    gold = routes_for(classify("XAUUSD"))[0]
-    assert (gold["symbol"], gold["kind"]) == ("GLD", "etf_proxy")
-    assert routes_for(classify("SPX"))[0]["symbol"] == "SPY" and routes_for(classify("WTI"))[0]["symbol"] == "USO"
+    assert routes_for(classify("VOD.L")) == [] and routes_for(classify("ESZ6")) == []
+    fx = routes_for(classify("EURUSD"))
+    assert [(r["provider"], r["venue_symbol"], r["kind"]) for r in fx] == [("oanda", "EUR_USD", "direct")]
+    gold = routes_for(classify("XAUUSD"))
+    assert [(r["provider"], r["kind"]) for r in gold] == [("oanda", "direct"), ("alpaca", "etf_proxy")] and gold[1]["symbol"] == "GLD"
+    spx, wti = routes_for(classify("SPX")), routes_for(classify("WTI"))
+    assert (spx[0]["kind"], spx[0]["venue_symbol"], spx[1]["symbol"]) == ("cfd", "SPX500_USD", "SPY")
+    assert (wti[0]["venue_symbol"], wti[1]["symbol"]) == ("WTICO_USD", "USO")
+    assert routes_for(classify("COFFEE"))[0]["kind"] == "etf_proxy"                  # OANDA lists no coffee CFD
+    assert [r["provider"] for r in routes_for(classify("AAPL261218C00200000"))] == ["alpaca"]
     assert routes_for(classify("GCZ6")) == []   # futures never route to an ETF: contracts != shares
 
 
 def test_proxy_routes_carry_notional_sizing_not_a_misleading_quantity():
-    a = assess("XAUUSD", now=W, price=4000.0, atr=40)
+    a = assess("XAUUSD", now=W, price=4000.0, atr=40, provider="alpaca")     # force the ETF to be the primary route
     p = a["sizing"]["proxy_sizing"]
     assert p["symbol"] == "GLD" and p["size_by_notional_usd"] == a["sizing"]["notional_usd"]
     assert "Do not submit the quantity above" in p["instruction"]
     assert "proxy_sizing" not in assess("BTCUSDT", now=W, price=95000, atr=1500)["sizing"]
+    # with OANDA as the primary route the quantity is already in underlying units, so no proxy sizing is attached
+    assert "proxy_sizing" not in assess("XAUUSD", now=W, price=4000.0, atr=40)["sizing"]
 
 
 class _FakeMarket:
@@ -260,10 +276,12 @@ class _FakeMarket:
 
 @pytest.mark.asyncio
 async def test_snapshot_labels_proxies_and_invents_nothing():
-    gold = await route_snapshot("XAUUSD", market_service=_FakeMarket())
+    gold = await route_snapshot("XAUUSD", "alpaca", market_service=_FakeMarket())
     assert gold["is_proxy"] is True and gold["symbol"] == "GLD" and "not the underlying" in gold["proxy_notice"]
-    fx = await route_snapshot("EURUSD", market_service=_FakeMarket())
-    assert fx["price"] is None and fx["data_status"] == "provider_not_integrated"
+    spot = await route_snapshot("XAUUSD", market_service=_FakeMarket())
+    assert spot["provider"] == "oanda" and "is_proxy" not in spot and spot["price"] == 100.0
+    nothing = await route_snapshot("VOD.L", market_service=_FakeMarket())
+    assert nothing["price"] is None and nothing["data_status"] == "provider_not_integrated"
     btc = await route_snapshot("BTCUSDT", market_service=_FakeMarket())
     assert btc["provider"] == "binance" and btc["price"] == 100.0 and "is_proxy" not in btc
 
@@ -355,8 +373,12 @@ def test_markets_page_renders(client):
 def test_overview_lists_every_market_and_clock(client):
     j = client.get("/api/markets/overview").json()
     assert {"forex", "metal", "crypto", "stock", "index", "commodity", "future", "option"} <= set(j["asset_classes"])
-    assert j["asset_classes"]["crypto"]["execution"] and not j["asset_classes"]["forex"]["execution"]
-    assert j["asset_classes"]["forex"]["gap"] and {"us_equity", "fx_24x5", "crypto_24x7", "ngx"} <= set(j["sessions"])
+    ac = j["asset_classes"]
+    assert ac["crypto"]["execution"] and ac["forex"]["execution"] and ac["forex"]["direct_providers"] == ["oanda"]
+    assert ac["index"]["cfd_providers"] == ["oanda"] and ac["index"]["etf_proxy_via"] == ["alpaca"]
+    assert ac["option"]["direct_providers"] == ["alpaca"] and not ac["future"]["execution"] and ac["future"]["gap"]
+    assert ac["stock"]["gap"] and {"us_equity", "fx_24x5", "crypto_24x7", "ngx"} <= set(j["sessions"])
+    assert "missing" in ac["forex"]["setup"]["oanda"]
 
 
 def test_instruments_filter_and_search(client):
@@ -383,9 +405,11 @@ def test_assess_rejects_bad_input(client, params):
     assert client.get("/api/markets/assess", params=params).status_code == 422
 
 
-def test_snapshot_for_unintegrated_market_is_honest(client):
-    j = client.get("/api/markets/snapshot", params={"symbol": "EURUSD"}).json()
+def test_snapshot_for_unintegrated_or_unconfigured_market_is_honest(client):
+    j = client.get("/api/markets/snapshot", params={"symbol": "VOD.L"}).json()
     assert j["price"] is None and j["data_status"] == "provider_not_integrated"
+    fx = client.get("/api/markets/snapshot", params={"symbol": "EURUSD"}).json()   # OANDA route exists but no credentials here
+    assert fx["price"] is None and fx["data_status"] == "unavailable" and fx["error"] == "not_configured"
 
 
 def test_pretrade_check_exposes_market_context_without_new_client_inputs(monkeypatch):
@@ -415,3 +439,102 @@ def test_pretrade_check_exposes_market_context_without_new_client_inputs(monkeyp
     assert result["market_context"]["asset_class"] == "crypto" and result["market_context"]["tier"] == "major"
     assert "warnings" in result and result["submits_order"] is False
     assert set(pretrade.PretradeRequest.model_fields) == {"provider", "environment", "symbol", "side", "quantity", "order_type", "limit_price"}
+
+
+# ------------------------------------------------------------------ holiday calendars (data/holidays.json)
+def test_calendar_status_reflects_provenance():
+    assert session_status("us_equity", at(2026, 11, 9, 15)).holiday_calendar == "applied"        # official
+    assert session_status("tse", at(2026, 11, 9, 1)).holiday_calendar == "applied"               # official
+    assert session_status("xetra", at(2026, 11, 9, 10)).holiday_calendar == "applied"            # official
+    assert session_status("lse", at(2026, 11, 9, 10)).holiday_calendar == "partial"              # secondary
+    assert session_status("jse", at(2027, 6, 1, 10)).holiday_calendar == "partial"               # derived
+    for sid in ("ngx", "gse", "egx", "nse_ke", "eu_cet"):                                         # no verifiable source: say so
+        assert session_status(sid, at(2026, 11, 9, 10)).holiday_calendar == "not_applied", sid
+
+
+@pytest.mark.parametrize("sid,when,reason", [
+    ("us_equity", at(2027, 11, 25, 15), "holiday"), ("us_equity", at(2027, 3, 26, 15), "holiday"),
+    ("xetra", at(2026, 12, 24, 10), "holiday"), ("xetra", at(2027, 3, 29, 10), "holiday"),
+    ("tse", at(2026, 12, 31, 3), "holiday"), ("tse", at(2027, 3, 22, 1), "holiday"),
+    ("jse", at(2026, 8, 10, 10), "holiday"), ("jse", at(2027, 3, 26, 10), "holiday"), ("jse", at(2027, 8, 9, 10), "holiday"),
+    ("hkex", at(2026, 2, 18, 3), "holiday"), ("lse", at(2027, 5, 31, 10), "holiday"),
+])
+def test_new_holidays_close_their_markets(sid, when, reason):
+    s = session_status(sid, when)
+    assert s.state == "closed" and s.reason == reason
+
+
+def test_adjacent_days_are_open_and_early_closes_apply():
+    assert session_status("xetra", at(2026, 12, 23, 10)).state == "open"
+    assert session_status("jse", at(2026, 8, 11, 8)).state == "open"
+    assert session_status("us_equity", at(2027, 11, 26, 17, 59)).state == "open"       # 12:59 ET
+    assert session_status("us_equity", at(2027, 11, 26, 18, 1)).state == "extended"    # after the 13:00 early close
+    assert session_status("lse", at(2027, 12, 24, 12, 29)).state == "open"
+    assert session_status("lse", at(2027, 12, 24, 12, 31)).state == "closed"           # 12:30 early close
+
+
+def test_dax_and_xetra_stocks_use_the_frankfurt_session_not_the_generic_one():
+    assert classify("DAX").session_id == "xetra" and classify("SAP.DE").session_id == "xetra"
+    assert classify("XETRA:SAP").session_id == "xetra" and classify("CAC40").session_id == "eu_cet"
+
+
+def _holiday_file():
+    import json
+    from pathlib import Path
+    import app.markets.sessions as sessions
+    return json.loads(Path(sessions._DATA_FILE).read_text(encoding="utf-8"))
+
+
+def test_holiday_data_integrity():
+    raw = _holiday_file()
+    assert raw["calendars"]
+    for name, cal in raw["calendars"].items():
+        assert cal["verification"] in ("official", "secondary", "derived"), name
+        assert cal["source"].strip(), f"{name}: every calendar must cite a source"
+        years = set(cal["years"])
+        dates = [date.fromisoformat(d) for d in cal["holidays"]]
+        assert dates == sorted(dates) and len(dates) == len(set(dates)), f"{name}: unsorted or duplicate dates"
+        assert {d.year for d in dates} <= years, f"{name}: holiday outside declared years"
+        for d, hhmm in cal.get("early_closes", {}).items():
+            assert date.fromisoformat(d).year in years and len(hhmm) == 5
+        if name != "nyse":                      # exchanges never schedule a full holiday and an early close on the same day
+            assert not (set(cal["holidays"]) & set(cal.get("early_closes", {})))
+
+
+def test_jse_2027_is_consistent_with_easter_from_the_official_nyse_calendar():
+    # Good Friday 2027 per NYSE is Mar 26 -> Family Day (Easter Monday) is Mar 29; the rejected aggregator list said Apr 3 / Apr 6.
+    cals = _holiday_file()["calendars"]
+    nyse_good_friday = next(d for d in cals["nyse"]["holidays"] if d.startswith("2027-03"))
+    jse = set(cals["jse_2027"]["holidays"])
+    assert nyse_good_friday == "2027-03-26" and "2027-03-26" in jse and "2027-03-29" in jse
+    assert "2027-04-03" not in jse and "2027-04-06" not in jse
+    assert "2027-08-09" in jse and "2027-12-27" in jse            # Women's Day; Dec 26 is a Sunday so Monday is the holiday
+    assert {"2026-08-10"} <= set(cals["jse"]["holidays"])           # Women's Day 2026 (Aug 9 is a Sunday)
+
+
+def test_easter_based_holidays_agree_across_calendars():
+    cals = _holiday_file()["calendars"]
+    for y, good_friday in ((2026, "2026-04-03"), (2027, "2027-03-26")):
+        for name in ("nyse", "lse", "xetra"):
+            assert good_friday in cals[name]["holidays"], (name, y)
+
+
+def test_malformed_calendar_file_degrades_to_not_applied(tmp_path):
+    import app.markets.sessions as sessions
+    bad = tmp_path / "h.json"
+    bad.write_text("{not json")
+    before = {k: set(v) for k, v in sessions._HOLIDAYS.items()}
+    sessions._load_calendars(bad)                     # must not raise or corrupt loaded data
+    assert {k: set(v) for k, v in sessions._HOLIDAYS.items()} == before
+    worse = tmp_path / "w.json"
+    worse.write_text('{"calendars": {"x": {"verification": "official", "holidays": ["not-a-date"], "years": [2026]}}}')
+    sessions._load_calendars(worse)
+    assert "x" not in sessions._HOLIDAYS
+
+
+def test_calendars_endpoint_reports_coverage_and_gaps(client):
+    j = client.get("/api/markets/calendars").json()
+    assert {"us_equity", "xetra", "tse", "lse", "jse", "hkex"} <= set(j["covered"])
+    assert j["covered"]["us_equity"]["years"] == {"2026": "official", "2027": "official"}
+    assert j["covered"]["jse"]["years"] == {"2026": "secondary", "2027": "derived"}
+    assert {"ngx", "gse", "egx", "nse_ke", "eu_cet"} <= {m["session_id"] for m in j["missing"]}

@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     binance_testnet_enabled: bool = True
     binance_live_trading_enabled: bool = False
 
+    # OANDA v20 (forex, spot metals, index/commodity CFDs). Paper = OANDA practice account.
+    oanda_api_token: Optional[str] = None
+    oanda_account_id: Optional[str] = None
+    oanda_live_trading_enabled: bool = False
+
     fred_api_key: Optional[str] = None
     newsapi_key: Optional[str] = Field(default=None, validation_alias=AliasChoices("newsapi_key", "news_api_key"))
 
@@ -144,6 +149,10 @@ class Settings(BaseSettings):
     @property
     def binance_configured(self) -> bool:
         return bool(self.binance_api_key and self.binance_secret_key)
+
+    @property
+    def oanda_configured(self) -> bool:
+        return bool(self.oanda_api_token and self.oanda_account_id)
 
     @property
     def fred_configured(self) -> bool:

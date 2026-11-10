@@ -5,17 +5,21 @@ exchange's *local* time zone and converted with ``zoneinfo`` so daylight-saving
 changes (US/EU shift on different dates) are handled automatically.
 
 Honest limits (surfaced in every status as ``holiday_calendar`` / ``schedule_confidence``):
-  * Holiday tables exist only for the calendars listed in ``_HOLIDAYS`` (NYSE and LSE,
-    2026). Other exchanges report ``holiday_calendar: "not_applied"`` - they may be
-    closed on a public holiday this engine does not know about.
+  * Holiday calendars live in ``data/holidays.json`` with provenance per year:
+    ``applied`` = published by the exchange, ``partial`` = secondary/derived (verify),
+    ``not_applied`` = none loaded for that market/year (it may be closed on a public
+    holiday this engine does not know about). NGX, GSE, EGX, NSE Kenya and Euronext have
+    no verifiable calendar loaded.
   * Schedules marked ``approximate`` (African exchanges, ICE softs, ASX, JSE ...) are
     static reference hours. Verify against the exchange before relying on them.
   * Lunch breaks, auctions and special sessions are modelled only where noted.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -84,15 +88,18 @@ SESSIONS: dict[str, SessionSpec] = {s.id: s for s in (
                 holiday_key="nyse", note="Regular 09:30-16:00 ET; extended 04:00-20:00 ET (thin, wide spreads)."),
     SessionSpec("lse", "London Stock Exchange", "Europe/London",
                 windows=_days(_MON_FRI, hm(8), hm(16, 30)), holiday_key="lse"),
-    SessionSpec("eu_cet", "Continental Europe (Xetra, Euronext, Milan, Madrid, SIX)", "Europe/Berlin",
+    SessionSpec("xetra", "Xetra (Frankfurt)", "Europe/Berlin",
+                windows=_days(_MON_FRI, hm(9), hm(17, 30)), holiday_key="xetra"),
+    SessionSpec("eu_cet", "Continental Europe (Euronext, Milan, Madrid, SIX)", "Europe/Berlin",
                 windows=_days(_MON_FRI, hm(9), hm(17, 30)),
-                note="Exchange-specific holidays are not modelled."),
+                note="Exchange-specific holidays are not modelled for these venues (Xetra has its own session)."),
     SessionSpec("tse", "Tokyo Stock Exchange", "Asia/Tokyo",
                 windows=_days(_MON_FRI, hm(9), hm(11, 30)) + _days(_MON_FRI, hm(12, 30), hm(15, 30)),
-                note="Lunch break 11:30-12:30 local."),
+                holiday_key="tse", note="Lunch break 11:30-12:30 local."),
     SessionSpec("hkex", "Hong Kong Exchange", "Asia/Hong_Kong",
                 windows=_days(_MON_FRI, hm(9, 30), hm(12)) + _days(_MON_FRI, hm(13), hm(16)),
-                schedule_confidence="approximate"),
+                holiday_key="hkex", schedule_confidence="approximate",
+                note="Half-day sessions (Christmas Eve, New Year's Eve, Lunar New Year's Eve) are not modelled."),
     SessionSpec("sse", "Shanghai / Shenzhen exchanges", "Asia/Shanghai",
                 windows=_days(_MON_FRI, hm(9, 30), hm(11, 30)) + _days(_MON_FRI, hm(13), hm(15)),
                 schedule_confidence="approximate"),
@@ -103,7 +110,7 @@ SESSIONS: dict[str, SessionSpec] = {s.id: s for s in (
     SessionSpec("asx", "Australian Securities Exchange", "Australia/Sydney",
                 windows=_days(_MON_FRI, hm(10), hm(16)), schedule_confidence="approximate"),
     SessionSpec("jse", "Johannesburg Stock Exchange", "Africa/Johannesburg",
-                windows=_days(_MON_FRI, hm(9), hm(17)), schedule_confidence="approximate",
+                windows=_days(_MON_FRI, hm(9), hm(17)), holiday_key="jse", schedule_confidence="approximate",
                 note="Continuous trading plus closing auction; verify with JSE."),
     SessionSpec("ngx", "Nigerian Exchange (NGX)", "Africa/Lagos",
                 windows=_days(_MON_FRI, hm(10), hm(14, 30)), schedule_confidence="approximate",
@@ -118,34 +125,74 @@ SESSIONS: dict[str, SessionSpec] = {s.id: s for s in (
                 windows=_days(_MON_FRI, hm(9), hm(15)), schedule_confidence="approximate"),
 )}
 
-# ---- Holiday calendars (verify against the exchange; extend with register_holidays) ----
-_HOLIDAYS: dict[str, set[date]] = {
-    "nyse": {date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3), date(2026, 5, 25),
-             date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7), date(2026, 11, 26), date(2026, 12, 25)},
-    "lse": {date(2026, 1, 1), date(2026, 4, 3), date(2026, 4, 6), date(2026, 5, 4), date(2026, 5, 25),
-            date(2026, 8, 31), date(2026, 12, 25), date(2026, 12, 28)},
-}
-_EARLY_CLOSES: dict[str, dict[date, int]] = {
-    "nyse": {date(2026, 11, 27): hm(13), date(2026, 12, 24): hm(13)},
-    "lse": {date(2026, 12, 24): hm(12, 30), date(2026, 12, 31): hm(12, 30)},
-}
-_HOLIDAY_YEARS: dict[str, set[int]] = {"nyse": {2026}, "lse": {2026}}
+# ---- Holiday calendars (data/holidays.json; extend with register_holidays) ----
+_DATA_FILE = Path(__file__).resolve().parent / "data" / "holidays.json"
+_HOLIDAYS: dict[str, set[date]] = {}
+_EARLY_CLOSES: dict[str, dict[date, int]] = {}
+# calendar key -> year -> verification (official | secondary | derived | user)
+_CAL_YEARS: dict[str, dict[int, str]] = {}
+_CAL_META: dict[str, dict] = {}
+
+
+def _parse_hhmm(value: str) -> int:
+    h, m = value.split(":")
+    return hm(int(h), int(m))
+
+
+def _load_calendars(path: Path = _DATA_FILE) -> None:
+    """Load calendars; a malformed file must never take the session engine down (fails to 'not_applied')."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    for name, cal in (raw.get("calendars") or {}).items():
+        try:
+            key = cal.get("key", name)
+            ver = cal["verification"]
+            dates = {date.fromisoformat(d) for d in cal["holidays"]}
+            early = {date.fromisoformat(d): _parse_hhmm(v) for d, v in (cal.get("early_closes") or {}).items()}
+            years = [int(y) for y in cal["years"]]
+        except (KeyError, ValueError, TypeError, AttributeError):
+            continue
+        _HOLIDAYS.setdefault(key, set()).update(dates)
+        _EARLY_CLOSES.setdefault(key, {}).update(early)
+        _CAL_YEARS.setdefault(key, {}).update({y: ver for y in years})
+        _CAL_META.setdefault(key, {"name": cal.get("name", key), "sources": []})["sources"].append(
+            {"years": years, "verification": ver, "source": cal.get("source"), "notes": cal.get("notes")})
+
+
+_load_calendars()
 
 
 def register_holidays(key: str, dates, early_closes: Optional[dict] = None) -> None:
-    """Add holidays (and optional {date: close_minute} early closes) for a calendar key."""
+    """Add holidays (and optional {date: close_minute} early closes) for a calendar key (treated as user-verified)."""
+    dates = set(dates)
     _HOLIDAYS.setdefault(key, set()).update(dates)
-    _HOLIDAY_YEARS.setdefault(key, set()).update(d.year for d in dates)
+    for y in {d.year for d in dates}:
+        _CAL_YEARS.setdefault(key, {})[y] = "user"
     if early_closes:
         _EARLY_CLOSES.setdefault(key, {}).update(early_closes)
 
 
+_VERIFICATION_STATUS = {"official": "applied", "user": "applied", "secondary": "partial", "derived": "partial"}
+
+
 def holiday_calendar_status(spec: SessionSpec, now: datetime) -> str:
+    """applied (official/user) | partial (secondary or derived: verify) | not_applied | not_applicable."""
     if spec.always_open:
         return "not_applicable"
-    if spec.holiday_key and now.year in _HOLIDAY_YEARS.get(spec.holiday_key, set()):
-        return "applied"
-    return "not_applied"
+    if not spec.holiday_key:
+        return "not_applied"
+    ver = _CAL_YEARS.get(spec.holiday_key, {}).get(now.astimezone(ZoneInfo(spec.tz)).year)
+    return _VERIFICATION_STATUS.get(ver, "not_applied")
+
+
+def calendar_info(key: str) -> Optional[dict]:
+    """Provenance for a calendar key (sources, years, verification) for the API/dashboard."""
+    meta = _CAL_META.get(key)
+    if not meta:
+        return None
+    return {**meta, "years": {str(y): v for y, v in sorted(_CAL_YEARS.get(key, {}).items())}}
 
 
 def _intervals(spec: SessionSpec, windows: tuple, start_utc: datetime, days: int) -> list[tuple[datetime, datetime]]:

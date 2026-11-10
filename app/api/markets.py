@@ -12,7 +12,7 @@ from starlette.requests import Request
 
 from app import __version__
 from app.markets import (
-    PROFILES, SESSIONS, assess, classify, list_instruments, overview, profile_for, session_status,
+    PROFILES, SESSIONS, assess, calendar_info, classify, list_instruments, overview, profile_for, session_status,
 )
 from app.markets.live import route_snapshot
 from app.markets.types import AssetClass
@@ -84,6 +84,24 @@ async def markets_sessions(
             raise HTTPException(status_code=404, detail="Unknown session_id")
         return session_status(session_id, now).to_dict()
     return {"as_of_utc": now.isoformat(), "sessions": {sid: session_status(sid, now).to_dict() for sid in SESSIONS}}
+
+
+@router.get("/api/markets/calendars")
+async def markets_calendars():
+    """Holiday-calendar provenance per market: which years are loaded, how they were verified, and what is missing."""
+    covered, missing = {}, []
+    for sid, spec in SESSIONS.items():
+        if spec.always_open:
+            continue
+        info = calendar_info(spec.holiday_key) if spec.holiday_key else None
+        if info:
+            covered[sid] = info
+        else:
+            missing.append({"session_id": sid, "name": spec.name,
+                            "reason": "no verifiable holiday calendar loaded; the market may be closed on public holidays"})
+    return {"verification_levels": {"official": "published by the exchange", "secondary": "third-party list cross-checked against statutory rules; verify",
+                                    "derived": "computed from public-holiday rules and Easter; verify"},
+            "covered": covered, "missing": missing}
 
 
 @router.get("/api/markets/profile")

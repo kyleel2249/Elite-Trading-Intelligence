@@ -1,20 +1,27 @@
 """Which provider can supply data for / execute which market - stated truthfully.
 
-This table mirrors the adapters that actually exist in ``app/integrations``:
-  * Binance  - crypto spot (public data; testnet/live orders through TradingService)
-  * Alpaca   - US-listed stocks and ETFs (data API; paper/live orders)
+Adapters that exist in ``app/integrations``:
+  * Binance - crypto spot (public data; testnet/paper/live orders through TradingService)
+  * Alpaca  - US-listed stocks and ETFs, plus US equity options (data API; paper/live orders)
+  * OANDA   - forex, spot metals, and index/commodity CFDs (practice = paper; live gated)
 
-Everything else (spot FX, spot metals, cash indices, futures, options, non-US equities)
-has *no execution adapter and no market-data adapter* in this repository today. For
-metals, indices and commodities that have a US-listed ETF stand-in, the route is the ETF
-through Alpaca and is labelled ``etf_proxy`` with its tracking caveats. New adapters plug
-in by adding a ``ProviderCapability`` here and a client under ``app/integrations``.
+Route kinds:
+  direct     - the instrument itself (spot FX, spot metals, crypto spot, US stock/option)
+  cfd        - an OANDA CFD on an index/commodity: tracks the underlying with financing costs; not offered everywhere
+  etf_proxy  - a US-listed ETF stand-in (tracks a different instrument; sized by notional)
+
+Every route reports whether its provider is *configured* (credentials present). A route can exist in
+code yet be unusable until you add credentials; ``executable`` means "an adapter exists", ``setup``
+tells you whether it will work right now.
+
+Still without any adapter: non-US equities (Europe/Asia/Africa) and futures. They stay analysis-only.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
+from app.markets.oanda_map import oanda_instrument
 from app.markets.registry import execution_proxy
 from app.markets.types import AssetClass, Instrument
 
@@ -42,20 +49,30 @@ CAPABILITIES: dict[str, ProviderCapability] = {
         "binance", frozenset({AssetClass.CRYPTO}), False, True, True, ("paper", "testnet", "live"),
         "Spot only (no margin, futures or options). The symbol must be listed on Binance spot."),
     "alpaca": ProviderCapability(
-        "alpaca", frozenset({AssetClass.STOCK}), True, True, True, ("paper", "live"),
-        "US-listed stocks and ETFs only; day orders; extended-hours orders are not supported by the ETI client."),
+        "alpaca", frozenset({AssetClass.STOCK, AssetClass.OPTION}), True, True, True, ("paper", "live"),
+        "US-listed stocks/ETFs and US equity options only; day orders; extended-hours orders are not supported by the ETI client. "
+        "Options need an Alpaca account with options trading approved."),
+    "oanda": ProviderCapability(
+        "oanda", frozenset({AssetClass.FOREX, AssetClass.METAL, AssetClass.INDEX, AssetClass.COMMODITY}), False, True, True,
+        ("paper", "live"),
+        "Spot FX and metals, plus index/commodity CFDs. Paper = OANDA practice account. Instruments offered depend on your "
+        "OANDA entity and jurisdiction (CFDs are not available to US accounts); ETI checks your account's instrument list."),
 }
 
 # Classes with no direct adapter, and what would be needed.
 NOT_INTEGRATED: dict[str, str] = {
-    "forex": "No FX broker/data adapter. Add one (e.g. an FX broker REST API) under app/integrations and register it here.",
-    "metal": "No spot-metals adapter; use the ETF proxy route (GLD/SLV/PPLT/PALL via Alpaca) or add an adapter.",
-    "index": "Cash indices are not tradable; use the ETF proxy route or add a futures/CFD adapter.",
-    "commodity": "No commodity adapter; ETF proxies exist for crude, gas and some agriculturals. Futures need a futures broker adapter.",
+    "forex": "OANDA adapter exists but is not configured (set OANDA_API_TOKEN and OANDA_ACCOUNT_ID), or this pair is not offered by OANDA.",
+    "metal": "OANDA adapter exists but is not configured, or this metal is not offered; ETF proxies (GLD/SLV/PPLT/PALL) need Alpaca keys.",
+    "index": "No route for this index (OANDA does not list it and no ETF stand-in exists).",
+    "commodity": "No route for this commodity (OANDA does not list it and no ETF stand-in exists).",
     "future": "No futures adapter (and no ETF stand-in: contract sizing does not map to shares). Analysis, sizing and sessions work; execution is unavailable.",
-    "option": "No options adapter in the ETI trading service; analysis and sizing only.",
+    "option": "Options route via Alpaca for US equity options (OCC symbols); other options are unsupported.",
     "stock_non_us": "No non-US equity adapter (EU/Asia/Africa). Analysis, sessions and sizing work; execution is unavailable.",
 }
+
+_OANDA_SESSION = {AssetClass.FOREX: "fx_24x5", AssetClass.METAL: "metals_otc"}
+_CFD_NOTE = ("OANDA CFD: tracks the underlying with financing costs and OANDA's own hours/spreads; it is not the cash index or the "
+             "exchange future, and CFDs are not offered in every jurisdiction (e.g. US accounts).")
 
 
 def provider_supports(provider: Optional[str], inst: Instrument) -> Optional[bool]:
@@ -69,41 +86,84 @@ def provider_supports(provider: Optional[str], inst: Instrument) -> Optional[boo
         return False
     if cap.us_stocks_only and inst.asset_class == AssetClass.STOCK and inst.region != "US":
         return False
+    if cap.name == "oanda" and oanda_instrument(inst) is None:
+        return False          # asset class is supported, but OANDA does not list this specific market
     return True
 
 
-def routes_for(inst: Instrument) -> list[dict]:
-    """Executable routes for an instrument (possibly via an ETF proxy). Empty list = analysis only."""
+def setup_status(provider: str, settings: Any = None) -> dict:
+    """Whether a provider's credentials are present (never reveals values)."""
+    if settings is None:
+        from app.config import get_settings
+        settings = get_settings()
+    p = provider.lower()
+    if p == "oanda":
+        missing = [n for n, v in (("OANDA_API_TOKEN", settings.oanda_api_token), ("OANDA_ACCOUNT_ID", settings.oanda_account_id)) if not v]
+        return {"configured": not missing, "missing": missing}
+    if p == "alpaca":
+        missing = [n for n, v in (("ALPACA_API_KEY", settings.alpaca_api_key), ("ALPACA_SECRET_KEY", settings.alpaca_secret_key)) if not v]
+        return {"configured": not missing, "missing": missing}
+    if p == "binance":     # public market data needs no keys; paper orders simulate without keys; real testnet/live orders need them
+        has = bool(settings.binance_api_key and settings.binance_secret_key)
+        return {"configured": True, "missing": [], "note": None if has else
+                "public data and simulated paper fills work without keys; real testnet/live orders need BINANCE_API_KEY and BINANCE_SECRET_KEY"}
+    return {"configured": False, "missing": []}
+
+
+def routes_for(inst: Instrument, settings: Any = None) -> list[dict]:
+    """Executable routes for an instrument, best first. Empty list = analysis only."""
     routes: list[dict] = []
-    if inst.asset_class == AssetClass.CRYPTO:
+    ac = inst.asset_class
+
+    if ac == AssetClass.CRYPTO:
         routes.append({"provider": "binance", "symbol": inst.symbol, "kind": "direct", "session_id": "crypto_24x7",
                        "environments": list(CAPABILITIES["binance"].environments),
                        "note": "Spot order via TradingService; the pair must exist on Binance spot."})
-    elif inst.asset_class == AssetClass.STOCK and inst.region == "US":
+
+    elif ac == AssetClass.STOCK and inst.region == "US":
         routes.append({"provider": "alpaca", "symbol": inst.symbol, "kind": "direct", "session_id": "us_equity",
                        "environments": list(CAPABILITIES["alpaca"].environments),
                        "note": "Whole-share day orders via TradingService."})
-    elif inst.asset_class in (AssetClass.METAL, AssetClass.INDEX, AssetClass.COMMODITY):
-        # Futures are deliberately excluded: their sizing is in contracts, an ETF route would be in shares.
-        proxy = execution_proxy(inst)
-        if proxy:
-            etf, quality = proxy
-            caveat = {"close": "Tracks the underlying closely but carries fund fees and trades only in US equity hours.",
-                      "approximate": "Tracks a different/approximate benchmark; basis risk vs the named index.",
-                      "futures_based": "Futures-based fund: roll yield (contango/backwardation) diverges from spot."}.get(quality, "")
-            routes.append({"provider": "alpaca", "symbol": etf, "kind": "etf_proxy", "proxy_quality": quality, "session_id": "us_equity",
-                           "environments": list(CAPABILITIES["alpaca"].environments),
-                           "note": f"Not the instrument itself: {inst.symbol} exposure via {etf}. {caveat}".strip()})
+
+    elif ac == AssetClass.OPTION:
+        routes.append({"provider": "alpaca", "symbol": inst.symbol, "kind": "direct", "session_id": "us_equity",
+                       "environments": list(CAPABILITIES["alpaca"].environments),
+                       "note": "US equity option via Alpaca (whole contracts, day orders). Requires an options-approved account; "
+                               "prefer limit orders - option spreads are wide."})
+
+    elif ac in (AssetClass.FOREX, AssetClass.METAL, AssetClass.INDEX, AssetClass.COMMODITY):
+        venue = oanda_instrument(inst)
+        if venue:
+            cfd = ac in (AssetClass.INDEX, AssetClass.COMMODITY)
+            routes.append({"provider": "oanda", "symbol": inst.symbol, "venue_symbol": venue, "kind": "cfd" if cfd else "direct",
+                           "session_id": _OANDA_SESSION.get(ac, "cme_globex" if ac == AssetClass.INDEX else inst.session_id),
+                           "environments": list(CAPABILITIES["oanda"].environments),
+                           "note": (_CFD_NOTE if cfd else f"Spot {inst.name or inst.symbol} via OANDA ({venue}); units are base-currency/ounces.")
+                                   + (" Session hours are approximate; the live quote's tradeable flag is authoritative." if cfd else "")})
+        if ac in (AssetClass.METAL, AssetClass.INDEX, AssetClass.COMMODITY):
+            # Futures are never routed to ETFs: their sizing is in contracts, an ETF route would be in shares.
+            proxy = execution_proxy(inst)
+            if proxy:
+                etf, quality = proxy
+                caveat = {"close": "Tracks the underlying closely but carries fund fees and trades only in US equity hours.",
+                          "approximate": "Tracks a different/approximate benchmark; basis risk vs the named index.",
+                          "futures_based": "Futures-based fund: roll yield (contango/backwardation) diverges from spot."}.get(quality, "")
+                routes.append({"provider": "alpaca", "symbol": etf, "kind": "etf_proxy", "proxy_quality": quality, "session_id": "us_equity",
+                               "environments": list(CAPABILITIES["alpaca"].environments),
+                               "note": f"Not the instrument itself: {inst.symbol} exposure via {etf}. {caveat}".strip()})
+
+    for r in routes:
+        r["setup"] = setup_status(r["provider"], settings)
     return routes
 
 
-def data_coverage(inst: Instrument) -> dict:
-    routes = routes_for(inst)
+def data_coverage(inst: Instrument, settings: Any = None) -> dict:
+    routes = routes_for(inst, settings)
     if routes:
         r = routes[0]
-        return {"status": "available", "provider": r["provider"], "symbol": r["symbol"],
-                "via": "direct" if r["kind"] == "direct" else "etf_proxy"}
-    return {"status": "provider_not_integrated", "provider": None, "symbol": None, "via": None}
+        return {"status": "available" if r["setup"]["configured"] else "needs_setup", "provider": r["provider"], "symbol": r["symbol"],
+                "via": r["kind"], "missing": r["setup"]["missing"]}
+    return {"status": "provider_not_integrated", "provider": None, "symbol": None, "via": None, "missing": []}
 
 
 def not_integrated_reason(inst: Instrument) -> Optional[str]:
@@ -114,20 +174,25 @@ def not_integrated_reason(inst: Instrument) -> Optional[str]:
     return NOT_INTEGRATED.get(inst.asset_class.value)
 
 
-def overview() -> dict:
-    """Capability matrix for every asset class (what works, what does not)."""
+def overview(settings: Any = None) -> dict:
+    """Capability matrix for every asset class (what works, what needs credentials, what has no adapter)."""
     matrix = {}
     for ac in AssetClass:
         if ac == AssetClass.UNKNOWN:
             continue
-        direct = [c.name for c in CAPABILITIES.values() if ac in c.asset_classes]
+        caps = [c for c in CAPABILITIES.values() if ac in c.asset_classes]
+        cfd = ac in (AssetClass.INDEX, AssetClass.COMMODITY)
+        direct = [c.name for c in caps if not (cfd and c.name == "oanda")]
+        cfd_via = [c.name for c in caps if cfd and c.name == "oanda"]
+        proxy_via = ["alpaca"] if ac in (AssetClass.METAL, AssetClass.INDEX, AssetClass.COMMODITY) else []
+        providers = sorted({*direct, *cfd_via, *proxy_via})
         matrix[ac.value] = {
-            "direct_providers": direct,
-            "etf_proxy_via": ["alpaca"] if ac in (AssetClass.METAL, AssetClass.INDEX, AssetClass.COMMODITY) else [],
-            "analysis": True,
-            "execution": bool(direct) or ac in (AssetClass.METAL, AssetClass.INDEX, AssetClass.COMMODITY),
-            "gap": NOT_INTEGRATED.get(ac.value) if not direct else None,
+            "direct_providers": direct, "cfd_providers": cfd_via, "etf_proxy_via": proxy_via,
+            "analysis": True, "execution": bool(providers),
+            "setup": {p: setup_status(p, settings) for p in providers},
+            "gap": None if providers else NOT_INTEGRATED.get(ac.value),
         }
     matrix["stock"]["gap"] = NOT_INTEGRATED["stock_non_us"]
     matrix["stock"]["execution_scope"] = "US-listed only"
+    matrix["option"]["execution_scope"] = "US equity options only"
     return {"providers": {k: v.to_dict() for k, v in CAPABILITIES.items()}, "asset_classes": matrix}
