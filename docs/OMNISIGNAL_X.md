@@ -137,3 +137,11 @@ The universe is built from Binance's 24h ticker (one request): USDT pairs, exclu
 A dedicated `*/5 * * * *` cron analyses a rotating batch (never-analysed first, then active movers, then the stalest) and stores rows in KV. It is **off unless `ETI_UNIVERSE_ENABLED=true`**.
 `ETI_UNIVERSE_BATCH` (default 3, max 25; each symbol costs about 10 subrequests, so mind the plan limit of 50 free / 1000 paid), `ETI_UNIVERSE_MAX_SYMBOLS`, `ETI_UNIVERSE_MIN_QUOTE_VOLUME`, `ETI_UNIVERSE_MAX_SPREAD_BPS`, `ETI_UNIVERSE_STRATEGY`.
 Rows older than 8 hours are not ranked; coverage reports fresh, stale and never-analysed counts. At the default batch of 3, full coverage of 150 symbols takes about 4 hours, so raise the batch on a paid plan for a fresher board.
+
+### Running the real-testnet verification
+
+`scripts/testnet_verify.py` (or the manual `ETI Testnet Verify` workflow) needs `BINANCE_TESTNET_API_KEY` and `BINANCE_TESTNET_API_SECRET`.
+**Location matters:** Binance rejects signed requests from restricted regions (HTTP 451-style "Service unavailable from a restricted location"). GitHub-hosted runners are in US data centres,
+and the first real run (run 42908373572) was rejected for that reason after the keys were read correctly. Run it from a machine in an eligible region
+(`pip install -r requirements.txt`, export the two variables, `python scripts/testnet_verify.py`) or from a self-hosted runner there. The same applies to wherever the Python execution backend runs.
+ETI does not route around the restriction.
