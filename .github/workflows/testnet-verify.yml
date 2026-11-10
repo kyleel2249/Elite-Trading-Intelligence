@@ -1,0 +1,29 @@
+name: ETI Testnet Verify
+# Manual only. Exercises the real Binance SPOT TESTNET with test funds through ETI's own engine and adapter.
+# Needs two repository secrets: BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET (testnet keys only, no withdrawal rights exist on testnet).
+on:
+  workflow_dispatch:
+    inputs:
+      symbol: { description: "Spot symbol", default: "BTCUSDT" }
+      notional: { description: "Approximate order size in USDT (test funds)", default: "30" }
+permissions: { contents: read }
+concurrency: { group: testnet-verify, cancel-in-progress: false }
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Self-test against the in-repo fake venue (no network, no keys)
+        run: python scripts/testnet_verify.py --selftest
+      - name: Real testnet run
+        env:
+          BINANCE_TESTNET_API_KEY: ${{ secrets.BINANCE_TESTNET_API_KEY }}
+          BINANCE_TESTNET_API_SECRET: ${{ secrets.BINANCE_TESTNET_API_SECRET }}
+          SYMBOL: ${{ inputs.symbol }}
+          NOTIONAL: ${{ inputs.notional }}
+        run: python scripts/testnet_verify.py --symbol "$SYMBOL" --notional "$NOTIONAL"
