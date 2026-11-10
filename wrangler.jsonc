@@ -11,7 +11,7 @@
     "enabled": true
   },
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": ["*/15 * * * *", "* * * * *", "*/5 * * * *"]
   },
   "vars": {
     "APP_ENV": "production",
@@ -25,6 +25,13 @@
     {
       "binding": "ETI_EXECUTION_LOG",
       "id": "da68ec381049420faa497428ea7f8180"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "ETI-PORTFOLIO-DB",
+      "database_name": "ETI-PORTFOLIO-DB",
+      "database_id": "e132826d-a725-41da-982c-5431ab1eb4f3"
     }
   ]
 }
