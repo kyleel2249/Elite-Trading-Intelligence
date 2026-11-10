@@ -132,3 +132,13 @@ test("diagnostics report per-host status/latency without secrets", async () => {
   assert.equal(d.failover.active, true);
   assert.doesNotMatch(JSON.stringify(d), /api[_-]?key|secret|authorization|bearer/i);
 });
+
+import { getMarketData } from "./market.ts";
+test("binance klines keep a plausible taker-buy volume internally; the public API stays 6 columns", async () => {
+  const rows = binanceK(5).map((r, i) => { const x = [...r]; x[9] = i === 3 ? "999" : "5.0"; return x; }); // row 3: taker volume above total volume = implausible
+  mock((u) => u.host === "data-api.binance.vision" ? { status: 200, body: rows } : { status: 500, body: "x" });
+  const r = await getMarketData("klines", { symbol: "BTCUSDT", interval: "1m", limit: 5 }, ["binance"]) as any;
+  assert.equal(r.data[0].length, 7); assert.equal(r.data[0][6], 5); assert.equal(r.data[3].length, 6, "implausible taker volume is dropped, not trusted");
+  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), {}); const pub = await res.json() as number[][];
+  assert.ok(pub.every(x => x.length === 6));
+});

@@ -80,7 +80,7 @@ export async function handleAlpha(req: Request, env: AlphaEnv, now = Date.now(),
     case "/candles": {
       const sym = (q.get("symbol") || "").toUpperCase(); if (!symbolOk(sym, cls)) return err("invalid_symbol", 400);
       if (cls === "equity") { const r = await fetchEquityBars(sym, env, ctx.budget, f, now); return r.ok ? json({ symbol: sym, interval, rows: r.data.slice(-160) }) : err(r.reason, 503); }
-      const k = await ctx.market.klines(sym, interval, 160); return k ? json({ symbol: sym, interval, provider: k.provider, rows: k.rows.slice(-160) }) : err("market_data_unavailable", 503);
+      const k = await ctx.market.klines(sym, interval, 160); return k ? json({ symbol: sym, interval, provider: k.provider, rows: k.rows.slice(-160).map(r => r.slice(0, 6)) }) : err("market_data_unavailable", 503);
     }
     case "/fusion": {
       const sym = (q.get("symbol") || "").toUpperCase(); if (!symbolOk(sym, cls)) return err("invalid_symbol", 400);

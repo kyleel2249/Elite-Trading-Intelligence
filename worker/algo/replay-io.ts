@@ -25,7 +25,8 @@ export async function fetchBinanceKlines(symbol: string, tf: Timeframe, startMs:
     if (!rows.length) break;
     for (const r of rows) {
       if (!Array.isArray(r) || r.length < 6) throw new Error("Binance klines: malformed row");
-      const k: Kline = [Number(r[0]), Number(r[1]), Number(r[2]), Number(r[3]), Number(r[4]), Number(r[5])];
+      const k: Kline = [Number(r[0]), Number(r[1]), Number(r[2]), Number(r[3]), Number(r[4]), Number(r[5])], tb = Number(r[9]);
+      if (r[9] !== undefined && Number.isFinite(tb) && tb >= 0 && tb <= k[5] * 1.0001) k.push(tb);
       if (k.some(v => !Number.isFinite(v))) throw new Error("Binance klines: non-numeric value in row");
       if (out.length && k[0] <= out.at(-1)![0]) continue; // de-duplicate overlapping pages
       out.push(k);

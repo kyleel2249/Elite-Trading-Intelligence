@@ -20,7 +20,8 @@ export interface MarketEnv {
 
 export type ProviderId = "binance" | "bybit" | "okx";
 export type Endpoint = "klines" | "depth" | "trades" | "ticker";
-export type Kline = [number, number, number, number, number, number];
+/** [openTime, open, high, low, close, volume, takerBuyBaseVolume?]. The optional 7th field is the exchange-reported aggressive-buy volume (Binance klines only). */
+export type Kline = [number, number, number, number, number, number, number?];
 
 export interface Attempt {
   provider: ProviderId;
@@ -173,7 +174,9 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
       if (endpoint === "klines") {
         return validateKlines(asArray(j, "klines_not_array").map((r) => {
           const a = asArray(r, "kline_row");
-          return [num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), num(a[5])] as Kline;
+          const k: Kline = [num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), num(a[5])], tb = Number(a[9]);
+          if (a[9] !== undefined && Number.isFinite(tb) && tb >= 0 && tb <= k[5] * 1.0001) k.push(tb); // only a plausible exchange-reported value is kept
+          return k;
         }), p.limit);
       }
       if (endpoint === "depth") {
@@ -454,7 +457,8 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   const order = providerOrder(env, url.searchParams.get("provider"));
   try {
     const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw) }, order);
-    return jsonResp(r.data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
+    const data = endpoint === "klines" && Array.isArray(r.data) ? (r.data as Kline[]).map(k => k.slice(0, 6)) : r.data; // public contract stays 6 columns; taker volume is internal
+    return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
   } catch (e) {
     if (e instanceof AllProvidersFailed) {
       const last = [...e.attempts].reverse().find((a) => a.status !== null);

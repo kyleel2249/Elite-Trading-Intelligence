@@ -6,10 +6,11 @@ import type { Kline } from "../market.ts";
 export interface FlowFlag { kind: "volume_spike" | "range_expansion" | "absorption_bullish" | "absorption_bearish" | "thin_move" | "climax"; barsAgo: number; detail: string }
 export interface FlowAnalysis {
   available: boolean; reason?: string; volumeZ: number | null; rangeZ: number | null; relativeVolume: number | null;
-  pressure: number | null; pressureBasis: "close_location_proxy"; stanceBias: "buying" | "selling" | "balanced" | null;
+  pressure: number | null; pressureBasis: "taker_buy_volume" | "close_location_proxy"; stanceBias: "buying" | "selling" | "balanced" | null;
   abnormal: boolean; flags: FlowFlag[]; supports: "supports" | "opposes" | "neutral" | "unavailable"; caveat: string;
 }
 export const FLOW_CAVEAT = "Derived from candle volume and close location only. It cannot tell who traded and does not identify institutions; treat as supporting evidence, not proof of large-participant activity.";
+export const FLOW_CAVEAT_TAKER = "Uses the exchange-reported aggressive-buy (taker) volume per candle. It shows which side crossed the spread, not who traded, and does not identify institutions; treat as supporting evidence, not proof of large-participant activity.";
 const LOOKBACK = 50, RECENT = 3, PRESSURE_BARS = 20;
 const mean = (a: number[]) => a.reduce((s, x) => s + x, 0) / Math.max(1, a.length);
 const sd = (a: number[], m = mean(a)) => Math.sqrt(mean(a.map(x => (x - m) ** 2)));
@@ -35,12 +36,13 @@ export function analyzeFlow(rows: Kline[] | undefined, dir: 1 | -1 | 0): FlowAna
     if (rz >= 2 && vz <= -0.5) flags.push({ kind: "thin_move", barsAgo: ago, detail: "wide range on below-average volume: weak participation behind the move" });
     if (vz >= 3 && wide) flags.push({ kind: "climax", barsAgo: ago, detail: "extreme volume with an extreme range: possible exhaustion or capitulation" });
   });
-  const win = bars.slice(-PRESSURE_BARS), tv = win.reduce((s, b) => s + b[5], 0);
-  const pressure = tv > 0 ? win.reduce((s, b) => { const r = b[2] - b[3]; return s + b[5] * (r > 0 ? (2 * (b[4] - b[3]) / r) - 1 : 0); }, 0) / tv : 0;
+  const win = bars.slice(-PRESSURE_BARS), tv = win.reduce((s, b) => s + b[5], 0), withTaker = win.filter(b => typeof b[6] === "number").length, taker = withTaker >= win.length * 0.9 && tv > 0;
+  // True aggressor imbalance when the exchange reported taker-buy volume on nearly every bar; otherwise the close-location proxy.
+  const pressure = taker ? win.reduce((s, b) => s + (typeof b[6] === "number" ? 2 * b[6] - b[5] : 0), 0) / tv : tv > 0 ? win.reduce((s, b) => { const r = b[2] - b[3]; return s + b[5] * (r > 0 ? (2 * (b[4] - b[3]) / r) - 1 : 0); }, 0) / tv : 0;
   const stanceBias = pressure > 0.15 ? "buying" : pressure < -0.15 ? "selling" : "balanced";
   const last = recent[RECENT - 1], vz = z(last[5], vols), rz = z(last[2] - last[3], ranges);
   const bull = flags.filter(f => f.kind === "absorption_bullish").length, bear = flags.filter(f => f.kind === "absorption_bearish").length;
   const score = (stanceBias === "buying" ? 1 : stanceBias === "selling" ? -1 : 0) + (bull ? 1 : 0) - (bear ? 1 : 0);
   const supports = dir === 0 ? "neutral" : score * dir >= 1 ? "supports" : score * dir <= -1 ? "opposes" : "neutral";
-  return { available: true, volumeZ: vz, rangeZ: rz, relativeVolume: last[5] / mean(vols), pressure, pressureBasis: "close_location_proxy", stanceBias, abnormal: flags.some(f => f.kind === "volume_spike" || f.kind === "range_expansion" || f.kind === "climax"), flags, supports, caveat: FLOW_CAVEAT };
+  return { available: true, volumeZ: vz, rangeZ: rz, relativeVolume: last[5] / mean(vols), pressure, pressureBasis: taker ? "taker_buy_volume" : "close_location_proxy", stanceBias, abnormal: flags.some(f => f.kind === "volume_spike" || f.kind === "range_expansion" || f.kind === "climax"), flags, supports, caveat: taker ? FLOW_CAVEAT_TAKER : FLOW_CAVEAT };
 }

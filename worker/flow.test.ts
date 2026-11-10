@@ -23,3 +23,11 @@ test("flow: wide range on thin volume is flagged as weak participation", () => {
   const r = calm(80).map((b, i) => [b[0], b[1], b[2] + (i % 3) * 0.1, b[3], b[4], b[5]] as Kline); r[79] = [79 * 60000, 100, 102, 98, 101.8, 20]; assert.ok(analyzeFlow(r, 1).flags.some(x => x.kind === "thin_move"));
 });
 test("flow: never names an institution", () => assert.ok(!/institution(al)? (buying|selling|accumulat)/i.test(JSON.stringify(analyzeFlow(calm(80), 1)))));
+
+test("flow: exchange taker-buy volume gives true aggressor imbalance, and bad values are not trusted", () => {
+  const buy = calm(80).map(b => [b[0], b[1], b[2], b[3], b[4], b[5], b[5] * 0.8] as Kline), f = analyzeFlow(buy, 1);
+  assert.equal(f.pressureBasis, "taker_buy_volume"); assert.ok(Math.abs(f.pressure! - 0.6) < 1e-9); assert.equal(f.stanceBias, "buying"); assert.equal(f.supports, "supports"); assert.match(f.caveat, /taker/);
+  assert.equal(analyzeFlow(buy, -1).supports, "opposes");
+  const partial = calm(80).map((b, i) => (i % 2 ? [b[0], b[1], b[2], b[3], b[4], b[5], b[5] * 0.8] : b) as Kline);
+  assert.equal(analyzeFlow(partial, 1).pressureBasis, "close_location_proxy");
+});
