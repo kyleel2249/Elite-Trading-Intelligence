@@ -47,6 +47,7 @@ from app.api.stream import router as stream_router
 from app.api.risk_gateway import router as risk_gateway_router
 from app.api.execution import router as execution_router
 from app.api.markets import router as markets_router
+from app.api.analytics import router as analytics_router
 from app.prediction_ledger.api import router as predictions_router
 from app.prediction_ledger.job import prediction_resolver_job
 from app.prediction_ledger.service import record_from_forecast
@@ -119,6 +120,7 @@ app.include_router(stream_router)
 app.include_router(risk_gateway_router)
 app.include_router(execution_router)
 app.include_router(markets_router)
+app.include_router(analytics_router)
 app.include_router(predictions_router)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
