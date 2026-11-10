@@ -44,6 +44,24 @@ async def test_protective_status_defaults_to_not_attached_and_only_changes_when_
     assert rec2.protective_orders == {"status": "attached", "method": "alpaca_bracket"}
 
 
+@pytest.mark.asyncio
+async def test_failed_exit_orders_suspend_trading_until_operator_resumes():
+    c = TradingControls()
+    bad = Sub({"status": "submitted", "client_order_id": "c3", "provider_response": {"orderId": 5},
+               "protective_orders": {"status": "failed", "reason": "OCO rejected"}})
+    e = ExecutionEngine(Settings(), bad, controls=c)
+    s3 = sig()
+    s3.signal_id = "b3"
+    rec = await e.execute(s3, PortfolioContext(equity=100_000.0))
+    assert any("UNPROTECTED" in r for r in rec.reasons)
+    assert "unprotected_position" in c.suspended_reasons and c.trading_blocked()
+    s4 = sig()
+    s4.signal_id = "b4"
+    assert (await e.execute(s4, PortfolioContext(equity=100_000.0))).state.value == "REJECTED"
+    c.resume("unprotected_position")
+    assert c.trading_blocked() is None
+
+
 # ---- Alpaca payload construction (pure, no network) ----
 def test_alpaca_bracket_body_has_both_legs():
     from app.integrations.alpaca.client import build_order_body

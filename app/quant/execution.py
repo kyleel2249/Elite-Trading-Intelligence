@@ -7,8 +7,9 @@ route/submit -> acknowledgement -> fill reconciliation.
 An order is never "executed" because a request was sent: states are
 SUBMITTED, ACKNOWLEDGED, PARTIALLY_FILLED, FILLED, REJECTED, CANCELLED, FAILED.
 Protective stop / take-profit orders are reported as attached only when the trading
-service says the provider confirmed the exit legs (Alpaca bracket/OTO). Otherwise the
-record stays ``not_attached`` and the levels are recorded for monitoring only.
+service says the provider confirmed the exit legs (Alpaca bracket/OTO, Binance OCO).
+Otherwise the record stays ``not_attached`` and the levels are recorded for monitoring only.
+If exit orders fail, new trading is suspended (``unprotected_position``).
 """
 from __future__ import annotations
 
@@ -86,7 +87,7 @@ class ExecutionRecord:
     provider_response: Optional[dict] = None
     protective_orders: dict = field(default_factory=lambda: {
         "status": "not_attached",
-        "reason": "provider bracket orders not implemented; levels recorded for monitoring only"})
+        "reason": "no provider-confirmed exit orders; levels recorded for monitoring only"})
     latency_ms: dict[str, float] = field(default_factory=dict)
     history: list[dict] = field(default_factory=list)
 
@@ -226,6 +227,10 @@ class ExecutionEngine:
         rec.provider_response = resp
         if resp.get("protective_orders"):          # only what the service reports; default stays not_attached
             rec.protective_orders = resp["protective_orders"]
+            if rec.protective_orders.get("status") == "failed":
+                # Entry went out but its exits did not: halt new trading until an operator resolves it.
+                rec.reasons.append("exit orders failed: position is UNPROTECTED")
+                self.controls.suspend("unprotected_position")
         rec.client_order_id = resp.get("client_order_id")
         if rec.client_order_id:
             self.by_client_id[rec.client_order_id] = rec
