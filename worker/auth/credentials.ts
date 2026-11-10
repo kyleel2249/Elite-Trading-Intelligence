@@ -10,7 +10,7 @@ export interface CredReport { broker: Broker; environment: "alpaca_paper" | "bin
 const TTL_MS = 10 * 60_000;
 export const configured = (env: CredEnv, b: Broker) => b === "alpaca" ? !!(env.ALPACA_API_KEY && env.ALPACA_SECRET_KEY) : !!(env.BINANCE_API_KEY && env.BINANCE_SECRET_KEY);
 const label = (b: Broker) => b === "alpaca" ? "alpaca_paper" : "binance_testnet" as const;
-async function hex(secret: string, q: string) { const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(q)))].map(x => x.toString(16).padStart(2, "0")).join(""); }
+export async function hmacHex(secret: string, q: string) { const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(q)))].map(x => x.toString(16).padStart(2, "0")).join(""); }
 /** Calls a harmless authenticated read endpoint of the paper/testnet service. 401/403 (or Binance -2014/-2015) means the credentials are wrong. */
 export async function probe(env: CredEnv, b: Broker, fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<CredStatus> {
   if (!configured(env, b)) return "missing";
@@ -19,7 +19,7 @@ export async function probe(env: CredEnv, b: Broker, fetchImpl: typeof fetch = f
       const r = await fetchImpl("https://paper-api.alpaca.markets/v2/account", { headers: { "APCA-API-KEY-ID": env.ALPACA_API_KEY!, "APCA-API-SECRET-KEY": env.ALPACA_SECRET_KEY! }, signal: AbortSignal.timeout(6000) });
       return r.ok ? "valid" : r.status === 401 || r.status === 403 ? "invalid" : "unreachable";
     }
-    const q = new URLSearchParams({ timestamp: String(now), recvWindow: "5000" }); q.set("signature", await hex(env.BINANCE_SECRET_KEY!, q.toString()));
+    const q = new URLSearchParams({ timestamp: String(now), recvWindow: "5000" }); q.set("signature", await hmacHex(env.BINANCE_SECRET_KEY!, q.toString()));
     const r = await fetchImpl("https://testnet.binance.vision/api/v3/account?" + q, { headers: { "X-MBX-APIKEY": env.BINANCE_API_KEY! }, signal: AbortSignal.timeout(6000) });
     if (r.ok) return "valid";
     const body: any = await r.json().catch(() => ({}));

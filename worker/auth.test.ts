@@ -82,7 +82,7 @@ test("server-side validation still applies to authenticated orders", async () =>
   for (const bad of [{ side: "hold" }, { quantity: -1 }, { quantity: "1" }, { symbol: "bad symbol!" }, { riskConfirmed: false }, { clientOrderId: "short" }, { executionSource: undefined }, { type: "limit" }, { type: "market", limitPrice: 5 }])
     assert.ok([400].includes((await exec(env, order(bad as any), h)).r.status), JSON.stringify(bad));
   assert.equal((await exec(env, order({ quantity: 1000 }), h)).r.status, 403, "max quantity");
-  assert.equal((await exec(env, order({ type: "limit", limitPrice: 40_000 }), h)).r.status, 422, "resting limit not simulated");
+  { const rest = await exec(env, order({ type: "limit", limitPrice: 40_000 }), h); assert.equal(rest.r.status, 202, "a non-marketable limit now rests in the internal book"); assert.equal(rest.body.fill, null); assert.equal(rest.body.order.status, "open"); }
   const ok = await exec(env, order({ type: "limit", limitPrice: 60_000 }), h); assert.equal(ok.r.status, 201); assert.ok(ok.body.fill.price <= 60_000);
   const id = "dup" + "a".repeat(12); assert.equal((await exec(env, order({}, id), h)).r.status, 201); assert.equal((await exec(env, order({}, id), h)).r.status, 409);
   assert.equal((await handleExecution(post("/api/orders", order(), h), { ...env, ETI_KILL_SWITCH: "true" }, { now: () => clock })).status, 423);

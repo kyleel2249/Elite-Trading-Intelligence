@@ -6,6 +6,7 @@
  * accepted by these public market-data routes.
  */
 import { handleExecution } from "./execution.ts";
+import { handlePortfolio } from "./portfolio/routes.ts";
 import type { ExecutionEnv } from "./execution.ts";
 import { handleMarket } from "./market.ts";
 import { handleSignals } from "./signals.ts";
@@ -621,6 +622,7 @@ export default {
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
     }
+    if (url.pathname.startsWith("/api/portfolio/")) return handlePortfolio(request, _env as any);
     if (url.pathname.startsWith("/api/auth/")) return handleAuth(request, _env as any);
     if (url.pathname === "/alpha" || url.pathname.startsWith("/api/alpha")) {
       return handleAlpha(request, _env);
