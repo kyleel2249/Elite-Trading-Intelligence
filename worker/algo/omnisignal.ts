@@ -11,6 +11,7 @@ import { swiftEngine } from "./swift.ts";
 import { gainzEngine } from "./gainz.ts";
 import { fuseEngines, type FusionResult } from "./fusion.ts";
 import { applyCalibration, type AppliedCalibration, type CalibrationTable } from "./calibration.ts";
+import { analyzeFlow, type FlowAnalysis } from "./flow.ts";
 import { assessElite, type EliteAssessment } from "./elite.ts";
 
 export interface TimeframeSummary { trend: string; trendScore: number; momentum: number; emaAlignment: string; bandTrend: string; adx: number; atrPercent: number; relativeVolume: number; volumeConfirms: boolean; structureBias: string; divergence: string; choppy: boolean; signalStrength: number; reliability: number }
@@ -21,6 +22,7 @@ export interface OmnisignalResult {
   symbol: string; strategy: string; decision: FinalDecision; fusion: FusionResult; validation: ValidationResult | null; liquidity: LiquidityAnalysis | null;
   /** Compact per-timeframe evidence for the eight-timeframe matrix (null where fewer than the minimum candles exist). */
   timeframes: Record<string, TimeframeSummary | null>; consensus: Pick<Consensus, "direction" | "weightedScore" | "confidence" | "bullish" | "bearish" | "neutral" | "unavailable" | "conflicts" | "degraded" | "dominantTimeframe"> | null;
+  /** Volume-footprint evidence: abnormal activity, absorption, buy/sell pressure proxy. Advisory. */ flow: FlowAnalysis | null;
   /** Elite Trader research-database assessment of the proposed direction (null when there is no directional proposal). */ elite: EliteAssessment | null;
   entryZone: [number, number] | null; stopLoss: number | null; takeProfits: FusionResult["takeProfits"]; riskRewardToTP3: number | null; confidence: number; confidenceType: "heuristic_score_not_probability";
   calibration: AppliedCalibration; reasons: string[]; generatedAt: string; expiresAt: string | null;
@@ -47,7 +49,7 @@ function runOmnisignalCore(ctx: FusionContext, o: OmnisignalOptions): Omnisignal
   const consensus = { direction: consensusFull.direction, weightedScore: consensusFull.weightedScore, confidence: consensusFull.confidence, bullish: consensusFull.bullish, bearish: consensusFull.bearish, neutral: consensusFull.neutral, unavailable: consensusFull.unavailable, conflicts: consensusFull.conflicts, degraded: consensusFull.degraded, dominantTimeframe: consensusFull.dominantTimeframe };
   const timeframes = Object.fromEntries(TIMEFRAMES.map(tf => [tf, summarize(analyses[tf])]));
   const base = { symbol: ctx.symbol, strategy: ctx.strategy, fusion, timeframes, consensus, generatedAt: new Date(now).toISOString(), confidenceType: "heuristic_score_not_probability" as const, calibration: { status: "uncalibrated" as const, note: CAL }, submitsOrder: false as const, liveExecutionAllowed: false as const, intellectualProperty: ENGINE_IP };
-  const result = (decision: FinalDecision, reasons: string[], extra: Partial<OmnisignalResult> = {}): OmnisignalResult => ({ ...base, decision, validation: null, liquidity: null, elite: null, entryZone: null, stopLoss: null, takeProfits: null, riskRewardToTP3: null, confidence: 0, reasons, expiresAt: null, ...extra });
+  const result = (decision: FinalDecision, reasons: string[], extra: Partial<OmnisignalResult> = {}): OmnisignalResult => ({ ...base, decision, validation: null, liquidity: null, flow: null, elite: null, entryZone: null, stopLoss: null, takeProfits: null, riskRewardToTP3: null, confidence: 0, reasons, expiresAt: null, ...extra });
 
   const age = rows && rows.length ? (now - rows.at(-1)![0]) / 1000 : Infinity;
   if (!rows || rows.length < 100 || age < -60 || age > TF_SECONDS[execTf] * 3) return result("DATA_UNRELIABLE", [!rows || rows.length < 100 ? `Execution timeframe ${execTf} has fewer than 100 valid candles` : `Execution candles are stale (${Math.round(age)}s old)`]);
@@ -61,10 +63,11 @@ function runOmnisignalCore(ctx: FusionContext, o: OmnisignalOptions): Omnisignal
   const validation = validateSignal({ direction: dir, emaFilter: emaFilter(rows, [20, 50, 200], a), bands: adaptiveBands(rows), volume: volumeMomentum(rows), structure: marketStructure(rows), consensus: consensusFull, regime, liquidity,
     costR: (o.roundTripCostBps ?? DEFAULT_ROUND_TRIP_COST_BPS) / 100 / stopPct, maxCostR: o.maxCostR, rewardRiskTP1: tps[0].rewardRisk, rewardRiskTP3: tps[2].rewardRisk, stopExceedsMax: stopPct > 5, data: { fresh: true, providersAgree: o.providersAgree ?? true, candlesComplete: rows.length >= 100, ageSec: Math.round(age), provider: "unknown" },
     thresholds: { ...DEFAULT_THRESHOLDS, ...o.thresholds }, risk: o.risk ?? { withinLimits: true, reasons: [] }, expectancyR: o.expectancyR ?? null, expectancySamples: o.expectancySamples, weights: o.weights });
-  const elite = assessElite(rows, dir, { entryZone: fusion.entryZone, stopLoss: stop, takeProfits: tps }, timeframes[execTf], undefined);
+  const flow = analyzeFlow(rows, dir);
+  const elite = assessElite(rows, dir, { entryZone: fusion.entryZone, stopLoss: stop, takeProfits: tps }, timeframes[execTf], flow);
   elite.influencesDecision = o.eliteGate === true;
-  const ctxOut = { validation, liquidity, elite, entryZone: fusion.entryZone, stopLoss: stop, takeProfits: tps, riskRewardToTP3: tps[2].rewardRisk };
-  const reasons = [...fusion.reasoning, ...validation.reasoning, ...validation.warnings, ...elite.warnings.map(w => `Elite Trader research: ${w}`)];
+  const ctxOut = { validation, liquidity, flow, elite, entryZone: fusion.entryZone, stopLoss: stop, takeProfits: tps, riskRewardToTP3: tps[2].rewardRisk };
+  const reasons = [...fusion.reasoning, ...validation.reasoning, ...validation.warnings, ...elite.warnings.map(w => `Elite Trader research: ${w}`), ...(flow.available && flow.supports === "opposes" ? ["Volume footprint opposes this direction (" + flow.stanceBias + " pressure proxy)"] : []), ...(flow.available ? flow.flags.filter(f => f.barsAgo === 0 && (f.kind === "thin_move" || f.kind === "climax")).map(f => `Volume footprint: ${f.detail}`) : [])];
   if (!o.providersAgree && o.providersAgree !== undefined) return result("DATA_UNRELIABLE", ["Data providers disagree materially", ...reasons], ctxOut);
   const cls = validation.classification;
   if (cls === "REJECTED") return result("REJECTED", [...reasons, ...validation.hardFailures], ctxOut);

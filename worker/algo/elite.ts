@@ -8,6 +8,7 @@ import { indicators } from "../signals.ts";
 import { attributionFor, runModules, stanceOf, type AttributionEntry, type ModuleResult, type Regime } from "../strategies.ts";
 import type { Kline } from "../market.ts";
 import type { TimeframeSummary } from "./omnisignal.ts";
+import type { FlowAnalysis } from "./flow.ts";
 
 type KB = { generatedAt: string | null; source: string; profiles: any[]; strategies: any[]; freshness?: { researchDate?: string } };
 const KB_DATA = knowledgeData as KB;
@@ -42,7 +43,7 @@ const consensusOf = (rs: ModuleResult[], ids: string[], dir: 1 | -1): { status: 
 };
 
 export interface PlanView { entryZone: [number, number] | null; stopLoss: number | null; takeProfits: { price: number; rewardRisk: number }[] | null }
-export function assessElite(rows: Kline[] | undefined, dir: 1 | -1, plan: PlanView, exec: TimeframeSummary | null | undefined, kb: KB = KB_DATA): EliteAssessment {
+export function assessElite(rows: Kline[] | undefined, dir: 1 | -1, plan: PlanView, exec: TimeframeSummary | null | undefined, flow?: FlowAnalysis | null, kb: KB = KB_DATA): EliteAssessment {
   const base = { direction: dir, knowledge: kbMeta(kb), disclosures: { status: "not_available" as const, reason: "ETI's analysed instruments are crypto spot pairs; no verified investor disclosure feed exists for them, so none is used or implied. Equity disclosures (13F/Form 4) are handled by the separate investor-activity service." }, influencesDecision: false, limitations: ELITE_LIMITATIONS };
   const ind = rows ? indicators(rows) : null;
   if (!rows || !ind) return { ...base, available: false, reason: "At least 210 execution-timeframe candles are required for the candle-testable modules", regime: null, supporting: 0, opposing: 0, neutral: 0, suppressed: 0, notApplicable: 0, alignment: "unavailable", principles: [], attribution: [], warnings: [] };
@@ -58,6 +59,7 @@ export function assessElite(rows: Kline[] | undefined, dir: 1 | -1, plan: PlanVi
     { id: "breakout_trading", principle: "Breakout trading", ...brk, documentedBy: by(["darvas_box", "turtle_trend"]) },
     { id: "reversal_trading", principle: "Reversal trading", ...rev, documentedBy: by(["wyckoff_supply_demand"]) },
     { id: "capital_preservation", principle: "Risk management and capital preservation", status: risky ? "opposes" : rr1 >= 1 ? "supports" : "neutral", evidence: risky ? "no valid stop-loss, so there is no invalidation level" : `explicit invalidation at the stop (${(risk / ((entry![0] + entry![1]) / 2) * 100).toFixed(2)}% from entry), TP1 reward/risk ${rr1.toFixed(2)}; long-term structure: ${struct.evidence}`, documentedBy: by(["ptj_structure_preservation", "soros_reflexivity"]) },
+    flow && flow.available ? { id: "volume_footprint", principle: "Volume footprint (absorption, abnormal activity)", status: flow.supports === "unavailable" ? "not_applicable" : flow.supports, evidence: `${flow.stanceBias} close-location pressure proxy${flow.flags.length ? "; " + flow.flags.map(f => f.kind.replace(/_/g, " ")).join(", ") : "; no abnormal bars"}. ${flow.caveat}`, documentedBy: by(["wyckoff_supply_demand"]) } : { id: "volume_footprint", principle: "Volume footprint (absorption, abnormal activity)", status: "not_applicable", evidence: "insufficient candles", documentedBy: [] },
     { id: "position_sizing", principle: "Position sizing", status: "info", evidence: "Fixed-fraction risk to the stop only. Kelly-style up-sizing is withheld because no statistically demonstrated edge exists (docs/RESEARCH_FINDINGS.md).", documentedBy: by(["druck_liquidity_macro", "simons_quant"]) },
     { id: "portfolio_management", principle: "Portfolio management", status: "info", evidence: "Enforced outside the signal: one position per symbol, a position cap, daily-loss and consecutive-loss limits, and the server-side risk gateway.", documentedBy: [] },
     { id: "entry_exit", principle: "Entry and exit methodologies", status: tps && tps.length === 3 && !risky ? "supports" : "neutral", evidence: tps ? `entry zone, ATR-based stop and three staged targets (40/30/30) with break-even after TP1 and a trailing stop after TP2` : "no complete plan", documentedBy: by(["turtle_trend", "seykota_mechanical"]) },

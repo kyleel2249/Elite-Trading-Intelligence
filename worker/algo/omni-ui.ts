@@ -175,6 +175,7 @@ function renderElite(p){
  var box=el("div");box.appendChild(kv([["Alignment",e.alignment,e.alignment==="supports"?"bull":e.alignment==="opposes"?"bear":""],["Supporting / opposing",e.supporting+" / "+e.opposing],["Neutral / suppressed / n.a.",e.neutral+" / "+e.suppressed+" / "+e.notApplicable],["Gates the decision",e.influencesDecision?"yes":"no (advisory)"],["Research database",e.knowledge.profiles+" profiles, "+e.knowledge.strategies+" strategies, "+(e.knowledge.researchDate||"undated")]]));
  if(e.warnings&&e.warnings.length)box.appendChild(list(e.warnings));
  box.appendChild(el("details",null,el("summary",{text:"Principles"}),list((e.principles||[]).map(function(x){return x.principle+": "+x.status.replace(/_/g," ")+" - "+x.evidence+(x.documentedBy&&x.documentedBy.length?" ["+x.documentedBy.join(", ")+"]":"")}))));
+ var f=p.flow;if(f&&f.available){box.appendChild(kv([["Volume footprint",f.supports,f.supports==="supports"?"bull":f.supports==="opposes"?"bear":""],["Pressure (close-location proxy)",f.stanceBias+" ("+num(f.pressure,2)+")"],["Volume z-score",num(f.volumeZ,1)],["Abnormal activity",f.abnormal?"yes":"no"]]));if(f.flags.length)box.appendChild(list(f.flags.map(function(x){return x.kind.replace(/_/g," ")+" ("+x.barsAgo+" bars ago): "+x.detail})));box.appendChild(el("div",{class:"small muted",text:f.caveat}))}
  box.appendChild(el("div",{class:"small muted",text:"Investor disclosures: "+e.disclosures.reason}));
  box.appendChild(el("div",{class:"small muted",text:e.limitations}));put("elite",box)}
 
