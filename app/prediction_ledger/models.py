@@ -1,15 +1,19 @@
 """Prediction ledger tables. All three are append-only (never updated, never deleted)."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text, event
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models import utcnow
 from app.prediction_ledger.immutability import install_on_create
+
+
+def _now() -> datetime:
+    """Naive UTC. Columns are timezone-naive; aware values can shift on PostgreSQL session time zones."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ImmutableRecordError(RuntimeError):
@@ -22,7 +26,7 @@ class PredictionRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     prediction_uid: Mapped[str] = mapped_column(String(36), unique=True, index=True)
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(160), unique=True, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)  # server clock, UTC
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)  # server clock, UTC
     asset: Mapped[str] = mapped_column(String(64), index=True)
     market: Mapped[str] = mapped_column(String(32), index=True)
     provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -48,13 +52,13 @@ class PredictionRecord(Base):
 
 
 class PredictionOutcome(Base):
-    """Write-once result for a prediction. status: resolved | invalidated | late | manual_void."""
+    """Write-once result for a prediction. status: resolved | invalidated | late."""
 
     __tablename__ = "prediction_outcomes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     prediction_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
-    evaluated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
     status: Mapped[str] = mapped_column(String(16), index=True)
     realized_price: Mapped[float] = mapped_column(Float)
     price_source: Mapped[str] = mapped_column(String(64))
@@ -76,7 +80,7 @@ class PredictionReport(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     period: Mapped[str] = mapped_column(String(7), unique=True, index=True)  # YYYY-MM
-    generated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     summary: Mapped[dict] = mapped_column(JSON)
     markdown: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64))

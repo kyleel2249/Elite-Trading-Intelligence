@@ -10,10 +10,14 @@ SCORED_STATUSES = ("resolved", "invalidated")  # on-time outcomes; "late" is sto
 
 
 def lateness_tolerance(horizon_seconds: int) -> float:
-    return max(300.0, 0.10 * horizon_seconds)
+    """Seconds after expiry a snapshot price may still be used. >= 3x the default evaluator interval."""
+    return max(900.0, 0.10 * horizon_seconds)
 
 
-def score_prediction(pred: dict[str, Any], realized_price: float, neutral_band: float = NEUTRAL_BAND) -> dict[str, Any]:
+def score_prediction(pred: dict[str, Any], realized_price: float, neutral_band: float = NEUTRAL_BAND,
+                     path_low: Optional[float] = None, path_high: Optional[float] = None) -> dict[str, Any]:
+    """Score one prediction. path_low/path_high (lowest/highest price between creation and expiry) make
+    invalidation path-aware; without them invalidation is judged on the realized price only."""
     entry = float(pred["entry_reference"])
     ret = realized_price / entry - 1.0
     d = pred["direction"]
@@ -36,7 +40,10 @@ def score_prediction(pred: dict[str, Any], realized_price: float, neutral_band: 
     inv = pred.get("invalidation_price")
     invalidated = False
     if inv is not None:
-        invalidated = (realized_price <= inv) if d == "up" else (realized_price >= inv) if d == "down" else False
+        if d == "up":
+            invalidated = min(realized_price, path_low if path_low is not None else realized_price) <= inv
+        elif d == "down":
+            invalidated = max(realized_price, path_high if path_high is not None else realized_price) >= inv
 
     return {
         "return_pct": ret, "direction_correct": correct, "in_target_range": in_range,
