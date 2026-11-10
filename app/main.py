@@ -1,4 +1,5 @@
 """ETI FastAPI application entrypoint."""
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Literal, Optional
@@ -81,19 +82,82 @@ def _warn_insecure_config(settings: Settings) -> None:
         logger.warning("API_KEY is not set; protected routes will return 503 in this environment")
 
 
+def _seed_memory(settings: Settings) -> None:
+    """Snapshot documented profiles/methodologies/risk limits into versioned memory (idempotent)."""
+    from app.database import SessionLocal
+    from app.memory.store import MemoryStore
+
+    db = SessionLocal()
+    try:
+        store = MemoryStore(db)
+        store.seed_static_knowledge()
+        store.snapshot_risk_limits(settings)
+    except Exception:
+        db.rollback()
+        logger.warning("startup: memory seeding failed; continuing", exc_info=True)
+    finally:
+        db.close()
+
+
+def _record_council_signal(db: Session, settings: Settings, symbol: str, provider: str, payload: dict, snap: dict, klines) -> None:
+    """Remember the council's call exactly as made, with a point-in-time regime label."""
+    from app.memory.regimes import RegimeMemoryService
+    from app.memory.signals import SignalMemoryService
+
+    regime = None
+    regimes = RegimeMemoryService(db, settings)
+    recent = regimes.latest_as_of(symbol, provider, max_age_seconds=300)
+    if recent is not None:
+        regime = recent.primary_regime
+    else:
+        closes = [float(k["close"]) for k in (klines or []) if k.get("close") is not None]
+        if len(closes) >= 20:
+            obs = regimes.classify_from_closes(symbol, provider, closes, source="council")
+            regime = obs.primary_regime if obs else None
+    SignalMemoryService(db, settings).record(
+        source="council",
+        symbol=symbol,
+        provider=provider,
+        action=payload.get("action"),
+        confidence=payload.get("confidence"),
+        reference_price=snap.get("price"),
+        regime=regime,
+        analysis={
+            "summary": payload.get("summary"),
+            "risk_veto": payload.get("risk_veto"),
+            "data_quality": payload.get("data_quality"),
+            "contradictory_signals": payload.get("contradictory_signals"),
+            "specialists": [
+                {"trader_id": s.get("trader_id"), "bias": s.get("bias"), "confidence": s.get("confidence")}
+                for s in payload.get("specialists", [])
+            ],
+        },
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     settings = get_settings()
     _warn_insecure_config(settings)
+    await asyncio.to_thread(_seed_memory, settings)
     mtm_job.interval_seconds = settings.mtm_interval_seconds
     reconcile_job.interval_seconds = settings.reconcile_interval_seconds
     investor_monitor_job.interval_seconds = settings.investor_monitor_interval_seconds
     execution_supervisor_job.interval_seconds = settings.execution_supervisor_interval_seconds
+    adaptive_job = None
+    try:
+        from app.jobs.adaptive_edge_job import adaptive_edge_job as adaptive_job
+
+        adaptive_job.interval_seconds = settings.adaptive_edge_interval_seconds
+    except Exception:
+        logger.exception("startup: adaptive_edge_job could not be imported")
     await _start_component("stream_hub", lambda: stream_hub.start(["btcusdt", "ethusdt"]))
     await _start_component("mtm_job", mtm_job.start)
     await _start_component("reconcile_job", reconcile_job.start)
     await _start_component("prediction_resolver_job", prediction_resolver_job.start)
+    if adaptive_job is not None:
+        await _start_component("adaptive_edge_job", adaptive_job.start)
     if settings.quiver_configured:
         await _start_component("investor_monitor_job", investor_monitor_job.start)
     if settings.execution_enabled:
@@ -101,6 +165,8 @@ async def lifespan(app: FastAPI):
     yield
     await execution_supervisor_job.stop()
     await investor_monitor_job.stop()
+    if adaptive_job is not None:
+        await adaptive_job.stop()
     await prediction_resolver_job.stop()
     await reconcile_job.stop()
     await mtm_job.stop()
@@ -124,6 +190,15 @@ app.include_router(markets_router)
 app.include_router(analytics_router)
 app.include_router(strategies_router)
 app.include_router(predictions_router)
+
+# ETI persistent memory & learning, and the adaptive-edge API that feeds on it. Imported defensively
+# so an unexpected import problem is logged loudly instead of taking the whole service down.
+for _module_path, _label in (("app.api.memory", "memory"), ("app.api.adaptive_edge", "adaptive_edge")):
+    try:
+        _mod = __import__(_module_path, fromlist=["router"])
+        app.include_router(_mod.router)
+    except Exception:
+        logger.exception("router %s failed to load; its endpoints are unavailable", _label)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -250,6 +325,12 @@ async def providers_status(settings: Settings = Depends(get_settings)):
     binance = BinanceClient(settings)
     quiver = QuiverClient(settings)
     liquid = LiquidClient(settings)
+    try:
+        from app.jobs.adaptive_edge_job import adaptive_edge_job
+
+        adaptive_status = adaptive_edge_job.status()
+    except Exception:
+        adaptive_status = {"running": False, "error": "unavailable"}
     return {
         "alpaca": await alpaca.health(),
         "binance": await binance.health(),
@@ -262,6 +343,7 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "investor_monitor": investor_monitor_job.status(),
         "execution_supervisor": execution_supervisor_job.status(),
         "prediction_resolver": prediction_resolver_job.status(),
+        "adaptive_edge": adaptive_status,
         "fred_configured": settings.fred_configured,
         "news_configured": settings.news_configured,
         "quiver_configured": settings.quiver_configured,
@@ -410,6 +492,11 @@ async def run_council(
             save_council_decision(db, symbol, provider, payload)
             if snap.get("price") is not None:
                 save_snapshot(db, snap)
+            try:
+                _record_council_signal(db, settings, symbol, provider, payload, snap, klines)
+            except Exception:
+                db.rollback()
+                logger.warning("memory: council signal record failed for %s", symbol, exc_info=True)
         return payload
     except Exception as e:
         raise _upstream_error(e, "Council analysis")
