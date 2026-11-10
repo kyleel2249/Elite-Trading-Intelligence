@@ -74,7 +74,7 @@ export function validateLiveOrderLimits(input: {
 export async function handleExecution(req: Request, env: ExecutionEnv): Promise<Response> {
   const url=new URL(req.url);
   if(url.pathname==="/api/execution/status" && req.method==="GET") {
-    return reply({mode:"paper_testnet_default",live_trading_enabled:env.ETI_LIVE_TRADING_ENABLED==="true",risk_gate_configured:!!(env.ETI_RISK_GATE_URL&&env.ETI_RISK_GATE_TOKEN),readiness_gate:["off","enforce"].includes((env.ETI_READINESS_GATE||"").toLowerCase())?(env.ETI_READINESS_GATE||"").toLowerCase():"advisory",live_activation_configured:!!env.ETI_LIVE_ACTIVATION_TOKEN,alpaca_paper_configured:!!(env.ALPACA_API_KEY&&env.ALPACA_SECRET_KEY),binance_testnet_configured:!!(env.BINANCE_API_KEY&&env.BINANCE_SECRET_KEY),live_credentials_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY&&env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),alpaca_live_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY),binance_live_configured:!!(env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),audit_log_configured:!!env.ETI_EXECUTION_LOG,kill_switch:env.ETI_KILL_SWITCH==="true",withdrawal_permissions:false});
+    return reply({mode:"paper_testnet_default",live_trading_enabled:env.ETI_LIVE_TRADING_ENABLED==="true",paper_risk_gate_required:false,live_risk_gate_configured:!!(env.ETI_RISK_GATE_URL&&env.ETI_RISK_GATE_TOKEN),readiness_gate:["off","enforce"].includes((env.ETI_READINESS_GATE||"").toLowerCase())?(env.ETI_READINESS_GATE||"").toLowerCase():"advisory",live_activation_configured:!!env.ETI_LIVE_ACTIVATION_TOKEN,alpaca_paper_configured:!!(env.ALPACA_API_KEY&&env.ALPACA_SECRET_KEY),binance_testnet_configured:!!(env.BINANCE_API_KEY&&env.BINANCE_SECRET_KEY),live_credentials_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY&&env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),alpaca_live_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY),binance_live_configured:!!(env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),audit_log_configured:!!env.ETI_EXECUTION_LOG,kill_switch:env.ETI_KILL_SWITCH==="true",withdrawal_permissions:false});
   }
   if(url.pathname==="/api/execution/history") {
     if(req.method!=="GET") return reply({error:"method_not_allowed"},405);
@@ -126,19 +126,24 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       message: "Live orders require configured server-side quantity and USD notional caps, and limit orders only.",
     }, 403);
   }
-  let riskGateEvidence:any = null;
-  {
+  // Paper/testnet orders do not depend on the separately hosted portfolio risk gateway.
+  // Live orders remain fail-closed and still require explicit external risk approval.
+  let riskGateEvidence:any = requestedLive ? null : {
+    decision: "PAPER_MODE_EXTERNAL_GATE_BYPASSED",
+    note: "Paper/testnet execution; no live funds are used.",
+  };
+  if(requestedLive) {
     const gateUrl=env.ETI_RISK_GATE_URL||"";
     const gateToken=env.ETI_RISK_GATE_TOKEN||"";
     if(!gateUrl || !gateToken)
-      return reply({error:"risk_gate_not_configured",message:"Order submission requires the ETI server-side portfolio risk preflight service."},503);
+      return reply({error:"risk_gate_not_configured",message:"Live order submission requires the ETI server-side portfolio risk preflight service."},503);
     let gateResponse:Response;
     try {
       gateResponse=await fetch(gateUrl,{method:"POST",headers:{"content-type":"application/json","x-api-key":gateToken},body:JSON.stringify({
-        provider:broker,environment:requestedLive?"live":(broker==="alpaca"?"paper":"testnet"),symbol,side,quantity,order_type:type,limit_price:body.limitPrice??null
+        provider:broker,environment:"live",symbol,side,quantity,order_type:type,limit_price:body.limitPrice??null
       })});
     } catch {
-      return reply({error:"risk_gate_unavailable",message:"Order submission was blocked because ETI risk preflight could not be reached."},503);
+      return reply({error:"risk_gate_unavailable",message:"Live order submission was blocked because ETI risk preflight could not be reached."},503);
     }
     const gateBody:any=await gateResponse.json().catch(()=>({}));
     if(!gateResponse.ok || gateBody?.approved!==true)
