@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { handleAuth } from "./auth/routes.ts";
 import { handleExecution } from "./execution.ts";
 import { handlePortfolio, filterClosed, closedCsv, runPortfolioCycle } from "./portfolio/routes.ts";
-import { PortfolioStore } from "./portfolio/store.ts";
+import { openStore } from "./portfolio/store.ts";
+import { sqliteD1 } from "./portfolio/testing.ts";
 import { fold, present, openOrders, type LedgerEvent } from "./portfolio/ledger.ts";
 import { applyBrokerView, cancelInternal, matchInternal, parseAlpacaOrder, parseBinanceOrder, placeInternal, reconcile, recordExchangeOrder, selfCheck, setPlan, syncExchange, validateLevels, type EngineDeps } from "./portfolio/engine.ts";
 
@@ -11,12 +12,13 @@ const ORIGIN = "https://eti.test", T0 = 1_800_000_000_000, MIN = 60_000;
 class MemKV { m = new Map<string, string>(); lists = 0;
   async get(k: string) { return this.m.get(k) ?? null; } async put(k: string, v: string) { this.m.set(k, v); } async delete(k: string) { this.m.delete(k); }
   async list({ prefix, limit = 1000 }: { prefix: string; limit?: number }) { this.lists++; return { keys: [...this.m.keys()].filter(k => k.startsWith(prefix)).sort().slice(0, limit).map(name => ({ name })) }; } }
-const mk = (extra: Record<string, unknown> = {}) => ({ ETI_EXECUTION_LOG: new MemKV(), ETI_READINESS_GATE: "off", ETI_EXECUTION_TOKEN: "master-token-value-0123456789", ETI_PAPER_START_BALANCE: "100000", ETI_PAPER_FEE_BPS: "10", ETI_PAPER_SLIPPAGE_BPS: "0", ...extra }) as any;
+const D1 = process.env.PF_BACKEND === "d1";
+const mk = (extra: Record<string, unknown> = {}) => ({ ETI_EXECUTION_LOG: new MemKV(), ...(D1 ? { ETI_PORTFOLIO_DB: sqliteD1() } : {}), ETI_READINESS_GATE: "off", ETI_EXECUTION_TOKEN: "master-token-value-0123456789", ETI_PAPER_START_BALANCE: "100000", ETI_PAPER_FEE_BPS: "10", ETI_PAPER_SLIPPAGE_BPS: "0", ...extra }) as any;
 let price = 50_000, clock = T0, bars: [number, number, number, number, number, number][] = [];
 const deps = (): EngineDeps => ({ now: () => clock, priceOf: async () => price, barsOf: async () => bars });
 const bar = (i: number, o: number, h: number, l: number, c: number): [number, number, number, number, number, number] => [T0 + i * MIN, o, h, l, c, 1];
 const buy = (over: Record<string, unknown> = {}) => ({ clientOrderId: "c" + Math.random().toString(36).slice(2, 12), symbol: "BTCUSDT", side: "buy" as const, type: "market" as const, qty: 1, ...over });
-const L = async (env: any, e: any = "internal_paper") => (await new PortfolioStore(env.ETI_EXECUTION_LOG, e).ledger()).ledger;
+const L = async (env: any, e: any = "internal_paper") => (await openStore(env, e)!.ledger()).ledger;
 const reset = () => { price = 50_000; clock = T0; bars = []; };
 
 test("lifecycle: BUY -> fill -> holding -> partial SELLs -> realized P&L -> full close -> closed trade -> persistence", async () => {
@@ -147,7 +149,7 @@ test("exchange testnet: Alpaca aggregates become delta fills; cancel path; broke
   reset(); const env = mk({ ALPACA_API_KEY: "k", ALPACA_SECRET_KEY: "s" }); const inp = { broker: "alpaca" as const, clientOrderId: "al-client-0001", symbol: "BTCUSD", side: "buy" as const, type: "limit" as const, qty: 10, limitPrice: 100 };
   await recordExchangeOrder(env, inp, { id: "alp-1", status: "partially_filled", filled_qty: "4", filled_avg_price: "99.5" }, true, clock);
   let l = await L(env, "exchange_testnet"); assert.equal(l.orders["ap-al-client-0001"].filledQty, 4); assert.equal(l.fills[0].fee, null);
-  const st = new PortfolioStore(env.ETI_EXECUTION_LOG, "exchange_testnet");
+  const st = openStore(env, "exchange_testnet")!;
   await applyBrokerView(st, "ap-al-client-0001", parseAlpacaOrder({ id: "alp-1", status: "partially_filled", filled_qty: "7", filled_avg_price: "99.8" }), clock + 1000);
   l = await L(env, "exchange_testnet"); assert.equal(l.orders["ap-al-client-0001"].filledQty, 7); assert.ok(Math.abs(l.orders["ap-al-client-0001"].avgFillPrice! - 99.8) < 1e-9, "delta price keeps the broker's average");
   const calls: string[] = []; const fetchImpl: any = async (u: any, init: any) => { calls.push((init?.method || "GET") + " " + u); return new Response(init?.method === "DELETE" ? null : JSON.stringify({ id: "alp-1", status: "canceled", filled_qty: "7", filled_avg_price: "99.8" }), { status: init?.method === "DELETE" ? 204 : 200 }); };
@@ -238,9 +240,9 @@ test("alerts: testnet levels are alert-only", async () => {
 });
 
 test("cron cycle: idle streams cost one read; active streams are processed", async () => {
-  reset(); const env = mk(); const kv: MemKV = env.ETI_EXECUTION_LOG;
+  reset(); const env = mk(); const kv: MemKV = env.ETI_EXECUTION_LOG; const q: string[] | undefined = env.ETI_PORTFOLIO_DB?.queries;
   assert.equal((await runPortfolioCycle(env, deps()) as any).internal_paper.idle, true);
-  const before = kv.lists; const o = await runPortfolioCycle(env, deps()) as any; assert.equal(o.internal_paper, "idle"); assert.equal(kv.lists, before, "idle: no KV list operation");
+  const before = kv.lists; const o = await runPortfolioCycle(env, deps()) as any; assert.equal(o.internal_paper, "idle"); assert.equal(kv.lists, before, "idle: no KV list operation"); if (q) { const n = q.length; await runPortfolioCycle(env, deps()); assert.ok(q.slice(n).every(x => !x.includes("SELECT body")), "idle on D1: the events table is not read"); }
   await placeInternal(env, deps(), buy({ type: "limit", limitPrice: 40_000 }), clock); const a = await runPortfolioCycle(env, deps()) as any; assert.notEqual(a.internal_paper, "idle"); assert.equal(a.internal_paper.idle, false);
 });
 

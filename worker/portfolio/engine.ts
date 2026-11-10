@@ -11,10 +11,10 @@ import { loadMinuteBars } from "../algo/market-inputs.ts";
 import { hmacHex } from "../auth/credentials.ts";
 import type { Kline } from "../market.ts";
 import { availableCash, fold, freeQty, isActive, remainingQty, type Environment, type Ledger, type LedgerEvent, type Order, type OrderType, type Plan, type Side } from "./ledger.ts";
-import { PortfolioStore, type KVL } from "./store.ts";
+import { PortfolioStore, openStore, type KVL } from "./store.ts";
 
 export interface EngineEnv {
-  ETI_EXECUTION_LOG?: KVL | any; ETI_PAPER_START_BALANCE?: string; ETI_PAPER_FEE_BPS?: string; ETI_PAPER_SLIPPAGE_BPS?: string; ETI_ROUND_TRIP_COST_BPS?: string;
+  ETI_EXECUTION_LOG?: KVL | any; ETI_PORTFOLIO_DB?: any; ETI_PAPER_START_BALANCE?: string; ETI_PAPER_FEE_BPS?: string; ETI_PAPER_SLIPPAGE_BPS?: string; ETI_ROUND_TRIP_COST_BPS?: string;
   ALPACA_API_KEY?: string; ALPACA_SECRET_KEY?: string; BINANCE_API_KEY?: string; BINANCE_SECRET_KEY?: string;
 }
 export interface EngineDeps { now?: () => number; fetchImpl?: typeof fetch; priceOf?: (symbol: string) => Promise<number | null>; barsOf?: (symbol: string, now: number) => Promise<Kline[]> }
@@ -28,7 +28,7 @@ export const paperConfig = (env: EngineEnv) => {
 // Event ids sort within one timestamp in this order: init, submitted, accepted, plan, fill, terminal, mark.
 const ID = { init: "e0i-", sub: "e1s-", acc: "e2a-", plan: "e2p-", fill: "e3f-", end: "e4x-", mark: "e5m-" };
 const rid = () => crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-const store = (env: EngineEnv, e: Environment) => new PortfolioStore(env.ETI_EXECUTION_LOG as KVL, e);
+const store = (env: EngineEnv, e: Environment): PortfolioStore => { const s = openStore(env, e); if (!s) throw new Error("no portfolio storage configured (bind ETI_PORTFOLIO_DB or ETI_EXECUTION_LOG)"); return s; };
 const priceOf = async (env: EngineEnv, deps: EngineDeps, s: string, now: number): Promise<number | null> => { try { if (deps.priceOf) return await deps.priceOf(s); return (await loadMinuteBars(env as any, s, null, now)).price; } catch { return null; } };
 const barsOf = async (env: EngineEnv, deps: EngineDeps, s: string, now: number): Promise<{ bars: Kline[]; price: number | null }> => {
   try {

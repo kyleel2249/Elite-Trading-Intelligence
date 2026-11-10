@@ -186,7 +186,7 @@ function pfRenderIntegrity(){
  const s=pf.state;if(!s)return;let h='';const rc=s.recon;
  h+=rc?'<div>Last reconciliation '+pfTime(rc.checkedAt)+' ('+pfEsc(rc.source.replace('_',' '))+'): <b class="'+(rc.ok?'pos':'neg')+'">'+(rc.ok?'consistent':'differences found')+'</b></div>'+(rc.problems||[]).map(p=>'<div class="neg">'+pfEsc(p)+'</div>').join(''):'<div>No reconciliation run yet. Use Reconcile.</div>';
  const an=s.anomalies||[];h+=an.length?'<div style="margin-top:6px">Ledger anomalies (ignored, never counted in P&amp;L):</div>'+an.map(a=>'<div>'+pfTime(a.at)+' · '+pfEsc(a.kind)+' · '+pfEsc(a.detail)+'</div>').join(''):'<div style="margin-top:6px">No ledger anomalies.</div>';
- h+='<div style="margin-top:6px">'+pfEsc(s.sync&&s.sync.consistency||'')+' Events recorded: '+s.eventCount+'.</div>';
+ h+='<div style="margin-top:6px">Storage: '+pfEsc((s.storage||'').toUpperCase())+'. '+pfEsc(s.sync&&s.sync.consistency||'')+' Events recorded: '+s.eventCount+'.</div>';
  $('pfIntegrity').innerHTML=h;
 }
 /* ---- actions ---- */

@@ -25,8 +25,15 @@ Each has its own event stream (`pf:<env>:*` in `ETI_EXECUTION_LOG`) and its own 
 ## Matching (internal paper)
 Cron (every minute) walks closed 1m bars after each order's creation: buy limit fills when low <= limit, sell limit when high >= limit, sell stop when low <= stop (gap-aware prices). A bar touching both stop and TP counts as the stop. Day orders expire at 00:00 UTC, IOC orders expire unfilled. When nothing is active and no event arrived, the cycle costs one KV read.
 
+## Storage: D1 (preferred) or KV
+- **D1** (`ETI_PORTFOLIO_DB`): strongly consistent SQLite on the free plan. Tables `pf_events` (primary key env+id, so a repeated event id is ignored) and `pf_kv`; each append is one atomic batch that also bumps a head counter. Polling reads one row while nothing changed, so the free-plan list quota no longer applies. The Worker creates the tables on first use; `migrations/0001_portfolio.sql` is the same schema for `wrangler d1 migrations apply`.
+- **KV** (`ETI_EXECUTION_LOG`): automatic fallback when no D1 binding exists (eventually consistent, list-based).
+- Auth sessions, the key ring, rate limits and the order audit trail stay in KV; the order gateway still needs `ETI_EXECUTION_LOG`.
+- Set up: `node scripts/provision-d1.mjs` (creates the database, binds `ETI_PORTFOLIO_DB` in `wrangler.jsonc`, applies the migration), then deploy. If you already have KV portfolio data, call `POST /api/portfolio/migrate-to-d1` with the master token once per environment (`internal_paper`, `exchange_testnet`); it is idempotent.
+- Free D1 limits (about 5M rows read and 100k rows written per day when last checked) are much more generous than KV list operations; confirm on Cloudflare's pricing page. Each ledger change re-reads that environment's events once per isolate, so very large ledgers (tens of thousands of events) will want an incremental read.
+
 ## Realtime
-The dashboard polls (4 s with activity, 15 s idle, 60 s hidden tab, exponential back-off with an offline indicator and immediate refresh after any order). Unrealized P&L is recomputed every second from the live chart price. WebSockets/SSE were not used: no Durable Object is provisioned, and KV is eventually consistent (another edge location can lag about a minute). A Durable Object is the upgrade path for push and strict ordering. Free-plan KV list limits (1,000/day) matter for heavy polling; a paid plan is recommended.
+The dashboard polls (4 s with activity, 15 s idle, 60 s hidden tab, exponential back-off with an offline indicator and immediate refresh after any order). Unrealized P&L is recomputed every second from the live chart price. WebSockets/SSE were not used: no Durable Object is provisioned, and KV is eventually consistent (another edge location can lag about a minute). A Durable Object is the upgrade path for push and strict ordering. On the KV fallback, free-plan list limits (1,000/day) matter for heavy polling; use D1.
 
 ## Chart
 "My trades and orders" layer: buy (green) / sell (red) markers snapped to the candle containing the fill timestamp (hollow = partial fill, square = exit, SL/TP tags), open-position entry/stop/TP1-3 lines with unrealized P&L, resting order lines, click any marker or line for details. Markers are re-anchored on every redraw so they survive symbol and timeframe changes.

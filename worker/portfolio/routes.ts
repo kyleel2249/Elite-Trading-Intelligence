@@ -12,10 +12,10 @@
 import { authenticate, can, rateLimit, type EnvScope } from "../auth/session.ts";
 import { cancelExchange, cancelInternal, ensureInit, matchInternal, reconcile, setPlan, syncExchange, type EngineDeps, type EngineEnv } from "./engine.ts";
 import { present, type ClosedTrade, type Environment } from "./ledger.ts";
-import { PortfolioStore, type KVL } from "./store.ts";
+import { PortfolioStore, importKvToD1, isD1, openStore, storageConfigured, type KVL } from "./store.ts";
 import { loadMinuteBars } from "../algo/market-inputs.ts";
 
-export type PortfolioEnv = EngineEnv & { ETI_EXECUTION_TOKEN?: string; ETI_SESSION_SECRET?: string; ETI_SESSION_SECRET_PREVIOUS?: string; ETI_AUTO_SESSIONS?: string; ETI_KEY_ROTATION_DAYS?: string; ETI_KILL_SWITCH?: string };
+export type PortfolioEnv = EngineEnv & { ETI_PORTFOLIO_DB?: any } & { ETI_EXECUTION_TOKEN?: string; ETI_SESSION_SECRET?: string; ETI_SESSION_SECRET_PREVIOUS?: string; ETI_AUTO_SESSIONS?: string; ETI_KEY_ROTATION_DAYS?: string; ETI_KILL_SWITCH?: string };
 const H = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: H });
 export const ENVIRONMENTS: Environment[] = ["internal_paper", "exchange_testnet", "live"];
@@ -44,9 +44,9 @@ export function closedCsv(trades: ClosedTrade[], source: string): string {
 
 export async function buildState(env: PortfolioEnv, deps: EngineDeps, environment: Environment, now: number, symbol?: string) {
   if (environment === "live") return { environment, label: LABEL.live, disabled: true, message: "Live trading is disabled. No live ledger exists and no live orders are placed from this dashboard.", serverTime: now };
-  if (!env.ETI_EXECUTION_LOG) return { environment, label: LABEL[environment], unavailable: true, message: "The ETI_EXECUTION_LOG KV binding is not configured, so no portfolio can be stored.", serverTime: now };
+  if (!storageConfigured(env)) return { environment, label: LABEL[environment], unavailable: true, message: "No portfolio storage is bound. Bind the ETI_PORTFOLIO_DB D1 database (preferred) or the ETI_EXECUTION_LOG KV namespace.", serverTime: now };
   if (environment === "internal_paper") await ensureInit(env, now);
-  const st = new PortfolioStore(env.ETI_EXECUTION_LOG as KVL, environment), { ledger: L, version, truncated, cached } = await st.ledgerFast(now);
+  const st = openStore(env, environment)!, { ledger: L, version, truncated, cached } = await st.ledgerFast(now);
   const live: Record<string, number | null> = {}, stale: string[] = [];
   await Promise.all(Object.keys(L.positions).map(async s => { const px = await quote(env, deps, s, now); if (px) live[s] = px; else { live[s] = L.marks[s] ?? null; stale.push(s); } }));
   const P = present(L, live, now, stale);
@@ -61,8 +61,8 @@ export async function buildState(env: PortfolioEnv, deps: EngineDeps, environmen
   const orders = Object.values(L.orders).sort((a, b) => b.createdAt - a.createdAt).slice(0, 150);
   const fills = L.fills.filter(f => !symbol || f.symbol === symbol).slice(-600).map(f => ({ orderId: f.orderId, fillId: f.fillId, symbol: f.symbol, side: f.side, qty: f.qty, price: f.price, fee: f.fee, at: f.at, origin: f.origin, applied: f.applied, positionId: f.positionId, slippageBps: f.slippageBps }));
   return {
-    environment, label: LABEL[environment], serverTime: now, version, cached, truncated, simulated: environment === "internal_paper", source: environment === "internal_paper" ? "ETI internal paper simulation (no exchange contacted)" : "Exchange testnet fills as reported by the broker",
-    sync: { mode: "polling", consistency: "KV is eventually consistent; another edge location can lag up to about a minute behind the writer." },
+    environment, label: LABEL[environment], serverTime: now, version, cached, truncated, storage: st.kind, simulated: environment === "internal_paper", source: environment === "internal_paper" ? "ETI internal paper simulation (no exchange contacted)" : "Exchange testnet fills as reported by the broker",
+    sync: { mode: "polling", consistency: st.kind === "d1" ? "Stored in D1 (strongly consistent)." : "Stored in KV, which is eventually consistent: another edge location can lag up to about a minute behind the writer." },
     ...P, curve: downsample(P.curve, 400), orders, fills, anomalies: L.anomalies.slice(-30), alerts, recon: await st.kvGet("recon", null), eventCount: L.eventCount,
     marksStale: stale,
   };
@@ -80,11 +80,11 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   const need = scopeOf(environment);
   if (need && !can(auth, need)) return reply({ error: "environment_scope_mismatch", required_session: need, environment, message: "This view needs an " + LABEL[environment].toUpperCase() + " session. Sessions are isolated per environment." }, 403);
   if (environment === "live") return reply(post ? { error: "live_disabled", message: "Live trading is disabled; there is nothing to change." } : await buildState(env, deps, "live", now), post ? 423 : 200);
-  if (!env.ETI_EXECUTION_LOG) return reply({ error: "audit_log_not_configured", message: "Configure the ETI_EXECUTION_LOG KV binding to store the portfolio." }, 503);
+  if (!storageConfigured(env)) return reply({ error: "storage_not_configured", message: "Bind the ETI_PORTFOLIO_DB D1 database (preferred) or the ETI_EXECUTION_LOG KV namespace to store the portfolio." }, 503);
 
   if (path === "/api/portfolio/state" && req.method === "GET") return reply(await buildState(env, deps, environment, now, (url.searchParams.get("symbol") || "").toUpperCase() || undefined));
   if (path === "/api/portfolio/history" && req.method === "GET") {
-    const st = new PortfolioStore(env.ETI_EXECUTION_LOG as KVL, environment), { ledger: L } = await st.ledgerFast(now), rows = filterClosed(L.closed.slice().sort((a, b) => b.exitAt - a.exitAt), url.searchParams);
+    const st = openStore(env, environment)!, { ledger: L } = await st.ledgerFast(now), rows = filterClosed(L.closed.slice().sort((a, b) => b.exitAt - a.exitAt), url.searchParams);
     const label = environment === "internal_paper" ? "Internal Paper" : "Exchange Testnet";
     if (url.searchParams.get("format") === "csv") return new Response(closedCsv(rows, label), { headers: { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": "attachment; filename=eti-closed-trades-" + environment + ".csv" } });
     return reply({ environment, label, total: L.closed.length, count: rows.length, trades: rows.slice(0, 500) });
@@ -92,7 +92,7 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   if (!post) return reply({ error: "method_not_allowed" }, 405);
   if (!auth.master) { const rl = await rateLimit(env as any, "pf:" + (auth.refs[need!] || "anon"), 120, 600, now); if (!rl.ok) return reply({ error: "rate_limited" }, 429); }
   const authRef = auth.master ? "master_token" : "session:" + (auth.refs[need!] || "?");
-  const audit = async (what: string, detail: unknown) => { try { await (env.ETI_EXECUTION_LOG as KVL).put("exec:audit:" + new Date(now).toISOString() + ":" + what, JSON.stringify({ at: new Date(now).toISOString(), what, environment, auth: authRef, detail }), { expirationTtl: 60 * 60 * 24 * 90 }); } catch { /* audit is best effort here; the ledger event is the record */ } };
+  const audit = async (what: string, detail: unknown) => { try { await ((env.ETI_EXECUTION_LOG ?? { put: async () => undefined }) as KVL).put("exec:audit:" + new Date(now).toISOString() + ":" + what, JSON.stringify({ at: new Date(now).toISOString(), what, environment, auth: authRef, detail }), { expirationTtl: 60 * 60 * 24 * 90 }); } catch { /* audit is best effort here; the ledger event is the record */ } };
   if (path === "/api/portfolio/cancel") {
     const orderId = typeof body.orderId === "string" ? body.orderId : ""; if (!/^[A-Za-z0-9_.:-]{4,80}$/.test(orderId)) return reply({ error: "invalid_order_id" }, 400);
     const r = environment === "internal_paper" ? await cancelInternal(env, orderId, now, authRef) : await cancelExchange(env, deps, orderId, now);
@@ -111,6 +111,12 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
     const r = environment === "internal_paper" ? await matchInternal(env, deps, now) : await syncExchange(env, deps, now);
     return reply({ ok: true, environment, result: r });
   }
+  if (path === "/api/portfolio/migrate-to-d1") {
+    if (!auth.master) return reply({ error: "master_token_required", message: "Migration needs the execution token." }, 403);
+    if (!isD1(env.ETI_PORTFOLIO_DB) || !env.ETI_EXECUTION_LOG) return reply({ error: "not_applicable", message: "Needs both the ETI_PORTFOLIO_DB D1 binding and the old ETI_EXECUTION_LOG KV namespace." }, 409);
+    const r = await importKvToD1(env.ETI_EXECUTION_LOG as KVL, env.ETI_PORTFOLIO_DB, environment); await audit("migrate", r);
+    return reply({ ok: true, environment, ...r });
+  }
   if (path === "/api/portfolio/reconcile") {
     const rec = await reconcile(env, deps, environment, now); await audit("reconcile", { ok: rec.ok, problems: rec.problems.length });
     return reply({ ok: true, reconciliation: rec });
@@ -120,15 +126,15 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
 
 /** Cron entry: match internal paper orders and exits, pull testnet fills. Isolated and best effort. A stream with nothing active and no new events is skipped after a single KV read. */
 export async function runPortfolioCycle(env: PortfolioEnv, deps: EngineDeps = {}) {
-  if (!env.ETI_EXECUTION_LOG) return null;
+  if (!storageConfigured(env)) return null;
   const now = (deps.now ?? Date.now)(), out: Record<string, unknown> = {};
   for (const environment of ["internal_paper", "exchange_testnet"] as const) {
     try {
-      const st = new PortfolioStore(env.ETI_EXECUTION_LOG as KVL, environment), head = (await st.kv.get("pf:" + environment + ":head")) ?? "none", idle = await st.kvGet<{ head: string } | null>("idle", null);
+      const st = openStore(env, environment)!, head = await st.head(), idle = await st.kvGet<{ head: string } | null>("idle", null);
       if (idle && idle.head === head) { out[environment] = "idle"; continue; }
       const r: any = environment === "internal_paper" ? await matchInternal(env, deps, now) : await syncExchange(env, deps, now);
       out[environment] = r;
-      const head2 = (await st.kv.get("pf:" + environment + ":head")) ?? "none";
+      const head2 = await st.head();
       if (r.idle) await st.kvPut("idle", { head: head2 }); // nothing active: sleep until a new event arrives
     } catch (e) { out[environment] = "error: " + (e instanceof Error ? e.message : "?"); }
   }
