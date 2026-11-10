@@ -15,6 +15,7 @@ from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.alpaca.client import protective_status
 from app.integrations.binance import BinanceClient
+from app.quant.binance_exits import protective_from_oco
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
 from app.trading.portfolio import PortfolioService
 
@@ -58,6 +59,28 @@ class TradingService:
             if opposite and (p.qty or 0.0) + 1e-12 >= qty:
                 return True
         return False
+
+    async def _binance_exits(self, client: BinanceClient, symbol: str, side: str, resp: dict[str, Any],
+                             stop_loss: Optional[float], take_profit: Optional[float],
+                             client_order_id: str) -> dict[str, Any]:
+        """Attach a SELL OCO to a *filled* long entry. Never claims protection it could not confirm."""
+        if side.lower() != "buy":
+            return {"status": "not_attached", "reason": "spot exits protect long positions only"}
+        if stop_loss is None or take_profit is None:
+            return {"status": "not_attached", "reason": "Binance OCO requires both stop_loss and take_profit"}
+        try:
+            executed = float(resp.get("executedQty") or 0)
+        except (TypeError, ValueError):
+            executed = 0.0
+        if str(resp.get("status", "")).upper() != "FILLED" or executed <= 0:
+            return {"status": "deferred_until_fill", "filled_qty": executed,
+                    "reason": "entry not fully filled; exit orders are not attached yet"}
+        try:
+            oco = await client.place_exit_oco(symbol, executed, resp.get("fills"), take_profit, stop_loss,
+                                              f"{client_order_id}-x")
+            return protective_from_oco(oco)
+        except Exception as e:  # noqa: BLE001
+            return {"status": "failed", "reason": str(e)[:300], "warning": "POSITION IS UNPROTECTED"}
 
     async def place_order(
         self,
@@ -175,6 +198,9 @@ class TradingService:
                         "status": "FILLED",
                     }
                     fill_price = fill_price_hint
+                    if stop_loss is not None or take_profit is not None:
+                        protective = {"status": "not_attached",
+                                      "reason": "simulated paper fill; no exchange exit orders exist"}
                 else:
                     client = BinanceClient(self.settings, use_testnet=use_testnet)
                     resp = await client.submit_order(
@@ -183,11 +209,12 @@ class TradingService:
                         qty=qty,
                         order_type=order_type.upper(),
                         client_order_id=client_order_id,
+                        limit_price=limit_price,
                     )
                     fill_price = fill_price_hint
-                if stop_loss is not None or take_profit is not None:
-                    protective = {"status": "not_attached",
-                                  "reason": "Binance exit orders are not implemented; levels are recorded only"}
+                    if stop_loss is not None or take_profit is not None:
+                        protective = await self._binance_exits(client, symbol, side, resp, stop_loss,
+                                                               take_profit, client_order_id)
             else:
                 return {
                     "status": "rejected",
