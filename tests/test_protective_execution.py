@@ -2,6 +2,7 @@
 fill verification, protective OCO orders, reconciliation and the failure paths. No network: the transport emulates the venue.
 The emulation follows Binance's documented REST shapes; it has not been run against the real testnet."""
 import asyncio
+import json
 from datetime import datetime, timezone
 
 from app.execution import protective
@@ -56,16 +57,30 @@ class FakeVenue:
             o = self.orders.get(p["origClientOrderId"])
             return (200, o) if o else (400, {"code": -2013, "msg": "Order does not exist."})
         if path == "/api/v3/order" and method == "DELETE":
-            self.orders.pop(p["origClientOrderId"], None)
+            o = self.orders.get(p["origClientOrderId"])
+            if o is None:
+                return 400, {"code": -2011, "msg": "Unknown order sent."}
+            for x in self.orders.values():           # Binance: cancelling either leg of an OCO cancels the whole list
+                if x.get("list") == o.get("list") and x["status"] == "NEW":
+                    x["status"] = "CANCELED"
+            o["status"] = "CANCELED" if o["status"] == "NEW" else o["status"]
             return 200, {}
         if path == "/api/v3/openOrders":
             return 200, [o for o in self.orders.values() if o["status"] == "NEW"]
         return 404, {"msg": path}
 
+    def fill_leg(self, cid):
+        """The venue fills one OCO leg: it executes in full and its sibling is cancelled."""
+        o = self.orders[cid]
+        o["status"], o["executedQty"], o["cummulativeQuoteQty"] = "FILLED", o["origQty"], str(float(o["origQty"]) * float(o["price"]))
+        for x in self.orders.values():
+            if x is not o and x.get("list") == o.get("list") and x["status"] == "NEW":
+                x["status"] = "CANCELED"
+
     def _oco(self, p):
         reports = []
         for cid, typ, price in ((p["aboveClientOrderId"], "LIMIT_MAKER", p["abovePrice"]), (p["belowClientOrderId"], "STOP_LOSS_LIMIT", p["belowPrice"])):
-            o = {"clientOrderId": cid, "orderId": len(self.orders) + 1, "origQty": p["quantity"], "executedQty": "0", "cummulativeQuoteQty": "0", "status": "NEW", "type": typ, "price": price}
+            o = {"clientOrderId": cid, "orderId": len(self.orders) + 1, "origQty": p["quantity"], "executedQty": "0", "cummulativeQuoteQty": "0", "status": "NEW", "type": typ, "price": price, "list": p["listClientOrderId"]}
             self.orders[cid] = o
             reports.append(o)
         return {"orderListId": 1, "listClientOrderId": p["listClientOrderId"], "orderReports": reports}
@@ -207,3 +222,114 @@ def test_emergency_flatten_cancels_protective_orders_first():
     run(eng.submit_signal(intent(1.0)))
     out = run(eng.emergency_flatten("acc", "test"))
     assert len(out["canceled"]) >= 6 or any(c[0] == "DELETE" for c in v.calls)
+
+
+# ---------- Phase 9: stop management after take-profits fill ----------
+def tp_id(store, idx):
+    return sorted([r for r in store.list_orders("acc") if r.origin == "protective" and r.client_order_id.endswith("-t") and r.idempotency_key.split("|")[2] == str(idx)], key=lambda r: r.created_at)[0].client_order_id
+
+
+def active_stops(store):
+    return sorted(r.limit_price for r in store.list_orders("acc") if r.origin == "protective" and r.client_order_id.endswith("-s") and r.status == "submitted")
+
+
+def after_tp(n_filled, bid):
+    v = FakeVenue(); eng, store, _ = build(v)
+    assert run(eng.submit_signal(intent(1.0))).status == "filled"
+    for i in range(n_filled):
+        v.fill_leg(tp_id(store, i))
+    v.bid, v.ask = bid, bid + 0.02
+    return v, eng, store
+
+
+def test_break_even_after_tp1_moves_remaining_stops_up_by_cancel_and_replace():
+    v, eng, store = after_tp(1, 101.5)
+    before = active_stops(store); assert len(before) == 3 and before[0] < 99                      # original stop (99 trigger, limit 0.2% below)
+    out = run(eng.manage_open_orders("acc"))
+    assert out["protection"]["adjusted"] == 2, out
+    now = active_stops(store)
+    assert len(now) == 2 and all(abs(s / (1 - 0.002) - 100.01 * 1.0025) < 0.02 for s in now)      # break-even plus costs
+    seq = [(c[0], c[1]) for c in v.calls if c[1] in ("/api/v3/orderList/oco", "/api/v3/order") and c[0] in ("POST", "DELETE")]
+    assert [m for m, _ in seq].count("DELETE") == 2 and seq.index(("DELETE", "/api/v3/order")) < len(seq) - 1
+    assert len(store.list_logs("acc", event="protective_adjusted")) == 2
+    assert not store.list_logs("acc", event="protective_failed")
+
+
+def test_adjustment_is_idempotent_and_never_loosens():
+    v, eng, store = after_tp(1, 101.5)
+    run(eng.manage_open_orders("acc")); n = len(v.calls)
+    stops = active_stops(store)
+    out = run(eng.manage_open_orders("acc"))
+    assert out["protection"]["adjusted"] == 0 and active_stops(store) == stops
+    assert not any(c[0] == "DELETE" for c in v.calls[n:])
+
+
+def test_trail_to_tp1_after_tp2():
+    v, eng, store = after_tp(1, 101.5)
+    run(eng.manage_open_orders("acc"))                                  # break-even first
+    v.fill_leg(tp_id_in_stage(store, 1)); v.bid, v.ask = 104.0, 104.02
+    out = run(eng.manage_open_orders("acc"))
+    assert out["protection"]["adjusted"] == 1, out
+    (s,) = active_stops(store); assert abs(s / (1 - 0.002) - 101.0) < 0.02                       # trailing stop at TP1 (101)
+
+
+def tp_id_in_stage(store, idx):
+    rows = [r for r in store.list_orders("acc") if r.origin == "protective" and r.client_order_id.endswith("-t") and r.idempotency_key.split("|")[2] == str(idx) and r.status == "submitted"]
+    return rows[0].client_order_id
+
+
+def test_stop_is_left_alone_when_the_market_is_too_close_to_move_it():
+    v, eng, store = after_tp(1, 100.2)                                   # bid below break-even level: moving the stop would trigger it at once
+    before = active_stops(store)
+    out = run(eng.manage_open_orders("acc"))
+    assert out["protection"]["skipped"] == 2 and out["protection"]["adjusted"] == 0
+    assert active_stops(store) == before[:2] and not any(c[0] == "DELETE" for c in v.calls)   # (the filled target's sibling stop was cancelled by the venue)
+
+
+def test_no_adjustment_before_any_target_fills():
+    v, eng, store = after_tp(0, 101.5)
+    out = run(eng.manage_open_orders("acc"))
+    assert out["protection"] == {"adjusted": 0, "skipped": 0, "failed": 0}
+
+
+def test_failed_replacement_restores_the_original_levels():
+    v, eng, store = after_tp(1, 101.5)
+    orig = active_stops(store)
+    calls = {"n": 0}; real = v.request
+
+    async def flaky(method, url, **kw):
+        if url.endswith("/orderList/oco"):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return 400, {"code": -1013, "msg": "Filter failure"}
+        return await real(method, url, **kw)
+    v.request = flaky
+    out = run(eng.manage_open_orders("acc"))
+    assert out["protection"]["failed"] >= 1
+    assert store.list_logs("acc", event="protective_restored")
+    live = [o for o in v.orders.values() if o["status"] == "NEW" and o["type"] == "STOP_LOSS_LIMIT"]
+    assert len(live) == 2 and any(abs(float(o["price"]) - 98.81) < 0.02 for o in live)        # the failed tranche is back at its original level; no tranche is left bare
+
+
+def test_unrecoverable_replacement_halts_the_account():
+    v, eng, store = after_tp(1, 101.5)
+    real = v.request
+
+    async def broken(method, url, **kw):
+        if url.endswith("/orderList/oco"):
+            return 400, {"code": -1013, "msg": "Filter failure"}
+        return await real(method, url, **kw)
+    v.request = broken
+    run(eng.manage_open_orders("acc"))
+    assert store.list_logs("acc", event="protective_failed")
+    acct = store.get_account("acc"); assert acct.halted and "unprotected" in acct.halted_reason
+
+
+def test_pure_stop_planner():
+    r = RULES
+    assert protective.plan_stop_adjustment(0, 100, 101, 97, 105, r)[2] == "no take-profit has filled yet"
+    s, l, why = protective.plan_stop_adjustment(1, 100.0, 101.0, 97.0, 105.0, r); assert why is None and abs(s - 100.25) < 0.011 and l < s
+    assert protective.plan_stop_adjustment(1, 100.0, 101.0, 100.5, 105.0, r)[2] == "not tighter than the current stop"       # never loosen
+    assert protective.plan_stop_adjustment(1, 100.0, 101.0, 97.0, 100.1, r)[2]                                               # market too close
+    s, l, why = protective.plan_stop_adjustment(2, 100.0, 101.0, 100.25, 108.0, r); assert why is None and abs(s - 101.0) < 0.011
+    assert protective.plan_stop_adjustment(2, 100.0, None, 97.0, 108.0, r)[2] == "no reference level for the new stop"

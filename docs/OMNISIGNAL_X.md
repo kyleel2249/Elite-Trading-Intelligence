@@ -107,7 +107,10 @@ It refuses `live` accounts (403), halted accounts (409) and an active kill switc
 The engine then runs: risk authorization, balance, precision and minimum-notional checks, acknowledgement, fill verification, **protective orders** and reconciliation.
 Protective orders are three Binance spot SELL OCO tranches (40/30/30 targets sharing the stop), sized to the quantity actually filled minus a fee buffer
 (`reconcile_tolerance_pct`, default 0.25%). If protection cannot be placed the account is halted and the result is `filled_unprotected`.
-Limits: stops are static on the exchange (no break-even or trailing adjustment); working protective legs reserve the sellable balance.
+Stop management (Phase 9): the execution supervisor's cycle watches the venue-side take-profits. After TP1 fills, the remaining tranches' stops move to break-even plus costs (entry +0.25%); after TP2 fills they trail to the TP1 price.
+Binance cannot amend an OCO, so each tranche is cancelled and re-placed; only that short window leaves the tranche without a stop. If the replacement is refused the original levels are restored, and if that also fails the account is halted and `protective_failed` is logged.
+Stops are only ever tightened, never moved past the market (a stop must sit 0.2% below the bid), and never loosen or add exposure. Idempotent (deterministic client ids per stage). Events: `protective_adjusted`, `protective_adjust_skipped`, `protective_adjust_failed`, `protective_restored`.
+Not built: closing or reducing a position on thesis invalidation (structure, momentum, liquidity deterioration); only price levels drive exits. Working protective legs reserve the sellable balance.
 **Verification status:** tested only against a fake venue that follows Binance's documented REST shapes (`tests/test_protective_execution.py`). It has not been run against the real Binance testnet; that needs testnet keys.
 
 ## Elite Trader assessment (Phase 5)

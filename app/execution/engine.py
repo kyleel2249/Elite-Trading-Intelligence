@@ -528,7 +528,117 @@ class ExecutionEngine:
                     else:
                         self._log(account_id, "order_ttl_canceled", row.client_order_id, filled_qty=final.filled_qty)
                     out["canceled_remainders"] += 1
+        if getattr(adapter, "supports_protective", False):
+            out["protection"] = await self._adjust_protection(acct, adapter)
         return out
+
+    # ------------------------------------------------------------------ stop management (Phase 9)
+    async def _adjust_protection(self, acct, adapter) -> dict:
+        """After a take-profit fills, tighten the stops of the remaining tranches (break-even after TP1, trail to TP1 after TP2).
+
+        Binance cannot amend an OCO, so a tranche is cancelled and re-placed; the window between the two calls is the only time that
+        tranche is unprotected. If the replacement fails the original levels are restored, and if that fails too the account is halted.
+        Never loosens a stop, never moves it past the market, never adds exposure. Called with the account lock held."""
+        res = {"adjusted": 0, "skipped": 0, "failed": 0}
+        rows = [r for r in self.store.list_orders(acct.account_id, limit=100_000) if r.origin == "protective"]
+        by_list: dict = {}
+        for r in rows:
+            parts = r.idempotency_key.split("|")            # protect|<entry>|<i>[|<tag>]|<kind>
+            if len(parts) < 4 or parts[0] != "protect":
+                continue
+            entry_id, idx, kind = parts[1], parts[2], parts[-1]
+            tag = parts[3] if len(parts) == 5 else "orig"
+            by_list.setdefault((entry_id, idx, tag), {})[kind] = r
+        entries = {k[0] for k in by_list}
+        for entry_id in entries:
+            entry = self.store.get_order(entry_id)
+            if entry is None or not entry.avg_fill_price:
+                continue
+            groups = {k: v for k, v in by_list.items() if k[0] == entry_id}
+            filled = {k[1] for k, v in groups.items() if "tp" in v and v["tp"].status == OrderStatus.FILLED.value}
+            stage = protective.desired_stage(len(filled))
+            if stage == 0:
+                continue
+            tag_new = protective.STAGE_TAGS[stage]
+            tp1 = next((v["tp"].limit_price for k, v in groups.items() if k[1] == "0" and "tp" in v), None)
+            for (eid, idx, tag), legs in sorted(groups.items()):
+                tp, sl = legs.get("tp"), legs.get("sl")
+                if tp is None or sl is None or tp.status in (OrderStatus.FILLED.value,):
+                    continue
+                if not (OrderStatus(tp.status).working and OrderStatus(sl.status).working):
+                    continue                                   # not an active, intact OCO pair
+                if protective.STAGE_RANK.get(tag, 0) >= stage:
+                    continue                                   # already at or beyond this stage
+                symbol = tp.symbol
+                try:
+                    rules = await self._read(acct, lambda: adapter.get_rules(symbol))
+                    quote = await self._read(acct, lambda: adapter.get_quote(symbol))
+                except (TransientProviderError, ProviderUnavailableError, PermanentProviderError):
+                    res["skipped"] += 1
+                    continue
+                cur_limit = sl.limit_price or 0.0
+                cur_stop = cur_limit / (1 - protective.STOP_LIMIT_BUFFER)
+                stop, limit, why = protective.plan_stop_adjustment(stage, entry.avg_fill_price, tp1, cur_stop, quote.bid, rules)
+                if why:
+                    res["skipped"] += 1
+                    self._log(acct.account_id, "protective_adjust_skipped", entry_id, symbol=symbol, tranche=int(idx) + 1, stage=tag_new, reason=why)
+                    continue
+                ok = await self._replace_oco(acct, adapter, entry, idx, tp, sl, stop, limit, tag_new, cur_stop)
+                res["adjusted" if ok else "failed"] += 1
+        return res
+
+    async def _replace_oco(self, acct, adapter, entry, idx, tp, sl, stop, limit, tag, old_stop) -> bool:
+        symbol, qty, tp_price = tp.symbol, tp.qty, tp.limit_price
+
+        async def place(new_tag, new_stop, new_limit):
+            key = f"protect|{entry.client_order_id}|{idx}|{new_tag}"
+            lid = "etp-" + hashlib.sha256(key.encode()).hexdigest()[:20]
+            legs = {"tp": lid + "-t", "sl": lid + "-s"}
+            now = self.clock()
+            rows = {}
+            for kind, price in (("tp", tp_price), ("sl", new_limit)):
+                rows[kind], _ = self.store.reserve_order(OrderRow(
+                    legs[kind], f"{key}|{kind}", acct.account_id, acct.provider, acct.environment, symbol, "sell", qty,
+                    OrderType.LIMIT.value, price, mode=tp.mode, origin="protective", strategy=tp.strategy,
+                    thesis=f"{'take-profit' if kind == 'tp' else 'stop-loss'} protecting {entry.client_order_id} ({new_tag})",
+                    created_at=now, updated_at=now))
+            try:
+                orders = await self._write(acct, lambda: adapter.place_protective(
+                    symbol=symbol, qty=qty, take_profit_price=tp_price, stop_price=new_stop, stop_limit_price=new_limit,
+                    list_client_order_id=lid, take_profit_client_id=legs["tp"], stop_client_id=legs["sl"]))
+            except Exception:
+                for kind in ("tp", "sl"):
+                    self.store.update_order(legs[kind], status=OrderStatus.REJECTED.value, error="protective replacement not placed")
+                raise
+            for bo in orders:
+                if bo.client_order_id in (legs["tp"], legs["sl"]):
+                    self._apply_broker_order(acct, rows["tp" if bo.client_order_id == legs["tp"] else "sl"], bo)
+
+        try:   # 1) cancel the existing pair (cancelling either leg cancels the whole OCO list on Binance)
+            await retry_async(lambda: adapter.cancel_order(symbol, tp.client_order_id, tp.provider_order_id), attempts=3, sleep=self._sleep)
+            final = await retry_async(lambda: adapter.get_order_by_client_id(symbol, tp.client_order_id), attempts=3, sleep=self._sleep)
+        except (TransientProviderError, ProviderUnavailableError, PermanentProviderError, OrderRejectedError) as e:
+            self._log(acct.account_id, "protective_adjust_failed", entry.client_order_id, symbol=symbol, stage="cancel", error=str(e)[:200])
+            return False        # nothing was changed, or the next cycle's reconciliation resolves the unknown state
+        if final is not None and final.status == OrderStatus.FILLED:
+            self._apply_broker_order(acct, tp, final)       # the target filled while we were adjusting: nothing to replace
+            return False
+        for r in (tp, sl):
+            self.store.update_order(r.client_order_id, status=OrderStatus.CANCELED.value, error="replaced by tighter stop")
+        try:   # 2) place the tighter pair
+            await place(tag, stop, limit)
+        except Exception as e:
+            self._log(acct.account_id, "protective_adjust_failed", entry.client_order_id, symbol=symbol, stage="replace", error=str(e)[:200])
+            try:   # 3) restore the original levels so the tranche is not left bare
+                await place("restore" + str(int(self.clock().timestamp())), old_stop, sl.limit_price)
+                self._log(acct.account_id, "protective_restored", entry.client_order_id, symbol=symbol, stop=old_stop)
+            except Exception as e2:
+                self.store.save_account(self._with_halt(self.store.get_account(acct.account_id) or acct,
+                                                        "Protective replacement and restore both failed; position may be unprotected: " + str(e2)[:200]))
+                self._log(acct.account_id, "protective_failed", entry.client_order_id, symbol=symbol, reasons=[str(e2)[:200]])
+            return False
+        self._log(acct.account_id, "protective_adjusted", entry.client_order_id, symbol=symbol, tranche=int(idx) + 1, stage=tag, from_stop=round(old_stop, 8), to_stop=stop)
+        return True
 
     # ------------------------------------------------------------------ position reconciliation
     def _ledger(self, account_id) -> dict:
