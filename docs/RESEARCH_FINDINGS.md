@@ -21,3 +21,18 @@ Source: GitHub Actions workflow "ETI Research", run 42718942068 on commit dab93a
 
 ## Regime filter: tested on a holdout and not supported (not built)
 Hypothesis: skip entries in poorly performing regimes. Procedure fixed in advance: choose regimes from the first half of 435 pooled intraday trades (5 symbols), score on the second half (run 42719680629). Result: after the cost gate, 71% of trades occur in high_volatility (about -0.09R train, -0.13R test); every regime that looked bad in the first half had fewer than 10 trades and did not repeat in the second half (e.g. weak_bearish -0.64R then +0.25R). The earlier "ranging" loss largely disappeared because the cost gate now blocks most of those entries. A filter would have fitted noise, so none was added.
+
+## Elite Trader gate A/B (real Binance data, 365 days, intraday, run 42812907125)
+
+Same history and parameters, `eliteGate` off versus on, for BTC, ETH, SOL, BNB and XRP (466 trades in total).
+
+| Symbol | Trades (off = on) | Mean R | Bootstrap 95% interval | Trades removed by the gate |
+|---|---|---|---|---|
+| BTCUSDT | 66 | -0.121 | -0.380 to 0.153 | 0 |
+| ETHUSDT | 93 | 0.048 | -0.190 to 0.266 | 0 |
+| SOLUSDT | 131 | -0.142 | -0.331 to 0.060 | 0 |
+| BNBUSDT | 73 | -0.118 | -0.383 to 0.173 | 0 |
+| XRPUSDT | 99 | 0.091 | -0.141 to 0.320 | 0 |
+
+Findings: the gate **never fired** on this data, so it is inert here: the fused plans already agree with the trend-following modules, and the gate needs two opposing modules with none supporting.
+It neither helps nor hurts, and nothing was changed by default. The pooled mean is about -0.05R with every interval including zero, which is the same "no demonstrated edge" conclusion as before.
