@@ -1,7 +1,7 @@
 """Prediction ledger REST API. Reads are public (like the rest of ETI); writes need X-API-Key."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,9 +14,9 @@ from app.database import get_db
 from app.prediction_ledger import reports as rpt
 from app.prediction_ledger.evaluation import breakdowns, compute_metrics
 from app.prediction_ledger.job import prediction_resolver_job
-from app.prediction_ledger.models import PredictionRecord
+from app.prediction_ledger.models import PredictionRecord, PredictionReport
 from app.prediction_ledger.service import (create_prediction, get_outcome, naive_utc, outcome_to_dict,
-                                           prediction_to_dict, resolve_prediction, scored_rows)
+                                           prediction_to_dict, resolve_prediction, scored_rows, verify_hash)
 from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/predictions", tags=["prediction-ledger"])
@@ -68,10 +68,16 @@ class OutcomeCreate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=2000)
 
 
+def _find(db: Session, uid: str) -> PredictionRecord:
+    p = db.execute(select(PredictionRecord).where(PredictionRecord.prediction_uid == uid)).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+    return p
+
+
 @router.post("", status_code=201)
 def create(body: PredictionCreate, db: Session = Depends(get_db), _auth=Depends(require_api_key)):
-    data = body.model_dump()
-    row, created = create_prediction(db, **data)
+    row, created = create_prediction(db, **body.model_dump())
     return {"created": created, **prediction_to_dict(row)}
 
 
@@ -103,7 +109,6 @@ async def job_run(_auth=Depends(require_api_key)):
 
 @router.get("/reports")
 def list_reports(db: Session = Depends(get_db)):
-    from app.prediction_ledger.models import PredictionReport
     rows = db.execute(select(PredictionReport).order_by(PredictionReport.period.desc())).scalars().all()
     return {"reports": [rpt.report_to_dict(r, full=False) for r in rows]}
 
@@ -148,18 +153,20 @@ def report_publish(period: str, db: Session = Depends(get_db), _auth=Depends(req
 
 @router.get("/{uid}")
 def get_one(uid: str, db: Session = Depends(get_db)):
-    p = db.execute(select(PredictionRecord).where(PredictionRecord.prediction_uid == uid)).scalar_one_or_none()
-    if not p:
-        raise HTTPException(status_code=404, detail="Prediction not found")
+    p = _find(db, uid)
     return {**prediction_to_dict(p), "outcome": outcome_to_dict(get_outcome(db, p.id))}
+
+
+@router.get("/{uid}/verify")
+def verify(uid: str, db: Session = Depends(get_db)):
+    """Recompute the content hash. intact=false means the stored fields no longer match what was recorded."""
+    return verify_hash(_find(db, uid))
 
 
 @router.post("/{uid}/outcome", status_code=201)
 def settle(uid: str, body: OutcomeCreate, db: Session = Depends(get_db), _auth=Depends(require_api_key)):
     """Manually settle a matured prediction with no automatic price feed. Write-once."""
-    p = db.execute(select(PredictionRecord).where(PredictionRecord.prediction_uid == uid)).scalar_one_or_none()
-    if not p:
-        raise HTTPException(status_code=404, detail="Prediction not found")
+    p = _find(db, uid)
     if get_outcome(db, p.id):
         raise HTTPException(status_code=409, detail="Outcome already recorded; outcomes are immutable")
     try:
