@@ -24,8 +24,6 @@ def get_db():
 
 def init_db() -> None:
     from app import models  # noqa: F401
-    from app.memory import models as memory_models  # noqa: F401  (ETI memory + adaptive-edge tables)
-    from app.prediction_ledger import models as _ledger_models  # noqa: F401  (append-only prediction ledger + triggers)
-    from app.strategies import store as _strategy_store  # noqa: F401  (strategy_validation_runs)
-    from app.alpha import db_models  # noqa: F401
+    from app.execution import models as _execution_models  # noqa: F401  (execution engine tables)
+    from app.paper import models as _paper_models  # noqa: F401  (internal paper engine tables)
     Base.metadata.create_all(bind=engine)
