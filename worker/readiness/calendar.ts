@@ -1,7 +1,7 @@
 // Deterministic market-clock rules for the ETI Market Readiness Engine.
 // Everything here is computed from published rules (time zones, DST law, exchange holiday rules) with no network access,
 // so it can never be "stale". Rule-derived holiday lists can still differ from an exchange's one-off announcements
-// (special closures, unscheduled bank holidays); callers surface that caveat. Tokyo public holidays are NOT built in.
+// (special closures, unscheduled bank holidays); callers surface that caveat. Tokyo holidays follow the national-holiday rules (equinoxes by the 1980-2099 formula).
 
 export type Zone = "UTC" | "America/New_York" | "Europe/London" | "Asia/Tokyo" | "Australia/Sydney";
 export const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
@@ -99,6 +99,19 @@ export function lseCalendar(y: number): Closure[] {
     return out.sort((a, b) => a.date.localeCompare(b.date));
   });
 }
+/** Japanese national holidays (Act on National Holidays) incl. equinoxes (valid 1980-2099), substitute holidays and citizens' holidays; TSE also closes 31 Dec and 1-3 Jan. */
+export function tokyoCalendar(y: number): Closure[] {
+  return memo("TSE" + y, () => {
+    const n = y - 1980, vernal = Math.floor(20.8431 + 0.242194 * n - Math.floor(n / 4)), autumn = Math.floor(23.2488 + 0.242194 * n - Math.floor(n / 4));
+    const fixed: [string, number, number][] = [["New Year's Day", 0, 1], ["Coming of Age Day", 0, nthDow(y, 0, 1, 2)], ["National Foundation Day", 1, 11], ["Emperor's Birthday", 1, 23], ["Vernal Equinox Day", 2, vernal], ["Showa Day", 3, 29], ["Constitution Memorial Day", 4, 3], ["Greenery Day", 4, 4], ["Children's Day", 4, 5],
+      ["Marine Day", 6, nthDow(y, 6, 1, 3)], ["Mountain Day", 7, 11], ["Respect for the Aged Day", 8, nthDow(y, 8, 1, 3)], ["Autumnal Equinox Day", 8, autumn], ["Sports Day", 9, nthDow(y, 9, 1, 2)], ["Culture Day", 10, 3], ["Labour Thanksgiving Day", 10, 23]];
+    const hol = new Map<string, string>(fixed.map(([name, m, d]) => [ymd(y, m, d), name]));
+    for (const [date, name] of [...hol]) { if (new Date(date + "T00:00:00Z").getUTCDay() === 0) { let t = Date.parse(date + "T00:00:00Z") + DAY; while (hol.has(new Date(t).toISOString().slice(0, 10))) t += DAY; hol.set(new Date(t).toISOString().slice(0, 10), `Substitute holiday (${name})`); } }
+    for (const date of [...hol.keys()]) { const t = Date.parse(date + "T00:00:00Z"), mid = new Date(t + DAY).toISOString().slice(0, 10), after = new Date(t + 2 * DAY).toISOString().slice(0, 10); if (hol.has(after) && !hol.has(mid) && new Date(mid + "T00:00:00Z").getUTCDay() !== 0) hol.set(mid, "Citizens' Holiday"); }
+    for (const [m, d] of [[0, 2], [0, 3], [11, 31]]) hol.set(ymd(y, m, d), "TSE year-end/new-year closure");
+    return [...hol.entries()].map(([date, name]) => ({ date, name, kind: "closed" as const })).sort((a, b) => a.date.localeCompare(b.date));
+  });
+}
 /** Additional US federal bank holidays that close the US bond/bank system (and thin USD liquidity) while equities trade. */
 export function usBankExtras(y: number): Closure[] {
   return memo("USBANK" + y, () => [
@@ -112,7 +125,7 @@ export type Exchange = "NYSE" | "LSE" | "TSE";
 const EXCHANGES: Record<Exchange, { zone: Zone; name: string; segments: [number, number][]; cal: ((y: number) => Closure[]) | null }> = {
   NYSE: { zone: "America/New_York", name: "NYSE / Nasdaq", segments: [[570, 960]], cal: nyseCalendar },
   LSE: { zone: "Europe/London", name: "London Stock Exchange", segments: [[480, 990]], cal: lseCalendar },
-  TSE: { zone: "Asia/Tokyo", name: "Tokyo Stock Exchange", segments: [[540, 690], [750, 930]], cal: null },
+  TSE: { zone: "Asia/Tokyo", name: "Tokyo Stock Exchange", segments: [[540, 690], [750, 930]], cal: tokyoCalendar },
 };
 export interface ExchangeStatus { exchange: Exchange; name: string; open: boolean; reason: string; closure: Closure | null; holidaysKnown: boolean }
 export function exchangeStatus(ex: Exchange, ms: number): ExchangeStatus {
@@ -123,6 +136,15 @@ export function exchangeStatus(ex: Exchange, ms: number): ExchangeStatus {
   const segs = spec.segments.map(([a, b], i) => (closure?.kind === "early_close" && i === spec.segments.length - 1 ? [a, Math.min(b, closure.closeLocalMinutes!)] : [a, b]) as [number, number]);
   const inside = segs.some(([a, b]) => lt.min >= a && lt.min < b);
   return { ...base, open: inside, reason: inside ? (closure ? `Open (${closure.name})` : "Open") : lt.min < segs[0][0] ? "Before the open" : lt.min >= segs.at(-1)![1] ? "After the close" : "Midday break" };
+}
+
+/** Next open/close instant of an exchange, computed from session boundaries (cheap: no minute-by-minute scan). */
+export function exchangeNextChange(ex: Exchange, ms: number, days = 6): { at: number; becomes: boolean } | null {
+  const spec = EXCHANGES[ex], now = exchangeStatus(ex, ms).open, bounds: number[] = [], lt0 = localTime(spec.zone, ms);
+  const mins = [...new Set([...spec.segments.flat(), 12 * 60 + 30, 13 * 60])];
+  for (let d = 0; d <= days; d++) { const midnight = Date.UTC(lt0.y, lt0.m - 1, lt0.d + d) - lt0.offset * MIN; for (const m of mins) { const t = midnight + m * MIN - (utcOffsetMinutes(spec.zone, midnight + m * MIN) - lt0.offset) * MIN; if (t > ms) bounds.push(t); } }
+  for (const t of bounds.sort((a, b) => a - b)) if (exchangeStatus(ex, t).open !== now) return { at: t, becomes: !now };
+  return null;
 }
 
 // ------------------------------------------------------------------ forex week

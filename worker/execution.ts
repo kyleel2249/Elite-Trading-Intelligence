@@ -2,7 +2,11 @@
  * ETI execution gateway: paper/testnet by default; live is separately gated.
  * No withdrawal, transfer, funding or wallet-management endpoints are exposed.
  */
+import { readinessForOrder } from "./readiness/api.ts";
+/** off | advisory (default: readiness is recorded on every order, never blocks) | enforce (AVOID TRADING and HIGH RISK block paper and live orders; a readiness failure blocks too) */
+export type ReadinessGateMode = "off" | "advisory" | "enforce";
 export interface ExecutionEnv {
+  ETI_READINESS_GATE?: string;
   ETI_EXECUTION_TOKEN?: string;
   ALPACA_API_KEY?: string;
   ALPACA_SECRET_KEY?: string;
@@ -70,7 +74,7 @@ export function validateLiveOrderLimits(input: {
 export async function handleExecution(req: Request, env: ExecutionEnv): Promise<Response> {
   const url=new URL(req.url);
   if(url.pathname==="/api/execution/status" && req.method==="GET") {
-    return reply({mode:"paper_testnet_default",live_trading_enabled:env.ETI_LIVE_TRADING_ENABLED==="true",risk_gate_configured:!!(env.ETI_RISK_GATE_URL&&env.ETI_RISK_GATE_TOKEN),live_activation_configured:!!env.ETI_LIVE_ACTIVATION_TOKEN,alpaca_paper_configured:!!(env.ALPACA_API_KEY&&env.ALPACA_SECRET_KEY),binance_testnet_configured:!!(env.BINANCE_API_KEY&&env.BINANCE_SECRET_KEY),live_credentials_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY&&env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),alpaca_live_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY),binance_live_configured:!!(env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),audit_log_configured:!!env.ETI_EXECUTION_LOG,kill_switch:env.ETI_KILL_SWITCH==="true",withdrawal_permissions:false});
+    return reply({mode:"paper_testnet_default",live_trading_enabled:env.ETI_LIVE_TRADING_ENABLED==="true",risk_gate_configured:!!(env.ETI_RISK_GATE_URL&&env.ETI_RISK_GATE_TOKEN),readiness_gate:["off","enforce"].includes((env.ETI_READINESS_GATE||"").toLowerCase())?(env.ETI_READINESS_GATE||"").toLowerCase():"advisory",live_activation_configured:!!env.ETI_LIVE_ACTIVATION_TOKEN,alpaca_paper_configured:!!(env.ALPACA_API_KEY&&env.ALPACA_SECRET_KEY),binance_testnet_configured:!!(env.BINANCE_API_KEY&&env.BINANCE_SECRET_KEY),live_credentials_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY&&env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),alpaca_live_configured:!!(env.ALPACA_LIVE_API_KEY&&env.ALPACA_LIVE_SECRET_KEY),binance_live_configured:!!(env.BINANCE_LIVE_API_KEY&&env.BINANCE_LIVE_SECRET_KEY),audit_log_configured:!!env.ETI_EXECUTION_LOG,kill_switch:env.ETI_KILL_SWITCH==="true",withdrawal_permissions:false});
   }
   if(url.pathname==="/api/execution/history") {
     if(req.method!=="GET") return reply({error:"method_not_allowed"},405);
@@ -144,6 +148,21 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
       high_impact_verified_count:gateBody.disclosure_context?.high_impact_verified_count??0
     }};
   }
+  let readinessEvidence:any = null;
+  {
+    const raw=(env.ETI_READINESS_GATE||"advisory").toLowerCase(), gate:ReadinessGateMode=raw==="off"||raw==="enforce"?raw:"advisory";
+    if(gate!=="off") {
+      try {
+        const r=await readinessForOrder(env as any,broker==="binance"?"crypto":"equities",symbol);
+        readinessEvidence={gate,status:r.status,reasons:r.reasons,evaluated:r.evaluated,notEvaluated:r.notEvaluated,generatedAt:r.generatedAt};
+        if(gate==="enforce" && (r.status==="AVOID_TRADING"||r.status==="HIGH_RISK"))
+          return reply({error:"readiness_gate_rejected",message:"The ETI Market Readiness Engine advises against opening new positions now.",readiness:{status:r.status,recommendation:r.recommendation,reasons:r.reasons,blockers:r.blockers}},403);
+      } catch {
+        if(gate==="enforce") return reply({error:"readiness_unavailable",message:"Order blocked because the readiness check could not be completed (ETI_READINESS_GATE=enforce)."},503);
+        readinessEvidence={gate,status:"unavailable"};
+      }
+    }
+  }
   try {
     let result:any, mode:string;
     if(broker==="alpaca") {
@@ -169,8 +188,8 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
     if(!r.ok) return reply({error:"broker_rejected",broker,status:r.status,detail:data,mode:requestedLive?"live":"testnet"},502);
     result=data; mode=requestedLive?"live":"testnet";
     }
-    const record={executedAt:new Date().toISOString(),broker,mode,symbol,side,type,quantity,clientOrderId,brokerOrderId:result?.id??result?.orderId??null,executionSource:{actorType:source.actorType,actorId:source.actorId,sourceName:source.sourceName,strategyId:source.strategyId??null,signalId:source.signalId??null,triggerReason:source.triggerReason??null},riskGateEvidence,order:result};
+    const record={executedAt:new Date().toISOString(),broker,mode,symbol,side,type,quantity,clientOrderId,readiness:readinessEvidence,brokerOrderId:result?.id??result?.orderId??null,executionSource:{actorType:source.actorType,actorId:source.actorId,sourceName:source.sourceName,strategyId:source.strategyId??null,signalId:source.signalId??null,triggerReason:source.triggerReason??null},riskGateEvidence,order:result};
     await env.ETI_EXECUTION_LOG!.put("order:"+record.executedAt+":"+clientOrderId,JSON.stringify(record),{expirationTtl:60*60*24*90});
-    return reply({ok:true,broker,mode,order:result,executionSource:record.executionSource,executedAt:record.executedAt,live_trading:requestedLive},201);
+    return reply({ok:true,broker,mode,order:result,executionSource:record.executionSource,executedAt:record.executedAt,live_trading:requestedLive,readiness:readinessEvidence},201);
   } catch(e) { return reply({error:"execution_upstream_error",message:e instanceof Error?e.message:"Unknown error"},502); }
 }

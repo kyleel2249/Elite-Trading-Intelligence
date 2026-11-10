@@ -57,9 +57,10 @@ Session/hour/weekday statistics are **measured activity** (range and volume rela
 directional efficiency) with sample sizes. They say nothing about profitability. Forex session fit is *structural*
 (where each currency's home market trades) and is labelled as not measured.
 
-Market clock rules (DST for US/UK/Sydney, NYSE and LSE holidays and early closes, Easter-based dates, FX week) are
-computed from published rules, with unit tests at the switch instants. Rule-derived holidays cannot know one-off
-closures; Tokyo public holidays are not built in.
+Market clock rules (DST for US/UK/Sydney, NYSE, LSE and Tokyo holidays, early closes, Easter-based dates, Japanese equinoxes
+and substitute/citizens' holidays, FX week) are computed from published rules, with unit tests at the switch instants.
+Every report lists NYSE/Nasdaq, LSE and TSE with open/closed state and the next open or close. Rule-derived holidays cannot
+know one-off special closures: confirm with the exchange.
 
 ## Configuration
 
@@ -97,6 +98,20 @@ npx wrangler kv key put --binding ETI_EXECUTION_LOG "readiness:evidence:BTCUSDT:
 ```
 Results are bucketed by session and regime. Below 30 matching trades no win rate or expectancy is shown.
 
+## Order gateway integration
+
+`ETI_READINESS_GATE` (Worker variable) controls how `/api/orders` and `/api/orders/live` use the engine, after the existing
+portfolio risk preflight:
+
+| Value | Behaviour |
+|---|---|
+| `advisory` (default) | the verdict is recorded on the audit record and in the response; orders are never blocked by it |
+| `enforce` | `AVOID TRADING` and `HIGH RISK` reject the order with HTTP 403 `readiness_gate_rejected` before the broker is called; a failed readiness check rejects with 503 (fail closed) |
+| `off` | not consulted |
+
+Binance orders are assessed as crypto, Alpaca orders as US equities. There is no override flag: change the setting if you
+want to trade through a warning. The gate cannot loosen any existing control (kill switch, live lock, caps, risk gate).
+
 ## API
 
 ```
@@ -113,6 +128,6 @@ UTC day). Future windows use schedule, events and typical behaviour only; live c
 
 ## Verification status
 Covered by `worker/readiness.test.ts` (calendar rules, event zones, decisions, fail-safe behaviour, API with mocked
-market data). **Not verified:** behaviour against live exchange, Alpaca and FX-provider responses and a real calendar feed (no
+market data). **Verified:** dashboard panel renders in jsdom with no script errors, escapes event text (no script injection), and passes an axe-core scan; palette contrast is at least 6.4:1. **Not verified:** real-browser layout at specific widths; behaviour against live exchange, Alpaca and FX-provider responses and a real calendar feed (no
 keys or network access to them from the build environment; only mocks were exercised), and Workers Free CPU headroom in production (about 3-4 ms for a full-day
 report measured locally in Node).

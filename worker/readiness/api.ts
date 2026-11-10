@@ -156,3 +156,12 @@ async function handleSessions(env: ReadinessEnv, q: URLSearchParams, market: Mar
   });
   return reply({ title: "ETI SESSION ANALYSIS", generatedAt: new Date(now).toISOString(), market, symbols, sessions: out, failures, economicCalendar: { status: events.status }, disclaimer: "No session is assumed to be profitable. Confirm a valid setup before any entry.", submitsOrder: false });
 }
+
+export interface OrderReadiness { status: string; statusLabel: string; recommendation: string; reasons: string[]; blockers: string[]; evaluated: number; notEvaluated: string[]; market: MarketKind; symbol: string; generatedAt: string; dataProvider: string }
+/** Readiness verdict for the next two hours, used by the order gateway. Throws only on programming errors; data outages lower the verdict instead. */
+export async function readinessForOrder(env: ReadinessEnv, market: MarketKind, symbol: string, now = Date.now()): Promise<OrderReadiness> {
+  const src = market === "crypto" ? null : sourceFor(market, env), live = marketOpenNow(market, now) && (market === "crypto" || !!src);
+  const [events, data] = await Promise.all([eventsFor(env, now), market === "crypto" ? fetchSnapshot(env, symbol, "intraday", now, live, null) : src ? fetchViaSource(src, market, symbol, "intraday", now, live) : Promise.resolve<Fetched>({ snapshot: null, provider: "none", failures: {}, timeframesLoaded: [] })]);
+  const r = buildReport({ now, at: now, scope: "now", market, symbol, strategy: "intraday", snapshot: data.snapshot, events, evidence: null }).overall;
+  return { status: r.status, statusLabel: r.statusLabel, recommendation: r.recommendation, reasons: r.reasons.slice(0, 6), blockers: r.blockers, evaluated: r.evaluated, notEvaluated: r.notEvaluated, market, symbol, generatedAt: new Date(now).toISOString(), dataProvider: data.provider };
+}

@@ -146,7 +146,7 @@ export function assess(i: AssessInput): Assessment {
     if (i.market === "equities") { const s = exchangeStatus("NYSE", Math.max(w.start, i.now)), e = exchangeStatus("NYSE", Math.max(w.start, w.end - 1)); d.push(`NYSE/Nasdaq: ${s.reason}`); if (!s.open && !e.open) bump("severe", `US equity market closed (${s.reason})`); else if (s.open !== e.open || s.closure?.kind === "early_close") bump("caution", "US equity session opens, closes or closes early inside this window"); }
     if (i.market === "crypto") { sched.push("Crypto trades continuously; individual exchanges can still halt or run maintenance (not detectable here)."); const clos = upcomingClosures(w.start, 3).filter(c => c.kind === "closed" && c.date >= iso(w.start).slice(0, 10) && c.date <= iso(w.end - 1).slice(0, 10)); for (const c of clos) { bump("caution", `${c.exchange} holiday (${c.name}): traditional-market participation is lower`); } }
     const up = upcomingClosures(i.now, 7); if (up.length) d.push(`Upcoming closures: ${up.map(c => `${c.date} ${c.exchange} ${c.name}`).join("; ")}`);
-    d.push(...sched, "Tokyo Stock Exchange holidays are not built in; verify them independently."); F(11, "Upcoming market closures", r, head, d); }
+    d.push(...sched, "Holiday lists are rule-derived (NYSE, LSE, TSE) and cannot know one-off special closures: confirm with the exchange."); F(11, "Upcoming market closures", r, head, d); }
 
   // 12. Historical strategy performance under similar conditions
   const sess = i.session ?? (i.scope === "now" || i.scope === "hour" ? (SESSION_IDS.filter(s => s !== "sydney").find(s => sessionActiveFor(i.market, s, Math.max(w.start, i.now))) ?? null) : null);

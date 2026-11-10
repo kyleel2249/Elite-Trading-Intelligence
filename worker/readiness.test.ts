@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "./index.ts";
-import { HOUR, DAY, MIN, easterSunday, exchangeStatus, fxOpen, holidayFlags, lseCalendar, nyseCalendar, nthDow, sessionActive, sessionWindow, structuralSessionFit, utcOffsetMinutes } from "./readiness/calendar.ts";
+import { HOUR, DAY, MIN, easterSunday, exchangeNextChange, exchangeStatus, tokyoCalendar, fxOpen, holidayFlags, lseCalendar, nyseCalendar, nthDow, sessionActive, sessionWindow, structuralSessionFit, utcOffsetMinutes } from "./readiness/calendar.ts";
 import { eventHits, loadEvents, parseEvents, severityFor, type MarketEvent } from "./readiness/events.ts";
 import { assess, upcomingClosures, type AssessInput } from "./readiness/engine.ts";
 import { parseEvidence, summarizeEvidence } from "./readiness/evidence.ts";
@@ -9,6 +9,7 @@ import { buildSnapshot, historyStats, quoteLiquidity, returnCorrelation, slippag
 import { alpacaSource, fxSource, parseCandleRows } from "./readiness/sources.ts";
 import { rateAssetSession, buildReport } from "./readiness/report.ts";
 import { handleReadiness } from "./readiness/api.ts";
+import { handleExecution } from "./execution.ts";
 import { series } from "./algo/fixtures.ts";
 import { INTERVAL_SECONDS, type Kline } from "./market.ts";
 import type { ClosedTrade } from "./algo/performance.ts";
@@ -175,14 +176,15 @@ test("strategy evidence is withheld below the minimum sample and judged only on 
 });
 
 // ------------------------------------------------------------------ end to end with mocked public market data
-function mockMarket(now: number, o: { spike?: boolean; thinBook?: boolean } = {}) {
-  const lastClose = series(1000, { drift: 0.05, noise: 0.6, seed: 7, stepMs: HOUR, end: Math.floor(now / HOUR) * HOUR - HOUR }).at(-1)![4];
+function mockMarket(now: number, o: { spike?: boolean; thinBook?: boolean; seed?: number } = {}) {
+  const seed = o.seed ?? 7;
+  const lastClose = series(1000, { drift: 0.05, noise: 0.6, seed, stepMs: HOUR, end: Math.floor(now / HOUR) * HOUR - HOUR }).at(-1)![4];
   const calls: string[] = [];
   globalThis.fetch = (async (input: unknown) => {
     const u = new URL(String((input as Request).url ?? input)); calls.push(u.pathname);
     if (u.pathname.endsWith("/klines")) {
       const iv = u.searchParams.get("interval")!, n = Number(u.searchParams.get("limit")), step = INTERVAL_SECONDS[iv] * 1000;
-      const rows = series(n, { drift: 0.05, noise: 0.6, seed: 7, stepMs: step, end: Math.floor(now / step) * step - step });
+      const rows = series(n, { drift: 0.05, noise: 0.6, seed, stepMs: step, end: Math.floor(now / step) * step - step });
       if (o.spike) { const l = rows.at(-1)!; l[2] = l[4] * 1.6; l[3] = l[1] * 0.7; }
       return new Response(JSON.stringify(rows.map(r => [r[0], String(r[1]), String(r[2]), String(r[3]), String(r[4]), String(r[5])])), { status: 200 });
     }
@@ -334,4 +336,58 @@ test("stale candles are never treated as live conditions", () => {
   const snap = buildSnapshot({ symbol: "TESTUSDT", now, strategy: "intraday", provider: "t", candles: { "1h": h.slice(-300) }, hourly: h, depth: null });
   assert.ok(snap && snap.stale); const a = assess(base({ market: "crypto", symbol: "TESTUSDT", now, at: now, snapshot: snap, events: loaded([]) }));
   assert.equal(a.liveConditionsApplied, false); assert.ok(["UNCERTAIN", "HIGH_RISK", "AVOID_TRADING"].includes(a.status));
+});
+
+// ------------------------------------------------------------------ exchange sessions and Tokyo holidays
+test("Tokyo holiday rules reproduce the 2026 calendar including substitute and citizens' holidays", () => {
+  const t = Object.fromEntries(tokyoCalendar(2026).map(c => [c.date, c.name]));
+  assert.equal(t["2026-03-20"], "Vernal Equinox Day"); assert.equal(t["2026-09-23"], "Autumnal Equinox Day"); assert.match(t["2026-05-06"], /Substitute/); assert.equal(t["2026-09-22"], "Citizens' Holiday");
+  assert.equal(t["2026-01-12"], "Coming of Age Day"); assert.equal(t["2026-12-31"], "TSE year-end/new-year closure");
+  assert.equal(exchangeStatus("TSE", utc(2026, 9, 22, 1)).open, false); assert.equal(exchangeStatus("TSE", utc(2026, 11, 9, 1)).open, true); assert.equal(exchangeStatus("TSE", utc(2026, 11, 9, 3, 0)).reason, "Midday break");
+  assert.equal(exchangeStatus("TSE", utc(2026, 11, 9, 1)).holidaysKnown, true);
+});
+test("exchange next open/close instants respect lunch breaks, weekends and early closes", () => {
+  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 16);
+  assert.equal(iso(exchangeNextChange("TSE", utc(2026, 11, 9, 2, 0))!.at), "2026-11-09T02:30"); // 11:30 JST lunch break
+  assert.equal(iso(exchangeNextChange("NYSE", utc(2026, 11, 8, 2, 0))!.at), "2026-11-09T14:30");
+  assert.equal(iso(exchangeNextChange("LSE", utc(2026, 11, 13, 17, 0))!.at), "2026-11-16T08:00");
+  assert.equal(iso(exchangeNextChange("NYSE", utc(2026, 11, 27, 15, 0))!.at), "2026-11-27T18:00"); // 13:00 ET early close after Thanksgiving
+});
+test("reports list every exchange with state and next change", () => {
+  const r = buildReport({ ...base({ market: "equities", symbol: "", events: loaded([]) }) });
+  assert.equal(r.exchanges.length, 3); assert.ok(r.exchanges.every(e => e.next)); assert.match(r.text, /Exchange hours \(as of 2026-11-09 09:00 UTC\):/); assert.match(r.text, /Tokyo Stock Exchange: OPEN|Tokyo Stock Exchange: CLOSED/);
+});
+
+// ------------------------------------------------------------------ order gateway integration
+function orderHarness(now: number, gate: string | undefined, events: string, seed = 7) {
+  mockMarket(now, { seed }); const market = globalThis.fetch, brokerCalls: string[] = [], stored: string[] = [];
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const u = new URL(String((input as Request).url ?? input));
+    if (u.hostname === "risk.example") return new Response(JSON.stringify({ approved: true, decision: "approved" }), { status: 200 });
+    if (u.hostname === "testnet.binance.vision") { brokerCalls.push(u.pathname); return new Response(JSON.stringify({ orderId: 42 }), { status: 200 }); }
+    return market(input as never, init);
+  }) as unknown as typeof fetch;
+  const env = { ETI_EXECUTION_TOKEN: "tok-12345678", ETI_RISK_GATE_URL: "https://risk.example/gate", ETI_RISK_GATE_TOKEN: "g", BINANCE_API_KEY: "k", BINANCE_SECRET_KEY: "s", ETI_EVENTS_JSON: events, ...(gate ? { ETI_READINESS_GATE: gate } : {}),
+    ETI_EXECUTION_LOG: { put: async (_k: string, v: string) => { stored.push(v); }, get: async () => null, list: async () => ({ keys: [] }) } };
+  const order = () => handleExecution(new Request("https://eti.test/api/orders", { method: "POST", headers: { authorization: "Bearer tok-12345678", "content-type": "application/json" },
+    body: JSON.stringify({ broker: "binance", symbol: "BTCUSDT", side: "buy", type: "market", quantity: 0.01, clientOrderId: "order-12345678", riskConfirmed: true, executionSource: { actorType: "manual_user", actorId: "u1", sourceName: "test" } }) }), env as never);
+  return { order, brokerCalls, stored, env };
+}
+test("order gateway: readiness=enforce blocks orders during a high-impact release and never reaches the broker", async () => {
+  const now = utc(2026, 11, 9, 13, 20); Date.now = () => now as never;
+  const cpi = JSON.stringify([{ title: "US CPI", time: new Date(now + 10 * MIN).toISOString(), impact: "high", currency: "USD" }]);
+  const h = orderHarness(now, "enforce", cpi), res = await h.order(), d = await res.json() as any;
+  assert.equal(res.status, 403); assert.equal(d.error, "readiness_gate_rejected"); assert.equal(d.readiness.status, "AVOID_TRADING"); assert.deepEqual(h.brokerCalls, []); assert.deepEqual(h.stored, []);
+});
+test("order gateway: advisory (the default) records the verdict on the audit record without blocking; off omits it", async () => {
+  const now = utc(2026, 11, 9, 13, 20); Date.now = () => now as never;
+  const cpi = JSON.stringify([{ title: "US CPI", time: new Date(now + 10 * MIN).toISOString(), impact: "high", currency: "USD" }]);
+  const h = orderHarness(now, undefined, cpi), res = await h.order(), d = await res.json() as any;
+  assert.equal(res.status, 201); assert.equal(d.readiness.status, "AVOID_TRADING"); assert.equal(d.readiness.gate, "advisory"); assert.deepEqual(h.brokerCalls, ["/api/v3/order"]); assert.equal(JSON.parse(h.stored[0]).readiness.status, "AVOID_TRADING");
+  const off = orderHarness(now, "off", cpi), r2 = await off.order(); assert.equal(r2.status, 201); assert.equal(((await r2.json()) as any).readiness, null);
+});
+test("order gateway: readiness=enforce lets an order through when conditions are not adverse", async () => {
+  const now = utc(2026, 11, 9, 9, 30); Date.now = () => now as never;
+  const h = orderHarness(now, "enforce", JSON.stringify([{ title: "Far", time: new Date(now + 5 * DAY).toISOString(), impact: "high", currency: "USD" }]), 1), res = await h.order(), d = await res.json() as any;
+  assert.equal(res.status, 201, JSON.stringify(d)); assert.ok(!["AVOID_TRADING", "HIGH_RISK"].includes(d.readiness.status));
 });
