@@ -14,9 +14,11 @@
     "crons": ["*/15 * * * *"]
   },
   "vars": {
+    "APP_ENV": "production",
+    "ETI_EDGE": "native",
     "ETI_KILL_SWITCH": "false",
     "ETI_LIVE_TRADING_ENABLED": "false",
-    "ETI_EDGE": "native",
+    "DATABASE_URL": "postgresql+psycopg2://eti:eti@localhost:5432/eti",
     "MARKET_PROVIDER_ORDER": "binance,bybit,okx"
   },
   "kv_namespaces": [
