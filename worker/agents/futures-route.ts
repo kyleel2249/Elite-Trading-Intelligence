@@ -1,7 +1,10 @@
 /**
  * Futures agent routes (bearer-authenticated: they read the futures account):
- *   GET|POST /api/agents/futures/analyze   Commander analysis + FuturesPlan preview
- *   POST     /api/agents/futures/execute   forwards a plan's ticket to /api/futures/orders only if the plan is eligible
+ *   GET  /agents/futures                    read-only Futures Control page
+ *   GET|POST /api/agents/futures/analyze    Commander analysis + FuturesPlan preview
+ *   POST     /api/agents/futures/execute    forwards a plan's ticket to /api/futures/orders only if the plan is eligible
+ *   GET  /api/futures/monitor               last protective-stop monitor result
+ *   POST /api/futures/monitor/run           run the monitor now
  *   /api/futures/*                          gateway (see worker/futures.ts)
  */
 import { AllProvidersFailed, INTERVALS, INTERVAL_SECONDS } from "../market.ts";
@@ -16,6 +19,8 @@ import type { SymbolFilters } from "./filters.ts";
 import { planFutures } from "./futures-plan.ts";
 import { FUTURES_BASE, HARD_MAX_LEVERAGE, handleFutures, loadFuturesState } from "../futures.ts";
 import type { FuturesEnv, FuturesState } from "../futures.ts";
+import { runFuturesMonitor } from "../futures-monitor.ts";
+import { FUTURES_PAGE_HTML } from "./futures-dashboard.ts";
 
 export type FuturesAgentsEnv = AgentsEnv & FuturesEnv;
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
@@ -55,6 +60,16 @@ export function withFutures<E extends FuturesAgentsEnv>(base: App<E>, deps: Futu
   return {
     async fetch(request, env) {
       const url = new URL(request.url), path = url.pathname;
+      if ((path === "/agents/futures" || path === "/agents/futures/") && request.method === "GET")
+        return new Response(FUTURES_PAGE_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" } });
+      if (path === "/api/futures/monitor" || path === "/api/futures/monitor/run") {
+        const run = path.endsWith("/run");
+        if (request.method !== (run ? "POST" : "GET")) return reply({ error: "method_not_allowed" }, 405);
+        if (!(await bearerOk(request, env))) return reply({ error: "unauthorized" }, 401);
+        if (run) return reply(await runFuturesMonitor(env, clock()));
+        const last = env.ETI_EXECUTION_LOG ? await env.ETI_EXECUTION_LOG.get("futures:monitor") : null;
+        return last ? reply(JSON.parse(last)) : reply({ error: "monitor_has_not_run" }, 404);
+      }
       if (path.startsWith("/api/futures")) return handleFutures(request, env);
       if (path !== "/api/agents/futures/analyze" && path !== "/api/agents/futures/execute") return base.fetch(request, env);
       const isExec = path.endsWith("/execute");
