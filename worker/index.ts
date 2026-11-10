@@ -7,6 +7,7 @@
  */
 import { handleExecution } from "./execution.ts";
 import { handlePortfolio } from "./portfolio/routes.ts";
+import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
 import type { ExecutionEnv } from "./execution.ts";
 import { handleMarket } from "./market.ts";
 import { handleSignals } from "./signals.ts";
@@ -63,13 +64,14 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 .sigcharts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:8px 0 14px}.sigcharts canvas{height:210px}.sigcharts .execution-note{margin-bottom:4px}
 .ev{margin:6px 0 0;padding-left:18px}.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 3px 3px 0;background:#4a5d78;vertical-align:middle}.dot.win{background:#21d69a}.dot.loss{background:#ff637d}.dot.hc{outline:2px solid #f0c674}
 @media(max-width:700px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
+${PORTFOLIO_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
 <div class="toolbar"><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="refresh" class="active">Refresh market</button><span class="muted" id="stamp">Waiting for market data…</span></div>
-<div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button></div>
+<div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
 <span id="overlayNote" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px;margin-bottom:8px"></span>
 <div id="stack" class="stack"><div class="chart big"><canvas id="chart" role="img" aria-label="Candlestick chart with ETI signal engine overlays"></canvas></div><div class="paneBox"><canvas id="paneRsi" role="img" aria-label="RSI 14 with engine momentum zones"></canvas></div><div class="paneBox"><canvas id="paneMacd" role="img" aria-label="MACD histogram and lines"></canvas></div><div class="paneBox"><canvas id="paneAdx" role="img" aria-label="ADX 14 trend strength"></canvas></div><div class="paneBox"><canvas id="paneScore" role="img" aria-label="ETI engine score per candle"></canvas></div><div id="tip" class="tip" role="status"></div></div>
 <div class="execution-note" style="margin-top:8px">Every layer is the engine's own per-candle output. Ribbon: colour = BUY/SELL lean, opacity = |score|. Triangles: filled = high-conviction (|score| 55+) setup, hollow = lean flip. Green/red boxes = reward/risk of the latest signal (1R/2R/3R). Dashed green/red = prior 20-candle high/low. Dots with ✓/✕ = walk-forward replay trades (TP1 before stop).</div></section>
@@ -82,11 +84,13 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <label>Venue<select id="orderBroker"><option value="eti_paper">ETI Internal Paper (automatic)</option><option value="alpaca">Alpaca paper (exchange testnet)</option><option value="binance">Binance testnet (exchange)</option></select></label>
 <label>Mode<select id="orderMode"><option value="paper_testnet">Paper / Testnet</option><option value="live">Live trading (locked)</option></select></label>
 <label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off"></label>
-<label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option></select></label>
+<label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop-loss (sell, Internal Paper)</option></select></label>
 <label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
 <label id="limitPriceWrap" style="display:none">Limit price<input id="orderLimitPrice" type="number" min="0" step="any" placeholder="Enter limit price"></label>
+<label id="stopPriceWrap" style="display:none">Stop price<input id="orderStopPrice" type="number" min="0" step="any" placeholder="Trigger price"></label>
 <label>Time in force<select id="orderTif"><option value="gtc">GTC</option><option value="day">DAY (Alpaca)</option><option value="ioc">IOC (Binance)</option></select></label>
 <label>Operator ID<input id="operatorId" value="dashboard-operator" maxlength="80"></label>
+${PLAN_HTML}
 </div>
 <div id="authBanner" class="authbanner" role="status" aria-live="polite">Starting authenticated sessions…</div>
 <div id="authEnvs" class="authenvs" aria-label="Execution environments"></div>
@@ -103,6 +107,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 <div style="margin-top:12px"><strong>Order preview / response</strong><div id="orderOutput" class="execution-output" style="margin-top:7px">No order prepared.</div></div>
 </aside>
 </div>
+${PORTFOLIO_HTML}
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
 
@@ -157,7 +162,7 @@ function resize(c){const dpr=devicePixelRatio||1, r=c.getBoundingClientRect();c.
 /* ===== ETI signal-engine chart layer: every chart draws the engine's own per-candle output (/api/signals chart payload) ===== */
 const BARS=120,PAD_R=116,FUTURE=14,FONT='11px Inter,system-ui,sans-serif';
 const C={up:'#21d69a',down:'#ff637d',ema20:'#f0c674',ema50:'#56a8ff',ema200:'#c792ea',grid:'#24334a',muted:'#8fa3bd',text:'#eaf2ff',entry:'#e6edf7',amber:'#f0c674'};
-const layers={ema:true,bb:true,levels:true,markers:true,replay:true,ribbon:true,volume:true};
+const layers={ema:true,bb:true,levels:true,markers:true,replay:true,ribbon:true,volume:true,trades:true};
 let sig=null,sigSeq=0,sigWantProvider=null,sigTimer=null,hoverIdx=-1;
 function fp(v){v=Number(v);if(!isFinite(v))return '—';const a=Math.abs(v),d=a>=1000?2:a>=100?3:a>=1?4:6;return v.toLocaleString(undefined,{minimumFractionDigits:Math.min(d,2),maximumFractionDigits:d});}
 const sg=v=>(v>0?'+':'')+v;
@@ -181,6 +186,7 @@ function drawChart(){
  let lo=Infinity,hi=-Infinity;
  candles.forEach(v=>{if(v[3]<lo)lo=v[3];if(v[2]>hi)hi=v[2];});
  if(ok&&layers.levels){const L=ch.levels;[L.stopLoss,L.entry].concat(L.targets).forEach(v=>{if(v<lo)lo=v;if(v>hi)hi=v;});}
+ if(layers.trades)pfRange(candles[n-1][4]).forEach(v=>{if(v<lo)lo=v;if(v>hi)hi=v;});
  const pad=(hi-lo)*.05||1;lo-=pad;hi+=pad;
  const py=v=>bot-(v-lo)/(hi-lo)*(bot-top);
  x.font=FONT;x.lineWidth=1;
@@ -210,6 +216,7 @@ function drawChart(){
  if(ok&&layers.markers)ch.markers.forEach(m=>{const i=cIdx.get(m.time);if(i===undefined)return;const v=candles[i],buy=m.label==='BUY',s=m.kind==='high'?7:5,cx=g.x(i),col=buy?C.up:C.down,y=buy?py(v[3])+6:py(v[2])-6;
   x.beginPath();if(buy){x.moveTo(cx,y);x.lineTo(cx-s,y+s*1.6);x.lineTo(cx+s,y+s*1.6);}else{x.moveTo(cx,y);x.lineTo(cx-s,y-s*1.6);x.lineTo(cx+s,y-s*1.6);}x.closePath();
   if(m.kind==='high'){x.fillStyle=col;x.fill();x.font='10px Inter,system-ui,sans-serif';x.textAlign='center';x.fillText(sg(m.score),cx,buy?y+s*1.6+11:y-s*1.6-4);x.textAlign='left';x.font=FONT;}else{x.strokeStyle=col;x.lineWidth=1.4;x.stroke();}});
+ pfDrawTrades(x,g,py,labels);
  x.restore();
  const lp=candles[n-1][4],ly=py(lp),lup=candles[n-1][4]>=candles[n-1][1];
  x.strokeStyle=lup?C.up:C.down;x.setLineDash([2,3]);x.lineWidth=1;x.beginPath();x.moveTo(0,ly);x.lineTo(g.plotW,ly);x.stroke();x.setLineDash([]);
@@ -431,12 +438,16 @@ function selectedOrder(){
  const quantity=Number($('orderQuantity').value), symbol=$('orderSymbol').value.trim().toUpperCase();
  const order={broker,mode,symbol,type,quantity,side:window.etiSelectedSide||'buy',timeInForce:$('orderTif').value};
  if(type==='limit') order.limitPrice=Number($('orderLimitPrice').value);
+ if(type==='stop') order.stopPrice=Number($('orderStopPrice').value);
  return order;
 }
 function orderValidation(o,requireCredentials=true){
  if(!/^[A-Z0-9._-]{2,24}$/.test(o.symbol))return 'Enter a valid symbol.';
  if(!Number.isFinite(o.quantity)||o.quantity<=0)return 'Enter a quantity greater than zero.';
  if(o.type==='limit'&&(!Number.isFinite(o.limitPrice)||o.limitPrice<=0))return 'Enter a valid limit price.';
+ if(o.type==='stop'&&o.broker!=='eti_paper')return 'Stop-loss orders are available on ETI Internal Paper only. On exchange testnet use the alert-only levels.';
+ if(o.type==='stop'&&o.side!=='sell')return 'A stop-loss order protects a long position: use Sell.';
+ if(o.type==='stop'&&(!Number.isFinite(o.stopPrice)||o.stopPrice<=0))return 'Enter a valid stop price.';
  if(!$('operatorId').value.trim())return 'Enter an operator ID for the audit record.';
  if(o.mode==='live'&&o.broker==='eti_paper')return 'ETI Internal Paper cannot be used for live trading.';
  if(requireCredentials&&o.mode==='live'&&!$('executionToken').value)return 'Live orders need the ETI execution token.';
@@ -483,6 +494,8 @@ async function submitOrder(side){
  const clientOrderId='eti'+crypto.randomUUID().replace(/-/g,'').slice(0,29);
  const body={broker:o.broker,symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity,timeInForce:o.timeInForce,clientOrderId,riskConfirmed:true,executionSource:{actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'}};
  if(o.type==='limit')body.limitPrice=o.limitPrice;
+ if(o.type==='stop')body.stopPrice=o.stopPrice;
+ if(side==='buy'){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
  const endpoint=o.mode==='live'?'/api/orders/live':'/api/orders';
  if(o.mode==='live')body.liveConfirmed=true;
  $('orderOutput').textContent='Submitting order…';
@@ -497,8 +510,8 @@ async function submitOrder(side){
   if(d.fallback&&d.notice)authBanner(d.notice,'warn');
   $('orderOutput').textContent=JSON.stringify(d,null,2);
   if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
-  await refreshExecutionHistory();
- }catch(e){$('orderOutput').textContent+=' | Order submission failed: '+e.message;}
+  await refreshExecutionHistory();pfKick();
+ }catch(e){$('orderOutput').textContent+=' | Order submission failed: '+e.message;pfKick();}
 }
 $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').value==='limit'?'flex':'none';};
 $('orderMode').onchange=()=>{const live=$('orderMode').value==='live';$('liveTokenWrap').style.display=live?'flex':'none';updateManualAuth();};
@@ -613,6 +626,8 @@ refreshExecutionStatus();startSessions().then(()=>refreshExecutionHistory());
 loadSignal();
 setInterval(loadSignal,60000);
 
+${PORTFOLIO_JS}
+pfInit();
 $('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
 </script></body></html>`;
 

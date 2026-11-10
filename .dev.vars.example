@@ -27,3 +27,8 @@ ETI_SESSION_SECRET_PREVIOUS=
 ETI_AUTO_SESSIONS=paper_testnet
 # Age after which the KV-held signing key rotates by itself (days)
 ETI_KEY_ROTATION_DAYS=7
+
+# --- Portfolio ledger (internal paper venue) ---
+# ETI_PAPER_START_BALANCE=10000     simulated starting cash (USDT)
+# ETI_PAPER_FEE_BPS=10              fee per fill, basis points
+# ETI_PAPER_SLIPPAGE_BPS=5          market-order slippage, basis points
