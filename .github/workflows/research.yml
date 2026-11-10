@@ -8,6 +8,7 @@ on:
       strategies: { description: "Comma-separated: scalp, intraday, swing, position", default: "intraday,swing" }
       days: { description: "History length in days", default: "365" }
       folds: { description: "Walk-forward folds", default: "4" }
+      elite_ab: { description: "A/B test the Elite Trader gate (off versus on) on the same real data", default: "false" }
       run_optimizer: { description: "Run the walk-forward optimizer (slow)", default: "false" }
 
 permissions:
@@ -57,6 +58,10 @@ jobs:
         run: node scripts/pooldump.mjs replay.json "$SYMBOL" "$STRATEGY"
       - name: Trade-level diagnostics (what costs take versus what signals earn)
         run: node scripts/diagnose.mjs replay.json combined
+      - name: Elite Trader gate A/B on real data
+        if: ${{ inputs.elite_ab == 'true' }}
+        env: { SYMBOL: "${{ matrix.symbol }}", STRATEGY: "${{ matrix.strategy }}", DAYS: "${{ inputs.days }}" }
+        run: node scripts/elitegate.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS"
       - name: Walk-forward optimizer on real data
         if: ${{ inputs.run_optimizer == 'true' }}
         env: { SYMBOL: "${{ matrix.symbol }}", STRATEGY: "${{ matrix.strategy }}", DAYS: "${{ inputs.days }}", FOLDS: "${{ inputs.folds }}" }
