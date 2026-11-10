@@ -60,6 +60,7 @@ class AdaptiveEdgeOrchestrator:
         self.kb = AdaptiveKnowledgeBase(db)
         self.regime_engine = MarketRegimeEngine()
         self.health = EdgeHealthMonitor()
+        self.change = MarketChangeDetector()
         self.discovery = EdgeDiscoveryEngine()
         self.selector = AdaptiveStrategySelector()
         self.portfolio = PortfolioAdaptationEngine()
@@ -80,7 +81,7 @@ class AdaptiveEdgeOrchestrator:
         started = _now()
         notes: list[str] = []
 
-        # 1. regime (point-in-time series is persisted every cycle)
+        # 1. regime (the point-in-time series is persisted every cycle)
         regime_mem = RegimeMemoryService(self.db)
         prev_obs = regime_mem.latest_as_of(symbol, provider, max_age_seconds=7 * 86400)
         previous = None
@@ -117,18 +118,13 @@ class AdaptiveEdgeOrchestrator:
             reg.health_status = rep.status
             reports[sid] = rep.to_dict()
 
-        # 3. change detection (uses the health flags as corroborating evidence)
+        # 3. change detection (strategy-health flags act as corroborating evidence)
         flags = [r["status"] for r in reports.values()]
         change = self.change.detect(
             symbol, closes, volumes, previous_regime=snap.previous_regime, current_regime=snap.primary_regime,
             strategy_health_flags=flags or None,
-        ) if hasattr(self, "change") else None
-        if change is None:
-            change = MarketChangeDetector().detect(
-                symbol, closes, volumes, previous_regime=snap.previous_regime, current_regime=snap.primary_regime,
-                strategy_health_flags=flags or None,
-            )
-        change_dict = change.to_dict() if change else None
+        )
+        change_dict = change.to_dict() if change is not None else None
         if change is not None:
             self.kb.record("change_event", change.event_id, change_dict or {}, tags=[symbol, change.severity])
 
@@ -154,6 +150,7 @@ class AdaptiveEdgeOrchestrator:
                     f"research:hypothesis:{h.hypothesis_id}", "research", h.title, h.priority,
                     rationale={"claim": h.measurable_claim, "triggers": triggers},
                 )
+            self.db.commit()
 
         # 5. selection (may suspend; never authorises live deployment)
         decisions: list[dict[str, Any]] = []
@@ -174,7 +171,7 @@ class AdaptiveEdgeOrchestrator:
         self.db.commit()
 
         # 6. portfolio adaptation plan (recommendation only)
-        severity = change.severity if change else None
+        severity = change.severity if change is not None else None
         plan = self.portfolio.plan(
             trigger=triggers[0] if triggers else "scheduled_cycle", strategy_decisions=decisions, change_severity=severity,
         )
