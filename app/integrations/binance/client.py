@@ -12,6 +12,8 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.integrations.base import BaseProvider, NormalizedQuote
+from app.quant.binance_exits import (base_qty_after_fees, build_oco_params, parse_symbol_filters,
+                                     plan_exit_oco)
 
 
 class BinanceClient(BaseProvider):
@@ -173,6 +175,8 @@ class BinanceClient(BaseProvider):
         qty: float,
         order_type: str = "MARKET",
         client_order_id: Optional[str] = None,
+        limit_price: Optional[float] = None,
+        time_in_force: str = "GTC",
     ) -> dict[str, Any]:
         if not self.configured:
             raise RuntimeError("Binance not configured")
@@ -183,6 +187,11 @@ class BinanceClient(BaseProvider):
             "quantity": f"{qty:.8f}".rstrip("0").rstrip("."),
             "timestamp": int(time.time() * 1000),
         }
+        if order_type.upper() == "LIMIT":
+            if limit_price is None:
+                raise ValueError("LIMIT orders require limit_price")
+            params["price"] = f"{limit_price:.8f}".rstrip("0").rstrip(".")
+            params["timeInForce"] = time_in_force
         if client_order_id:
             params["newClientOrderId"] = client_order_id
         params["signature"] = self._sign(params)
@@ -194,4 +203,47 @@ class BinanceClient(BaseProvider):
             )
             if r.status_code not in (200, 201):
                 raise RuntimeError(f"Binance order failed: {r.status_code} {r.text[:400]}")
+            return r.json()
+
+    async def get_symbol_filters(self, symbol: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            r = await client.get(f"{self.base_url}/api/v3/exchangeInfo", params={"symbol": symbol.upper()})
+            r.raise_for_status()
+            return parse_symbol_filters(r.json())
+
+    async def place_exit_oco(
+        self,
+        symbol: str,
+        executed_qty: float,
+        fills: Optional[list[dict[str, Any]]],
+        take_profit: float,
+        stop_price: float,
+        list_client_order_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Place a SELL OCO (take-profit + stop-loss-limit) protecting a filled long.
+
+        Quantity is the filled amount net of base-asset commission, rounded down to the LOT_SIZE step.
+        Raises ValueError for a plan Binance would reject (prices vs last, dust, min notional) instead
+        of sending a doomed request.
+        """
+        if not self.configured:
+            raise RuntimeError("Binance not configured")
+        filt = await self.get_symbol_filters(symbol)
+        last = await self.get_ticker_price(symbol)
+        qty = base_qty_after_fees(executed_qty, fills, filt["base_asset"])
+        plan = plan_exit_oco(
+            qty=qty, take_profit=take_profit, stop_price=stop_price, last_price=last,
+            tick_size=filt["tick_size"], step_size=filt["step_size"], min_qty=filt["min_qty"],
+            min_notional=filt["min_notional"],
+        )
+        params = build_oco_params(symbol, plan, int(time.time() * 1000), list_client_order_id)
+        params["signature"] = self._sign(params)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{self.base_url}/api/v3/orderList/oco",
+                params=params,
+                headers=self._headers(),
+            )
+            if r.status_code not in (200, 201):
+                raise RuntimeError(f"Binance OCO failed: {r.status_code} {r.text[:400]}")
             return r.json()
