@@ -43,6 +43,7 @@ class BinanceAdapter(BrokerAdapter):
     name = "binance"
     supports_order_book = True
     supports_short = False      # spot only
+    supports_protective = True  # SELL OCO via POST /api/v3/orderList/oco
 
     def __init__(self, api_key: str, secret: str, *, testnet: bool = True, symbols=(), transport=None,
                  clock_ms=lambda: int(time.time() * 1000)):
@@ -181,6 +182,22 @@ class BinanceAdapter(BrokerAdapter):
         s, b = await self._signed("POST", "/api/v3/order", params, write=True)
         self._raise(s, b, "binance order")
         return self._order(b)
+
+    async def place_protective(self, *, symbol, qty, take_profit_price, stop_price, stop_limit_price,
+                               list_client_order_id, take_profit_client_id, stop_client_id):
+        """SELL OCO protecting a long: LIMIT_MAKER take-profit above, STOP_LOSS_LIMIT stop below. One leg filling cancels the other."""
+        if not self._perms_ok:
+            await self.verify_permissions()
+        params = {"symbol": symbol.upper(), "side": "SELL", "quantity": _fmt(qty), "listClientOrderId": list_client_order_id,
+                  "aboveType": "LIMIT_MAKER", "abovePrice": _fmt(take_profit_price), "aboveClientOrderId": take_profit_client_id,
+                  "belowType": "STOP_LOSS_LIMIT", "belowPrice": _fmt(stop_limit_price), "belowStopPrice": _fmt(stop_price),
+                  "belowTimeInForce": "GTC", "belowClientOrderId": stop_client_id, "newOrderRespType": "FULL"}
+        s, b = await self._signed("POST", "/api/v3/orderList/oco", params, write=True)
+        self._raise(s, b, "binance oco")
+        reports = b.get("orderReports") or b.get("orders") or []
+        if len(reports) != 2:
+            raise TransientProviderError("binance oco: unexpected response shape")
+        return [self._order(o) for o in reports]
 
     async def get_order_by_client_id(self, symbol, client_order_id):
         s, b = await self._signed("GET", "/api/v3/order",

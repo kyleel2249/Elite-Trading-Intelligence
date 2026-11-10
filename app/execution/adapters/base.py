@@ -24,6 +24,13 @@ class BrokerAdapter(ABC):
     environment: str = "paper"          # paper | live  (what these credentials point at)
     supports_order_book = False
     supports_short = True
+    supports_protective = False          # can place venue-side stop-loss / take-profit (OCO) orders for a long
+
+    async def place_protective(self, *, symbol: str, qty: float, take_profit_price: float, stop_price: float,
+                               stop_limit_price: float, list_client_order_id: str, take_profit_client_id: str,
+                               stop_client_id: str) -> list:
+        """Place one SELL OCO (take-profit + stop-loss) and return its two BrokerOrder legs. Unsupported by default."""
+        raise NotImplementedError(f"{self.name} does not support venue-side protective orders")
 
     # ---- market data ----
     @abstractmethod

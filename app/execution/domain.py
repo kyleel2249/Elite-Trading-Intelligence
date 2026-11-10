@@ -191,6 +191,7 @@ class ExecutionResult:
     proposal_id: Optional[str] = None
     reasons: list = field(default_factory=list)
     order: Optional[dict] = None
+    protective: Optional[list] = None        # venue-side stop/take-profit orders placed after the fill
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)

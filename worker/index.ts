@@ -13,6 +13,7 @@ import { handleAlgoSignal } from "./algo/api.ts";
 import { handleOmnisignal } from "./algo/omni-api.ts";
 import { handlePaper } from "./algo/paper-api.ts";
 import { handleOmniUi } from "./algo/omni-ui.ts";
+import { handleTestnetExecute } from "./algo/testnet-api.ts";
 import { handleKnowledge } from "./knowledge.ts";
 import { handleReadiness } from "./readiness/api.ts";
 import type { ReadinessEnv } from "./readiness/api.ts";
@@ -640,6 +641,7 @@ export default {
     if (url.pathname.startsWith("/api/paper")) {
       return handlePaper(request, _env);
     }
+    if (url.pathname === "/api/omnisignal/execute") return handleTestnetExecute(request, env as any);
     if (url.pathname === "/omnisignal" || url.pathname === "/omnisignal.js") {
       return handleOmniUi(request) as Response;
     }

@@ -76,6 +76,11 @@ class PolicyBody(BaseModel):
     emergency_use_market: bool = True
 
 
+class TakeProfit(BaseModel):
+    price: float = Field(..., gt=0, allow_inf_nan=False)
+    fraction: float = Field(..., gt=0, le=1, allow_inf_nan=False)
+
+
 class SignalBody(BaseModel):
     account_id: str = Field(..., pattern=ID)
     symbol: str = Field(..., min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
@@ -87,6 +92,8 @@ class SignalBody(BaseModel):
     thesis: Optional[str] = Field(None, max_length=2000)
     signal_id: Optional[str] = Field(None, max_length=96)
     reduce_only: bool = False
+    stop_loss: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
+    take_profits: list[TakeProfit] = Field(default_factory=list, max_length=3)
 
 
 class EmergencyBody(BaseModel):
@@ -228,6 +235,10 @@ async def submit_signal(body: SignalBody, settings: Settings = Depends(get_setti
         raise HTTPException(503, "Execution engine is disabled (EXECUTION_ENABLED=false)")
     intent = OrderIntent(body.account_id, body.symbol, body.side, body.qty, body.order_type, body.limit_price,
                          body.strategy, body.thesis, body.signal_id, reduce_only=body.reduce_only)
+    if body.stop_loss is not None or body.take_profits:
+        if body.side != Side.BUY:
+            raise HTTPException(422, "Protective stop-loss/take-profit orders are supported for long (buy) entries only")
+        intent.meta["protective"] = {"stop_loss": body.stop_loss, "take_profits": [t.model_dump() for t in body.take_profits]}
     return (await get_engine().submit_signal(intent)).to_dict()
 
 

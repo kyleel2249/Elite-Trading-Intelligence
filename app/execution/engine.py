@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Optional
 
-from . import guards
+from . import guards, protective
 from .domain import (AccountPolicy, BrokerOrder, BrokerPosition, ExecutionResult, Mode, OrderIntent, OrderStatus,
                      OrderType, Side, utcnow)
 from .errors import (OrderRejectedError, PermanentProviderError, PermissionPolicyError, ProviderUnavailableError,
@@ -169,7 +169,7 @@ class ExecutionEngine:
         self._log(acct.account_id, "proposal_approved", proposal_id=proposal_id, approver=approver)
         res = await self._execute(acct, intent, origin="approved", approver=approver)
         res.proposal_id = proposal_id
-        ok = res.status in ("submitted", "partially_filled", "filled")
+        ok = res.status in ("submitted", "partially_filled", "filled", "filled_unprotected")
         self.store.update_proposal(proposal_id, status="executed" if ok else "failed", result=res.to_dict())
         return res
 
@@ -324,12 +324,91 @@ class ExecutionEngine:
                       side=intent.side.value, qty=qty, limit_price=price, spread_bps=round(quote.spread_bps, 3),
                       quote_age_s=round(quote.age_seconds(now), 3), origin=origin, approver=approver)
             row = await self._submit_row(acct, adapter, row, OrderType.LIMIT, price, reduce_only=intent.reduce_only)
-        return self._result_from_row(row, mode)
+            result = self._result_from_row(row, mode)
+            plan = (intent.meta or {}).get("protective")
+            if plan and row.side == Side.BUY.value and row.filled_qty > _EPS:
+                await self._protect(acct, adapter, row, plan, result)
+        return result
 
     @staticmethod
     def _with_halt(acct, reason):
         acct.halted, acct.halted_reason = True, reason
         return acct
+
+    async def _protect(self, acct, adapter, row: OrderRow, plan: dict, result: ExecutionResult) -> None:
+        """Place venue-side stop-loss / take-profit (OCO) orders for what actually filled. Called with the account lock held.
+
+        An unprotected position is never silent: the account is halted (no new orders), the result says
+        'filled_unprotected', and the position stays visible to reconciliation and emergency flatten."""
+        reasons: list = []
+        placed: list = []
+        if not getattr(adapter, "supports_protective", False):
+            reasons.append(f"{acct.provider} cannot place venue-side protective orders")
+        else:
+            try:
+                rules = await self._read(acct, lambda: adapter.get_rules(row.symbol))
+            except (TransientProviderError, ProviderUnavailableError, PermanentProviderError) as e:
+                rules = None
+                reasons.append(f"Could not read venue rules for protection: {e}")
+            if rules is not None:
+                tranches, problems = protective.plan_protection(
+                    row.filled_qty, row.avg_fill_price or row.limit_price or 0.0, plan.get("stop_loss"), plan.get("take_profits"),
+                    rules, acct.policy.reconcile_tolerance_pct)
+                reasons += problems
+                for i, t in enumerate(tranches):
+                    key = f"protect|{row.client_order_id}|{i}"
+                    lid = "etp-" + hashlib.sha256(key.encode()).hexdigest()[:20]
+                    legs = {"tp": lid + "-t", "sl": lid + "-s"}
+                    now = self.clock()
+                    rows = {}
+                    for kind, price in (("tp", t.take_profit), ("sl", t.stop_limit)):
+                        r, created = self.store.reserve_order(OrderRow(
+                            legs[kind], f"{key}|{kind}", acct.account_id, acct.provider, acct.environment, row.symbol, "sell",
+                            t.qty, OrderType.LIMIT.value, price, mode=row.mode, origin="protective", strategy=row.strategy,
+                            thesis=f"{'take-profit' if kind == 'tp' else 'stop-loss'} protecting {row.client_order_id}",
+                            created_at=now, updated_at=now))
+                        rows[kind] = r
+                    try:
+                        orders = await self._write(acct, lambda: adapter.place_protective(
+                            symbol=row.symbol, qty=t.qty, take_profit_price=t.take_profit, stop_price=t.stop_price,
+                            stop_limit_price=t.stop_limit, list_client_order_id=lid, take_profit_client_id=legs["tp"],
+                            stop_client_id=legs["sl"]))
+                    except TransientProviderError as e:
+                        # Outcome unknown: look at the venue before declaring failure; never place a second OCO blind.
+                        orders = []
+                        try:
+                            for kind in ("tp", "sl"):
+                                bo = await adapter.get_order_by_client_id(row.symbol, legs[kind])
+                                if bo is not None:
+                                    orders.append(bo)
+                        except Exception:
+                            orders = []
+                        if len(orders) != 2:
+                            orders = []
+                            reasons.append(f"Protective order outcome unconfirmed for tranche {i + 1}: {e}")
+                    except (OrderRejectedError, PermanentProviderError, ProviderUnavailableError, NotImplementedError) as e:
+                        orders = []
+                        reasons.append(f"Venue refused protective order for tranche {i + 1}: {e}")
+                    if not orders:
+                        for kind in ("tp", "sl"):
+                            self.store.update_order(legs[kind], status=OrderStatus.REJECTED.value,
+                                                    error="protective order not placed"[:400])
+                        continue
+                    for bo in orders:
+                        cid = bo.client_order_id
+                        if cid in (legs["tp"], legs["sl"]):
+                            self._apply_broker_order(acct, rows["tp" if cid == legs["tp"] else "sl"], bo)
+                    placed.append({"tranche": i + 1, "qty": t.qty, "take_profit": t.take_profit, "stop": t.stop_price,
+                                   "stop_limit": t.stop_limit, "take_profit_order": legs["tp"], "stop_order": legs["sl"]})
+                    self._log(acct.account_id, "protective_placed", row.client_order_id, symbol=row.symbol, **placed[-1])
+        result.protective = placed
+        if reasons or not placed:
+            result.status = "filled_unprotected"
+            result.reasons = list(result.reasons) + reasons
+            result.message = "Entry filled but protective stop/take-profit orders are NOT fully in place; the account is halted. Use emergency flatten or place protection manually."
+            self.store.save_account(self._with_halt(self.store.get_account(acct.account_id) or acct,
+                                                    "Unprotected position after entry: " + "; ".join(reasons or ["no protective order placed"])[:300]))
+            self._log(acct.account_id, "protective_failed", row.client_order_id, symbol=row.symbol, reasons=reasons)
 
     @staticmethod
     def _result_from_row(row: OrderRow, mode: str) -> ExecutionResult:
@@ -430,7 +509,8 @@ class ExecutionEngine:
             row2 = self._apply_broker_order(acct, row, bo)
             if row2.status != row.status or row2.filled_qty != row.filled_qty:
                 out["updated"] += 1
-            if bo.status in (OrderStatus.SUBMITTED, OrderStatus.PARTIALLY_FILLED) and age > acct.policy.order_ttl_seconds:
+            if (bo.status in (OrderStatus.SUBMITTED, OrderStatus.PARTIALLY_FILLED) and age > acct.policy.order_ttl_seconds
+                    and row.origin != "protective"):   # protective stop/take-profit orders are GTC by design
                 try:
                     await retry_async(lambda: adapter.cancel_order(row.symbol, row.client_order_id, bo.provider_order_id),
                                       attempts=3, sleep=self._sleep)
