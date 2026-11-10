@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22.x"
+      - name: Build the Elite Trader knowledge database (generated, not committed)
+        run: npm run build:knowledge
       - name: Node version (type stripping needs >= 22.18)
         run: node --version
       - name: Market-data reachability
