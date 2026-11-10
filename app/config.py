@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     max_position_notional_pct: float = 6.0
     require_live_confirmation: bool = True
 
+    # Autonomous execution engine (docs/EXECUTION_ENGINE.md). Off by default.
+    execution_enabled: bool = False
+    # Fernet key that encrypts broker credentials at rest. Keep it separate from DATABASE_URL.
+    execution_vault_key: Optional[str] = None
+    execution_supervisor_interval_seconds: int = 15
+
     # Server-side equity baselines used by the risk engine (never taken from requests).
     # Paper/testnet equity = paper_starting_equity + realized + unrealized PnL.
     paper_starting_equity: float = 10000.0
