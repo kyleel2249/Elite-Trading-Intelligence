@@ -50,11 +50,21 @@
     <div class="scroll"><table id="tbl-cal"></table></div>
 
     <h2>Predictions</h2>
+    <div class="sub">Click a row to verify its integrity hash and copy its UID into the settle form.</div>
     <div class="scroll"><table id="tbl-pred"></table></div>
 
     <h2>Monthly reports</h2>
     <div class="scroll"><table id="tbl-rep"></table></div>
     <pre id="report-body" style="display:none"></pre>
+
+    <h2>Settle a matured prediction (no price feed)</h2>
+    <form id="settle">
+      <label>Prediction UID<input name="uid" required /></label>
+      <label>Realized price<input name="realized_price" type="number" step="any" min="0" required /></label>
+      <label>Price source<input name="price_source" required minlength="2" placeholder="e.g. exchange close" /></label>
+      <label class="full">Notes<textarea name="notes"></textarea></label>
+      <div style="align-self:end"><button class="btn" type="submit">Settle (final, cannot be edited)</button></div>
+    </form>
 
     <h2>Record a prediction</h2>
     <form id="form">
@@ -84,7 +94,7 @@
     $('api-key').value = localStorage.getItem('eti_api_key') || '';
     const pct = (x) => x == null ? 'n/a' : (x * 100).toFixed(1) + '%';
     const num = (x, d = 4) => x == null ? 'n/a' : Number(x).toFixed(d);
-    function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3500); }
+    function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 4500); }
     async function api(path, opts) {
       const r = await fetch(path, opts); const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail || r.status));
@@ -117,9 +127,13 @@
       renderGroups();
       table($('tbl-cal'), ['Probability bin', 'N', 'Mean stated p', 'Observed frequency'], (o.calibration || []).map(b => [b.bin, b.n, num(b.mean_probability, 3), num(b.observed_frequency, 3)]));
       const p = await api('/api/predictions?limit=100');
-      table($('tbl-pred'), ['Created (UTC)', 'Asset', 'Dir', 'Entry', 'Prob', 'Horizon', 'Regime', 'Strategy', 'Status', 'Realized', 'Correct'],
-        p.predictions.map(x => [x.created_at, x.asset, x.direction, x.entry_reference, x.probability, x.horizon_label, x.market_regime, x.strategy, x.status, x.realized_price, x.direction_correct == null ? '' : (x.direction_correct ? 'yes' : 'no')]),
+      table($('tbl-pred'), ['Created (UTC)', 'Asset', 'Dir', 'Entry', 'Prob', 'Horizon', 'Regime', 'Strategy', 'Status', 'Realized', 'Correct', 'UID'],
+        p.predictions.map(x => [x.created_at, x.asset, x.direction, x.entry_reference, x.probability, x.horizon_label, x.market_regime, x.strategy, x.status, x.realized_price, x.direction_correct == null ? '' : (x.direction_correct ? 'yes' : 'no'), x.prediction_uid]),
         (i, v) => i === 2 ? (v === 'up' ? 'up' : v === 'down' ? 'down' : '') : '');
+      $('tbl-pred').querySelectorAll('tbody tr').forEach(tr => { tr.style.cursor = 'pointer'; tr.onclick = async () => {
+        const uid = tr.cells[11] && tr.cells[11].textContent; if (!uid) return;
+        $('settle').elements.uid.value = uid;
+        try { const v = await api('/api/predictions/' + encodeURIComponent(uid) + '/verify'); toast(v.intact ? 'Integrity hash verified' : 'WARNING: stored hash does not match the record'); } catch (e) { toast(e.message); } }; });
       const rp = await api('/api/predictions/reports');
       table($('tbl-rep'), ['Period', 'Generated', 'Hash'], rp.reports.map(r => [r.period, r.generated_at, r.content_hash.slice(0, 16)]));
       $('tbl-rep').querySelectorAll('tbody tr').forEach(tr => { tr.style.cursor = 'pointer'; tr.onclick = async () => {
@@ -128,7 +142,14 @@
     }
     $('group').onchange = () => METRICS && renderGroups();
     $('btn-refresh').onclick = () => load().then(() => toast('Refreshed')).catch(e => toast(e.message));
-    $('btn-run').onclick = async () => { try { const j = await api('/api/predictions/job/run', { method: 'POST', headers: headers() }); toast('Resolved ' + j.resolved + ' · skipped (no feed) ' + j.skipped_no_price + ' · errors ' + j.errors); await load(); } catch (e) { toast(e.message); } };
+    $('btn-run').onclick = async () => { try { const j = await api('/api/predictions/job/run', { method: 'POST', headers: headers() }); toast('Resolved ' + j.resolved + ' (' + (j.resolved_from_candles || 0) + ' from candles) · no feed ' + j.skipped_no_price + ' · errors ' + j.errors); await load(); } catch (e) { toast(e.message); } };
+    $('settle').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target); const notes = (f.get('notes') || '').toString().trim();
+      const body = { realized_price: Number(f.get('realized_price')), price_source: (f.get('price_source') || '').toString().trim(), notes: notes || null };
+      try { const j = await api('/api/predictions/' + encodeURIComponent(f.get('uid').toString().trim()) + '/outcome', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+        toast('Settled: ' + j.status); ev.target.reset(); await load(); } catch (e) { toast(e.message); }
+    });
     $('form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target); const n = (k) => f.get(k) === '' || f.get(k) == null ? null : Number(f.get(k));
