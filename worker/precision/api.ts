@@ -12,7 +12,7 @@ import { assessCalibration, fitCalibration, parseCalibrationModel, type Calibrat
 import { DEFAULT_CONFIG, ENGINE_NAME, ENGINE_VERSION, resolveConfig, scoreConfigHash } from "./config.ts";
 import { mergeNews, parseFundamentalContext, parseNewsContext } from "./context.ts";
 import { SUPPORTED_MARKETS, parseInstrument, runPrecisionEngine } from "./engine.ts";
-import { SYMBOL_RE, keys, loadContext, parseExpectancy, tokenMatches, type PrecisionEnv } from "./stores.ts";
+import { SYMBOL_RE, keys, loadContext, parseExpectancy, precisionStore, tokenMatches, type PrecisionEnv } from "./stores.ts";
 import { isFiniteNumber, isRecord } from "./util.ts";
 
 export const STRATEGIES: Strategy[] = ["scalp", "intraday", "swing", "position"];
@@ -87,7 +87,7 @@ export async function handlePrecision(req: Request, env: PrecisionEnv): Promise<
     fundamentals: ctx.fundamentals, news: mergeNews(ctx.news, ctx.marketNews), expectancy: ctx.expectancy, calibration: ctx.calibration,
   });
   const notes = [...(ctx.expectancyNote ? [ctx.expectancyNote] : []), ...(resolved.status === "override_rejected" ? [`ETI_PRECISION_CONFIG was rejected and defaults are in use: ${resolved.errors.join("; ")}`] : []),
-    ...(!ctx.storeConfigured ? ["No context store (ETI_PRECISION_DATA) is bound: fundamentals, news, expectancy and calibration are unavailable, so the score is capped and confidence is qualitative."] : [])];
+    ...(!ctx.storeConfigured ? ["No context store (ETI_PRECISION_DATA or ETI_EXECUTION_LOG) is bound: fundamentals, news, expectancy and calibration are unavailable, so the score is capped and confidence is qualitative."] : [])];
   signal.dataQuality.notes.push(...notes);
   return reply({ ...signal, dataQuality: { ...signal.dataQuality, failures } });
 }
@@ -97,8 +97,8 @@ async function handleAdmin(req: Request, env: PrecisionEnv, path: string, url: U
   if (!env.ETI_PRECISION_ADMIN_TOKEN) return reply({ error: "admin_disabled", detail: "Set the ETI_PRECISION_ADMIN_TOKEN Worker secret (at least 16 characters) to enable data entry." }, 403);
   const auth = req.headers.get("authorization") || "";
   if (!tokenMatches(auth.startsWith("Bearer ") ? auth.slice(7) : null, env.ETI_PRECISION_ADMIN_TOKEN)) return reply({ error: "unauthorized" }, 401, { "www-authenticate": "Bearer" });
-  const kv = env.ETI_PRECISION_DATA;
-  if (!kv) return reply({ error: "store_not_configured", detail: "Bind a KV namespace as ETI_PRECISION_DATA." }, 503);
+  const kv = precisionStore(env);
+  if (!kv) return reply({ error: "store_not_configured", detail: "Bind a KV namespace as ETI_PRECISION_DATA (or ETI_EXECUTION_LOG)." }, 503);
 
   const parts = path.slice("/api/precision/admin/".length).split("/");
   const kind = parts[0], arg = parts[1];
