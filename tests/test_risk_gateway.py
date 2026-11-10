@@ -41,7 +41,7 @@ def test_preflight_connects_market_risk_and_disclosures_without_submitting(monke
     settings = Settings(paper_starting_equity=10000.0)
     req = risk_gateway.PreflightRequest(
         provider="binance", environment="paper", symbol="BTCUSDT",
-        side="buy", quantity=0.01, order_type="market",
+        side="buy", quantity=0.01, order_type="market", stop_loss=99.0,
     )
 
     result = asyncio.run(risk_gateway.execution_preflight(
@@ -49,6 +49,7 @@ def test_preflight_connects_market_risk_and_disclosures_without_submitting(monke
     ))
 
     assert result["approved"] is True
+    assert result["capital_protection"]["system"] == "ETI CAPITAL PROTECTION SYSTEM"
     assert result["risk_inputs"]["source"] == "server"
     assert result["market"]["price"] == 100.0
     assert result["disclosure_context"]["high_impact_verified_count"] == 1
@@ -134,3 +135,17 @@ def test_preflight_only_counts_explicitly_verified_disclosures(monkeypatch):
     assert result["disclosure_context"]["matched_count"] == 1
     assert result["disclosure_context"]["high_impact_verified_count"] == 0
     assert result["disclosure_context"]["activities"] == []
+
+
+def test_preflight_refuses_entry_without_stop_loss(monkeypatch):
+    monkeypatch.setattr(risk_gateway, "MarketService", _Market)
+    monkeypatch.setattr(risk_gateway, "ActivityStore", _Activities)
+    settings = Settings(paper_starting_equity=10000.0)
+    req = risk_gateway.PreflightRequest(
+        provider="binance", environment="paper", symbol="BTCUSDT",
+        side="buy", quantity=0.01, order_type="market",
+    )
+    result = asyncio.run(risk_gateway.execution_preflight(req, settings=settings, db=None, _auth=None))
+    assert result["approved"] is False
+    assert "STOP_LOSS_REQUIRED" in result["capital_protection"]["violations"]
+    assert any("[Capital Protection]" in r for r in result["reasons"])
