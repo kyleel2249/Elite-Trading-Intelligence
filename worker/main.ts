@@ -1,5 +1,6 @@
 /**
  * Worker entrypoint. Layers, outermost first:
+ *  -1. ETI PRECISION SIGNAL ENGINE (/api/precision/*), read-only and analytical
  *   0. command centre (/command) and global-intelligence API (/api/intel/*)
  *   1. ETI algorithmic-intelligence API (/api/algo/*)
  *   2. futures agents + gateway + monitor (/api/agents/futures/*, /api/futures/*, /agents/futures)
@@ -13,6 +14,7 @@ import { withAlgo } from "./algo/route.ts";
 import { withAgents } from "./agents/route.ts";
 import { withFutures } from "./agents/futures-route.ts";
 import { withCommand } from "./command/route.ts";
+import { withPrecision } from "./precision/route.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runPaperCycle } from "./algo/paper-api.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
@@ -20,7 +22,7 @@ import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
 import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
 
-const app = withCommand(withAlgo(withFutures(withAgents(base as any) as any) as any) as any);
+const app = withPrecision(withCommand(withAlgo(withFutures(withAgents(base as any) as any) as any) as any) as any);
 const inner: any = base;
 export const MONITOR_CRON = "* * * * *";
 
