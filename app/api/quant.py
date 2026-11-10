@@ -1,6 +1,7 @@
 """Global market intelligence API (scanner, valuation, mispricing, Kelly sizing, execution)."""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
@@ -22,6 +23,8 @@ from app.security.auth import require_api_key
 from app.trading.risk_context import build_risk_context
 
 router = APIRouter(prefix="/api/quant", tags=["quant"])
+
+_SYMBOL_RE = re.compile(r"[A-Za-z0-9./_-]{1,32}")
 
 
 def _limits(s: Settings) -> KellyLimits:
@@ -75,7 +78,8 @@ class EvaluateRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
     asset_class: Literal["equity", "etf", "crypto", "commodity", "futures", "forex"]
     # Model inputs must come from a licensed/real data source chosen by the caller.
-    fair_value_inputs: dict[str, dict]
+    fair_value_inputs: dict[str, dict] = {}
+    auto_fundamentals: bool = False  # equities: add DCF/DDM inputs derived from SEC EDGAR 10-K facts
     sentiment: list[SentimentIn] = []
     use_news: bool = False          # pull headlines from NewsAPI when no sentiment items are supplied
     components: dict[str, float] = {}
@@ -99,6 +103,13 @@ async def evaluate(req: EvaluateRequest, settings: Settings = Depends(get_settin
     if not items and req.use_news:
         from app.quant.news_sentiment import news_items
         items = await news_items(req.symbol, settings)
+    fv_inputs = dict(req.fair_value_inputs)
+    fundamentals = None
+    if req.auto_fundamentals and req.asset_class == "equity":
+        from app.quant.fundamentals import fundamentals_for
+        fundamentals = await fundamentals_for(req.symbol)
+        for model, data in fundamentals.get("inputs", {}).items():
+            fv_inputs.setdefault(model, data)       # caller-supplied inputs always win
     bankroll = req.bankroll
     if bankroll is None:
         try:
@@ -107,10 +118,12 @@ async def evaluate(req: EvaluateRequest, settings: Settings = Depends(get_settin
             bankroll = None
     out = evaluate_opportunity(
         symbol=req.symbol.upper(), asset_class=req.asset_class, coverage=cov,
-        fair_value_inputs=req.fair_value_inputs, sentiment_items=items, components=req.components,
+        fair_value_inputs=fv_inputs, sentiment_items=items, components=req.components,
         engine_votes=req.engine_votes, win_probability=req.win_probability, sample_size=req.sample_size,
         bankroll=bankroll, stop_pct=req.stop_pct, round_trip_cost_pct=req.round_trip_cost_pct,
         kelly_limits=_limits(settings), sizing_context=req.verification, max_age_seconds=settings.data_max_age_seconds)
+    if fundamentals is not None:
+        out["fundamentals"] = fundamentals
     store = QuantStore(db)
     fv = out.get("fair_value")
     if fv and fv.get("supported"):
@@ -132,11 +145,23 @@ async def evaluate(req: EvaluateRequest, settings: Settings = Depends(get_settin
     return out
 
 
+@router.get("/fundamentals/{ticker}")
+async def fundamentals(ticker: str, discount_rate: float = Query(0.10, gt=0, lt=0.5),
+                       terminal_growth: float = Query(0.025, ge=0, lt=0.06)):
+    """DCF/DDM inputs from SEC EDGAR 10-K facts. Assumptions (discount/terminal growth) are echoed back."""
+    if not _SYMBOL_RE.fullmatch(ticker):
+        raise HTTPException(422, "invalid ticker")
+    from app.quant.fundamentals import fundamentals_for
+    try:
+        return await fundamentals_for(ticker, discount_rate=discount_rate, terminal_growth=terminal_growth)
+    except Exception:
+        raise HTTPException(502, "SEC EDGAR request failed")
+
+
 @router.get("/sentiment/{symbol}")
 async def sentiment(symbol: str, settings: Settings = Depends(get_settings)):
     """News sentiment from NewsAPI. Reports 'unavailable' honestly when the key is missing or the feed fails."""
-    import re
-    if not re.fullmatch(r"[A-Za-z0-9./_-]{1,32}", symbol):
+    if not _SYMBOL_RE.fullmatch(symbol):
         raise HTTPException(422, "invalid symbol")
     from app.quant.news_sentiment import news_sentiment
     return (await news_sentiment(symbol.upper(), settings)).to_dict()
