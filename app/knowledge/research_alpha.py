@@ -24,6 +24,18 @@ RETURNS: dict[str, list[SourceNote]] = {
         "Fidelity Magellan Fund averaged 29.2% a year from May 1977 to May 1990, growing from about $18 million to about $14 billion in assets (fund-level)",
         "reported", "Fidelity Magellan Fund and Peter Lynch entries on Wikipedia (citing Fidelity/press), Motley Fool 'Peter Lynch Averaged a 29.2% Annual Return...' (2026-08/10); accessed " + RESEARCH_DATE,
         "Mutual-fund total return after expenses, not Lynch's personal returns. Secondary sources; the primary Fidelity annual-return table was not retrieved.")],
+    "ed_seykota": [
+        _n("A single client 'model account' he managed from a $5,000 start in 1972 reportedly grew about 250,000% on a cash-on-cash basis (to roughly $12-15 million) by 1988, and several million percent if adjusted for withdrawals (account-level)",
+           "estimate", "Jack Schwager, Market Wizards (1989), as cited by trendfollowing.com 'Ed Seykota', the7circles.uk and theshortbear.substack.com; accessed " + RESEARCH_DATE,
+           "Selection bias: this is one chosen client account, not a fund or his whole book, and the sources do not report the other accounts. Contradictory evidence recorded: the period is given as 12 or 16 years and the end value as $12 million or $15 million; the 'adjusted for withdrawals' figure is hypothetical. The primary book text was not retrieved.")],
+    "michael_burry": [
+        _n("Scion Capital returned 489.34% net of fees and expenses from inception (1 Nov 2000) to June 2008, against just under 3% (about 2% in some sources) for the S&P 500 including dividends (fund-level)",
+           "reported", "Scion Capital website figures as cited by Wikipedia 'Scion Asset Management' and 'Michael Burry' (site accessed 2010-03-30; Lewis, The Big Short); year-by-year table at hedgefundalpha.com 'Michael Burry bio'; accessed " + RESEARCH_DATE,
+           "Fund-level, net of fees. Contradictory evidence recorded: the often-quoted '+55% in 2001' is the GROSS figure (net about +44.7%); through Q1 2008 the table shows 472.4% net and 696.9% gross, and the window and fee basis differ between quotes. Primary Scion investor letters were not retrieved. Burry reportedly made about $100 million personally and about $700 million for investors.")],
+    "paul_tudor_jones": [
+        _n("Tudor BVI Global Fund averaged about 26% a year from 1987 through 2007, per investor documents reported by Bloomberg; the average then fell to about 4.7% a year over 2008-2015. The main fund was reported at about +125.9% net of fees in 1987 (roughly +200% gross in other accounts) and +99.2% in 1986 (fund-level)",
+           "reported", "Bloomberg via FA Magazine, 'Paul Tudor Jones Clients Said To Pull 15% From Main Hedge Fund' (2016-07); A Wealth of Common Sense (about 5.3% for 2008-2016); Schwager, Market Wizards (1986 and Oct-1987 figures) via GuruFocus; accessed " + RESEARCH_DATE,
+           "Fund-level, not a personal return; a spokesman declined to comment on the figures. Contradictory evidence recorded: the post-2008 average is quoted as 4.7% or 5.3% depending on the end year, and 1987 is quoted net (125.9%) or gross (about 200%). Fees were high (reported 2.75-4% management and 23-27% performance on newer share classes).")],
     "mark_minervini": [
         _n("Won the U.S. Investing Championship stock division in 1997 (+155%, on about $250,000 of his own money) and the $1M+ stock division for 2021 (+334.8%, 338 entrants; prior record +119.1%); real-money personal accounts",
            "reported", "United States Investing Championship results release via Business Wire (2022-01-24), 'Minervini Smashes Record'; CTE research sheet on the competition (2026); accessed " + RESEARCH_DATE,
@@ -54,6 +66,14 @@ DRAWDOWNS: dict[str, list[SourceNote]] = {
         "No calendar-year loss from 1986 through 2009; the fund was reported down about 5% year-to-date when he announced its closure on 2010-08-18 (a drawdown, not a calendar-year result)",
         "reported", "Reuters (2010-08-18) and Bloomberg (2010-08-18) as syndicated by InvestmentNews and Financial Planning; accessed " + RESEARCH_DATE,
         "Intra-year and peak-to-trough drawdowns are not disclosed in the sources.")],
+    "michael_burry": [_n(
+        "Scion's worst calendar year was 2006 at about -18.2% (gross and net), when the S&P 500 gained about 15.8%; the fund then returned about +138% net in 2007",
+        "reported", "Year-by-year Scion Capital table at hedgefundalpha.com 'Michael Burry bio' (secondary, reproducing investor-letter figures); accessed " + RESEARCH_DATE,
+        "Secondary table; primary letters not retrieved. Intra-year drawdowns are not reported. Burry also reportedly restricted redemptions during the subprime bet, which was widely criticised by investors at the time.")],
+    "paul_tudor_jones": [_n(
+        "BVI Global Fund was reported down about 5% in 2008 (still far better than the S&P 500) and the firm temporarily halted withdrawals from it that year; it fell about 2.3% in 2016 to mid-year per the client letter",
+        "reported", "GuruFocus via Yahoo Finance 'Paul Tudor Jones: global macro' ; Market Folly (2008-12-08); Bloomberg via FA Magazine (2016-07); accessed " + RESEARCH_DATE,
+        "Contradictory evidence recorded: older blog posts claim the fund 'never had a down year' and give 1993 (+1.6%) as its worst year; the 2008 loss contradicts that and the blog claim is not adopted. Peak-to-trough drawdowns are not disclosed in these sources.")],
     "mark_minervini": [_n(
         "Schwager reported only one down quarter over the period reviewed (a loss of a fraction of 1%); no drawdown record was found for his 2021 championship year",
         "reported", "Schwager, Stock Market Wizards, as quoted at wallstreettrader.substack.com; accessed " + RESEARCH_DATE,

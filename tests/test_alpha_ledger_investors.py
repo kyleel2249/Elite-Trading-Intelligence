@@ -271,3 +271,26 @@ def test_minervini_and_dennis_notes_record_contradictions_and_caveats():
     assert "80%" in dd["notes"] and "only the multiply-sourced" in dd["notes"]  # unsupported figure is flagged, not adopted
     for pid in ("mark_minervini", "richard_dennis"):
         assert audit_profiles(None, [pid])["results"][0]["categories"]["drawdowns"]["status"] == "DOCUMENTED"
+
+
+def test_burry_and_jones_notes_flag_gross_net_confusion_and_outdated_claims():
+    from app.knowledge.registry import get_trader
+    b = get_trader("michael_burry")
+    ret = next(n for n in b["historical_returns"] if "489.34%" in n["claim"] and "2026-11-10" in n["source"])
+    assert "GROSS" in ret["notes"] and ret["classification"] == "reported"
+    assert any("-18.2%" in n["claim"] for n in b["historical_drawdowns"])
+    j = get_trader("paul_tudor_jones")
+    r = next(n for n in j["historical_returns"] if "26%" in n["claim"] and "2026-11-10" in n["source"])
+    assert "Contradictory evidence recorded" in r["notes"] and "fund-level" in r["claim"]
+    dd = next(n for n in j["historical_drawdowns"] if "2008" in n["claim"] and "2026-11-10" in n["source"])
+    assert "not adopted" in dd["notes"]  # the 'never a down year' claim is rejected, not repeated
+    for pid in ("michael_burry", "paul_tudor_jones"):
+        a = audit_profiles(None, [pid])["results"][0]["categories"]
+        assert a["returns"]["status"] == "DOCUMENTED" and a["drawdowns"]["status"] == "DOCUMENTED"
+
+
+def test_seykota_single_account_is_labelled_as_selected_and_estimated():
+    from app.knowledge.registry import get_trader
+    n = next(x for x in get_trader("ed_seykota")["historical_returns"] if "250,000%" in x["claim"] and "2026-11-10" in x["source"])
+    assert n["classification"] == "estimate" and "Selection bias" in n["notes"] and "Contradictory evidence recorded" in n["notes"]
+    assert audit_profiles(None, ["ed_seykota"])["results"][0]["categories"]["returns"]["status"] == "DOCUMENTED"
