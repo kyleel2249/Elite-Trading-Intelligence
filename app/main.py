@@ -1,5 +1,4 @@
 """ETI FastAPI application entrypoint."""
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Literal, Optional
@@ -39,6 +38,7 @@ from app.jobs.mark_to_market import mtm_job
 from app.jobs.reconcile import reconcile_job
 from app.jobs.investor_monitor import investor_monitor_job
 from app.jobs.execution_supervisor import execution_supervisor_job
+from app.jobs.paper_autopilot import paper_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
 from app.models import CouncilDecisionRecord
 from app.api.knowledge import router as knowledge_router
@@ -47,14 +47,7 @@ from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
 from app.api.risk_gateway import router as risk_gateway_router
 from app.api.execution import router as execution_router
-from app.api.markets import router as markets_router
-from app.api.analytics import router as analytics_router
-from app.api.strategies import router as strategies_router
-from app.prediction_ledger.api import router as predictions_router
-from app.prediction_ledger.job import prediction_resolver_job
-from app.prediction_ledger.service import record_from_forecast
-from app.api.alpha import router as alpha_router
-from app.alpha.research_job import alpha_research_job
+from app.api.paper import router as paper_router
 from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
@@ -84,96 +77,28 @@ def _warn_insecure_config(settings: Settings) -> None:
         logger.warning("API_KEY is not set; protected routes will return 503 in this environment")
 
 
-def _seed_memory(settings: Settings) -> None:
-    """Snapshot documented profiles/methodologies/risk limits into versioned memory (idempotent)."""
-    from app.database import SessionLocal
-    from app.memory.store import MemoryStore
-
-    db = SessionLocal()
-    try:
-        store = MemoryStore(db)
-        store.seed_static_knowledge()
-        store.snapshot_risk_limits(settings)
-    except Exception:
-        db.rollback()
-        logger.warning("startup: memory seeding failed; continuing", exc_info=True)
-    finally:
-        db.close()
-
-
-def _record_council_signal(db: Session, settings: Settings, symbol: str, provider: str, payload: dict, snap: dict, klines) -> None:
-    """Remember the council's call exactly as made, with a point-in-time regime label."""
-    from app.memory.regimes import RegimeMemoryService
-    from app.memory.signals import SignalMemoryService
-
-    regime = None
-    regimes = RegimeMemoryService(db, settings)
-    recent = regimes.latest_as_of(symbol, provider, max_age_seconds=300)
-    if recent is not None:
-        regime = recent.primary_regime
-    else:
-        closes = [float(k["close"]) for k in (klines or []) if k.get("close") is not None]
-        if len(closes) >= 20:
-            obs = regimes.classify_from_closes(symbol, provider, closes, source="council")
-            regime = obs.primary_regime if obs else None
-    SignalMemoryService(db, settings).record(
-        source="council",
-        symbol=symbol,
-        provider=provider,
-        action=payload.get("action"),
-        confidence=payload.get("confidence"),
-        reference_price=snap.get("price"),
-        regime=regime,
-        analysis={
-            "summary": payload.get("summary"),
-            "risk_veto": payload.get("risk_veto"),
-            "data_quality": payload.get("data_quality"),
-            "contradictory_signals": payload.get("contradictory_signals"),
-            "specialists": [
-                {"trader_id": s.get("trader_id"), "bias": s.get("bias"), "confidence": s.get("confidence")}
-                for s in payload.get("specialists", [])
-            ],
-        },
-    )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     settings = get_settings()
     _warn_insecure_config(settings)
-    await asyncio.to_thread(_seed_memory, settings)
     mtm_job.interval_seconds = settings.mtm_interval_seconds
     reconcile_job.interval_seconds = settings.reconcile_interval_seconds
     investor_monitor_job.interval_seconds = settings.investor_monitor_interval_seconds
     execution_supervisor_job.interval_seconds = settings.execution_supervisor_interval_seconds
-    adaptive_job = None
-    try:
-        from app.jobs.adaptive_edge_job import adaptive_edge_job as adaptive_job
-
-        adaptive_job.interval_seconds = settings.adaptive_edge_interval_seconds
-    except Exception:
-        logger.exception("startup: adaptive_edge_job could not be imported")
+    paper_job.configure(settings)
     await _start_component("stream_hub", lambda: stream_hub.start(["btcusdt", "ethusdt"]))
     await _start_component("mtm_job", mtm_job.start)
     await _start_component("reconcile_job", reconcile_job.start)
-    await _start_component("prediction_resolver_job", prediction_resolver_job.start)
-    if adaptive_job is not None:
-        await _start_component("adaptive_edge_job", adaptive_job.start)
+    await _start_component("paper_job", paper_job.start)
     if settings.quiver_configured:
         await _start_component("investor_monitor_job", investor_monitor_job.start)
     if settings.execution_enabled:
         await _start_component("execution_supervisor_job", execution_supervisor_job.start)
-    alpha_research_job.interval_seconds = settings.alpha_research_interval_seconds
-    if settings.alpha_research_enabled:
-        await _start_component("alpha_research_job", alpha_research_job.start)
     yield
-    await alpha_research_job.stop()
     await execution_supervisor_job.stop()
+    await paper_job.stop()
     await investor_monitor_job.stop()
-    if adaptive_job is not None:
-        await adaptive_job.stop()
-    await prediction_resolver_job.stop()
     await reconcile_job.stop()
     await mtm_job.stop()
     await stream_hub.stop()
@@ -192,20 +117,7 @@ app.include_router(intelligence_data_router)
 app.include_router(stream_router)
 app.include_router(risk_gateway_router)
 app.include_router(execution_router)
-app.include_router(markets_router)
-app.include_router(analytics_router)
-app.include_router(strategies_router)
-app.include_router(predictions_router)
-app.include_router(alpha_router)
-
-# ETI persistent memory & learning, and the adaptive-edge API that feeds on it. Imported defensively
-# so an unexpected import problem is logged loudly instead of taking the whole service down.
-for _module_path, _label in (("app.api.memory", "memory"), ("app.api.adaptive_edge", "adaptive_edge")):
-    try:
-        _mod = __import__(_module_path, fromlist=["router"])
-        app.include_router(_mod.router)
-    except Exception:
-        logger.exception("router %s failed to load; its endpoints are unavailable", _label)
+app.include_router(paper_router)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -276,25 +188,11 @@ async def data_intel_dashboard(request: Request):
     )
 
 
-@app.get("/alpha", response_class=HTMLResponse)
-async def alpha_dashboard(request: Request):
-    return templates.TemplateResponse(request, "alpha.html", {"version": __version__})
-
-
 @app.get("/alerts", response_class=HTMLResponse)
 async def alerts_page(request: Request):
     return templates.TemplateResponse(
         request,
         "alerts.html",
-        {"version": __version__},
-    )
-
-
-@app.get("/predictions", response_class=HTMLResponse)
-async def predictions_page(request: Request):
-    return templates.TemplateResponse(
-        request,
-        "predictions.html",
         {"version": __version__},
     )
 
@@ -337,12 +235,6 @@ async def providers_status(settings: Settings = Depends(get_settings)):
     binance = BinanceClient(settings)
     quiver = QuiverClient(settings)
     liquid = LiquidClient(settings)
-    try:
-        from app.jobs.adaptive_edge_job import adaptive_edge_job
-
-        adaptive_status = adaptive_edge_job.status()
-    except Exception:
-        adaptive_status = {"running": False, "error": "unavailable"}
     return {
         "alpaca": await alpaca.health(),
         "binance": await binance.health(),
@@ -354,8 +246,7 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "reconcile": reconcile_job.status(),
         "investor_monitor": investor_monitor_job.status(),
         "execution_supervisor": execution_supervisor_job.status(),
-        "prediction_resolver": prediction_resolver_job.status(),
-        "adaptive_edge": adaptive_status,
+        "paper_engine": paper_job.status(),
         "fred_configured": settings.fred_configured,
         "news_configured": settings.news_configured,
         "quiver_configured": settings.quiver_configured,
@@ -504,11 +395,6 @@ async def run_council(
             save_council_decision(db, symbol, provider, payload)
             if snap.get("price") is not None:
                 save_snapshot(db, snap)
-            try:
-                _record_council_signal(db, settings, symbol, provider, payload, snap, klines)
-            except Exception:
-                db.rollback()
-                logger.warning("memory: council signal record failed for %s", symbol, exc_info=True)
         return payload
     except Exception as e:
         raise _upstream_error(e, "Council analysis")
@@ -537,15 +423,7 @@ async def intelligence_forecast(
             raise HTTPException(status_code=422, detail="Insufficient history for forecast scaffold")
         payload = fc.to_dict()
         if persist:
-            saved = save_forecast(db, payload)
-            # Every persisted forecast is also written to the append-only prediction ledger.
-            try:
-                closes = [float(k["close"]) for k in klines if k.get("close") and k.get("data_status") != "invalid"]
-                payload["ledger"] = record_from_forecast(db, payload, closes=closes, forecast_id=saved.id)
-            except Exception:
-                db.rollback()
-                logger.warning("prediction ledger write failed for %s", symbol, exc_info=True)
-                payload["ledger"] = {"error": "ledger_write_failed"}
+            save_forecast(db, payload)
         return payload
     except HTTPException:
         raise
