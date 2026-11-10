@@ -15,11 +15,16 @@ export interface PrecisionEnv {
   MARKET_PROVIDER_ORDER?: string;
   /** Optional KV namespace for context data. Without it the engine reports fundamentals, news, expectancy and calibration as unavailable. */
   ETI_PRECISION_DATA?: KvLike;
+  /** Existing ETI KV namespace. Used as the context store when ETI_PRECISION_DATA is not bound; every key is prefixed "precision:" so nothing collides. */
+  ETI_EXECUTION_LOG?: KvLike;
   /** Secret bearer token for the admin routes. Admin routes are disabled (403) when it is not set. */
   ETI_PRECISION_ADMIN_TOKEN?: string;
   /** Optional JSON string overriding scoring weights, bands and gates. A rejected override falls back to defaults and is reported. */
   ETI_PRECISION_CONFIG?: string;
 }
+
+/** The namespace holding context data: a dedicated one when bound, otherwise the existing ETI namespace. */
+export const precisionStore = (env: PrecisionEnv): KvLike | undefined => env.ETI_PRECISION_DATA ?? env.ETI_EXECUTION_LOG;
 
 export const SYMBOL_RE = /^[A-Z0-9]{5,20}$/;
 export const keys = {
@@ -56,7 +61,7 @@ export interface LoadedContext {
 }
 
 export async function loadContext(env: PrecisionEnv, base: string | null, strategy: Strategy, now: number, expectancyMaxAgeDays: number): Promise<LoadedContext> {
-  const kv = env.ETI_PRECISION_DATA;
+  const kv = precisionStore(env);
   const [f, n, mn, e, c] = await Promise.all([
     base ? readJson(kv, keys.fundamentals(base)) : null, base ? readJson(kv, keys.news(base)) : null, readJson(kv, keys.marketNews()),
     readJson(kv, keys.expectancy(strategy)), readJson(kv, keys.calibration(strategy)),
