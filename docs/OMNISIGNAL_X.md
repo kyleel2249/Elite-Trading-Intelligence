@@ -121,7 +121,7 @@ attributes no position or performance to anyone, and investor disclosures are re
 ## Volume footprint (Phase 5)
 
 `flow` reports abnormal activity (volume/range z-scores), absorption (heavy volume, narrow range, close location after a move), thin moves, climaxes and a volume-weighted
-close-location pressure proxy. It is derived from candles only: it is **not** aggressor (taker) flow and cannot identify institutions. The Kline type carries no taker-buy field; adding it would be the next step toward true flow.
+close-location pressure proxy. Binance candles now carry the exchange-reported taker-buy volume (optional 7th field, kept only when plausible); when nearly every recent bar has it, `pressureBasis` is `taker_buy_volume` (true aggressor imbalance), otherwise the close-location proxy is used and labelled as such. Neither identifies who traded or any institution. Bybit/OKX candles do not supply it, and the public `/api/market/klines` response stays 6 columns.
 
 ## Confidence calibration
 
