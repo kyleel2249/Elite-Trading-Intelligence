@@ -13,7 +13,7 @@ import type { Thresholds, Weights } from "./validation.ts";
 export type History = Partial<Record<Timeframe, Kline[]>>;
 export interface ReplayConfig {
   symbol: string; strategy: Strategy; startingEquity?: number; stepBars?: number; windowCandles?: number; warmupBars?: number;
-  enabledEngines?: { swift: boolean; gainz: boolean }; weights?: Weights; thresholds?: Partial<Thresholds>; maxCostR?: number; /** Round-trip cost assumption in bps for the validator gate. Default: derived from the paper fee and slippage. */ roundTripCostBps?: number; paper?: Partial<PaperConfig>; outOfSampleFraction?: number; bootstrapSamples?: number; seed?: number;
+  enabledEngines?: { swift: boolean; gainz: boolean }; weights?: Weights; thresholds?: Partial<Thresholds>; maxCostR?: number; eliteGate?: boolean; /** Round-trip cost assumption in bps for the validator gate. Default: derived from the paper fee and slippage. */ roundTripCostBps?: number; paper?: Partial<PaperConfig>; outOfSampleFraction?: number; bootstrapSamples?: number; seed?: number;
 }
 export interface Bootstrap { meanR: number; low95: number; high95: number; samples: number }
 export interface ReplayResult {
@@ -74,7 +74,7 @@ export async function replay(history: History, cfg: ReplayConfig): Promise<Repla
     const candles: History = {};
     for (const tf of TIMEFRAMES) { const rows = history[tf]; if (rows) { const w = closedWindow(rows, tf, now, win); if (w.length) candles[tf] = w; } }
     evaluations++;
-    const plan = runOmnisignal({ symbol: cfg.symbol, strategy: cfg.strategy, candles, now }, { enabledEngines: cfg.enabledEngines, weights: cfg.weights, thresholds: cfg.thresholds, maxCostR: cfg.maxCostR, roundTripCostBps: cfg.roundTripCostBps ?? ((cfg.paper?.feeRate ?? DEFAULT_PAPER_CONFIG.feeRate) * 2 * 1e4 + (cfg.paper?.slippageBps ?? DEFAULT_PAPER_CONFIG.slippageBps) * 2) });
+    const plan = runOmnisignal({ symbol: cfg.symbol, strategy: cfg.strategy, candles, now }, { enabledEngines: cfg.enabledEngines, weights: cfg.weights, thresholds: cfg.thresholds, maxCostR: cfg.maxCostR, eliteGate: cfg.eliteGate, roundTripCostBps: cfg.roundTripCostBps ?? ((cfg.paper?.feeRate ?? DEFAULT_PAPER_CONFIG.feeRate) * 2 * 1e4 + (cfg.paper?.slippageBps ?? DEFAULT_PAPER_CONFIG.slippageBps) * 2) });
     tally(decisions, plan.decision); tally(agreements, plan.fusion.agreement);
     if (plan.decision !== "BUY" && plan.decision !== "SELL") continue;
     const next = exec[i + 1], ev = await eng.open(plan, next[1], next[0]); // fill at the NEXT bar's open

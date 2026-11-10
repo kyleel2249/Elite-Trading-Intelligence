@@ -2,11 +2,12 @@
 // Promotion needs a named human approver and an optimizer recommendation; rollback only returns to a previously approved version.
 // Candidates are resolved server-side from the whitelist (CANDIDATE_SET), so a client cannot smuggle in arbitrary weights or looser gates.
 import { CANDIDATE_SET, KVParamStore, ParamRegistry, type OptimizerResult, type ParamVersion } from "./optimizer.ts";
+import { loadCalibration } from "./calibration.ts";
 import type { OmnisignalOptions } from "./omnisignal.ts";
 
 export const PARAMS_KEY = "algo:params:v1";
 type KV = { get(k: string): Promise<string | null>; put(k: string, v: string): Promise<void> };
-export type ActiveOptions = Pick<OmnisignalOptions, "weights" | "thresholds" | "maxCostR"> & { version: number; name: string };
+export type ActiveOptions = Pick<OmnisignalOptions, "weights" | "thresholds" | "maxCostR" | "calibrationTable"> & { version: number; name: string };
 export const toOptions = (v: Pick<ParamVersion, "id" | "name" | "weights" | "tighten">): ActiveOptions => ({ version: v.id, name: v.name, weights: v.weights,
   thresholds: { ...(v.tighten?.minRiskReward !== undefined ? { minRiskReward: v.tighten.minRiskReward } : {}), ...(v.tighten?.confirmed !== undefined ? { confirmed: v.tighten.confirmed } : {}) }, maxCostR: v.tighten?.maxCostR });
 
@@ -14,7 +15,9 @@ export const toOptions = (v: Pick<ParamVersion, "id" | "name" | "weights" | "tig
 export async function activeOptions(kv: KV | undefined, now: () => number = Date.now): Promise<ActiveOptions> {
   if (!kv) return { version: 1, name: "default" };
   const reg = await ParamRegistry.open(new KVParamStore(kv, PARAMS_KEY), now);
-  return toOptions(reg.champion());
+  // A calibration table that cannot be read only means the score stays uncalibrated; it never changes a trading gate.
+  const calibrationTable = await loadCalibration(kv).catch(() => null);
+  return { ...toOptions(reg.champion()), calibrationTable };
 }
 
 export interface ParamsResult { status: number; body: Record<string, unknown> }

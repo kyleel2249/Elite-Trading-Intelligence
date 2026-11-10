@@ -16,6 +16,7 @@ import { STRATEGIES } from "./omni-api.ts";
 import { loadMinuteBars, loadSignalInputs } from "./market-inputs.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions, paramsOp } from "./params.ts";
+import { fitCalibration, loadCalibration, outcomesFrom, saveCalibration } from "./calibration.ts";
 import { KVPaperStore, PaperEngine, type KVLike, type Preflight, type PreflightRequest } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
 
@@ -41,7 +42,7 @@ export function makeGatePreflight(env: ExecutionEnv, fetchImpl: typeof fetch = f
 
 export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps = {}): Promise<Response> {
   const url = new URL(req.url), now = (deps.now ?? Date.now)(), path = url.pathname.replace(/\/+$/, "");
-  const known: Record<string, string> = { "/api/paper/status": "GET", "/api/paper/performance": "GET", "/api/paper/audit": "GET", "/api/paper/evaluate": "POST", "/api/paper/tick": "POST", "/api/paper/kill": "POST", "/api/paper/params": "GET", "/api/paper/params/propose": "POST", "/api/paper/params/promote": "POST", "/api/paper/params/rollback": "POST" };
+  const known: Record<string, string> = { "/api/paper/status": "GET", "/api/paper/performance": "GET", "/api/paper/audit": "GET", "/api/paper/evaluate": "POST", "/api/paper/tick": "POST", "/api/paper/kill": "POST", "/api/paper/params": "GET", "/api/paper/params/propose": "POST", "/api/paper/params/promote": "POST", "/api/paper/params/rollback": "POST", "/api/paper/calibration": "GET", "/api/paper/calibration/fit": "POST" };
   if (!(path in known)) return reply({ error: "not_found" }, 404);
   { const a = await authenticate(req, env, now); if (!can(a, "paper")) return reply({ error: a.scopes.size ? "environment_scope_mismatch" : "unauthorized", message: "The paper-trading API needs an INTERNAL PAPER session or the master execution token." }, a.scopes.size ? 403 : 401); }
   if (req.method !== known[path]) return reply({ error: "method_not_allowed", allowed: known[path] }, 405);
@@ -78,6 +79,8 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
     return reply({ event: await engine.setKillSwitch(body.on, now), killSwitch: engine.state.killSwitch, envKillSwitch: envKill });
   }
 
+  if (path === "/api/paper/calibration") { const t = await loadCalibration(kv).catch(() => null); return reply({ table: t, status: t?.status ?? "uncalibrated", recordedPaperOutcomes: engine.state.closed.length, note: "Fitted only from this system's own closed paper trades. Clients cannot supply outcomes." }); }
+  if (path === "/api/paper/calibration/fit") { const table = fitCalibration(outcomesFrom(engine.state.closed, "paper"), now); await saveCalibration(kv, table); return reply({ table, saved: true }); }
   if (path.startsWith("/api/paper/params")) { const r = await paramsOp(path.split("/").pop() === "params" ? "get" : (path.split("/").pop() as "propose" | "promote" | "rollback"), env.ETI_EXECUTION_LOG as any, body, now); return reply(r.body, r.status); }
 
   const symbol = symbolOf();

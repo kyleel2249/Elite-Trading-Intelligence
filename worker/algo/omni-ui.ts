@@ -69,6 +69,7 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <section class="card s12"><h2>Eight-timeframe matrix</h2><div id="matrix" class="scroll muted">–</div></section>
 <section class="card s6"><h2>Momentum, EMA, volatility, breakout</h2><div id="indicators" class="muted">–</div></section>
 <section class="card s6"><h2>Liquidity and order book</h2><div id="liquidity" class="muted">–</div></section>
+<section class="card s12"><h2>Elite Trader research</h2><div id="elite" class="muted">–</div></section>
 <section class="card s12" id="scanner"><h2>Opportunity scanner and leaderboard</h2><form class="bar" id="scan-form" autocomplete="off"><label>Symbols (up to 4, comma separated)<input type="text" id="scan-symbols" value="BTCUSDT,ETHUSDT,SOLUSDT" maxlength="80" style="width:280px"></label><button type="submit" id="scan-go">Scan</button></form><div id="scan-body" class="muted">Ranks by evidence quality (validator score, reward/risk, liquidity), not by predicted profit. HOLD and REJECTED are valid outcomes and are not ranked.</div></section>
 <section class="card s12" id="paper"><h2>Paper trading (simulated)</h2>
 <form class="bar" id="paper-auth" autocomplete="off"><label>Paper API token (kept in memory only, never stored)<input type="password" id="token" autocomplete="off" spellcheck="false"></label><button type="submit">Connect</button><button type="button" id="p-eval">Evaluate (analyse only)</button><button type="button" id="p-open" class="primary">Evaluate &amp; open paper position</button><button type="button" id="p-tick">Tick position</button><button type="button" id="p-kill" class="danger">Engage kill switch</button></form>
@@ -103,7 +104,7 @@ function renderDecision(p){
  var f=p.fusion||{},d=p.decision,box=el("div");
  var top=el("div",{class:"decision"},el("div",{class:"big "+d,text:d.replace("_"," ")}),
   el("div",null,el("div",{text:"Agreement: "+String(f.agreement||"–").replace(/_/g," ").toLowerCase()}),
-   el("div",{class:"muted small",text:"Evidence score "+(p.confidence||0)+"/100 (uncalibrated; not a win probability)"}),
+   el("div",{class:"muted small",text:"Evidence score "+(p.confidence||0)+"/100 "+(p.calibration&&p.calibration.status==="calibrated"?"- "+Math.round(p.calibration.observedWinRate*100)+"% of "+p.calibration.basedOn+" similar past trades closed net-positive (95% interval "+Math.round(p.calibration.interval95.low*100)+"-"+Math.round(p.calibration.interval95.high*100)+"%); a past frequency, not a forecast":"(uncalibrated; not a win probability)")}),
    el("div",{class:"muted small",text:"As of "+(p.generatedAt||"–")+(p.expiresAt?" | expires "+p.expiresAt:"")})));
  box.appendChild(top);
  if(d==="BUY"||d==="SELL"){var z=p.entryZone||[null,null],tp=p.takeProfits||[];
@@ -168,8 +169,17 @@ function renderLiquidity(p){
  if(l.largeOrders&&l.largeOrders.length)box.appendChild(el("details",null,el("summary",{text:"Large resting orders ("+l.largeOrders.length+")"}),list(l.largeOrders.map(function(o){return JSON.stringify(o)}))));
  box.appendChild(el("div",{class:"small muted",text:l.caveat}));put("liquidity",box)}
 
-function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p)}
-function clearAll(msg){["decision-body","swift-body","gainz-body","evidence","validation","matrix","indicators","liquidity"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
+function renderElite(p){
+ var e=p.elite;if(!e){put("elite",el("div",{class:"muted",text:"Elite Trader assessment runs only when the engines propose a trade."}));return}
+ if(!e.available){put("elite",el("div",{class:"muted",text:e.reason||"Unavailable"}));return}
+ var box=el("div");box.appendChild(kv([["Alignment",e.alignment,e.alignment==="supports"?"bull":e.alignment==="opposes"?"bear":""],["Supporting / opposing",e.supporting+" / "+e.opposing],["Neutral / suppressed / n.a.",e.neutral+" / "+e.suppressed+" / "+e.notApplicable],["Gates the decision",e.influencesDecision?"yes":"no (advisory)"],["Research database",e.knowledge.profiles+" profiles, "+e.knowledge.strategies+" strategies, "+(e.knowledge.researchDate||"undated")]]));
+ if(e.warnings&&e.warnings.length)box.appendChild(list(e.warnings));
+ box.appendChild(el("details",null,el("summary",{text:"Principles"}),list((e.principles||[]).map(function(x){return x.principle+": "+x.status.replace(/_/g," ")+" - "+x.evidence+(x.documentedBy&&x.documentedBy.length?" ["+x.documentedBy.join(", ")+"]":"")}))));
+ box.appendChild(el("div",{class:"small muted",text:"Investor disclosures: "+e.disclosures.reason}));
+ box.appendChild(el("div",{class:"small muted",text:e.limitations}));put("elite",box)}
+
+function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p);renderElite(p)}
+function clearAll(msg){["decision-body","swift-body","gainz-body","evidence","validation","matrix","indicators","liquidity","elite"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
 
 function params(){var sym=$("symbol").value.trim().toUpperCase();var eng=[];if($("e-swift").checked)eng.push("swift");if($("e-gainz").checked)eng.push("gainz");return {symbol:sym,strategy:$("strategy").value,engines:eng}}
 function analyse(){
