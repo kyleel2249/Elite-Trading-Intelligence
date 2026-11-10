@@ -77,6 +77,16 @@ price adapter (`ETI_FX_*`); without a feed those markets are schedule/calendar b
 (`ETI_EVENT_FEED_URL` / `ETI_EVENTS_JSON`); without it the calendar is reported as unverified. A favourable rating is never an
 entry signal. See [docs/READINESS.md](docs/READINESS.md).
 
+## Trade signals: ETI PRECISION SIGNAL ENGINE
+
+`GET /api/precision/signal?symbol=BTCUSDT&strategy=intraday` returns one fully-specified, read-only result for a crypto spot pair:
+BUY, SELL or NO TRADE, with entry/zone, stop, TP1-TP3, gross and net-of-cost reward-to-risk, estimated costs, higher-timeframe view,
+justifications, news, liquidity, volatility, invalidation, expiry, timestamps, evidence and attribution. A 0-100 opportunity score
+(research-priority bands, not probabilities) ranks setups, but about 18 hard risk gates decide whether one may be signalled: any
+failed gate forces NO TRADE regardless of score. Confidence is qualitative unless a calibration model validated on held-out
+outcomes exists. Fundamentals, news and expectancy are operator-supplied (token-protected admin routes); missing evidence is
+reported as unavailable and caps the score. It cannot place orders. See [docs/PRECISION_ENGINE.md](docs/PRECISION_ENGINE.md).
+
 ## Important feature boundary
 
 This Cloudflare edge deployment is a working market dashboard foundation, not a completed
@@ -125,8 +135,8 @@ See [docs/PREDICTION_LEDGER.md](docs/PREDICTION_LEDGER.md).
 
 ## Documentation
 
-See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs/MARKETS.md) and
-[prediction ledger guide](docs/PREDICTION_LEDGER.md).
+See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs/MARKETS.md),
+[prediction ledger guide](docs/PREDICTION_LEDGER.md) and [Precision signal engine](docs/PRECISION_ENGINE.md).
 
 
 ## Broker execution — paper/testnet only
