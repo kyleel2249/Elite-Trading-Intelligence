@@ -35,6 +35,37 @@ class Settings(BaseSettings):
     max_position_notional_pct: float = 6.0
     require_live_confirmation: bool = True
 
+    # --- ETI CAPITAL PROTECTION SYSTEM (independent of the LLM / signal engines) ---
+    # Conservative defaults. Every value is clamped to a hard ceiling in
+    # app/risk/protection_policy.py; there is no flag that disables the system.
+    cps_max_risk_per_trade_pct: float = 0.5
+    cps_max_daily_loss_pct: float = 2.0
+    cps_max_weekly_loss_pct: float = 5.0
+    cps_max_drawdown_pct: float = 10.0
+    cps_max_open_positions: int = 5
+    cps_max_correlated_exposure_pct: float = 20.0
+    cps_max_leverage: float = 1.0
+    cps_max_position_notional_pct: float = 6.0
+    cps_max_consecutive_losses: int = 3
+    cps_consecutive_loss_cooldown_minutes: int = 240
+    cps_emergency_drawdown_pct: float = 12.0
+    cps_emergency_daily_loss_pct: float = 4.0
+    cps_target_volatility_pct: float = 2.0
+    cps_extreme_volatility_pct: float = 12.0
+    cps_min_stop_distance_pct: float = 0.1
+    cps_max_stop_distance_pct: float = 10.0
+    cps_session_restrictions_enabled: bool = True
+    cps_equity_session_buffer_minutes: int = 15
+    cps_blocked_windows_utc: str = ""  # e.g. "23:55-00:05,21:55-22:05"
+    cps_news_blackout_before_minutes: int = 30
+    cps_news_blackout_after_minutes: int = 30
+    cps_news_calendar_required_for_live: bool = True
+    cps_require_strategy_attribution_live: bool = True
+    cps_auto_liquidate_on_stop_breach: bool = True
+    cps_auto_liquidate_on_emergency: bool = True
+    # Separate secret for releasing halts / quarantines. Never give it to an AI agent.
+    cps_admin_key: Optional[str] = None
+
     # Server-side equity baselines used by the risk engine (never taken from requests).
     # Paper/testnet equity = paper_starting_equity + realized + unrealized PnL.
     paper_starting_equity: float = 10000.0
