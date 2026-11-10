@@ -11,17 +11,16 @@ Verification: 315 automated tests pass in the combined tree (main's Python tests
 | Duplicate prediction ledger | Retired. Alpha writes to main's immutable ledger (`app/prediction_ledger`) via an adapter. |
 | Position sizing vs main's 6% cap | Bug found and fixed: plans could exceed `MAX_POSITION_NOTIONAL_PCT`; now capped, live attempts are limit-only, missing live equity refused with a clear reason. |
 | Data-dependent strategy modules | Buffett/Munger quality and Lynch GARP (SEC XBRL), Druckenmiller liquidity regime, Dalio growth x inflation proxy, credit-cycle leg (FRED) now have live evaluators. They are screens, not backtests. |
-| Trader profile gaps | Main's own research had raised completeness from ~66% to ~90%. This work added cited, dated, fund-level-labelled return/drawdown notes for Druckenmiller, Lynch (returns), Simons, Paulson and Munger (5 sourced lookups), bringing the audit to ~96%. |
+| Trader profile gaps | Main's own research had raised completeness from ~66% to ~90%. This work added cited, dated, fund-level-labelled return/drawdown notes for Druckenmiller, Lynch (returns), Simons, Paulson and Munger (7 sourced lookups), bringing the audit to ~96.7%. |
 | Coverage gaps | Not closable without licensed data: international exchanges, forex, commodities, futures. Documented, not faked. |
 
 ## Still not complete (honest)
-* **Profiles (corrected):** the 35 foundational profiles are present and the audit reports about 96% average completeness. An earlier revision of this report wrongly said ten profiles lacked methodology fields; `main`'s newer research had already filled those. What remains: no cited drawdown record for 23 profiles, no cited return record for 8 (Paul Tudor Jones, Dennis, Seykota, Minervini, Wyckoff, O'Neil, Lien, Burry), and no dated prediction outcomes for Dalio. Many of these were never publicly disclosed; recording "not publicly documented" requires a documented search per trader, which has not been done, so they stay listed as gaps. Cited notes added by this work: Druckenmiller, Lynch (returns), Simons, Paulson, Munger.
+* **Profiles (corrected):** the 35 foundational profiles are present and the audit reports about 96% average completeness. An earlier revision of this report wrongly said ten profiles lacked methodology fields; `main`'s newer research had already filled those. What remains: no cited drawdown record for 21 profiles, no cited return record for 6 (Paul Tudor Jones, Seykota, Wyckoff, O'Neil, Lien, Burry), and no dated prediction outcomes for Dalio. Many of these were never publicly disclosed; recording "not publicly documented" requires a documented search per trader, which has not been done, so they stay listed as gaps. Cited notes added by this work: Druckenmiller, Lynch (returns), Simons, Paulson, Munger, Minervini, Dennis (with the source contradictions recorded). Audit average completeness: about 96.7%.
 * **International equities, forex, commodities, futures:** no licensed or verified data adapter. Liquid: existing client is a health check only.
 * **Unimplemented styles:** Soros, Kovner, Lien, Templeton, Burry, activist/concentrated, distressed/event legs.
 * **Live end-to-end:** blocked by design and also by main's unwired `live_confirmed`.
 * **Provider calls** (Binance, DexScreener, Alpaca, SEC, FRED, explorer, Worker) tested only against mock transports; first real success per provider needed.
 * **Prediction probabilities** are uncalibrated priors until the ledger accumulates resolved predictions.
-* **Role-based access:** single API key only.
 * Main's migration 0004 cannot run on SQLite (pre-existing, not changed).
 
 ## Dependencies needed from the operator
@@ -29,3 +28,6 @@ Alpaca keys, FRED key, `OMNISIGNAL_BASE_URL`, explorer URL + key, wallet labels 
 
 ## Live-trading permissions
 None active. All flags default off; no withdrawal or transfer capability.
+
+## Added in rev 4
+* **Role-based access** for all Alpha routes (analyst / trader / admin), live attempts admin-only, audited with role + key fingerprint, tested (including fail-closed and weak-key handling).

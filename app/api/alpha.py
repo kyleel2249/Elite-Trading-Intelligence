@@ -11,13 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.alpha import ALPHA_VERSION
 from app.alpha.predictions import STRATEGY_TAG, alpha_predictions
+from app.alpha.access import Access, require_alpha_role
 from app.alpha.context import gather_context, load_fundamentals
 from app.alpha.macro import load_macro
 from app.alpha.coverage import build_registry
 from app.alpha.db_models import (AlphaAuditLog, AlphaCandidate, AlphaResearchRun, AlphaStrategyRun, AlphaStrategyState,
                                  AlphaTradePlan, TraderQualification, WalletLabel)
 from app.alpha.discovery import DiscoveryEngine, candidate_dict, leaderboard
-from app.alpha.execution import AlphaExecutor
+from app.alpha.execution import AlphaExecutor, audit
 from app.alpha.fusion import validate
 from app.alpha.investor_intel import (FOUNDATIONAL_35, assess_following, audit_profiles, disclosure_freshness, effective_profile,
                                       overlap_report, profile_history, propose_profile_update, qualify_investor)
@@ -34,7 +35,6 @@ from app.integrations.explorer.client import ExplorerClient
 from app.knowledge.registry import get_trader, list_traders
 from app.prediction_ledger.evaluation import compute_metrics
 from app.prediction_ledger.service import scored_rows
-from app.security.auth import require_api_key
 from app.services.activity_store import ActivityStore
 
 logger = logging.getLogger("eti.alpha")
@@ -103,7 +103,7 @@ class ScanRequest(BaseModel):
 
 
 @router.post("/scan")
-async def scan(req: ScanRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+async def scan(req: ScanRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("analyst"))):
     binance, alpaca = _providers(db, s)
     eng = DiscoveryEngine(db, binance=binance, alpaca=alpaca, dex=DexScreener(db=db))
     out: dict[str, Any] = {}
@@ -125,7 +125,7 @@ class ValidateRequest(BaseModel):
 
 
 @router.post("/validate")
-async def validate_candidate(req: ValidateRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+async def validate_candidate(req: ValidateRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("analyst"))):
     cand = db.query(AlphaCandidate).filter_by(candidate_id=req.candidate_id).one_or_none()
     if not cand:
         raise HTTPException(404, "candidate not found")
@@ -147,7 +147,10 @@ class ExecuteRequest(BaseModel):
 
 
 @router.post("/execute")
-async def execute(req: ExecuteRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+async def execute(req: ExecuteRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("trader"))):
+    if req.environment == "live" and who.role != "admin":
+        raise HTTPException(403, "live-environment attempts require the admin role")
+    audit(db, f"api:{who.role}", "execute_requested", {"candidate_id": req.candidate_id, "environment": req.environment, "key_id": who.key_id})
     binance, alpaca = _providers(db, s)
     res = await AlphaExecutor(db, s).execute(req.candidate_id, req.environment, make_bars_fn(binance, alpaca), req.confirm_live)
     if res["status"] == "rejected" and any("live execution not authorized" in r for r in res["reasons"]):
@@ -156,7 +159,8 @@ async def execute(req: ExecuteRequest, db: Session = Depends(get_db), s: Setting
 
 
 @router.post("/monitor")
-async def monitor(db: Session = Depends(get_db), s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+async def monitor(db: Session = Depends(get_db), s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("trader"))):
+    audit(db, f"api:{who.role}", "monitor_requested", {"key_id": who.key_id})
     return await AlphaExecutor(db, s).monitor()
 
 
@@ -210,7 +214,7 @@ async def strategy_compat(symbol: str = Query("BTCUSDT", pattern=r"^[A-Za-z0-9.]
 
 @router.post("/strategies/competition")
 async def competition(symbols: list[str] = Query(pattern=r"^[A-Za-z0-9]{3,20}$", default=["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT"]),
-                      db: Session = Depends(get_db), s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+                      db: Session = Depends(get_db), s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("analyst"))):
     binance, _ = _providers(db, s)
     ds = {}
     for sym in symbols[:15]:
@@ -232,7 +236,7 @@ class ComboRequest(BaseModel):
 
 
 @router.post("/strategies/combination")
-async def combination(req: ComboRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+async def combination(req: ComboRequest, db: Session = Depends(get_db), s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("analyst"))):
     binance, _ = _providers(db, s)
     try:
         bars = await binance.klines(req.symbol.upper(), "1d", 1000)
@@ -280,7 +284,8 @@ class QualifyRequest(BaseModel):
 
 
 @router.post("/investors/qualify")
-async def qualify(req: QualifyRequest, db: Session = Depends(get_db), _a=Depends(require_api_key)):
+async def qualify(req: QualifyRequest, db: Session = Depends(get_db), who: Access = Depends(require_alpha_role("analyst"))):
+    audit(db, f"api:{who.role}", "qualification_requested", {"name": req.name[:80], "key_id": who.key_id})
     return qualify_investor(db, req.model_dump())
 
 
@@ -299,7 +304,8 @@ class ProfileUpdate(BaseModel):
 
 
 @router.post("/investors/profile-update")
-async def profile_update(req: ProfileUpdate, db: Session = Depends(get_db), _a=Depends(require_api_key)):
+async def profile_update(req: ProfileUpdate, db: Session = Depends(get_db), who: Access = Depends(require_alpha_role("analyst"))):
+    audit(db, f"api:{who.role}", "profile_update_requested", {"trader_id": req.trader_id, "field": req.field, "key_id": who.key_id})
     try:
         return propose_profile_update(db, req.trader_id, req.field, req.new_value, req.reason, req.sources)
     except ValueError as e:
@@ -339,7 +345,7 @@ class Sync13F(BaseModel):
 
 
 @router.post("/investors/13f/sync")
-async def sync_13f_route(req: Sync13F, db: Session = Depends(get_db), s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+async def sync_13f_route(req: Sync13F, db: Session = Depends(get_db), s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("analyst"))):
     try:
         sub = await EdgarClient(s.sec_user_agent).company_submissions(req.cik)
         if sub.get("status") != "ok":
@@ -369,7 +375,8 @@ class WalletLabelReq(BaseModel):
 
 
 @router.post("/whales/labels")
-async def wallet_label(req: WalletLabelReq, db: Session = Depends(get_db), _a=Depends(require_api_key)):
+async def wallet_label(req: WalletLabelReq, db: Session = Depends(get_db), who: Access = Depends(require_alpha_role("analyst"))):
+    audit(db, f"api:{who.role}", "wallet_label_requested", {"chain": req.chain, "entity_type": req.entity_type, "key_id": who.key_id})
     try:
         r = add_wallet_label(db, req.chain, req.address, req.label, req.entity_type, req.source, req.confidence, req.verified)
     except ValueError as e:
@@ -385,7 +392,7 @@ async def wallet_labels(db: Session = Depends(get_db)):
 @router.get("/whales/analysis")
 async def whale_analysis(chain: str, contract: str = Query(min_length=10, max_length=96), price_usd: float = Query(gt=0),
                          threshold_usd: float = Query(100_000, gt=0), db: Session = Depends(get_db), s: Settings = Depends(get_settings),
-                         _a=Depends(require_api_key)):  # spends the operator's explorer quota, so it is not anonymous
+                         who: Access = Depends(require_alpha_role("analyst"))):  # spends the operator's explorer quota, so it is not anonymous
     client = ExplorerClient(s.alpha_explorer_base_url, s.alpha_explorer_api_key)
     if not client.configured:
         return {"status": "not_configured", "detail": "ALPHA_EXPLORER_BASE_URL and ALPHA_EXPLORER_API_KEY are required"}
@@ -400,13 +407,13 @@ async def whale_analysis(chain: str, contract: str = Query(min_length=10, max_le
 
 # ------------------------------------------------------------------ macro & fundamentals (outbound quota: key required)
 @router.get("/macro")
-async def macro(s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+async def macro(s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("analyst"))):
     return await load_macro(s)
 
 
 @router.get("/fundamentals/{ticker}")
 async def fundamentals(ticker: str, price: Optional[float] = Query(None, gt=0), db: Session = Depends(get_db),
-                       s: Settings = Depends(get_settings), _a=Depends(require_api_key)):
+                       s: Settings = Depends(get_settings), who: Access = Depends(require_alpha_role("analyst"))):
     if not ticker.replace(".", "").replace("-", "").isalnum() or len(ticker) > 10:
         raise HTTPException(422, "invalid ticker")
     out = await load_fundamentals(db, s, ticker, price)
@@ -417,7 +424,7 @@ async def fundamentals(ticker: str, price: Optional[float] = Query(None, gt=0), 
 
 # ------------------------------------------------------------------ operations
 @router.post("/research/run")
-async def research_run(force_competition: bool = False, _a=Depends(require_api_key)):
+async def research_run(force_competition: bool = False, who: Access = Depends(require_alpha_role("analyst"))):
     return await alpha_research_job.run_once(force_competition=force_competition)
 
 

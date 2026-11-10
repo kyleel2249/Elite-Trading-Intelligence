@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     alpha_max_participation_pct: float = 1.0  # max order size as % of average daily dollar volume
     # Live alpha execution needs BOTH flags plus per-request confirmation; default is paper/testnet only.
     alpha_live_execution_authorized: bool = False
+    # Extra Global Alpha keys: "key:analyst,key:trader" (each key >= 16 chars). API_KEY stays the admin key.
+    alpha_role_keys: Optional[str] = None
     # Base URL of the deployed Worker that serves GET /api/omnisignal (Swift/Gainz/OMNISIGNAL X). Empty = engine unavailable.
     omnisignal_base_url: Optional[str] = None
     alpha_explorer_base_url: Optional[str] = None  # Etherscan-compatible endpoint chosen by the operator

@@ -258,3 +258,16 @@ def test_loss_records_keep_their_caveats_and_derived_numbers_are_labelled_estima
     assert derived and derived[0]["classification"] == "estimate" and "derived" in derived[0]["notes"] + derived[0]["claim"]
     for pid in ("john_paulson", "charlie_munger"):
         assert audit_profiles(None, [pid])["results"][0]["categories"]["drawdowns"]["status"] == "DOCUMENTED"
+
+
+def test_minervini_and_dennis_notes_record_contradictions_and_caveats():
+    from app.knowledge.registry import get_trader
+    mr = get_trader("mark_minervini")["historical_returns"]
+    assert any("334.8%" in n["claim"] and "not independently audited" in n["notes"] for n in mr)
+    dr = get_trader("richard_dennis")
+    ret = next(n for n in dr["historical_returns"] if "$200 million" in n["claim"] and "2026-11-10" in n["source"])
+    assert ret["classification"] == "estimate" and "Contradictory evidence recorded" in ret["notes"]
+    dd = next(n for n in dr["historical_drawdowns"] if "1987" in n["claim"] and "2026-11-10" in n["source"])
+    assert "80%" in dd["notes"] and "only the multiply-sourced" in dd["notes"]  # unsupported figure is flagged, not adopted
+    for pid in ("mark_minervini", "richard_dennis"):
+        assert audit_profiles(None, [pid])["results"][0]["categories"]["drawdowns"]["status"] == "DOCUMENTED"
