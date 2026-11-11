@@ -48,9 +48,7 @@ export function securityAnalyst(ctx: Ctx): SecurityReport {
     const lk = finite(oc.liquidityLockedPct); if (lk !== undefined && lk < 20) flag("liquidity_unlocked", "high", `Only ${lk}% of liquidity locked (rug-pull risk).`);
     const t10 = finite(oc.top10HolderPct); if (t10 !== undefined && t10 > 80) flag("extreme_concentration", "high", `Top-10 holders control ${t10}% of supply.`);
   }
-  const ig = ctx.integrity;
-  if (ig.liveTradingEnabled && !ig.liveCapsConfigured) flag("live_without_caps", "critical", "Live trading is enabled without server-side notional/quantity caps.");
-  if (ig.liveTradingEnabled && !ig.riskGateConfigured) flag("live_without_risk_gate", "critical", "Live trading is enabled but the server-side risk gate is not configured.");
+  if (ctx.integrity.liveFlagSet) flag("live_flag_set", "low", "ETI_LIVE_TRADING_ENABLED is set, but ETI has no live execution path: orders are paper/testnet only. Remove the variable to avoid confusion.");
   if (Object.keys(ctx.market.failures).length) flag("provider_degraded", "low", "Some market-data requests failed: " + Object.entries(ctx.market.failures).map(([k, v]) => `${k}=${v}`).join(", "));
   const severity = flags.reduce<Severity>((m, f) => (SEVERITY_RANK[f.severity] > SEVERITY_RANK[m] ? f.severity : m), "none");
   const base = makeReport("security", {
@@ -147,15 +145,15 @@ export interface OrderTicket { broker: "alpaca" | "binance"; symbol: string; sid
 export interface ExecutionRequest { broker?: string; clientOrderId?: string; riskConfirmed?: boolean; executionSource?: ExecutionSource }
 export interface ExecutionReview { schema: "eti.execution.review/1"; requested: boolean; eligible: boolean; mode: "paper_testnet_only"; blockers: string[]; warnings: string[]; ticket: OrderTicket | null }
 
-/** Builds a limit-order ticket only when every gate passes. Never submits; the route forwards to the existing /api/orders gateway (token, kill switch, FastAPI risk gate, KV audit). */
+/** Builds a limit-order ticket only when every gate passes. Never submits; the route forwards to /api/orders, which re-checks token, kill switch, balances/holdings, limits, duplicates and the KV audit log. */
 export function prepareTicket(a: {
   request?: ExecutionRequest; action: "BUY" | "SELL" | "NO_TRADE"; proposal: TradeProposal | null; risk: RiskDecision | null;
   account?: AccountState; integrity: Integrity; maxOrderQuantity?: number; decisionId: string;
 }): ExecutionReview {
   const base = { schema: "eti.execution.review/1" as const, mode: "paper_testnet_only" as const };
   const q = a.request;
-  if (!q?.broker) return { ...base, requested: false, eligible: false, blockers: [], warnings: ["No broker specified: no ticket prepared. Live execution is not available through this system."], ticket: null };
-  const blockers: string[] = [], warnings: string[] = ["Exchange lot-size, tick-size and minimum-notional filters are not checked here; the broker may still reject the order."];
+  if (!q?.broker) return { ...base, requested: false, eligible: false, blockers: [], warnings: ["No broker specified: no ticket prepared. ETI executes paper/testnet orders only."], ticket: null };
+  const blockers: string[] = [], warnings: string[] = ["Exchange lot-size, tick-size and minimum-notional filters are applied by the execution route for Binance; the broker may still reject the order."];
   if (a.action === "NO_TRADE" || !a.proposal) blockers.push("no_trade_decision");
   if (!a.risk?.approved || !a.risk.sizing) blockers.push("risk_not_approved");
   if (q.broker !== "alpaca" && q.broker !== "binance") blockers.push("unsupported_broker");
@@ -164,7 +162,6 @@ export function prepareTicket(a: {
   if (q.riskConfirmed !== true) blockers.push("risk_confirmation_required");
   if (a.integrity.killSwitch) blockers.push("kill_switch_active");
   if (!a.integrity.executionTokenConfigured) blockers.push("execution_token_not_configured");
-  if (!a.integrity.riskGateConfigured) blockers.push("risk_gate_not_configured");
   if (!a.integrity.auditLogConfigured) blockers.push("audit_log_not_configured");
   let qty = a.risk?.sizing?.quantity ?? 0;
   if (a.proposal?.side === "sell") {
@@ -179,7 +176,7 @@ export function prepareTicket(a: {
 }
 
 export function executionReport(e: ExecutionReview, now: number): AgentReport {
-  return makeReport("execution", { stance: "neutral", confidence: e.eligible ? 1 : 0, status: e.requested ? "ok" : "insufficient_data", summary: !e.requested ? "No execution requested; paper/testnet only, live unavailable." : e.eligible ? "Order ticket prepared (paper/testnet); not yet submitted." : "Execution blocked: " + e.blockers.join(", "), evidence: e.blockers.map((b) => ({ label: "blocker", value: b })), warnings: e.warnings, missingInputs: e.requested ? [] : ["broker"] }, now);
+  return makeReport("execution", { stance: "neutral", confidence: e.eligible ? 1 : 0, status: e.requested ? "ok" : "insufficient_data", summary: !e.requested ? "No execution requested; paper/testnet only." : e.eligible ? "Order ticket prepared (paper/testnet); not yet submitted." : "Execution blocked: " + e.blockers.join(", "), evidence: e.blockers.map((b) => ({ label: "blocker", value: b })), warnings: e.warnings, missingInputs: e.requested ? [] : ["broker"] }, now);
 }
 
 // ------------------------------------------------------- 11. PERFORMANCE AUDITOR

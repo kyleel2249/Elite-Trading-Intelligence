@@ -24,7 +24,7 @@ export const AGENT_ROSTER: AgentProfile[] = [
   { id: "news", number: 7, name: "NEWS INTELLIGENCE", mandate: "News sentiment, economic-calendar hazards and event monitoring.", inputs: ["news items", "calendar events"], externalDataRequired: "News items and calendar events must be supplied with the request; no live news feed is configured." },
   { id: "researcher", number: 8, name: "ELITE TRADER RESEARCHER", mandate: "Compares simplified, mechanical readings of publicly documented trading methodologies against current price data.", inputs: ["candles"], externalDataRequired: null },
   { id: "risk", number: 9, name: "RISK MANAGER", mandate: "Independently approves, reduces or rejects proposed trades. Its rejection is binding.", inputs: ["trade proposal", "market data", "account state", "security severity", "event hazards"], externalDataRequired: "Account state (equity etc.) must be supplied; without it every trade is rejected." },
-  { id: "execution", number: 10, name: "EXECUTION SPECIALIST", mandate: "Builds order tickets for authorised paper/testnet brokers. Never bypasses the risk veto or the server-side risk gate.", inputs: ["approved proposal", "broker", "clientOrderId"], externalDataRequired: "Broker credentials, execution token, risk gate and KV audit log (Worker secrets/bindings)." },
+  { id: "execution", number: 10, name: "EXECUTION SPECIALIST", mandate: "Builds order tickets for the paper/testnet brokers. Never bypasses the risk veto; the execution gateway re-checks balances, holdings, limits and duplicates.", inputs: ["approved proposal", "broker", "clientOrderId"], externalDataRequired: "Paper/testnet broker credentials, execution token and the KV audit log (Worker secrets/bindings)." },
   { id: "auditor", number: 11, name: "PERFORMANCE AUDITOR", mandate: "Scores stored decisions against subsequent price action and down-weights agents with poor measured accuracy.", inputs: ["stored decisions", "subsequent candles"], externalDataRequired: "Needs the ETI_EXECUTION_LOG KV binding and recorded decisions." },
   { id: "security", number: 12, name: "FRAUD AND SECURITY ANALYST", mandate: "Flags manipulation signatures, illiquidity, feed disagreement, scam indicators and unsafe integration configuration.", inputs: ["candles", "order book", "cross-provider price", "integration configuration"], externalDataRequired: null },
 ];
@@ -98,7 +98,8 @@ export interface MarketInput {
 /** Caller-supplied research data. The agents never invent any of it; absent data yields insufficient_data. */
 export interface SuppliedData { fundamentals?: unknown; macro?: unknown; news?: unknown; onchain?: unknown }
 export interface AccountState { equityUsd?: number; availableUsd?: number; positionQuantity?: number; dailyPnlPct?: number; drawdownPct?: number; openRiskPct?: number }
-export interface Integrity { killSwitch: boolean; liveTradingEnabled: boolean; liveCapsConfigured: boolean; riskGateConfigured: boolean; executionTokenConfigured: boolean; auditLogConfigured: boolean }
+/** Operational state the agents care about. ETI executes paper/testnet orders only; `liveFlagSet` records a stray ETI_LIVE_TRADING_ENABLED variable, which enables nothing. */
+export interface Integrity { killSwitch: boolean; liveFlagSet: boolean; executionTokenConfigured: boolean; auditLogConfigured: boolean }
 export interface Ctx { market: MarketInput; supplied: SuppliedData; now: number; integrity: Integrity }
 
 export interface TradeProposal {
