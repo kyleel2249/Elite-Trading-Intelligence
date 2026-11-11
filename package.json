@@ -13,6 +13,6 @@
     "pretest": "npm run build:knowledge"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.45.0"
   }
 }

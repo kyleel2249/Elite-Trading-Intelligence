@@ -65,8 +65,10 @@ test("[d1] migration file mirrors the runtime schema; provisioning helpers patch
   const mig = readFileSync(new URL("../migrations/0001_portfolio.sql", import.meta.url), "utf8");
   for (const s of SCHEMA) assert.ok(mig.includes(s), "migration lacks: " + s);
   const { patchWrangler, parseDatabaseId } = await import("../scripts/provision-d1.mjs");
-  const cfg = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"), id = "123e4567-e89b-12d3-a456-426614174000";
-  const patched = patchWrangler(cfg, "eti-portfolio", id); assert.ok(patched.includes('"ETI_PORTFOLIO_DB"') && patched.includes(id)); assert.equal(patchWrangler(patched, "eti-portfolio", id), patched, "idempotent");
+  const live = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+  assert.match(live, /"binding": "ETI_PORTFOLIO_DB"/); assert.match(live, /"database_name": "eti-portfolio-db"/); assert.ok(!/"database_id"\s*:\s*"[^"]*"[^}]*"binding": "ETI_PORTFOLIO_DB"/.test(live), "no pinned id: wrangler provisions it on deploy");
+  const cfg = live.replace(/"d1_databases": \[[^\]]*\],\s*/, ""), id = "123e4567-e89b-12d3-a456-426614174000";
+  const patched = patchWrangler(cfg, "eti-portfolio-db", id); assert.ok(patched.includes('"ETI_PORTFOLIO_DB"') && patched.includes(id)); assert.equal(patchWrangler(patched, "eti-portfolio-db", id), patched, "idempotent");
   assert.doesNotThrow(() => JSON.parse(patched.replace(/^\s*\/\/.*$/gm, "")), "patched wrangler.jsonc is still valid JSON");
   assert.equal(parseDatabaseId('[[d1_databases]]\nbinding = "DB"\ndatabase_name = "x"\ndatabase_id = "' + id + '"'), id);
   assert.equal(parseDatabaseId('{ "d1_databases": [ { "database_id": "' + id + '" } ] }'), id);

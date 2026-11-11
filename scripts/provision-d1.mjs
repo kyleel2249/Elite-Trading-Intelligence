@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Creates the D1 database for the portfolio ledger, binds it as ETI_PORTFOLIO_DB in wrangler.jsonc, applies the migration.
-// Usage: node scripts/provision-d1.mjs [--name eti-portfolio] [--dry-run]
+// wrangler.jsonc already declares ETI_PORTFOLIO_DB / eti-portfolio-db WITHOUT a database_id, so `wrangler deploy` (4.45+) creates and binds it automatically.
+// This script is the explicit alternative (older wrangler, or to pin the id): it creates the D1 database for the portfolio ledger, binds it as ETI_PORTFOLIO_DB in wrangler.jsonc, applies the migration.
+// Usage: node scripts/provision-d1.mjs [--name eti-portfolio-db] [--dry-run]
 // Needs `wrangler` authenticated for your Cloudflare account (npx wrangler login, or CLOUDFLARE_API_TOKEN).
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -21,7 +22,7 @@ export function parseDatabaseId(out) {
   return m[1];
 }
 function main() {
-  const args = process.argv.slice(2), dry = args.includes("--dry-run"), name = args.includes("--name") ? args[args.indexOf("--name") + 1] : "eti-portfolio";
+  const args = process.argv.slice(2), dry = args.includes("--dry-run"), name = args.includes("--name") ? args[args.indexOf("--name") + 1] : "eti-portfolio-db";
   const run = (a) => { console.log("$ npx wrangler " + a.join(" ")); return dry ? "" : execFileSync("npx", ["wrangler", ...a], { encoding: "utf8" }); };
   const out = run(["d1", "create", name]);
   const id = dry ? "00000000-0000-0000-0000-000000000000" : parseDatabaseId(out);
