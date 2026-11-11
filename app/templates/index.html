@@ -60,7 +60,7 @@
       <h1>ETI — Elite Trading Intelligence</h1>
       <span class="badge">v{{ version }}</span>
       <span class="pp-chip internal" title="Default execution mode: simulated by ETI, no exchange credentials">INTERNAL PAPER</span>
-      {% if live_trading_enabled %}<span class="badge live">LIVE PATH (risk-gated)</span><span class="pp-chip livedis">LIVE FLAG ON IN CONFIG — NOT USED BY PAPER TRADING</span>{% else %}<span class="pp-chip livedis">LIVE TRADING: DISABLED</span>{% endif %}
+      {% if live_trading_enabled %}<span class="badge live">LIVE PATH (in-process risk checks)</span><span class="pp-chip livedis">LIVE FLAG ON IN CONFIG — NOT USED BY PAPER TRADING</span>{% else %}<span class="pp-chip livedis">LIVE TRADING: DISABLED</span>{% endif %}
     </div>
     <nav>
       <button data-panel="overview" class="active">Overview</button>
@@ -189,7 +189,7 @@
     <section id="risk" class="panel"><div class="card"><div class="row"><input id="r-symbol" value="BTCUSDT" /><select id="r-env"><option>paper</option><option>testnet</option><option>live</option></select><input id="r-qty" type="number" value="0.01" /><input id="r-equity" type="number" value="10000" /><button class="action" id="r-eval">Evaluate</button></div><pre id="r-out">—</pre></div></section>
     <section id="providers" class="panel"><div class="card"><h2>Diagnostics</h2><pre id="prov-out">—</pre></div></section>
   </main>
-  <footer>Helena Frost risk-gates live. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a> · <a href="/predictions" style="color:#a78bfa">Predictions</a></footer>
+  <footer>Every order, including live, passes the in-process risk engine. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a> · <a href="/predictions" style="color:#a78bfa">Predictions</a></footer>
   <script>
     const $ = (id) => document.getElementById(id);
     const apiKey = localStorage.getItem('eti_api_key') || '';
