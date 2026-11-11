@@ -8,8 +8,8 @@ Goals
   nothing can authorize a LIVE order (live is hard-disabled here).
 * Tokens are random (256-bit), stored only as keyed HMAC hashes, expire (idle + absolute), rotate
   automatically, can be revoked, and every decision is audited without secrets.
-* An order is authenticated again at the execution boundary through a short-lived signed ticket
-  bound to the environment and the exact order payload.
+* An order is authorized again at the execution boundary through a short-lived signed ticket bound to
+  the environment and the exact order payload.
 * Operator access (X-API-Key) keeps working unchanged for scripts and operator-only actions.
 
 What this is not: user accounts. Anonymous dashboard visitors share the paper account, which holds
@@ -101,8 +101,8 @@ def load_policy() -> AuthPolicy:
 
 # --------------------------------------------------------------------------------------- keyring
 class AuthKeyring:
-    """HMAC keys. ``current`` signs; ``previous`` keys only verify, so a rotation of the secret
-    does not log everyone out at once."""
+    """HMAC keys. ``current`` signs; ``previous`` keys only verify, so rotating the secret does not
+    log everyone out at once."""
 
     def __init__(self, current: bytes, previous: Optional[list[bytes]] = None, source: str = "explicit"):
         if len(current) < 32:
@@ -206,7 +206,8 @@ class TokenService:
         self.db.commit()
         return raw, row
 
-    def _check_environment(self, environment: str) -> None:
+    @staticmethod
+    def _check_environment(environment: str) -> None:
         if environment == LIVE:
             raise AuthError("live_disabled", 403, "Live trading is disabled; no credential can authorize it")
         if environment not in ISSUABLE_ENVIRONMENTS:
@@ -251,6 +252,9 @@ class TokenService:
         return as_utc(row.absolute_expires_at) > now and as_utc(row.idle_expires_at) > now  # type: ignore[operator]
 
     def slide(self, row: ExecAuthToken) -> None:
+        """Idle-timeout slides on use (never for a superseded token, whose grace period is fixed)."""
+        if row.replaced_by:
+            return
         now = self.now()
         if row.last_used_at is not None and (now - as_utc(row.last_used_at)).total_seconds() < 30:  # type: ignore[operator]
             return
@@ -265,14 +269,17 @@ class TokenService:
         return (self.now() - base).total_seconds() >= self.policy.rotate_after  # type: ignore[operator]
 
     def seconds_left(self, row: ExecAuthToken) -> int:
-        now = self.now()
-        left = min(as_utc(row.idle_expires_at), as_utc(row.absolute_expires_at)) - now  # type: ignore[operator]
+        left = min(as_utc(row.idle_expires_at), as_utc(row.absolute_expires_at)) - self.now()  # type: ignore[operator]
         return max(0, int(left.total_seconds()))
+
+    def seconds_until_rotation(self, row: ExecAuthToken) -> int:
+        base = as_utc(row.rotated_at or row.created_at)
+        return max(0, int(self.policy.rotate_after - (self.now() - base).total_seconds()))  # type: ignore[operator]
 
     # -- rotate / revoke -----------------------------------------------------------------------
     def rotate(self, row: ExecAuthToken) -> tuple[str, ExecAuthToken]:
-        """Issue a successor and let the old token live for a short grace period so concurrent
-        in-flight requests do not fail. The successor inherits the old absolute lifetime."""
+        """Issue a successor; the old token lives only for a short grace period so concurrent in-flight
+        requests do not fail. The successor inherits the old absolute lifetime (no unlimited chains)."""
         if row.revoked_at is not None:
             raise AuthError("token_revoked")
         raw, new = self._create(row.environment, row.kind, row.subject)
@@ -280,8 +287,7 @@ class TokenService:
         now = self.now()
         row.replaced_by = new.token_id
         row.rotated_at = now
-        grace_end = now + timedelta(seconds=self.policy.grace)
-        row.idle_expires_at = min(as_utc(row.idle_expires_at), grace_end)  # type: ignore[type-var]
+        row.idle_expires_at = min(as_utc(row.idle_expires_at), now + timedelta(seconds=self.policy.grace))  # type: ignore[type-var]
         self.db.commit()
         return raw, new
 
@@ -298,8 +304,8 @@ class TokenService:
         q = self.db.query(ExecAuthToken).filter(ExecAuthToken.revoked_at.is_(None))
         if environment:
             q = q.filter(ExecAuthToken.environment == environment)
-        n = 0
         now = self.now()
+        n = 0
         for row in q.all():
             row.revoked_at = now
             row.revoked_reason = reason[:64]
@@ -311,35 +317,32 @@ class TokenService:
     def active_count(self, environment: Optional[str] = None) -> int:
         now = naive_utc(self.now())
         q = self.db.query(func.count(ExecAuthToken.id)).filter(
-            ExecAuthToken.revoked_at.is_(None), ExecAuthToken.absolute_expires_at > now, ExecAuthToken.idle_expires_at > now)
+            ExecAuthToken.revoked_at.is_(None), ExecAuthToken.absolute_expires_at > now,
+            ExecAuthToken.idle_expires_at > now)
         if environment:
             q = q.filter(ExecAuthToken.environment == environment)
         return int(q.scalar() or 0)
 
     def purge(self, retention_days: int = 7) -> int:
+        """Delete tokens that ended more than ``retention_days`` ago, and audit events older than 30 days."""
         cutoff = naive_utc(self.now() - timedelta(days=retention_days))
-        now = naive_utc(self.now())
         rows = self.db.query(ExecAuthToken).filter(
-            (ExecAuthToken.absolute_expires_at < now) | (ExecAuthToken.idle_expires_at < now) | ExecAuthToken.revoked_at.isnot(None)
+            (ExecAuthToken.absolute_expires_at < cutoff) | (ExecAuthToken.idle_expires_at < cutoff)
+            | (ExecAuthToken.revoked_at < cutoff)
         ).all()
-        n = 0
         for r in rows:
-            ended = min(x for x in (as_utc(r.absolute_expires_at), as_utc(r.idle_expires_at), as_utc(r.revoked_at) or as_utc(r.absolute_expires_at)))  # type: ignore[type-var]
-            if naive_utc(ended) < cutoff or r.revoked_at is not None and naive_utc(as_utc(r.revoked_at)) < cutoff:  # type: ignore[arg-type]
-                self.db.delete(r)
-                n += 1
-        # expired-but-recent rows stay for audit; capacity counting already ignores them
+            self.db.delete(r)
         self.db.query(ExecAuthEvent).filter(ExecAuthEvent.ts < naive_utc(self.now() - timedelta(days=30))).delete()
         self.db.commit()
-        return n
+        return len(rows)
 
 
 def audit(db: Session, event: str, *, environment: Optional[str], result: str, principal: Optional[str] = None,
           token_id: Optional[str] = None, reason: Optional[str] = None, path: Optional[str] = None) -> None:
-    """Best-effort audit record. Contains the public token id only."""
+    """Best-effort audit record. Contains the public token id only - never a secret, cookie or key."""
     try:
         db.add(ExecAuthEvent(event=event, environment=environment, token_id=token_id, principal=principal,
-                             result=result, reason=(reason or None) and reason[:64], path=(path or None) and path[:128]))
+                             result=result, reason=reason[:64] if reason else None, path=path[:128] if path else None))
         db.commit()
     except Exception:
         db.rollback()
@@ -389,7 +392,7 @@ def make_ticket(principal: Principal, environment: str, digest: str, ttl: int = 
     return f"{body}|{kr.sign(body)}"
 
 
-def verify_ticket(ticket: str, environment: str, digest: str, keyring: Optional[AuthKeyring] = None) -> Optional[str]:
+def verify_ticket(ticket: str, environment: str, digest: str, keyring: Optional[AuthKeyring] = None) -> str:
     """Return the token id ('-' for non-session principals) when the ticket is valid for exactly this
     environment and order payload; otherwise raise AuthError."""
     kr = keyring or load_keyring()
@@ -403,7 +406,7 @@ def verify_ticket(ticket: str, environment: str, digest: str, keyring: Optional[
         raise AuthError("wrong_environment", 403, "Ticket is for a different execution environment")
     if dig != digest:
         raise AuthError("ticket_payload_mismatch", 403)
-    if int(exp) < int(time.time()):
+    if not exp.isdigit() or int(exp) < int(time.time()):
         raise AuthError("ticket_expired", 403)
     return token_id
 
@@ -422,7 +425,7 @@ def execution_gate(principal: Principal, environment: str, payload: dict[str, An
         token_id = verify_ticket(make_ticket(principal, environment, digest), environment, digest)
     except AuthError as e:
         raise e.http()
-    if principal.kind == "session" and token_id and token_id != "-":
+    if principal.kind == "session" and token_id != "-":
         db = SessionLocal()
         try:
             if not TokenService(db).is_active(token_id):
@@ -439,9 +442,8 @@ def is_protected_env() -> bool:
 
 
 def enforcement_active() -> bool:
-    """Anonymous/open access exists only for local development without an API_KEY (unchanged behaviour)."""
-    s = get_settings()
-    return bool((s.api_key or "").strip()) or is_protected_env()
+    """Open access exists only for local development without an API_KEY (unchanged behaviour)."""
+    return bool((get_settings().api_key or "").strip()) or is_protected_env()
 
 
 def _secure_cookie(request: Request) -> bool:
@@ -481,7 +483,7 @@ def operator_ok(request: Request) -> Optional[bool]:
     return hmac.compare_digest(supplied.encode(), expected.encode())
 
 
-def _client_key(request: Request) -> str:
+def client_key(request: Request) -> str:
     fwd = (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
     return fwd or (request.client.host if request.client else "unknown")
 
@@ -526,13 +528,8 @@ async def authorize(request: Request, response: Response, environment: str) -> P
                 audit(db, "rotate", environment=environment, result="ok", principal="session", token_id=new_row.token_id)
                 return Principal("session", environment, new_row.token_id)
             return Principal("session", environment, row.token_id)
-    finally:
-        db.close()
-
-    if not enforcement_active():
-        return Principal("dev_open", environment)
-    db = SessionLocal()
-    try:
+        if not enforcement_active():
+            return Principal("dev_open", environment)
         audit(db, "authorize", environment=environment, result="denied", reason="no_credentials", path=path)
     finally:
         db.close()
@@ -541,18 +538,20 @@ async def authorize(request: Request, response: Response, environment: str) -> P
 
 
 # ------------------------------------------------------------------------------ log redaction
-_REDACT_RE = re.compile(r"(eti_(?:ip|xt|lv)_[0-9a-f]{16}\.)[A-Za-z0-9_-]{8,}|(?i:(x-api-key|authorization|cookie|set-cookie)\s*[:=]\s*)[^\s,;]+")
+_TOKEN_RE = re.compile(r"(eti_(?:ip|xt|lv)_[0-9a-f]{16}\.)[A-Za-z0-9_-]{8,}")
+_HEADER_RE = re.compile(r"(?i)\b(x-api-key|authorization|set-cookie|cookie)(\s*[:=]\s*)([^\s,;]+)")
 
 
 def redact(text: str) -> str:
-    return _REDACT_RE.sub(lambda m: (m.group(1) + "[REDACTED]") if m.group(1) else (m.group(0).split(m.group(0)[-1])[0][:0] + "[REDACTED]"), text)
+    text = _TOKEN_RE.sub(r"\1[REDACTED]", text)
+    return _HEADER_RE.sub(r"\1\2[REDACTED]", text)
 
 
 _redaction_installed = False
 
 
 def install_log_redaction() -> None:
-    """Wrap the log-record factory so no token, API key or cookie value can reach any handler."""
+    """Wrap the log-record factory so no token, API key or cookie value reaches any log handler."""
     global _redaction_installed
     if _redaction_installed:
         return
