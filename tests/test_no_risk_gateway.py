@@ -45,6 +45,6 @@ def test_settings_have_no_gateway_fields():
 def test_no_route_exposes_a_gateway():
     from app.main import app
 
-    paths = [getattr(r, "path", "") for r in app.routes]
+    paths = list(app.openapi()["paths"])  # include_router may nest routes, so read the generated schema
     assert not [p for p in paths if "gateway" in p.lower()]
     assert "/api/pretrade/check" in paths  # the dry-run check that replaced the old preflight endpoint
