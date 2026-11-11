@@ -93,7 +93,7 @@ export function evaluateGates(g: GateInput): GateResult[] {
   if (g.score === null) add("score_floor", "Opportunity score meets the minimum", "fail", "No opportunity score could be computed");
   else pf("score_floor", "Opportunity score meets the minimum", g.score >= c.minScoreToSignal, `Score ${g.score} (minimum ${c.minScoreToSignal})`, `Score ${g.score} is below the minimum ${c.minScoreToSignal}`);
 
-  if (!g.risk) add("account_risk", "Account-level risk limits", "not_evaluated", "Equity, exposure, daily-loss and drawdown limits are not evaluated by this analytical engine. Any order must still pass the execution risk preflight.");
+  if (!g.risk) add("account_risk", "Account-level risk limits", "not_evaluated", "Equity, exposure, daily-loss and drawdown limits are not evaluated by this analytical engine. Any order must still pass the in-process execution safeguards.");
   else pf("account_risk", "Account-level risk limits", g.risk.withinLimits, "Supplied account risk context is within limits", g.risk.reasons.join("; ") || "Account-level risk limits not satisfied");
   return out;
 }

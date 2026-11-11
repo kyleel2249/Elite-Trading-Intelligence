@@ -27,7 +27,7 @@ const depthAround = (p: number): Depth => ({
   asks: Array.from({ length: 30 }, (_, i) => [p * (1 + 0.0004 + i * 0.0004), 50] as [number, number]),
 });
 const market = (cs: Kline[]): MarketInput => ({ symbol: "BTCUSDT", interval: "1h", candles: cs, depth: depthAround(cs[cs.length - 1][4]), provider: "test", fetchedAt: NOW, crossCheck: null, benchmark: null, failures: {} });
-const integrity: Integrity = { killSwitch: false, liveTradingEnabled: false, liveCapsConfigured: false, riskGateConfigured: true, executionTokenConfigured: true, auditLogConfigured: true };
+const integrity: Integrity = { killSwitch: false, liveFlagSet: false, executionTokenConfigured: true, auditLogConfigured: true };
 const account = { equityUsd: 100_000, dailyPnlPct: 0, drawdownPct: 1, openRiskPct: 0 };
 
 test("roster has the 12 specified agents in order", () => {
@@ -108,9 +108,9 @@ test("too few participating agents yields no consensus", () => {
 
 test("security analyst flags provider disagreement and unsafe live configuration", () => {
   const cs = candles(300, 0.002, 0.004), m = market(cs), last = cs[cs.length - 1][4];
-  const s = securityAnalyst({ market: { ...m, crossCheck: { provider: "other", price: last * 1.03 } }, supplied: {}, now: NOW, integrity: { ...integrity, liveTradingEnabled: true } });
+  const s = securityAnalyst({ market: { ...m, crossCheck: { provider: "other", price: last * 1.03 } }, supplied: {}, now: NOW, integrity: { ...integrity, liveFlagSet: true } });
   assert.equal(s.severity, "critical");
-  assert.ok(s.flags.some((f) => f.id === "provider_price_disagreement") && s.flags.some((f) => f.id === "live_without_caps"));
+  assert.ok(s.flags.some((f) => f.id === "provider_price_disagreement") && s.flags.some((f) => f.id === "live_flag_ignored"));
 });
 
 test("performance auditor replays outcomes stop-first", () => {
@@ -167,7 +167,7 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
     loadProviders: async () => ({ supplied: { news: { items: [fresh("Bitcoin ETF inflows surge"), fresh("Bitcoin rally continues")] } }, status }),
     loadAccount: async () => ({}), loadFilters: async () => null,
   });
-  const env: any = { ETI_EXECUTION_TOKEN: "x".repeat(32), ETI_RISK_GATE_URL: "https://example.invalid", ETI_RISK_GATE_TOKEN: "t" };
+  const env: any = { ETI_EXECUTION_TOKEN: "x".repeat(32) };
   const realFetch = globalThis.fetch; globalThis.fetch = (async () => { brokerCalls++; return new Response("{}"); }) as any;
   try {
     assert.equal(await (await app.fetch(new Request("https://e.test/other"), env)).text(), "base"); assert.equal(baseCalls, 1);
@@ -182,6 +182,6 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
     const body = JSON.stringify({ symbol: "BTCUSDT", interval: "1h", execution: { broker: "binance", clientOrderId: "test-order-0001", riskConfirmed: true } });
     const res = await app.fetch(new Request("https://e.test/api/agents/execute", { method: "POST", headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN }, body }), env);
     const j: any = await res.json(); assert.equal(res.status, 409); assert.equal(j.error, "blocked_by_agents");
-    assert.equal(brokerCalls, 0, "no broker/risk-gate call may occur when blocked (no account state supplied)");
+    assert.equal(brokerCalls, 0, "no broker call may occur when blocked (no account state supplied)");
   } finally { globalThis.fetch = realFetch; }
 });

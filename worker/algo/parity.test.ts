@@ -23,7 +23,7 @@ async function paperR(dir: 1 | -1, bars: Record<number, Bar>): Promise<number> {
   const plan: any = { symbol: "TESTUSDT", decision: dir > 0 ? "BUY" : "SELL", generatedAt: new Date(now).toISOString(), expiresAt: new Date(now + 10 * H).toISOString(), confidence: 70, reasons: [],
     entryZone: dir > 0 ? [99.75, 100] : [100, 100.25], stopLoss: entry - dir * dist, takeProfits: ["TP1", "TP2", "TP3"].map((label, i) => ({ label, price: px(R_MULTIPLES[i]), rewardRisk: R_MULTIPLES[i] })),
     fusion: { direction: dir, acceptedEngine: "swift", swift: { regime: "t" }, gainz: { regime: "t" } } };
-  const eng = await PaperEngine.create(new MemoryPaperStore(), async () => ({ approved: true, reasons: [] }), { feeRate: 0, slippageBps: 0, riskFraction: 0.01 }, now);
+  const eng = await PaperEngine.create(new MemoryPaperStore(), { feeRate: 0, slippageBps: 0, riskFraction: 0.01 }, now);
   const ev = await eng.open(plan, entry, now);
   assert.equal(ev.type, "OPENED", JSON.stringify(ev));
   const list = Object.keys(bars).map(Number).sort((a, b) => a - b).map(i => ({ ts: T0 + i * H + H / 2, high: bars[i][1], low: bars[i][2], close: bars[i][3] }));

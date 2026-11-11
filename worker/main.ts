@@ -7,9 +7,10 @@
  *   2. futures agents + gateway + monitor (/api/agents/futures/*, /api/futures/*, /agents/futures)
  *   3. multi-agent system (/api/agents/*, /agents)
  *   4. the existing application (worker/index.ts), left unchanged, which handles every other route.
- * Scheduled events: the every-minute cron runs the futures protective-stop monitor; any other cron is forwarded
- * unchanged to the existing application's scheduled handler (if it has one). Other cron ticks also run the daily-report
- * cycle, which generates and stores at most one report per UTC weekday (see docs/DAILY_REPORT.md).
+ * Scheduled events: the every-minute cron runs the futures protective-stop monitor; any other cron runs the simulated
+ * paper-trading cycle (a no-op unless ETI_PAPER_SYMBOLS is set; new entries also need ETI_PAPER_AUTOEXECUTE=true and no kill switch),
+ * the Global Alpha loop, execution-session maintenance and the daily-report cycle (at most one report per UTC weekday, see
+ * docs/DAILY_REPORT.md), then is forwarded unchanged to the existing application's scheduled handler.
  */
 import base from "./index.ts";
 import { withAlgo } from "./algo/route.ts";

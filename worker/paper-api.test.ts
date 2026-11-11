@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handlePaper, makeGatePreflight, type PaperEnv } from "./algo/paper-api.ts";
+import { handlePaper, type PaperEnv } from "./algo/paper-api.ts";
 import worker from "./index.ts";
 import { series } from "./algo/fixtures.ts";
 
@@ -10,17 +10,11 @@ function fakeKV() {
   const m = new Map<string, string>();
   return { m, get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); }, list: async (o: { prefix: string; limit?: number }) => ({ keys: [...m.keys()].filter(k => k.startsWith(o.prefix)).sort().slice(0, o.limit ?? 1000).map(name => ({ name })) }) };
 }
-interface World { clock: number; minuteOverride: ((interval: string) => unknown[][] | null) | null; gate: "approve" | "reject" | "down" | "http500"; gateCalls: { headers: Record<string, string>; body: any }[]; depthOk: boolean }
-const world: World = { clock: NOW, minuteOverride: null, gate: "approve", gateCalls: [], depthOk: true };
+interface World { clock: number; minuteOverride: ((interval: string) => unknown[][] | null) | null;externalCalls: string[]; depthOk: boolean }
+const world: World = { clock: NOW, minuteOverride: null, externalCalls: [], depthOk: true };
 const fetchImpl = (async (input: any, init?: any) => {
   const u = new URL(String(input));
-  if (u.host === "gate.test") {
-    world.gateCalls.push({ headers: Object.fromEntries(new Headers(init?.headers).entries()), body: JSON.parse(init.body) });
-    if (world.gate === "down") throw new TypeError("connect refused");
-    if (world.gate === "http500") return new Response("boom", { status: 500 });
-    return new Response(JSON.stringify(world.gate === "approve" ? { approved: true, decision: "APPROVED", reasons: ["All risk checks passed"] } : { approved: false, decision: "REJECTED", reasons: ["Daily loss limit hit"] }), { status: 200 });
-  }
-  if (u.host !== "data-api.binance.vision") return new Response("down", { status: 500 });
+  if (u.host !== "data-api.binance.vision") { world.externalCalls.push(u.host); return new Response("down", { status: 500 }); }
   if (u.pathname.includes("klines")) {
     const iv = u.searchParams.get("interval") || "1h", ov = world.minuteOverride?.(iv);
     if (ov) return new Response(JSON.stringify(ov), { status: 200 });
@@ -31,10 +25,10 @@ const fetchImpl = (async (input: any, init?: any) => {
   return new Response("down", { status: 500 });
 }) as typeof fetch;
 const realFetch = globalThis.fetch;
-test.beforeEach(() => { globalThis.fetch = fetchImpl; world.clock = NOW; world.minuteOverride = null; world.gate = "approve"; world.gateCalls = []; world.depthOk = true; });
+test.beforeEach(() => { globalThis.fetch = fetchImpl; world.clock = NOW; world.minuteOverride = null; world.externalCalls = []; world.depthOk = true; });
 test.afterEach(() => { globalThis.fetch = realFetch; });
 
-const mkEnv = (o: Partial<PaperEnv> = {}): PaperEnv & { kv: ReturnType<typeof fakeKV> } => { const kv = fakeKV(); return { ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_LOG: kv as any, ETI_RISK_GATE_URL: "https://gate.test/api/risk-gateway/preflight", ETI_RISK_GATE_TOKEN: "gate-secret", ETI_ROUND_TRIP_COST_BPS: "0", ...o, kv } as any; };
+const mkEnv = (o: Partial<PaperEnv> = {}): PaperEnv & { kv: ReturnType<typeof fakeKV> } => { const kv = fakeKV(); return { ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_LOG: kv as any,  ETI_ROUND_TRIP_COST_BPS: "0", ...o, kv } as any; };
 const call = (env: PaperEnv, path: string, method = "GET", body?: unknown, token: string | null = TOKEN) =>
   handlePaper(new Request("https://eti.test" + path, { method, headers: { ...(token ? { authorization: "Bearer " + token } : {}), "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }), env, { now: () => world.clock, fetchImpl });
 const json = async (r: Response) => r.json() as Promise<any>;
@@ -55,39 +49,34 @@ test("state storage is mandatory: without the KV binding paper trading is unavai
 });
 test("status reports simulated mode, no live capability and no withdrawal permission", async () => {
   const b = await json(await call(mkEnv(), "/api/paper/status"));
-  assert.equal(b.mode, "paper"); assert.equal(b.simulated, true); assert.equal(b.liveTradingAvailable, false); assert.equal(b.withdrawalPermissions, false); assert.equal(b.riskGateConfigured, true); assert.equal(b.equity, 10000);
+  assert.equal(b.mode, "paper"); assert.equal(b.simulated, true); assert.equal(b.liveTradingAvailable, false); assert.equal(b.withdrawalPermissions, false); assert.deepEqual(b.safeguards, { engine: "in_process", externalRiskGateway: false }); assert.equal(b.equity, 10000);
 });
 test("evaluate without execute analyses only and changes no state", async () => {
   const env = mkEnv(), b = await json(await call(env, "/api/paper/evaluate", "POST", { symbol: "BTCUSDT", strategy: "intraday" }));
-  assert.equal(b.executed, false); assert.equal(b.event, null); assert.equal(b.plan.decision, "BUY"); assert.equal(b.submitsOrder, false); assert.equal(world.gateCalls.length, 0);
+  assert.equal(b.executed, false); assert.equal(b.event, null); assert.equal(b.plan.decision, "BUY"); assert.equal(b.submitsOrder, false); assert.deepEqual(world.externalCalls, []);
   assert.equal((await json(await call(env, "/api/paper/status"))).openPositions.length, 0);
 });
-test("execute goes through the Python gateway contract (limit order, x-api-key) and opens a persisted paper position", async () => {
+test("execute runs the in-process safeguards (no external service) and opens a persisted paper position", async () => {
   const env = mkEnv(), b = await openOnce(env);
   assert.equal(b.executed, true, JSON.stringify(b.event)); assert.equal(b.event.type, "OPENED");
-  assert.equal(world.gateCalls.length, 1); const g = world.gateCalls[0];
-  assert.equal(g.headers["x-api-key"], "gate-secret"); assert.deepEqual([g.body.provider, g.body.environment, g.body.order_type, g.body.side, g.body.symbol], ["binance", "paper", "limit", "buy", "BTCUSDT"]);
-  assert.ok(g.body.quantity > 0 && g.body.limit_price > 0);
+  assert.deepEqual(world.externalCalls, [], "only public market data was contacted: no gateway, no broker");
   const st = await json(await call(env, "/api/paper/status")); assert.equal(st.openPositions.length, 1); assert.ok(st.equity < 10000, "entry fee charged");
-  const audit = await json(await call(env, "/api/paper/audit")); assert.ok(audit.entries.some((e: any) => e.type === "OPENED" && e.detail.reasoning.length > 0));
+  const audit = await json(await call(env, "/api/paper/audit")); assert.ok(audit.entries.some((e: any) => e.type === "OPENED" && e.detail.reasoning.length > 0 && e.detail.safeguards === "in_process"));
 });
 test("a second execute while a position is open cannot stack or average down", async () => {
   const env = mkEnv(); await openOnce(env); world.clock += 1000;
-  const b = await openOnce(env); assert.equal(b.executed, false); assert.match(b.event.reasons[0], /already open/); assert.equal(world.gateCalls.length, 1, "gateway not even asked");
+  const b = await openOnce(env); assert.equal(b.executed, false); assert.match(b.event.reasons[0], /already open/); assert.equal((await json(await call(env, "/api/paper/audit"))).entries.filter((e: any) => e.type === "OPENED").length, 1, "only one position was ever opened");
   assert.equal((await json(await call(env, "/api/paper/status"))).openPositions.length, 1);
 });
-test("fail closed: gateway rejecting, erroring, unreachable or unconfigured blocks the order", async () => {
-  for (const [gate, re] of [["reject", /Risk gateway rejected/], ["http500", /rejected|HTTP 500/], ["down", /unreachable/]] as const) {
-    world.gate = gate; const env = mkEnv(), b = await openOnce(env);
-    assert.equal(b.executed, false, gate); assert.equal(b.event.type, "REJECTED"); assert.match(b.event.reasons.join(" "), re, gate);
-    assert.equal((await json(await call(env, "/api/paper/status"))).openPositions.length, 0);
-  }
-  const b = await openOnce(mkEnv({ ETI_RISK_GATE_URL: undefined })); assert.equal(b.executed, false); assert.match(b.event.reasons[0], /not configured/);
-  const gw = makeGatePreflight({ ETI_RISK_GATE_URL: "https://gate.test/x", ETI_RISK_GATE_TOKEN: "k" }, (async () => new Response(JSON.stringify({ approved: "true" }), { status: 200 })) as any);
-  assert.equal((await gw!({ mode: "paper", symbol: "BTCUSDT", side: "buy", quantity: 1, orderType: "limit", limitPrice: 1, clientOrderId: "x", source: { actorType: "strategy", actorId: "a", signalGeneratedAt: "t" } })).approved, false, "only boolean true approves");
+test("a quantity cap from ETI_MAX_ORDER_QUANTITY refuses an oversized simulated order and opens nothing", async () => {
+  const env = mkEnv({ ETI_MAX_ORDER_QUANTITY: "0.000001" }), b = await openOnce(env);
+  assert.equal(b.executed, false); assert.equal(b.event.type, "REJECTED"); assert.match(b.event.reasons[0], /maximum order quantity/);
+  assert.equal((await json(await call(env, "/api/paper/status"))).openPositions.length, 0);
+  assert.ok((await json(await call(env, "/api/paper/audit"))).entries.some((e: any) => e.type === "REJECTED"), "the refusal is audited");
+  assert.equal((await openOnce(mkEnv({ ETI_MAX_ORDER_QUANTITY: "not-a-number" }))).executed, true, "an invalid cap is ignored rather than blocking everything");
 });
 test("kill switches: the env switch returns 423 and the API switch blocks new orders", async () => {
-  const b = await call(mkEnv({ ETI_KILL_SWITCH: "true" }), "/api/paper/evaluate", "POST", { symbol: "BTCUSDT", execute: true }); assert.equal(b.status, 423); assert.equal(world.gateCalls.length, 0);
+  const b = await call(mkEnv({ ETI_KILL_SWITCH: "true" }), "/api/paper/evaluate", "POST", { symbol: "BTCUSDT", execute: true }); assert.equal(b.status, 423); assert.deepEqual(world.externalCalls, []);
   const env = mkEnv(); assert.equal((await json(await call(env, "/api/paper/kill", "POST", { on: true }))).killSwitch, true);
   const r = await openOnce(env); assert.equal(r.executed, false); assert.match(r.event.reasons[0], /Kill switch/);
   await call(env, "/api/paper/kill", "POST", { on: false }); assert.equal((await openOnce(env)).executed, true);

@@ -1,6 +1,7 @@
 // Paper execution engine. Simulated fills against supplied live prices; it never contacts a broker and has no
-// withdrawal, transfer or funding concept. Every order must pass an injected risk-gate preflight, and a missing,
-// failing or erroring preflight rejects the order (fail closed). It cannot grant itself permissions.
+// withdrawal, transfer or funding concept. Every order passes the in-process safeguards below before it opens
+// (kill switch, idempotency, valid plan and price, position/loss limits, quantity cap, simulated free-cash check).
+// There is no external risk service. It cannot grant itself permissions.
 import { manageStop, type TradeLevels } from "./levels.ts";
 import type { OmnisignalResult } from "./omnisignal.ts";
 import type { ClosedTrade } from "./performance.ts";
@@ -11,11 +12,10 @@ export interface PaperConfig {
   maxEntryDeviationBps: number; maxDailyLossPct: number; maxConsecutiveLosses: number; reentryCooldownMs: number;
   /** How long new entries stay paused after the loss streak limit is reached. A further loss re-triggers it. */
   lossPauseMs: number;
+  /** Optional hard cap on a single order's quantity (base units). null = no cap beyond the notional limits. */
+  maxOrderQuantity: number | null;
 }
-export const DEFAULT_PAPER_CONFIG: PaperConfig = { startingEquity: 10_000, feeRate: 0.001, slippageBps: 5, riskFraction: 0.005, maxNotionalFraction: 1, maxOpenPositions: 3, maxEntryDeviationBps: 15, maxDailyLossPct: 3, maxConsecutiveLosses: 4, reentryCooldownMs: 3_600_000, lossPauseMs: 86_400_000 };
-
-export interface PreflightRequest { mode: "paper"; symbol: string; side: "buy" | "sell"; quantity: number; orderType: "limit"; limitPrice: number; clientOrderId: string; source: { actorType: "strategy"; actorId: string; signalGeneratedAt: string } }
-export type Preflight = (req: PreflightRequest) => Promise<{ approved: boolean; reasons: string[] }>;
+export const DEFAULT_PAPER_CONFIG: PaperConfig = { startingEquity: 10_000, feeRate: 0.001, slippageBps: 5, riskFraction: 0.005, maxNotionalFraction: 1, maxOpenPositions: 3, maxEntryDeviationBps: 15, maxDailyLossPct: 3, maxConsecutiveLosses: 4, reentryCooldownMs: 3_600_000, lossPauseMs: 86_400_000, maxOrderQuantity: null };
 
 export interface PaperPosition {
   clientOrderId: string; symbol: string; direction: 1 | -1; qty: number; remainingQty: number; entry: number; stop: number; initialStop: number;
@@ -46,12 +46,12 @@ export type PaperEvent = { type: "REJECTED" | "OPENED" | "DUPLICATE" | "TP1" | "
 const dayOf = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 
 export class PaperEngine {
-  readonly cfg: PaperConfig; private store: PaperStore; private preflight: Preflight | null; state: PaperState;
-  private constructor(cfg: PaperConfig, store: PaperStore, preflight: Preflight | null, state: PaperState) { this.cfg = cfg; this.store = store; this.preflight = preflight; this.state = state; }
-  static async create(store: PaperStore, preflight: Preflight | null, cfg: Partial<PaperConfig> = {}, now = Date.now()): Promise<PaperEngine> {
+  readonly cfg: PaperConfig; private store: PaperStore; state: PaperState;
+  private constructor(cfg: PaperConfig, store: PaperStore, state: PaperState) { this.cfg = cfg; this.store = store; this.state = state; }
+  static async create(store: PaperStore, cfg: Partial<PaperConfig> = {}, now = Date.now()): Promise<PaperEngine> {
     const c = { ...DEFAULT_PAPER_CONFIG, ...cfg };
     const restored = await store.load();
-    return new PaperEngine(c, store, preflight, restored ?? { equity: c.startingEquity, positions: [], closed: [], orderIds: [], lastStopOut: {}, killSwitch: false, dayKey: dayOf(now), dayStartEquity: c.startingEquity, version: 1 });
+    return new PaperEngine(c, store, restored ?? { equity: c.startingEquity, positions: [], closed: [], orderIds: [], lastStopOut: {}, killSwitch: false, dayKey: dayOf(now), dayStartEquity: c.startingEquity, version: 1 });
   }
   private pending: Promise<void>[] = [];
   private queue(e: AuditEntry) { this.pending.push(this.store.audit(e)); }
@@ -89,19 +89,20 @@ export class PaperEngine {
     const qty = Math.min((s.equity * this.cfg.riskFraction) / dist, (s.equity * this.cfg.maxNotionalFraction) / fill);
     if (!(qty > 0)) return this.reject(plan, ["Position size computes to zero"], now, id);
 
-    // Mandatory risk-gate preflight. Fail closed on absence, rejection or any error.
-    if (!this.preflight) return this.reject(plan, ["Risk gateway preflight is not configured"], now, id);
-    let pf: Awaited<ReturnType<Preflight>>;
-    try { pf = await this.preflight({ mode: "paper", symbol: plan.symbol, side: dir > 0 ? "buy" : "sell", quantity: qty, orderType: "limit", limitPrice: fill, clientOrderId: id, source: { actorType: "strategy", actorId: `omnisignal:${plan.fusion.acceptedEngine}`, signalGeneratedAt: plan.generatedAt } }); }
-    catch (e) { return this.reject(plan, [`Risk gateway unreachable or errored (${e instanceof Error ? e.message : "unknown"}): order blocked`], now, id); }
-    if (!pf || pf.approved !== true) return this.reject(plan, ["Risk gateway rejected the order", ...(pf?.reasons ?? [])], now, id);
+    // In-process safeguards (no external service): finite values, quantity cap and a simulated free-cash check.
+    // Free cash = equity minus the notional already committed to open positions, so exposure can never exceed the simulated balance.
+    if (![qty, fill, dist].every(Number.isFinite)) return this.reject(plan, ["Order size or price is not a finite number"], now, id);
+    if (this.cfg.maxOrderQuantity !== null && qty > this.cfg.maxOrderQuantity) return this.reject(plan, [`Quantity ${qty} exceeds the maximum order quantity ${this.cfg.maxOrderQuantity}`], now, id);
+    const committed = s.positions.reduce((a, p) => a + p.remainingQty * p.entry, 0), freeCash = s.equity - committed, notional = qty * fill;
+    // Fees are paid out of equity after the fill (not held as collateral), so they are not part of the notional compared here.
+    if (notional > freeCash * (1 + 1e-9)) return this.reject(plan, [`Insufficient simulated balance: this order needs ${notional.toFixed(2)} but only ${Math.max(0, freeCash).toFixed(2)} is free (equity ${s.equity.toFixed(2)}, committed ${committed.toFixed(2)})`], now, id);
 
     const fee = qty * fill * this.cfg.feeRate, fractions = [0.4, 0.3, 0.3];
     const pos: PaperPosition = { clientOrderId: id, symbol: plan.symbol, direction: dir, qty, remainingQty: qty, entry: fill, stop: plan.stopLoss, initialStop: plan.stopLoss, hitTargets: 0, highWater: fill, trailDistance: dist * 1.7,
       targets: plan.takeProfits.map((t, i) => ({ label: t.label, price: t.price, fraction: fractions[i], hit: false })), realizedPnl: -fee, fees: fee, slippage: Math.abs(fill - marketPrice) * qty, openedAt: now,
       engine: plan.fusion.acceptedEngine === "both" ? "combined" : (plan.fusion.acceptedEngine ?? "combined"), confidence: plan.confidence, regime: plan.fusion.swift.regime !== "unknown" ? plan.fusion.swift.regime : plan.fusion.gainz.regime, riskAmount: dist * qty };
     s.positions.push(pos); s.orderIds.push(id); s.equity -= fee;
-    await this.persist({ ts: now, type: "OPENED", symbol: plan.symbol, clientOrderId: id, detail: { fill, qty, stop: plan.stopLoss, targets: plan.takeProfits, fee, riskAmount: pos.riskAmount, reasoning: plan.reasons.slice(0, 12), preflight: pf.reasons } });
+    await this.persist({ ts: now, type: "OPENED", symbol: plan.symbol, clientOrderId: id, detail: { fill, qty, stop: plan.stopLoss, targets: plan.takeProfits, fee, riskAmount: pos.riskAmount, reasoning: plan.reasons.slice(0, 12), safeguards: "in_process", freeCashBefore: freeCash } });
     return { type: "OPENED", symbol: plan.symbol, clientOrderId: id, price: fill };
   }
 

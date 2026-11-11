@@ -79,7 +79,7 @@ test("plans are blocked by risk veto, disabled flag, kill switch, missing state 
   assert.equal(planFutures({ ...base, marketFresh: false, analysis: fake("short"), state: st() }).eligible, false);
 });
 
-function harness(opts: { positionAmt?: string; liq?: string } = {}) {
+function harness(opts: { positionAmt?: string; liq?: string; orderStatus?: number } = {}) {
   const calls: string[] = [], kv = new Map<string, string>();
   const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s });
   const fetchStub = (async (input: any, init?: any) => {
@@ -88,25 +88,25 @@ function harness(opts: { positionAmt?: string; liq?: string } = {}) {
     if (u.includes("/fapi/v2/positionRisk")) return json([{ symbol: "BTCUSDT", positionAmt: opts.positionAmt ?? "0", entryPrice: "100", markPrice: "100", liquidationPrice: opts.liq ?? "0", leverage: "3", marginType: "isolated", unRealizedProfit: "0" }]);
     if (u.includes("/fapi/v1/positionSide/dual")) return json({ dualSidePosition: false });
     if (u.includes("/fapi/v1/premiumIndex")) return json({ markPrice: "100", lastFundingRate: "0.0001" });
-    if (u.includes("/fapi/v1/order")) return json({ orderId: 123, status: "NEW" });
+    if (u.includes("example.invalid")) throw new Error("an external gateway host must never be contacted");
+    if (u.includes("/fapi/v1/order")) return opts.orderStatus ? json({ code: -1, msg: "x" }, opts.orderStatus) : json({ orderId: 123, status: "NEW" });
     return json({}, 404);
   }) as any;
-  const env: any = { ETI_EXECUTION_TOKEN: "x".repeat(32), ETI_FUTURES_ENABLED: "true", ETI_FUTURES_MAX_NOTIONAL_USD: "1000", ETI_FUTURES_MAX_LEVERAGE: "3", BINANCE_FUTURES_API_KEY: "k", BINANCE_FUTURES_SECRET_KEY: "s", ETI_EXECUTION_LOG: { put: async (k: string, v: string) => { kv.set(k, v); }, get: async (k: string) => kv.get(k) ?? null, delete: async (k: string) => { kv.delete(k); }, list: async () => ({ keys: [...kv.keys()].map((name) => ({ name })) }) } };
+  const env: any = { ETI_EXECUTION_TOKEN: "x".repeat(32), ETI_FUTURES_ENABLED: "true", ETI_FUTURES_MAX_NOTIONAL_USD: "1000", ETI_FUTURES_MAX_LEVERAGE: "3", BINANCE_FUTURES_API_KEY: "k", BINANCE_FUTURES_SECRET_KEY: "s", ETI_EXECUTION_LOG: { put: async (k: string, v: string) => { kv.set(k, v); }, get: async (k: string) => kv.get(k) ?? null, list: async () => ({ keys: [...kv.keys()].map((name) => ({ name })) }) } };
   const order = (o: any = {}) => new Request("https://e.test/api/futures/orders", { method: "POST", headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN }, body: JSON.stringify({ symbol: "BTCUSDT", side: "sell", quantity: 1, limitPrice: 100, leverage: 3, stopPrice: 102, reduceOnly: false, clientOrderId: "fut-test-0001", riskConfirmed: true, executionSource: { actorType: "manual_user", actorId: "u1", sourceName: "test" }, ...o }) });
   const run = async <T>(fn: () => Promise<T>) => { const real = globalThis.fetch; globalThis.fetch = fetchStub; try { return await fn(); } finally { globalThis.fetch = real; } };
-  const orderPosts = () => calls.filter((c) => c === "POST https://testnet.binancefuture.com/fapi/v1/order").length;
-  return { calls, kv, env, order, run, orderPosts };
+  return { calls, kv, env, order, run };
 }
 
-test("gateway: testnet-only short entry succeeds without any risk gateway, is audited, and never touches a live host", async () => {
+test("gateway: testnet-only short entry succeeds, is audited, and never touches a live host", async () => {
   const h = harness(), res = await h.run(() => handleFutures(h.order(), h.env)), j: any = await res.json();
-  assert.equal(res.status, 201, JSON.stringify(j)); assert.equal(j.intent, "SHORT"); assert.match(j.protectiveStop, /Not placed/);
-  assert.equal(h.orderPosts(), 1);
+  assert.equal(res.status, 201, JSON.stringify(j)); assert.equal(j.intent, "SHORT"); assert.match(j.protectiveStop, /NOT placed/);
+  assert.ok(h.calls.some((c) => c === "POST https://testnet.binancefuture.com/fapi/v1/order"));
   assert.ok(h.calls.every((c) => c.includes("testnet.binancefuture.com")), h.calls.join("\n"));
-  const key = [...h.kv.keys()].find((k) => k.startsWith("order:"))!, rec = JSON.parse(h.kv.get(key)!); assert.equal(rec.mode, "futures_testnet"); assert.equal(rec.intent, "SHORT");
+  const rec = JSON.parse(h.kv.get([...h.kv.keys()].find((k) => k.startsWith("order:"))!)!); assert.equal(rec.mode, "futures_testnet"); assert.equal(rec.intent, "SHORT"); assert.equal(rec.outcome, "executed"); assert.equal(rec.brokerStatus, "NEW"); assert.equal(j.brokerOrderId, 123);
 });
 
-test("gateway: reduce-only COVER of a short is accepted; intent mismatches are rejected", async () => {
+test("gateway: reduce-only COVER of a short is accepted; a plain buy-to-cover is not required but intent mismatches are rejected", async () => {
   const h = harness({ positionAmt: "-1" });
   const ok = await h.run(() => handleFutures(h.order({ side: "buy", limitPrice: 100.1, reduceOnly: true, stopPrice: undefined, intent: "COVER", clientOrderId: "fut-test-0002" }), h.env));
   assert.equal(ok.status, 201); assert.equal(((await ok.json()) as any).intent, "COVER");
@@ -114,29 +114,40 @@ test("gateway: reduce-only COVER of a short is accepted; intent mismatches are r
   assert.equal(bad.status, 400); assert.equal(((await bad.json()) as any).error, "intent_mismatch");
 });
 
-test("gateway: a duplicate clientOrderId never reaches the exchange twice", async () => {
-  const h = harness(), a = await h.run(() => handleFutures(h.order(), h.env)), b = await h.run(() => handleFutures(h.order(), h.env));
-  assert.equal(a.status, 201); assert.equal(b.status, 409); assert.equal(((await b.json()) as any).error, "duplicate_order"); assert.equal(h.orderPosts(), 1);
-});
-
-test("gateway: hard limits, auth, flag and kill switch stop the order before submission", async () => {
+test("gateway: hard limits, auth, flag and kill switch all stop the order before submission", async () => {
   let h = harness({ positionAmt: "2" });
-  const r = await h.run(() => handleFutures(h.order(), h.env)); assert.equal(r.status, 403); assert.ok((((await r.json()) as any).reasons as string[]).includes("opposing_order_must_be_reduce_only")); assert.equal(h.orderPosts(), 0);
+  let r = await h.run(() => handleFutures(h.order(), h.env)); assert.equal(r.status, 403); assert.ok((((await r.json()) as any).reasons as string[]).includes("opposing_order_must_be_reduce_only")); assert.ok(!h.calls.some((c) => c.includes("/fapi/v1/order")));
+  assert.ok([...h.kv.keys()].some((k) => k.startsWith("reject:")), "the refusal was audited");
   h = harness();
   assert.equal((await h.run(() => handleFutures(new Request("https://e.test/api/futures/orders", { method: "POST", body: "{}" }), h.env))).status, 401);
   assert.equal((await h.run(() => handleFutures(h.order(), { ...h.env, ETI_FUTURES_ENABLED: "false" }))).status, 423);
   assert.equal((await h.run(() => handleFutures(h.order(), { ...h.env, ETI_KILL_SWITCH: "true" }))).status, 423);
   assert.equal((await h.run(() => handleFutures(h.order(), { ...h.env, ETI_FUTURES_MAX_NOTIONAL_USD: undefined }))).status, 503);
   assert.equal((await h.run(() => handleFutures(h.order({ leverage: 9 }), h.env))).status, 403);
-  assert.equal((await h.run(() => handleFutures(h.order({ stopPrice: undefined }), h.env))).status, 403);
-  assert.equal(h.orderPosts(), 0);
+  assert.equal(h.calls.filter((c) => c.includes("/fapi/v1/order")).length, 0);
+});
+
+test("gateway: refused orders are audited, a reused clientOrderId is refused, and an ambiguous exchange failure is never re-sent", async () => {
+  let h = harness();
+  const ok = await h.run(() => handleFutures(h.order(), h.env)); assert.equal(ok.status, 201);
+  const dup = await h.run(() => handleFutures(h.order(), h.env)), d: any = await dup.json();
+  assert.equal(dup.status, 409); assert.equal(d.error, "duplicate_client_order_id"); assert.equal(d.broker_contacted, false);
+  assert.equal(h.calls.filter((c) => c === "POST https://testnet.binancefuture.com/fapi/v1/order").length, 1);
+  const rejects = [...h.kv.keys()].filter((k) => k.startsWith("reject:")); assert.equal(rejects.length, 1); assert.equal(JSON.parse(h.kv.get(rejects[0])!).brokerContacted, false);
+  h = harness({ orderStatus: 400 });
+  const bad = await h.run(() => handleFutures(h.order(), h.env)), bj: any = await bad.json(); assert.equal(bad.status, 502); assert.equal(bj.outcome, "broker_rejected"); assert.equal(bj.broker_contacted, true);
+  h = harness({ orderStatus: 503 });
+  const amb = await h.run(() => handleFutures(h.order(), h.env)), aj: any = await amb.json(); assert.equal(amb.status, 502); assert.equal(aj.outcome, "unknown");
+  const again = await h.run(() => handleFutures(h.order(), h.env)); assert.equal(again.status, 409);
+  assert.equal(h.calls.filter((c) => c === "POST https://testnet.binancefuture.com/fapi/v1/order").length, 1, "no blind re-send after an ambiguous failure");
+  const status: any = await (await handleFutures(new Request("https://e.test/api/futures/status"), h.env)).json(); assert.equal(status.external_risk_gateway, false); assert.equal(status.safeguards.engine, "in_process");
 });
 
 test("gateway: positions endpoint reports liquidation distance and risk level", async () => {
   const h = harness({ positionAmt: "1", liq: "95" });
   const res = await h.run(() => handleFutures(new Request("https://e.test/api/futures/positions", { headers: { authorization: "Bearer " + h.env.ETI_EXECUTION_TOKEN } }), h.env)), j: any = await res.json();
   assert.equal(res.status, 200); assert.equal(j.positions[0].liquidationRisk, "critical"); assert.equal(Math.round(j.positions[0].liquidationDistancePct), 5);
-  const status: any = await (await handleFutures(new Request("https://e.test/api/futures/status"), h.env)).json(); assert.equal(status.live_futures, false); assert.equal(status.withdrawal_permissions, false); assert.equal(status.external_risk_gateway_required, false);
+  const status: any = await (await handleFutures(new Request("https://e.test/api/futures/status"), h.env)).json(); assert.equal(status.live_futures, false); assert.equal(status.withdrawal_permissions, false);
 });
 
 test("futures filters parse MIN_NOTIONAL from the `notional` field", () => {

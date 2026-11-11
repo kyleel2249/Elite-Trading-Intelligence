@@ -104,8 +104,7 @@ limits. Do not silently rely on paid Workers features, Containers, or an externa
 - Do not expose API keys, broker credentials, Quiver tokens or Liquid API tokens in frontend
   JavaScript or public environment variables.
 - Withdrawal permissions must never be requested, stored or enabled.
-- Live trading remains disabled unless a separate authenticated and risk-gated execution
-  implementation is explicitly deployed and tested.
+- There is no live trading path: orders go only to Alpaca Paper and the Binance testnets.
 
 ## Multi-market intelligence
 
@@ -141,7 +140,7 @@ See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs
 
 ## Broker execution — paper/testnet only
 
-The Worker includes a server-side execution gateway for **Alpaca Paper**, **Binance Spot Testnet**, and a separately locked live route. Live execution is not ready for activation: it now requires a reachable ETI FastAPI risk-preflight service, independent live credentials, an explicit per-order confirmation and server-side quantity/notional caps. The Worker does not expose withdrawal, transfer, funding or wallet-management endpoints.
+The Worker includes a server-side execution handler for **Alpaca Paper** and the **Binance Spot Testnet**. Orders are validated by in-process safeguards (see "Paper / testnet execution and in-process safeguards" below); no separately deployed risk service is needed and there is no live route that submits orders. The Worker does not expose withdrawal, transfer, funding or wallet-management endpoints.
 
 Configure these as **Cloudflare Worker secrets**, never frontend variables or GitHub source files:
 
@@ -149,7 +148,7 @@ Configure these as **Cloudflare Worker secrets**, never frontend variables or Gi
 - `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` — Alpaca paper-account key pair only.
 - `BINANCE_API_KEY` and `BINANCE_SECRET_KEY` — Binance Spot Testnet key pair only.
 
-Optional Worker variables: `ETI_MAX_ORDER_QUANTITY` (default 100) and `ETI_KILL_SWITCH` (set to `true` to reject orders). Each order requires a unique `clientOrderId`; requests without it are rejected. The gateway uses a fixed Alpaca paper URL and fixed Binance Spot Testnet URL. It does not offer a live-mode switch, and never calls withdrawal, transfer, funding or wallet-management endpoints.
+Optional Worker variables: `ETI_MAX_ORDER_QUANTITY` (default 100), `ETI_DUPLICATE_WINDOW_SECONDS` (default 60, 0 disables) and `ETI_KILL_SWITCH` (set to `true` to reject orders). Each order requires a unique `clientOrderId`; requests without it are rejected. The handler uses a fixed Alpaca paper URL and fixed Binance Spot Testnet URL. It does not offer a live-mode switch, and never calls withdrawal, transfer, funding or wallet-management endpoints.
 
 Authenticated order request:
 
@@ -161,14 +160,14 @@ Content-Type: application/json
 {"broker":"alpaca","symbol":"AAPL","side":"buy","type":"limit","quantity":1,"limitPrice":150,"clientOrderId":"eti-demo-000001","riskConfirmed":true}
 ```
 
-For Binance use `"broker":"binance"` and a Binance Spot Testnet symbol such as `BTCUSDT`. Check `GET /api/execution/status` for configured adapters and kill-switch state. This endpoint intentionally reports paper/testnet-only mode.
+For Binance use `"broker":"binance"` and a Binance Spot Testnet symbol such as `BTCUSDT`. Check `GET /api/execution/status` for configured adapters, the safeguards in force and kill-switch state. This endpoint intentionally reports paper/testnet-only mode.
 
 **Before enabling order submission:** create paper/testnet API keys with trading-only permissions, disable withdrawals/transfers, and set the three credentials as Worker secrets using Wrangler or the Cloudflare dashboard. Never paste secrets into chat, commit them, or place them in browser code. The bearer token must be held only by a trusted authenticated backend/client; do not embed it in public dashboard JavaScript.
 
-Live trading is not implemented or enabled. A future live-trading release must be a separately reviewed change with explicit activation, separate live credentials, per-order confirmation and risk controls.
+Live trading is not implemented or enabled in this build.
 
 
-## Execution attribution, audit history and gated live mode
+## Paper execution, attribution and audit history
 
 Every submitted order must include an `executionSource` object so the execution receipt identifies who or what initiated it:
 
@@ -185,23 +184,30 @@ Every submitted order must include an `executionSource` object so the execution 
 }
 ```
 
-Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, paper/testnet/live mode, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
+Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, paper/testnet mode, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
 
-### Live trading is locked pending integrated risk preflight
+### Paper / testnet execution and in-process safeguards
 
-A separate `POST /api/orders/live` route exists. It is not activated by the default deployment. Live submission requires **all** of the following:
+ETI executes **paper and testnet orders only**: Alpaca Paper (`paper-api.alpaca.markets`) and the Binance Spot Testnet (`testnet.binance.vision`). There is no live order path in this build: `POST /api/orders/live` exists only to answer `423 live_trading_disabled`, no live broker host or live credential is referenced, and `ETI_LIVE_TRADING_ENABLED=true` is ignored (the status endpoint reports `live_flag_ignored`). No separately deployed risk service is required: `ETI_RISK_GATE_URL` and `ETI_RISK_GATE_TOKEN` are no longer read.
 
-1. Set Worker variable `ETI_LIVE_TRADING_ENABLED=true` only after paper/testnet validation and explicit owner authorization.
-2. Add secret `ETI_LIVE_ACTIVATION_TOKEN` and send it as `X-ETI-Live-Authorization` on each live request.
-3. Add separate live broker credentials as `ALPACA_LIVE_API_KEY`, `ALPACA_LIVE_SECRET_KEY`, `BINANCE_LIVE_API_KEY`, and `BINANCE_LIVE_SECRET_KEY`.
-4. Submit to `/api/orders/live` with `riskConfirmed:true`, a unique client order ID and the required `executionSource`.
-5. Keep the general `ETI_EXECUTION_TOKEN` authentication in place. The emergency `ETI_KILL_SWITCH=true` rejects both paper and live submissions.
-6. Configure `ETI_LIVE_MAX_NOTIONAL_USD` and `ETI_LIVE_MAX_ORDER_QUANTITY` as positive server-side Worker variables. Live orders fail closed if either cap is missing or invalid.
-7. Live orders are limit-order only. The Worker rejects live market orders and rejects any quantity or `quantity × limitPrice` that exceeds the configured caps. This is a deterministic order-input cap, not a guarantee against gaps, slippage, exchange faults or losses.
-8. Configure `ETI_RISK_GATE_URL` as the HTTPS URL of the deployed ETI FastAPI `/api/risk-gateway/preflight` endpoint, and `ETI_RISK_GATE_TOKEN` as a Worker secret matching the FastAPI `API_KEY`. The Worker sends every paper, testnet and live order to this service before contacting a broker. Missing, unreachable, unauthorized or rejected preflight blocks the order.
-9. The FastAPI preflight derives equity, open positions, daily PnL, drawdown and quote freshness server-side, and attaches verified investor-disclosure context. It never submits an order. Until the FastAPI service is deployed, reachable and configured with synchronized live-account equity, live preflight will reject orders.
+Every order is checked inside the Worker, in this order, before a broker is contacted. A refusal at any step never reaches the broker and is written to the audit log with the reason.
 
-Paper/testnet remains the default `POST /api/orders` route. The Cloudflare Worker dashboard and Python/FastAPI intelligence service are separate deployable components: all order submission now requires the FastAPI service to be hosted at a stable HTTPS origin. The Cloudflare-only Worker deployment by itself does not host the Python portfolio/disclosure engine. Never enable withdrawals, transfers, or wallet-management permissions on any broker API key. Live trading has not been activated or validated by this repository change. The execution history endpoint stores audit records in KV for 90 days; configure backups/retention separately if longer regulatory retention is required.
+1. **Kill switch** (`ETI_KILL_SWITCH=true`) refuses everything with `423`.
+2. **Bearer auth** (`ETI_EXECUTION_TOKEN`), and the `ETI_EXECUTION_LOG` KV binding must exist so every outcome can be audited.
+3. **Valid order**: broker, symbol, buy/sell, market/limit, positive quantity, limit price rules, a unique `clientOrderId`, `riskConfirmed:true` and a complete `executionSource`.
+4. **Quantity cap**: `ETI_MAX_ORDER_QUANTITY` (default 100).
+5. **Broker configured**: paper/testnet credentials present.
+6. **Duplicate protection**: a `clientOrderId` can be used once (it stays reserved when the broker's answer is ambiguous, so nothing is blindly re-sent), and an identical order from the same actor inside `ETI_DUPLICATE_WINDOW_SECONDS` (default 60) is refused.
+7. **Market readiness** (`ETI_READINESS_GATE`): `advisory` (default) records the verdict, `enforce` blocks adverse conditions, `off` skips it.
+8. **Paper balance and holdings**, read from the paper broker's own account: a BUY needs free cash (with a 0.1% buffer for limit orders and 1% for market orders), a SELL needs held quantity (no short selling through the spot endpoints). If the account cannot be read the order is refused (fail closed).
+
+Outcomes are explicit: `executed` (broker order ID and status returned), `rejected` (refused by ETI, `broker_contacted:false`), `broker_rejected` (the paper broker answered 4xx; the ID is freed for correction) and `unknown` (timeout/5xx; the ID stays reserved, check the broker before retrying). `GET /api/execution/status` (public, no secrets) reports the safeguards in force; `GET /api/execution/history` (bearer) lists executed and refused orders, newest first, and the dashboard renders both.
+
+The same checks cover every pathway: the dashboard Buy/Sell buttons, `POST /api/orders`, the Global Alpha executor and the agent execution route all call this one handler; futures testnet orders (`POST /api/futures/orders`) use the same kill switch, duplicate protection and refusal audit with their own hard limits. The simulated engine behind `/api/paper/*` applies its own in-process safeguards (kill switch, idempotency, position and loss limits, quantity cap, simulated free-cash check) and its scheduled cycle runs from the cron trigger (analyse-only unless `ETI_PAPER_AUTOEXECUTE=true`).
+
+**Omnisignal execute (`POST /api/omnisignal/execute`)** works with no extra service: a BUY plan becomes an ordinary limit order for the same in-Worker flow (ETI Internal Paper, or Binance testnet) and is subject to every safeguard above; the plan's stop and targets are returned but the Worker does not place resting stop/take-profit orders. Optionally set `ETI_EXECUTION_API_URL` + `ETI_EXECUTION_API_TOKEN` to route plans to the Python execution engine instead, which adds per-account limits and protective OCO orders. **Retired settings:** `ETI_RISK_GATE_URL` / `ETI_RISK_GATE_TOKEN` are never read; a deployment that still has them keeps working and `/api/execution/status` reports `legacy_gateway_config_ignored: true` so they can be deleted. A test (`worker/execution.test.ts`) fails the build if any Worker source or config file starts depending on a risk gateway or a live-trading switch again.
+
+The Python/FastAPI `POST /api/risk-gateway/preflight` endpoint still exists as an independent service of the Python application; the Cloudflare Worker neither calls nor requires it. Never enable withdrawals, transfers or wallet management with any key used here.
 
 
 ## Elite-method signal engine (incremental release)

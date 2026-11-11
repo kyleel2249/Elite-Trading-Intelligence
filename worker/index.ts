@@ -79,11 +79,10 @@ ${PORTFOLIO_CSS}
 <aside class="panel execpanel" id="executionPanel" aria-label="Order Execution">
 <h2>Order Execution</h2>
 <div class="pxbar" aria-live="polite"><span>Chart symbol <b id="orderChartSymbol">—</b></span><span>Market price <b id="orderMarketPrice">—</b></span><button type="button" id="useMarketPrice" title="Copy the live chart price into the limit price field">Use as limit</button></div>
-<div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
+<div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Broker <b id="brokerStatus">Checking…</b></span><span>Safeguards <b id="safeguardStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
 <details class="execution-note"><summary>Execution safeguards (read before trading)</summary><p class="execution-note">Orders are sent only after you preview and confirm them. ETI Internal Paper and exchange testnets authenticate automatically with short-lived server-side sessions: nothing to type, and nothing stored in this page. Exchange testnet keys are read from Worker secrets; if they are missing or rejected, orders run in ETI Internal Paper and this panel says so. Live mode stays disabled and needs the live switch, live broker keys, the execution token and the separate live activation secret. Protect this dashboard with Cloudflare Access. Never enter withdrawal or transfer credentials here.</p></details>
 <div class="execution-grid">
 <label>Venue<select id="orderBroker"><option value="eti_paper">ETI Internal Paper (automatic)</option><option value="alpaca">Alpaca paper (exchange testnet)</option><option value="binance">Binance testnet (exchange)</option></select></label>
-<label>Mode<select id="orderMode"><option value="paper_testnet">Paper / Testnet</option><option value="live">Live trading (locked)</option></select></label>
 <label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off"></label>
 <label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop-loss (sell, Internal Paper)</option></select></label>
 <label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
@@ -96,8 +95,7 @@ ${PLAN_HTML}
 <div id="authBanner" class="authbanner" role="status" aria-live="polite">Starting authenticated sessions…</div>
 <div id="authEnvs" class="authenvs" aria-label="Execution environments"></div>
 <div id="manualAuth" class="execution-grid" style="margin-top:10px;display:none">
-<label style="grid-column:span 2">Execution token (not saved; live and API use only)<input id="executionToken" type="password" autocomplete="off" placeholder="Paste ETI_EXECUTION_TOKEN"></label>
-<label id="liveTokenWrap" style="grid-column:span 2;display:none">Live activation secret (not saved)<input id="liveActivationToken" type="password" autocomplete="off" placeholder="Paste ETI_LIVE_ACTIVATION_TOKEN"></label>
+<label style="grid-column:span 2">Execution token (not saved; only needed when automatic sessions are off)<input id="executionToken" type="password" autocomplete="off" placeholder="Paste ETI_EXECUTION_TOKEN"></label>
 </div>
 <div class="execution-actions">
 <button id="previewOrder" class="active">Preview order</button>
@@ -145,7 +143,7 @@ ${PORTFOLIO_HTML}
 </section>
 <section class="panel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Execution Audit History</h2><button id="refreshExecutionHistory">Refresh audit history</button></div>
-<p class="execution-note">Shows ETI orders recorded in KV, including who or what initiated each order. This is separate from the public Binance market trade tape above.</p>
+<p class="execution-note">Shows every ETI order recorded in KV, newest first: executed orders with the broker's order ID and status, orders ETI refused (never sent to a broker) with the reason, and broker rejections. This is separate from the public Binance market trade tape above.</p>
 <div id="executionHistory" class="history-table"><span class="muted">Enter your execution token, then refresh.</span></div>
 </section>
 <section class="panel" id="traderPanel" style="margin-top:14px">
@@ -405,7 +403,7 @@ let preparedOrder=null, executionStatus=null;
 /* ---- automatic, server-side execution sessions (HttpOnly cookies: this page never sees or stores a token) ---- */
 let authInfo=null,testnetOk=false,refreshTimers={},manualNeeded=false;
 function authBanner(t,kind){const b=$('authBanner');b.textContent=t;b.className='authbanner'+(kind?' '+kind:'');}
-function updateManualAuth(){$('manualAuth').style.display=($('orderMode').value==='live'||manualNeeded)?'grid':'none';}
+function updateManualAuth(){$('manualAuth').style.display=manualNeeded?'grid':'none';}
 function scheduleRefresh(env,refreshAfter){clearTimeout(refreshTimers[env]);const wait=Math.max(5000,refreshAfter-Date.now());refreshTimers[env]=setTimeout(async()=>{try{const r=await fetch('/api/auth/refresh',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({environment:env})}),d=await r.json();if(r.ok)scheduleRefresh(env,d.refreshAfter);else await startSessions();}catch(e){authBanner('Session refresh failed; retrying…','warn');refreshTimers[env]=setTimeout(startSessions,15000);}},wait);}
 async function authPost(env){const r=await fetch('/api/auth/session',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({environment:env})});return {r,d:await r.json().catch(()=>({}))};}
 async function startSessions(){
@@ -435,9 +433,9 @@ async function renderAuthEnvs(){
 }
 
 function selectedOrder(){
- const broker=$('orderBroker').value, mode=$('orderMode').value, type=$('orderType').value;
+ const broker=$('orderBroker').value, type=$('orderType').value;
  const quantity=Number($('orderQuantity').value), symbol=$('orderSymbol').value.trim().toUpperCase();
- const order={broker,mode,symbol,type,quantity,side:window.etiSelectedSide||'buy',timeInForce:$('orderTif').value};
+ const order={broker,symbol,type,quantity,side:window.etiSelectedSide||'buy',timeInForce:$('orderTif').value};
  if(type==='limit') order.limitPrice=Number($('orderLimitPrice').value);
  if(type==='stop') order.stopPrice=Number($('orderStopPrice').value);
  return order;
@@ -450,28 +448,37 @@ function orderValidation(o,requireCredentials=true){
  if(o.type==='stop'&&o.side!=='sell')return 'A stop-loss order protects a long position: use Sell.';
  if(o.type==='stop'&&(!Number.isFinite(o.stopPrice)||o.stopPrice<=0))return 'Enter a valid stop price.';
  if(!$('operatorId').value.trim())return 'Enter an operator ID for the audit record.';
- if(o.mode==='live'&&o.broker==='eti_paper')return 'ETI Internal Paper cannot be used for live trading.';
- if(requireCredentials&&o.mode==='live'&&!$('executionToken').value)return 'Live orders need the ETI execution token.';
- if(requireCredentials&&o.mode==='live'&&!$('liveActivationToken').value)return 'Enter the separate live activation secret.';
- if(o.mode==='live'&&(!executionStatus||executionStatus.live_trading_enabled!==true))return 'Live trading is not enabled in the Worker configuration.';
  return '';
 }
 function renderPreview(o){
- const summary={venue:o.broker==='eti_paper'?'ETI INTERNAL PAPER (simulated, no exchange)':o.broker,mode:o.mode==='live'?'LIVE':(o.broker==='eti_paper'?'internal paper':'exchange paper/testnet'),symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
+ const summary={venue:o.broker==='eti_paper'?'ETI INTERNAL PAPER (simulated, no exchange)':o.broker,mode:o.broker==='eti_paper'?'internal paper (simulated)':'exchange paper/testnet',symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
  if(o.type==='limit')summary.limitPrice=o.limitPrice;
  summary.executionSource={actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'};
  $('orderOutput').textContent='Review this order carefully before submission: | '+JSON.stringify(summary,null,2);
 }
+function describeOutcome(r,d){
+ if(d&&d.ok&&d.outcome==='executed')return d.broker==='eti_paper'?'FILLED in ETI Internal Paper (simulated; no exchange contacted)'+(d.fill?' · '+d.fill.quantity+' @ '+Number(d.fill.price).toFixed(4):''):'EXECUTED on '+(d.mode==='testnet'?'Binance testnet':'Alpaca paper')+' · broker order '+d.brokerOrderId+' · status '+d.brokerStatus;
+ if(d&&d.ok&&d.outcome==='resting')return 'ACCEPTED into the ETI internal paper book (simulated): it fills only when the market trades through its price';
+ if(d&&d.outcome==='rejected')return 'REFUSED by ETI safeguards ('+(d.stage||'check')+'): '+((d.reasons&&d.reasons[0])||d.error)+' · the broker was NOT contacted';
+ if(d&&d.outcome==='broker_rejected')return 'REJECTED by the broker (HTTP '+d.status+') · see the broker response below';
+ if(d&&d.outcome==='unknown')return 'BROKER OUTCOME UNKNOWN: check the broker before retrying; this order ID stays reserved';
+ if(d&&d.error==='execution_disabled')return 'BLOCKED: emergency kill switch is active · the broker was NOT contacted';
+ if(r.status===401)return 'REFUSED: the execution token was not accepted · the broker was NOT contacted';
+ return 'NOT EXECUTED: '+((d&&(d.message||d.error))||('HTTP '+r.status));
+}
 async function refreshExecutionStatus(){
  try{
   const r=await fetch('/api/execution/status',{cache:'no-store'}),d=await r.json();executionStatus=d;
-  const brokerReady=$('orderBroker').value==='alpaca'?d.alpaca_live_configured:d.binance_live_configured;
-  $('executionStatus').textContent=d.live_trading_enabled?(brokerReady?'Live switch ON · broker credentials configured':'Live switch ON · live broker credentials missing'):'Internal paper automatic · live disabled';
-  $('executionStatus').style.color=d.live_trading_enabled?(brokerReady?'#21d69a':'#ffb08c'):'#21d69a';
+  const b=$('orderBroker').value,internal=b==='eti_paper';
+  const ready=internal||(b==='alpaca'?d.alpaca_paper_configured:d.binance_testnet_configured), name=internal?'ETI Internal Paper':b==='alpaca'?'Alpaca Paper':'Binance Testnet';
+  const sg=d.safeguards||{}, ok=!d.kill_switch&&(internal||(ready&&d.audit_log_configured))&&d.audit_log_configured;
+  $('executionStatus').textContent=d.kill_switch?'Halted (kill switch)':ok?'Ready · paper/testnet only':!d.audit_log_configured?'Needs audit log (KV binding)':'Needs '+name+' credentials (internal paper still works)';
+  $('executionStatus').style.color=ok?'#21d69a':'#ffb08c';
+  if($('brokerStatus')){$('brokerStatus').textContent=name+(internal?' · simulated, no exchange':ready?' · credentials set':' · not configured');$('brokerStatus').style.color=ready?'#21d69a':'#ffb08c';}
+  if($('safeguardStatus')){$('safeguardStatus').textContent=sg.engine==='in_process'?'In-process · max qty '+(sg.max_order_quantity==null?'unset':sg.max_order_quantity)+' · duplicate window '+sg.duplicate_window_seconds+'s'+(d.live_flag_ignored?' · live flag ignored':'')+(d.legacy_gateway_config_ignored?' · old gateway settings ignored (safe to delete)':''):'Unknown';$('safeguardStatus').style.color=sg.engine==='in_process'?'#21d69a':'#ff637d';}
   $('killSwitchStatus').textContent=d.kill_switch?'ACTIVE':'Inactive';
   $('killSwitchStatus').style.color=d.kill_switch?'#ff637d':'#21d69a';
-  $('orderMode').value='paper_testnet';
- }catch(e){$('executionStatus').textContent='Status unavailable';}
+ }catch(e){$('executionStatus').textContent='Status unavailable';$('executionStatus').style.color='#ff637d';}
 }
 async function refreshExecutionHistory(){
  const token=$('executionToken').value,env=$('orderBroker').value==='eti_paper'?'internal_paper':'exchange_testnet';
@@ -481,42 +488,39 @@ async function refreshExecutionHistory(){
   if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
   const records=d.records||[];
   if(!records.length){$('executionHistory').textContent='No ETI execution records found.';return;}
-  $('executionHistory').innerHTML='<table><tr><th>Time (UTC)</th><th>Venue / Mode</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Initiator</th><th>Order ID</th></tr>'+records.map(v=>'<tr><td>'+esc(v.executedAt)+'</td><td>'+esc(v.broker)+' / '+esc(v.mode)+'</td><td>'+esc(v.symbol)+'</td><td class="'+(v.side==='buy'?'buy':'sell')+'">'+esc(v.side)+'</td><td>'+esc(v.quantity)+'</td><td>'+esc((v.executionSource||{}).sourceName)+' ('+esc((v.executionSource||{}).actorId)+')</td><td>'+esc(v.brokerOrderId||v.clientOrderId)+'</td></tr>').join('')+'</table>';
+  const label=v=>v.outcome==='rejected'?'Refused (not sent)':v.outcome==='broker_rejected'?'Broker rejected':v.outcome==='unknown'?'Outcome unknown':v.outcome==='resting'?'Resting (simulated book)':'Executed';
+  const detail=v=>v.outcome==='executed'?(v.brokerOrderId||v.clientOrderId)+(v.brokerStatus?' · '+v.brokerStatus:''):((v.reasons&&v.reasons[0])||v.error||'');
+  $('executionHistory').innerHTML='<table><tr><th>Time (UTC)</th><th>Outcome</th><th>Broker / Mode</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Initiator</th><th>Broker order / reason</th></tr>'+records.map(v=>{const q=v.request||v,src=v.executionSource||{};return '<tr><td>'+esc(v.at||v.executedAt)+'</td><td>'+esc(label(v))+'</td><td>'+esc(v.broker||q.broker)+' / '+esc(v.mode)+'</td><td>'+esc(v.symbol||q.symbol)+'</td><td class="'+((v.side||q.side)==='buy'?'buy':'sell')+'">'+esc(v.side||q.side)+'</td><td>'+esc(v.quantity!=null?v.quantity:q.quantity)+'</td><td>'+esc(src.sourceName)+' ('+esc(src.actorId)+')</td><td>'+esc(detail(v))+'</td></tr>';}).join('')+'</table>';
  }catch(e){$('executionHistory').textContent='Could not load history: '+e.message;}
 }
 async function submitOrder(side){
  const o=selectedOrder();o.side=side;window.etiSelectedSide=side;
  const problem=orderValidation(o);if(problem){$('orderOutput').textContent=problem;return;}
- if(o.mode==='live'&&executionStatus&&executionStatus.kill_switch){$('orderOutput').textContent='Execution blocked: emergency kill switch is active.';return;}
+ if(executionStatus&&executionStatus.kill_switch){$('orderOutput').textContent='Execution blocked: emergency kill switch is active.';return;}
  renderPreview(o);
- const modeLabel=o.mode==='live'?'LIVE':(o.broker==='eti_paper'?'INTERNAL PAPER, SIMULATED':'EXCHANGE TESTNET');
+ const modeLabel=o.broker==='eti_paper'?'INTERNAL PAPER, SIMULATED':'EXCHANGE '+(o.broker==='binance'?'BINANCE TESTNET':'ALPACA PAPER');
  const detail=side.toUpperCase()+' '+o.quantity+' '+o.symbol+' via '+o.broker.toUpperCase()+' ('+modeLabel+', '+o.type.toUpperCase()+')';
- if(!window.confirm('FINAL ORDER CONFIRMATION |  | '+detail+' |  | LIVE is locked unless the Worker enables it. Continue?'))return;
+ if(!window.confirm('FINAL ORDER CONFIRMATION |  | '+detail+' |  | This submits a PAPER / TESTNET order. No real money is used. Continue?'))return;
  const clientOrderId='eti'+crypto.randomUUID().replace(/-/g,'').slice(0,29);
  const body={broker:o.broker,symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity,timeInForce:o.timeInForce,clientOrderId,riskConfirmed:true,executionSource:{actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'}};
  if(o.type==='limit')body.limitPrice=o.limitPrice;
  if(o.type==='stop')body.stopPrice=o.stopPrice;
  if(side==='buy'){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
- const endpoint=o.mode==='live'?'/api/orders/live':'/api/orders';
- if(o.mode==='live')body.liveConfirmed=true;
  $('orderOutput').textContent='Submitting order…';
  try{
   const headers={'content-type':'application/json'};
-  if(o.mode==='live'){headers.Authorization='Bearer '+$('executionToken').value;headers['X-ETI-Live-Authorization']=$('liveActivationToken').value;}
-  else if($('executionToken').value)headers.Authorization='Bearer '+$('executionToken').value;
-  const send=()=>fetch(endpoint,{method:'POST',credentials:'same-origin',headers,body:JSON.stringify(body)});
+  if($('executionToken').value)headers.Authorization='Bearer '+$('executionToken').value;
+  const send=()=>fetch('/api/orders',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify(body)});
   let r=await send();
-  if(r.status===401&&o.mode!=='live'&&!$('executionToken').value){await startSessions();r=await send();}
+  if(r.status===401&&!$('executionToken').value){await startSessions();r=await send();}
   const d=await r.json().catch(()=>({}));
   if(d.fallback&&d.notice)authBanner(d.notice,'warn');
-  $('orderOutput').textContent=JSON.stringify(d,null,2);
-  if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
-  await refreshExecutionHistory();pfKick();
- }catch(e){$('orderOutput').textContent+=' | Order submission failed: '+e.message;pfKick();}
+  $('orderOutput').textContent=describeOutcome(r,d)+' | '+JSON.stringify(d,null,2);
+  await refreshExecutionHistory();refreshExecutionStatus();pfKick();
+ }catch(e){$('orderOutput').textContent='Order submission failed before a response was received: '+e.message+' | Check the audit history before retrying.';pfKick();}
 }
 $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').value==='limit'?'flex':'none';};
-$('orderMode').onchange=()=>{const live=$('orderMode').value==='live';$('liveTokenWrap').style.display=live?'flex':'none';updateManualAuth();};
-$('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';if(executionStatus){const ready=$('orderBroker').value==='alpaca'?executionStatus.alpaca_live_configured:executionStatus.binance_live_configured;$('executionStatus').textContent=executionStatus.live_trading_enabled?(ready?'Live switch ON · broker credentials configured':'Live switch ON · live broker credentials missing'):'Paper/Testnet default';$('executionStatus').style.color=executionStatus.live_trading_enabled?(ready?'#21d69a':'#ffb08c'):'#21d69a';}};
+$('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();};
 function syncOrderMarket(){const l=$('last').textContent;$('orderMarketPrice').textContent=l;$('orderChartSymbol').textContent=$('symbol').value;}
 new MutationObserver(syncOrderMarket).observe($('last'),{childList:true,characterData:true,subtree:true});syncOrderMarket();
 $('useMarketPrice').onclick=()=>{const v=Number(String($('last').textContent).replace(/,/g,''));if(!Number.isFinite(v)||v<=0){$('orderOutput').textContent='No live market price is available yet.';return;}$('orderType').value='limit';$('orderType').onchange();$('orderLimitPrice').value=String(v);};
@@ -525,7 +529,7 @@ $('symbol').addEventListener('change',syncOrderMarket);
 $('previewOrder').onclick=()=>{const o=selectedOrder();const problem=orderValidation(o,false);if(problem){$('orderOutput').textContent=problem;return;}renderPreview(o);};
 $('buyOrder').onclick=()=>submitOrder('buy');
 $('sellOrder').onclick=()=>submitOrder('sell');
-$('clearExecutionSecrets').onclick=()=>{$('executionToken').value='';$('liveActivationToken').value='';$('orderOutput').textContent='Typed credentials cleared; sessions are being replaced with fresh tokens.';Promise.all(['paper','testnet'].map(e=>fetch('/api/auth/revoke',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({environment:e})}).catch(()=>null))).then(startSessions);$('executionHistory').textContent='Enter your execution token, then refresh.';};
+$('clearExecutionSecrets').onclick=()=>{$('executionToken').value='';$('orderOutput').textContent='Typed credentials cleared; sessions are being replaced with fresh tokens.';Promise.all(['paper','testnet'].map(e=>fetch('/api/auth/revoke',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({environment:e})}).catch(()=>null))).then(startSessions);$('executionHistory').textContent='Enter your execution token, then refresh.';};
 $('refreshExecutionHistory').onclick=refreshExecutionHistory;
 async function loadSignal(){
  const sym=$('symbol').value, iv=$('interval').value, seq=++sigSeq;

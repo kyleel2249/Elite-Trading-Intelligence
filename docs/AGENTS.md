@@ -19,10 +19,10 @@ Twelve specialised agents exchange schema-validated JSON (`eti.agent.report/1`, 
 
 ## Guarantees
 
-* **Risk veto is structural.** `riskManager()` sees only the proposal and raw data (never analyst opinions). If it rejects, `finalize()` returns `NO_TRADE` with `vetoedBy: "risk"`, `executionEligible` is false, no order ticket is built, and `/api/agents/execute` returns 409 without contacting any broker or the FastAPI risk gate.
+* **Risk veto is structural.** `riskManager()` sees only the proposal and raw data (never analyst opinions). If it rejects, `finalize()` returns `NO_TRADE` with `vetoedBy: "risk"`, `executionEligible` is false, no order ticket is built, and `/api/agents/execute` returns 409 without contacting any broker.
 * **Disagreements are reported.** Opposing confident stances become a `direction` dispute (positions, explanation, resolution); all dissenting agents are listed in `dissent`; agents without data are listed as *abstaining*, never counted as neutral. A risk veto against the consensus is its own `risk_veto` dispute.
 * **No fabricated data.** Fundamental, macro, news and on-chain agents return `insufficient_data` unless the caller supplies inputs. No live news / macro / fundamentals / on-chain provider is configured in this repository.
-* **Paper/testnet only.** The Execution Specialist produces limit-order tickets and forwards them to the existing `/api/orders` gateway (bearer token, kill switch, FastAPI risk preflight, KV audit log). The live route is never used.
+* **Paper/testnet only.** The Execution Specialist produces limit-order tickets and forwards them to the existing `/api/orders` gateway (bearer token, kill switch, in-process paper safeguards, KV audit log). The live route is never used.
 * Confidence values are heuristic scores, not probabilities. Spot markets cannot be shorted: `SELL` is executable only against an existing `positionQuantity`.
 
 ## Endpoints
@@ -45,7 +45,7 @@ Twelve specialised agents exchange schema-validated JSON (`eti.agent.report/1`, 
 
 ## Configuration still required
 
-Account state per request; broker secrets, `ETI_EXECUTION_TOKEN`, `ETI_RISK_GATE_URL/TOKEN` and the `ETI_EXECUTION_LOG` KV binding for execution; data feeds for fundamentals/macro/news/on-chain if you want those agents to run without caller-supplied inputs.
+Account state per request; broker secrets, `ETI_EXECUTION_TOKEN` and the `ETI_EXECUTION_LOG` KV binding for execution; data feeds for fundamentals/macro/news/on-chain if you want those agents to run without caller-supplied inputs.
 
 ## Limits
 

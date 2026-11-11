@@ -118,7 +118,7 @@ export async function walkForward(history: History, cfg: OptimizerConfig): Promi
   return { symbol: cfg.replay.symbol, strategy, folds, challenger, oosChallenger, oosChampion, candidatesTried: names.length, promotion, caveats: [
     "Anchored walk-forward: each fold trains on all earlier data and is scored only on the next unseen block; the pooled out-of-sample trades are what count.",
     "Picking the best of several candidates inflates results; the promotion gates (margin, interval above zero, drawdown, stability) are the guard against this, not a guarantee.",
-    "Same replay limits apply: no historical order book, flat fees/slippage, local risk-gateway stub. Results are not a forecast.",
+    "Same replay limits apply: no historical order book, flat fees/slippage, in-process paper safeguards only. Results are not a forecast.",
     "The search space is limited to bounded validator weights and tighten-only gate adjustments (minimum reward/risk, confirmation threshold, cost limit); none can loosen a default. Risk limits, permissions and live-trading settings are not tunable here." ] };
 }
 

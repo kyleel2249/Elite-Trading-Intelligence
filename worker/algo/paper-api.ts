@@ -1,6 +1,7 @@
 // Authenticated paper-trading API. SIMULATED fills only: it never contacts a broker and exposes no withdrawal,
-// transfer or live-mode concept. Every order is preflighted through the ETI server-side risk gateway (the same
-// service and contract as /api/orders) and fails closed when the gateway is missing, unreachable or says no.
+// transfer or live-mode concept. Every simulated order passes the in-process safeguards in paper.ts (kill switch,
+// idempotency, limits, quantity cap, simulated balance); no external risk service is involved. Orders that should reach
+// a paper broker (Alpaca Paper / Binance Testnet) go through POST /api/orders instead.
 //
 //   GET  /api/paper/status
 //   POST /api/paper/evaluate   {symbol, strategy, execute?}   analyse; with execute=true open a paper position if approved
@@ -17,7 +18,7 @@ import { loadMinuteBars, loadSignalInputs } from "./market-inputs.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions, paramsOp } from "./params.ts";
 import { fitCalibration, loadCalibration, outcomesFrom, saveCalibration } from "./calibration.ts";
-import { KVPaperStore, PaperEngine, type KVLike, type Preflight, type PreflightRequest } from "./paper.ts";
+import { KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
 
 export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string; ETI_ROUND_TRIP_COST_BPS?: string }
@@ -27,17 +28,10 @@ interface KVWithList extends KVLike { list(o: { prefix: string; limit?: number }
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (k, v) => (v === Infinity ? "Infinity" : v)), { status, headers: HEADERS });
 
-/** Adapter to the Python POST /api/risk-gateway/preflight contract. Returns null when the gateway is not configured. */
-export function makeGatePreflight(env: ExecutionEnv, fetchImpl: typeof fetch = fetch): Preflight | null {
-  const url = env.ETI_RISK_GATE_URL, token = env.ETI_RISK_GATE_TOKEN;
-  if (!url || !token) return null;
-  return async (r: PreflightRequest) => {
-    const res = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json", "x-api-key": token }, signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ provider: "binance", environment: "paper", symbol: r.symbol, side: r.side, quantity: r.quantity, order_type: r.orderType, limit_price: r.limitPrice }) });
-    const body: any = await res.json().catch(() => ({}));
-    if (!res.ok) return { approved: false, reasons: [`Risk gateway responded HTTP ${res.status}`, ...(Array.isArray(body?.reasons) ? body.reasons : [])] };
-    return { approved: body?.approved === true, reasons: Array.isArray(body?.reasons) ? body.reasons : [] };
-  };
+/** Engine config derived from the environment. Only an explicit, positive ETI_MAX_ORDER_QUANTITY sets a quantity cap. */
+export function paperConfigFrom(env: ExecutionEnv): Partial<PaperConfig> {
+  const cap = Number(env.ETI_MAX_ORDER_QUANTITY);
+  return Number.isFinite(cap) && cap > 0 ? { maxOrderQuantity: cap } : {};
 }
 
 export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps = {}): Promise<Response> {
@@ -49,7 +43,7 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
   if (!env.ETI_EXECUTION_LOG) return reply({ error: "audit_log_not_configured", message: "Bind the ETI_EXECUTION_LOG KV namespace; paper state and audit trail are stored there." }, 503);
   const kv = env.ETI_EXECUTION_LOG as unknown as KVWithList, store = new KVPaperStore(kv);
   const envKill = env.ETI_KILL_SWITCH === "true";
-  const engine = await PaperEngine.create(store, makeGatePreflight(env, deps.fetchImpl ?? fetch), {}, now);
+  const engine = await PaperEngine.create(store, paperConfigFrom(env), now);
   const body: any = req.method === "POST" ? await req.json().catch(() => null) : {};
   if (req.method === "POST" && (body === null || typeof body !== "object")) return reply({ error: "invalid_json_body" }, 400);
   const symbolOf = () => String(body?.symbol ?? "BTCUSDT").toUpperCase();
@@ -58,7 +52,7 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
   if (path === "/api/paper/status") {
     const s = engine.state;
     return reply({ mode: "paper", simulated: true, equity: s.equity, startingEquity: engine.cfg.startingEquity, openPositions: s.positions, closedTrades: s.closed.length, killSwitch: s.killSwitch || envKill, envKillSwitch: envKill,
-      riskGateConfigured: !!(env.ETI_RISK_GATE_URL && env.ETI_RISK_GATE_TOKEN), config: engine.cfg, withdrawalPermissions: false, liveTradingAvailable: false, stateVersion: s.version,
+      safeguards: { engine: "in_process", externalRiskGateway: false }, config: engine.cfg, withdrawalPermissions: false, liveTradingAvailable: false, stateVersion: s.version,
       scheduler: { ...(({ symbols, strategy, autoExecute, ignored }) => ({ symbols, strategy, autoExecute, ignoredSymbols: ignored }))(cycleConfig(env)), maxSymbolsPerRun: MAX_CYCLE_SYMBOLS, lastRun: await readLastRun(env) },
       note: "Simulated fills against live public prices; no broker is contacted. State is stored in KV without transactions, so issue paper requests one at a time." });
   }
@@ -105,7 +99,7 @@ export async function tickSymbol(engine: PaperEngine, env: PaperEnv, symbol: str
   const pending = bars.filter(b => b.ts > (p.lastBarTs ?? p.openedAt)).length, events = await engine.processBars(symbol, bars);
   return { status: 200, body: { symbol, barsPending: pending, events, position: engine.state.positions.find(x => x.symbol === symbol) ?? null, equity: engine.state.equity, granularity: "closed 1-minute bars; stop-first when a bar touches both stop and target" } };
 }
-/** Analyse a symbol and, when `execute` is true, open a paper position if the plan is BUY/SELL and the risk gateway approves. */
+/** Analyse a symbol and, when `execute` is true, open a paper position if the plan is BUY/SELL and the in-process safeguards pass. */
 export async function evaluateSymbol(engine: PaperEngine, env: PaperEnv, symbol: string, strategy: Strategy, execute: boolean, now: number, envKill: boolean): Promise<OpResult> {
   let active; try { active = await activeOptions(env.ETI_EXECUTION_LOG as any, () => now); } catch { return { status: 503, body: { error: "params_unavailable", message: "The parameter registry could not be read, so no new analysis or entry is made.", submitsOrder: false } }; }
   const inputs = await loadSignalInputs(env, symbol, strategy, null, now);
@@ -141,7 +135,7 @@ const LASTRUN_KEY = "eti:paper:lastrun";
 export async function runPaperCycle(env: PaperEnv, deps: PaperDeps = {}): Promise<CycleSummary> {
   const now = (deps.now ?? Date.now)(), at = new Date(now).toISOString(), cfg = cycleConfig(env);
   if (!env.ETI_EXECUTION_LOG) return { ran: false, reason: "ETI_EXECUTION_LOG KV binding is not configured", at, items: [] };
-  const kv = env.ETI_EXECUTION_LOG as unknown as KVWithList, engine = await PaperEngine.create(new KVPaperStore(kv), makeGatePreflight(env, deps.fetchImpl ?? fetch), {}, now);
+  const kv = env.ETI_EXECUTION_LOG as unknown as KVWithList, engine = await PaperEngine.create(new KVPaperStore(kv), paperConfigFrom(env), now);
   const open = engine.state.positions.map(p => p.symbol);
   if (!cfg.symbols.length && !open.length) return { ran: false, reason: "ETI_PAPER_SYMBOLS is not set and there are no open positions", at, items: [] };
   const envKill = env.ETI_KILL_SWITCH === "true", killed = envKill || engine.state.killSwitch, items: CycleItem[] = [];

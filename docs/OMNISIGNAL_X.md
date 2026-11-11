@@ -25,8 +25,8 @@ Authenticated (`Authorization: Bearer $ETI_EXECUTION_TOKEN`), all paper/simulate
 
 | Route | Purpose |
 |---|---|
-| `GET /api/paper/status` | Equity, open positions, kill switch, gateway configured |
-| `POST /api/paper/evaluate` `{symbol, strategy, execute?}` | Analyse; with `execute:true` open a paper position **only if the risk gateway approves** |
+| `GET /api/paper/status` | Equity, open positions, kill switch, safeguards in force |
+| `POST /api/paper/evaluate` `{symbol, strategy, execute?}` | Analyse; with `execute:true` open a simulated paper position **only if the in-process safeguards pass** |
 | `POST /api/paper/tick` `{symbol}` | Advance an open position with closed 1-minute bars (each bar applied once) |
 | `POST /api/paper/kill` `{on}` | Engage/release the paper kill switch (`ETI_KILL_SWITCH=true` also blocks, with HTTP 423) |
 | `GET /api/paper/performance` | 24h/7d/30d/90d/all windows, per engine, per regime, calibration |
@@ -34,9 +34,12 @@ Authenticated (`Authorization: Bearer $ETI_EXECUTION_TOKEN`), all paper/simulate
 
 ### Required configuration (Worker secrets / bindings)
 
-`ETI_EXECUTION_TOKEN`, `ETI_EXECUTION_LOG` (KV), `ETI_RISK_GATE_URL`, `ETI_RISK_GATE_TOKEN`. Without the gateway settings
-every order is rejected (fail closed). Orders are preflighted as `provider=binance, environment=paper, order_type=limit`
-against the existing Python `POST /api/risk-gateway/preflight`.
+`ETI_EXECUTION_TOKEN` and `ETI_EXECUTION_LOG` (KV); optionally `ETI_MAX_ORDER_QUANTITY` (quantity cap). No external service is needed.
+Every simulated order passes the in-process safeguards before it opens: kill switch, idempotency key, valid plan and price, position
+count, daily-loss and loss-streak limits, re-entry cooldown, entry-zone deviation, stop on the protective side, the optional quantity
+cap, and a simulated free-cash check (new notional must fit within equity minus the notional already committed). A SELL opens a
+simulated short using the same collateral check. Fills are simulated; no broker is contacted (use `POST /api/orders` for Alpaca Paper
+or Binance testnet orders).
 
 ### Scheduled paper cycle (Cron Trigger, every 15 minutes)
 
@@ -49,7 +52,7 @@ against the existing Python `POST /api/risk-gateway/preflight`.
 | `ETI_PAPER_AUTOEXECUTE` | Only the exact string `true` lets the cycle open positions. Otherwise it analyses only |
 
 Each pass: manage every open position first (always, even under a kill switch or after a symbol is removed), then evaluate the
-configured symbols. New entries still need gateway approval and are blocked by `ETI_KILL_SWITCH` or the API kill switch
+configured symbols. New entries still pass the same safeguards and are blocked by `ETI_KILL_SWITCH` or the API kill switch
 (recorded as `SKIPPED`). One symbol failing never stops the others. The last pass is visible at
 `GET /api/paper/status` -> `scheduler.lastRun`. The 3-symbol cap exists because the Workers free plan allows about
 50 subrequests per invocation and one symbol costs about 10.
@@ -68,7 +71,7 @@ node scripts/replay.mjs --csv btc_15m.csv --tf 15m --symbol BTCUSDT --strategy i
 ```
 
 Needs Node >= 22.18 and (without `--csv`) access to `data-api.binance.vision`. Replay has no historical order book,
-uses flat fee/slippage, stubs the risk gateway, and is **not** a forecast.
+uses flat fee/slippage, applies the same in-process safeguards, and is **not** a forecast.
 
 ## Dashboard (`/omnisignal`)
 Standalone page (`GET /omnisignal`, script at `GET /omnisignal.js`) under a strict CSP: no inline script, same-origin connections only, all values written with `textContent`. Shows both engines, agreement/decision, entry/SL/TP1-3, the eight-timeframe matrix, evidence families, validation, liquidity, and the paper panel (status, positions, performance, audit, kill switch). The paper API token is typed at runtime and held in memory only. It has no live-trading, testnet, withdrawal or transfer controls. Visual checks used synthetic fixtures, not real market data.

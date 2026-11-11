@@ -112,7 +112,7 @@ function engineHeader(h: Header): Pick<PrecisionSignal, "engine" | "asset" | "tr
     strategy: h.strategy, setupTimeframe: h.execTf, expectedHolding: HOLDING_PERIOD[h.strategy],
     dataTimestamp: new Date(h.fetchedAt).toISOString(), disclaimers: DISCLAIMERS,
     liveExecutionAllowed: false,
-    execution: { note: "Analytical output only. Orders require POST /api/orders and its server-side risk preflight; this engine cannot place or authorise a trade.", requiresRiskPreflight: true },
+    execution: { note: "Analytical output only. Orders require POST /api/orders and its in-process paper safeguards; this engine cannot place or authorise a trade.", requiresRiskPreflight: true },
   };
 }
 

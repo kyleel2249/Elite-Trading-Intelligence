@@ -219,7 +219,10 @@ test("API: the full UI lifecycle through /api/orders and /api/portfolio, per-env
 test("API: testnet order through the gateway lands in the testnet ledger with broker fills and is isolated from paper", async () => {
   reset(); const env = mk({ ALPACA_API_KEY: "ak", ALPACA_SECRET_KEY: "as", BINANCE_API_KEY: "bk", BINANCE_SECRET_KEY: "bs" }); const testnet = await sess(env, "testnet"), paper = await sess(env, "paper");
   const fetchImpl: any = async (u: any, init: any) => { const url = String(u), j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s });
-    if (url.includes("/api/v3/account")) return j({ balances: [] });
+    const path = url.includes("binance") ? new URL(url).pathname : "";
+    if (path.endsWith("/exchangeInfo")) return j({ symbols: [{ symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING" }] });
+    if (path.endsWith("/ticker/price")) return j({ price: "50000" });
+    if (url.includes("/api/v3/account")) return j({ canTrade: true, balances: [{ asset: "USDT", free: "1000000" }, { asset: "BTC", free: "1000" }] });
     if (url.includes("testnet.binance.vision/api/v3/order") && init?.method === "POST") return j({ orderId: 4242, status: "FILLED", executedQty: "0.5", cummulativeQuoteQty: "25000", fills: [{ price: "50000", qty: "0.5", commission: "12.5", commissionAsset: "USDT", tradeId: 99 }] });
     return j({}, 404); };
   const r = await handleExecution(new Request(ORIGIN + "/api/orders", { method: "POST", headers: H(testnet), body: JSON.stringify(order({ broker: "binance", quantity: 0.5 })) }), env, { now: () => clock, fetchImpl, priceOf: async () => price });
@@ -227,7 +230,7 @@ test("API: testnet order through the gateway lands in the testnet ledger with br
   const st = (await api(env, "/api/portfolio/state?environment=exchange_testnet", { cookies: testnet })).body;
   assert.equal(st.positions.length, 1); assert.equal(st.positions[0].avgEntry, 50_000); assert.equal(st.fills[0].origin, "exchange_reported"); assert.equal(st.balances.cash, null, "no invented testnet balance"); assert.equal(st.simulated, false);
   assert.equal((await api(env, "/api/portfolio/state?environment=internal_paper", { cookies: paper })).body.positions.length, 0);
-  const rej = await handleExecution(new Request(ORIGIN + "/api/orders", { method: "POST", headers: H(testnet), body: JSON.stringify(order({ broker: "binance", quantity: 99, side: "sell" })) }), env, { now: () => clock, fetchImpl: (async () => new Response(JSON.stringify({ code: -2010, msg: "insufficient balance" }), { status: 400 })) as any, priceOf: async () => price });
+  const rej = await handleExecution(new Request(ORIGIN + "/api/orders", { method: "POST", headers: H(testnet), body: JSON.stringify(order({ broker: "binance", quantity: 99, side: "sell" })) }), env, { now: () => clock, fetchImpl: (async (u: any, init: any) => String(u).includes("/api/v3/order") && init?.method === "POST" ? new Response(JSON.stringify({ code: -2010, msg: "insufficient balance" }), { status: 400 }) : fetchImpl(u, init)) as any, priceOf: async () => price });
   assert.equal(rej.status, 502);
   const st2 = (await api(env, "/api/portfolio/state?environment=exchange_testnet", { cookies: testnet })).body; assert.ok(st2.orders.some((o: any) => o.status === "rejected"), "broker rejection is recorded");
 });

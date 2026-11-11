@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calibration, computeReport, maxDrawdown, reportsByEngine, wilson, windowedReports, type ClosedTrade } from "./algo/performance.ts";
-import { KVPaperStore, MemoryPaperStore, PaperEngine, type Preflight, type PreflightRequest } from "./algo/paper.ts";
+import { KVPaperStore, MemoryPaperStore, PaperEngine } from "./algo/paper.ts";
 import { runOmnisignal, type OmnisignalResult } from "./algo/omnisignal.ts";
 import { series } from "./algo/fixtures.ts";
 import { TF_SECONDS, TIMEFRAMES } from "./algo/timeframes.ts";
@@ -55,33 +55,35 @@ function buyPlan(seed = 1): OmnisignalResult {
   const r = runOmnisignal(ctx, { roundTripCostBps: 0 }); assert.equal(r.decision, "BUY", "fixture must yield a real BUY through engines, fusion and validation"); return r;
 }
 const mid = (p: OmnisignalResult) => (p.entryZone![0] + p.entryZone![1]) / 2;
-const approve = (calls: PreflightRequest[] = []): Preflight => async req => { calls.push(req); return { approved: true, reasons: ["ok"] }; };
-const mk = async (pf: Preflight | null = approve(), cfg = {}, store = new MemoryPaperStore()) => ({ store, eng: await PaperEngine.create(store, pf, cfg, NOW) });
+const mk = async (cfg = {}, store = new MemoryPaperStore()) => ({ store, eng: await PaperEngine.create(store, cfg, NOW) });
 const bar = (p: { entry: number }, o: Partial<{ ts: number; high: number; low: number; close: number }> = {}) => ({ ts: NOW + 60_000, high: p.entry, low: p.entry, close: p.entry, ...o });
 
-test("opening goes through the risk gate with a limit order, charges fees and records an audit trail", async () => {
-  const calls: PreflightRequest[] = [], plan = buyPlan(), { eng, store } = await mk(approve(calls));
+test("opening runs the in-process safeguards, charges fees and records an audit trail", async () => {
+  const plan = buyPlan(), { eng, store } = await mk();
   const ev = await eng.open(plan, mid(plan), NOW);
-  assert.equal(ev.type, "OPENED"); assert.equal(calls.length, 1);
-  assert.equal(calls[0].mode, "paper"); assert.equal(calls[0].orderType, "limit"); assert.equal(calls[0].side, "buy"); assert.equal(calls[0].source.actorType, "strategy");
+  assert.equal(ev.type, "OPENED");
   const p = eng.state.positions[0]; assert.ok(p.qty > 0 && p.stop < p.entry && p.entry >= mid(plan)); assert.ok(eng.state.equity < 10_000, "entry fee deducted");
   assert.ok(p.riskAmount * 1.0001 >= eng.state.equity * 0 && Math.abs(p.riskAmount - eng.state.equity * 0.005) < eng.state.equity * 0.0051 + 1);
-  assert.ok(store.log.some(e => e.type === "OPENED" && Array.isArray((e.detail as any).reasoning)), "decision trail persisted");
+  const opened = store.log.find(e => e.type === "OPENED")!; assert.ok(Array.isArray((opened.detail as any).reasoning), "decision trail persisted"); assert.equal((opened.detail as any).safeguards, "in_process"); assert.equal((opened.detail as any).freeCashBefore, 10_000);
 });
-test("an order is blocked when the preflight is missing, errors, or rejects (fail closed)", async () => {
+test("in-process safeguards refuse an order that is too large, unaffordable or malformed, and nothing is opened or reserved", async () => {
   const plan = buyPlan();
-  for (const pf of [null, (async () => { throw new Error("gateway down"); }) as Preflight, (async () => ({ approved: false, reasons: ["Daily loss limit hit"] })) as Preflight, (async () => ({ approved: "yes" as any, reasons: [] })) as Preflight]) {
-    const { eng } = await mk(pf), ev = await eng.open(plan, mid(plan), NOW);
-    assert.equal(ev.type, "REJECTED"); assert.equal(eng.state.positions.length, 0); assert.equal(eng.state.orderIds.length, 0);
-  }
+  const probe = (await mk()).eng, qty = (await (async () => { await probe.open(plan, mid(plan), NOW); return probe.state.positions[0].qty; })());
+  const capped = await mk({ maxOrderQuantity: qty / 2 }), ev = await capped.eng.open(plan, mid(plan), NOW);
+  assert.equal(ev.type, "REJECTED"); assert.match(ev.reasons![0], /maximum order quantity/); assert.equal(capped.eng.state.positions.length, 0); assert.equal(capped.eng.state.orderIds.length, 0);
+  assert.ok(capped.store.log.some(e => e.type === "REJECTED"), "refusal is audited");
+  const okCap = await mk({ maxOrderQuantity: qty * 2 }); assert.equal((await okCap.eng.open(plan, mid(plan), NOW)).type, "OPENED");
+  const poor = await mk({ startingEquity: 10_000, maxNotionalFraction: 1 }); poor.eng.state.positions.push({ ...probe.state.positions[0], symbol: "HELDUSDT", clientOrderId: "held", remainingQty: 1, entry: 9_990 });
+  const broke = await poor.eng.open(plan, mid(plan), NOW); assert.equal(broke.type, "REJECTED"); assert.match(broke.reasons![0], /Insufficient simulated balance/); assert.equal(poor.eng.state.positions.length, 1);
+  const bad = await (await mk()).eng.open({ ...plan, stopLoss: NaN as any }, mid(plan), NOW); assert.equal(bad.type, "REJECTED");
 });
 test("duplicate orders are not resubmitted, including after a restart", async () => {
-  const calls: PreflightRequest[] = [], plan = buyPlan(), { eng, store } = await mk(approve(calls));
+  const plan = buyPlan(), { eng, store } = await mk();
   assert.equal((await eng.open(plan, mid(plan), NOW)).type, "OPENED");
-  assert.equal((await eng.open(plan, mid(plan), NOW + 1)).type, "DUPLICATE"); assert.equal(calls.length, 1); assert.equal(eng.state.positions.length, 1);
-  const restarted = await PaperEngine.create(store, approve(calls), {}, NOW + 5000);
+  assert.equal((await eng.open(plan, mid(plan), NOW + 1)).type, "DUPLICATE"); assert.equal(eng.state.positions.length, 1); assert.equal(eng.state.orderIds.length, 1);
+  const restarted = await PaperEngine.create(store, {}, NOW + 5000);
   assert.equal(restarted.state.positions.length, 1, "open position recovered from the store");
-  assert.equal((await restarted.open(plan, mid(plan), NOW + 6000)).type, "DUPLICATE"); assert.equal(calls.length, 1);
+  assert.equal((await restarted.open(plan, mid(plan), NOW + 6000)).type, "DUPLICATE"); assert.equal(restarted.state.orderIds.length, 1);
 });
 test("kill switch, non-trade decisions, expired signals and bad prices all block new orders", async () => {
   const plan = buyPlan(), { eng } = await mk();
@@ -94,7 +96,7 @@ test("kill switch, non-trade decisions, expired signals and bad prices all block
   assert.equal(eng.state.positions.length, 0);
 });
 test("one position per symbol, a position cap, and no stacking", async () => {
-  const plan = buyPlan(), other = { ...plan, symbol: "OTHERUSDT" }, { eng } = await mk(approve(), { maxOpenPositions: 1 });
+  const plan = buyPlan(), other = { ...plan, symbol: "OTHERUSDT" }, { eng } = await mk({ maxOpenPositions: 1 });
   assert.equal((await eng.open(plan, mid(plan), NOW)).type, "OPENED");
   const again = await eng.open({ ...plan, generatedAt: new Date(NOW + 1).toISOString() }, mid(plan), NOW + 1); assert.equal(again.type, "REJECTED"); assert.match(again.reasons![0], /already open/);
   const capped = await eng.open(other, mid(plan), NOW + 2); assert.equal(capped.type, "REJECTED"); assert.match(capped.reasons![0], /Max open positions/);
@@ -129,30 +131,30 @@ test("reaching TP3 closes the trade, books the partials in order, and feeds the 
 });
 test("daily loss limit and consecutive-loss protection pause new entries", async () => {
   const plan = buyPlan(), b = { ...plan, symbol: "BBBUSDT" }, c = { ...plan, symbol: "CCCUSDT" };
-  const { eng } = await mk(approve(), { maxDailyLossPct: 0.0001, maxOpenPositions: 5 });
+  const { eng } = await mk({ maxDailyLossPct: 0.0001, maxOpenPositions: 5 });
   await eng.open(plan, mid(plan), NOW); await eng.onBar(plan.symbol, bar(eng.state.positions[0], { low: eng.state.positions[0].stop - 1 }));
   const r = await eng.open(b, mid(plan), NOW + 10); assert.equal(r.type, "REJECTED"); assert.match(r.reasons![0], /Daily loss limit/);
-  const { eng: e2 } = await mk(approve(), { maxConsecutiveLosses: 1, maxDailyLossPct: 50, maxOpenPositions: 5 });
+  const { eng: e2 } = await mk({ maxConsecutiveLosses: 1, maxDailyLossPct: 50, maxOpenPositions: 5 });
   await e2.open(plan, mid(plan), NOW); await e2.onBar(plan.symbol, bar(e2.state.positions[0], { low: e2.state.positions[0].stop - 1 }));
   const r2 = await e2.open(c, mid(plan), NOW + 10); assert.equal(r2.type, "REJECTED"); assert.match(r2.reasons![0], /consecutive losses/);
 });
 test("a store failure surfaces instead of silently losing state", async () => {
   const plan = buyPlan(), store = new MemoryPaperStore(); store.save = async () => { throw new Error("db down"); };
-  const eng = await PaperEngine.create(store, approve(), {}, NOW);
+  const eng = await PaperEngine.create(store, {}, NOW);
   await assert.rejects(() => eng.open(plan, mid(plan), NOW), /db down/);
 });
 test("KV-backed store round-trips state and writes TTL'd audit entries", async () => {
   const data = new Map<string, { v: string; ttl?: number }>();
   const kv = { get: async (k: string) => data.get(k)?.v ?? null, put: async (k: string, v: string, o?: { expirationTtl?: number }) => { data.set(k, { v, ttl: o?.expirationTtl }); } };
-  const plan = buyPlan(), s1 = new KVPaperStore(kv), e1 = await PaperEngine.create(s1, approve(), {}, NOW);
+  const plan = buyPlan(), s1 = new KVPaperStore(kv), e1 = await PaperEngine.create(s1, {}, NOW);
   await e1.open(plan, mid(plan), NOW);
-  const e2 = await PaperEngine.create(new KVPaperStore(kv), approve(), {}, NOW + 1000);
+  const e2 = await PaperEngine.create(new KVPaperStore(kv), {}, NOW + 1000);
   assert.equal(e2.state.positions.length, 1); assert.equal(e2.state.orderIds.length, 1);
   const audits = [...data.entries()].filter(([k]) => k.includes(":audit:")); assert.ok(audits.length >= 1 && audits.every(([, x]) => x.ttl === 90 * 86400));
 });
 
 test("the consecutive-loss pause expires, and a further loss re-triggers it", async () => {
-  const plan = buyPlan(), PAUSE = 3_600_000, { eng } = await mk(approve(), { maxConsecutiveLosses: 1, maxDailyLossPct: 50, reentryCooldownMs: 0, lossPauseMs: PAUSE });
+  const plan = buyPlan(), PAUSE = 3_600_000, { eng } = await mk({ maxConsecutiveLosses: 1, maxDailyLossPct: 50, reentryCooldownMs: 0, lossPauseMs: PAUSE });
   await eng.open(plan, mid(plan), NOW); const t1 = NOW + 60_000;
   await eng.onBar(plan.symbol, { ts: t1, high: eng.state.positions[0].entry, low: eng.state.positions[0].stop - 1, close: 1 });
   const fresh = (ts: number): OmnisignalResult => ({ ...plan, generatedAt: new Date(ts).toISOString(), expiresAt: new Date(ts + 9e6).toISOString() });

@@ -1,6 +1,6 @@
 // ETI Omnisignal X orchestrator (analytical, read-only): Swift engine + Gainz engine -> fusion -> independent validation.
 // Produces a decision and trade plan only. It never submits an order and never grants itself permissions;
-// any execution must go through the existing server-side risk gateway.
+// any execution must go through the Worker's in-process order safeguards (see execution.ts / safeguards.ts).
 import { adaptiveBands, atrSeries, emaFilter, volumeMomentum } from "./indicators.ts";
 import { classifyRegime } from "./regime.ts";
 import { analyzeLiquidity, type LiquidityAnalysis } from "./liquidity.ts";

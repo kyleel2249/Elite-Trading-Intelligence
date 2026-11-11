@@ -52,5 +52,5 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const result = runOmnisignal({ symbol, strategy, candles, depth, now: Date.now() }, { ...opts, roundTripCostBps: costBpsFrom(env as any), enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") } });
   return reply({ ...result, parameters: { version, name }, dataQuality: { provider, timeframesLoaded: Object.keys(candles), failures, orderBook: depth ? "rest_snapshot" : "unavailable", providerCrossCheck: "not_performed",
     note: "Single validated provider per request; cross-provider reconciliation is not performed and the REST order-book snapshot is timestamped at fetch time." },
-    validationStatus: { expectancy: "unmeasured_until_backtest_lab", accountRisk: "not_evaluated_by_analytical_endpoint", execution: "Orders require POST /api/orders and the server-side risk-gateway preflight; live trading remains disabled by default." } });
+    validationStatus: { expectancy: "unmeasured_until_backtest_lab", accountRisk: "not_evaluated_by_analytical_endpoint", execution: "Orders require POST /api/orders, which applies in-process paper safeguards; there is no live trading path." } });
 }

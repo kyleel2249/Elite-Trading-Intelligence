@@ -6,7 +6,7 @@ Three environments, three credential sets, three kinds of record. Nothing is sha
 |---|---|---|---|---|
 | **INTERNAL PAPER** (`paper`) | ETI's own simulation. Fills at the live public price; no exchange or broker is contacted | automatic session (HttpOnly cookie `eti_paper`) | `POST /api/orders` with `broker:"eti_paper"`, and `/api/paper/*` | `exec:paper:rec:*` |
 | **EXCHANGE TESTNET** (`testnet`) | Alpaca paper and Binance testnet, using **your** keys from Worker secrets | automatic session (cookie `eti_testnet`), issued only if the keys exist and are not rejected | `POST /api/orders` with `broker:"alpaca"` or `"binance"` | `order:*` |
-| **LIVE** | Disabled | never by session. Master token **and** `X-ETI-Live-Authorization` secret **and** `ETI_LIVE_TRADING_ENABLED=true` **and** live broker keys **and** external risk gate, limit orders only, capped | `POST /api/orders/live` | `exec:live:rec:*` |
+| **LIVE** | Disabled in this build | never. `POST /api/orders/live` answers 423 `live_trading_disabled` (403 for a session); no live broker host or credential is referenced and `ETI_LIVE_TRADING_ENABLED` is ignored. No external risk gateway is involved anywhere | `POST /api/orders/live` (always refused) | none |
 
 No withdrawal, transfer or funding endpoint exists. Requests to such paths return 404.
 

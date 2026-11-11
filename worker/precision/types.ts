@@ -151,7 +151,7 @@ export interface PrecisionSignal {
   opportunityScore: OpportunityScore;
   riskChecks: GateResult[];
   riskCheckSummary: { passed: number; failed: number; notEvaluated: number };
-  /** Always false: this engine is analytical. Orders go through POST /api/orders and its server-side risk preflight. */
+  /** Always false: this engine is analytical. Orders go through POST /api/orders and its in-process paper safeguards. */
   liveExecutionAllowed: false;
   execution: { note: string; requiresRiskPreflight: true };
   dataQuality: { provider: string; timeframesLoaded: Timeframe[]; candleCounts: Partial<Record<Timeframe, number>>; orderBook: "available" | "unavailable"; providerCrossCheck: "not_performed"; notes: string[] };

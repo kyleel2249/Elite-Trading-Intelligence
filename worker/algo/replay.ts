@@ -60,9 +60,9 @@ export async function replay(history: History, cfg: ReplayConfig): Promise<Repla
   for (const tf of TIMEFRAMES) { const r = history[tf]; if (r) for (let i = 1; i < r.length; i++) if (!(r[i][0] > r[i - 1][0])) throw new Error(`${tf} candles are not strictly ascending at index ${i}`); }
   const step = Math.max(1, cfg.stepBars ?? 4), win = cfg.windowCandles ?? 300, execMs = TF_SECONDS[execTf] * 1000, warm = cfg.warmupBars ?? 120;
   const store = new MemoryPaperStore();
-  // Replay-local stand-in for the risk gateway: it approves, because the paper engine's own limits (position cap, daily loss,
-  // loss streak, cooldown, sizing) still apply. The real gateway is NOT exercised here.
-  const eng = await PaperEngine.create(store, async () => ({ approved: true, reasons: ["replay: simulated gateway approval"] }), { startingEquity: cfg.startingEquity ?? 10_000, ...cfg.paper }, exec[warm][0]);
+  // Replay uses the same in-process paper safeguards as live paper trading (position cap, daily loss, loss streak, cooldown,
+  // sizing, quantity cap and simulated free-cash check).
+  const eng = await PaperEngine.create(store, { startingEquity: cfg.startingEquity ?? 10_000, ...cfg.paper }, exec[warm][0]);
   const decisions: Record<string, number> = {}, agreements: Record<string, number> = {}, rejections: Record<string, number> = {};
   let evaluations = 0; const fills: ReplayResult["fills"] = [];
   const tally = (m: Record<string, number>, k: string) => { m[k] = (m[k] ?? 0) + 1; };
@@ -96,7 +96,7 @@ export async function replay(history: History, cfg: ReplayConfig): Promise<Repla
       "Historical replay is not a forecast and not evidence of future profit; results can overfit and depend on the period tested.",
       "No historical order-book data: liquidity checks are unavailable, so spread, depth and slippage beyond the configured flat bps are not modelled.",
       "Fills occur at the next bar's open with flat fee and slippage assumptions; funding, market impact and partial fills are not modelled.",
-      "The risk gateway is replaced by a local approval stub; only the paper engine's own limits applied.",
+      "The paper engine's in-process safeguards applied (position cap, daily loss, loss streak, cooldown, sizing, simulated balance).",
       "Parameters are fixed defaults and were not optimised on this data; in-sample and out-of-sample splits are reported separately.",
       ...(report.status === "insufficient_sample" ? [`Only ${report.trades} closed trades (< ${MIN_SAMPLE}): rates, ratios and expectancy are withheld.`] : []),
     ],

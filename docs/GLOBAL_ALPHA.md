@@ -12,7 +12,7 @@ Open `/alpha` on the Worker. Code lives in `worker/alpha/`; API under `/api/alph
 | Copy-trade evaluation | `copytrade.ts` | Delay-aware 12-step trail, 6 classes. |
 | Fusion + validation | `fusion.ts` | Hard-risk veto, independent validator that reads only raw candles and the plan; validation cap 60. |
 | Ledger | `ledger.ts` | Predictions resolved from later candles only, stop-first; false-negative tracking; rates withheld on small samples. |
-| Execution | `routes.ts`, `positions.ts` | Token-gated; uses existing risk gateway at `/api/orders` only (paper/testnet). Live disabled, no withdrawal capability. Virtual stops monitored each run; exposure limits. |
+| Execution | `routes.ts`, `positions.ts` | Token-gated; submits through the in-process safeguards at `/api/orders` only (paper/testnet). Live disabled, no withdrawal capability. Virtual stops monitored each run; exposure limits. |
 | Monitoring | `monitor.ts` | Model-version hash, champion/challenger with automatic rollback on paper losses. |
 | Profiles | `profiles.ts` | Audit of the 35 foundational traders. Result today: 35 present, 0 fully evidenced, 24 partial, 11 seed text. They are research backlog, not verified track records. |
 
@@ -35,7 +35,7 @@ Open `/alpha` on the Worker. Code lives in `worker/alpha/`; API under `/api/alph
 `npm test` runs `worker/*.test.ts` and `worker/alpha/*.test.ts`.
 
 ## Implementation report (12 points)
-1. **Architecture:** Discovery (scanner, early-alpha, DEX, SEC) -> Research (lab, flow, copy-trade) -> Decision (fusion, independent validator, risk gateway). Cloudflare Worker + KV, 15-minute cron.
+1. **Architecture:** Discovery (scanner, early-alpha, DEX, SEC) -> Research (lab, flow, copy-trade) -> Decision (fusion, independent validator, in-process order safeguards). Cloudflare Worker + KV, 15-minute cron.
 2. **Coverage:** crypto via Binance/Bybit/OKX; US equities via Alpaca (keys needed); DEX via DexScreener/GoPlus. Everything else is listed as a gap in `/api/alpha/coverage`. Not global.
 3. **Early-alpha engine:** 8 stages, 0-100 score, unavailable factors excluded and reported as evidence coverage. 12 tests.
 4. **Whale / on-chain / DEX:** order-flow and wash checks, wallet attribution only with sourced label at confidence >= 0.8, DEX monitoring-only. Live-unverified.

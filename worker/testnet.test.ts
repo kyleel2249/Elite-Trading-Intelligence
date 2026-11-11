@@ -21,8 +21,8 @@ function world(drift = 0.25, acct: any = { environment: "paper", halted: false }
   }) as typeof fetch;
   return { fetchImpl, calls };
 }
-const kv = () => { const m = new Map<string, string>(); return { get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); }, list: async () => ({ keys: [] }) }; };
-const envOf = (o: any = {}) => ({ ETI_EXECUTION_TOKEN: TOKEN, ETI_RISK_GATE_URL: "https://api.test/api/risk-gateway/preflight", ETI_RISK_GATE_TOKEN: "gate", ETI_EXECUTION_LOG: kv(), ETI_ROUND_TRIP_COST_BPS: "0", ...o }) as any;
+const kv = () => { const m = new Map<string, string>(); return { get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); }, list: async (o: { prefix: string }) => ({ keys: [...m.keys()].filter((k) => k.startsWith(o.prefix)).sort().map((name) => ({ name })), list_complete: true }) }; };
+const envOf = (o: any = {}) => ({ ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_API_URL: "https://api.test/", ETI_EXECUTION_API_TOKEN: "gate", ETI_EXECUTION_LOG: kv(), ETI_ROUND_TRIP_COST_BPS: "0", ...o }) as any;
 const req = (body: unknown, o: { token?: string | null; method?: string } = {}) => new Request("https://eti.test/api/omnisignal/execute", { method: o.method ?? "POST", headers: { "content-type": "application/json", ...(o.token === null ? {} : { authorization: "Bearer " + (o.token ?? TOKEN) }) }, body: body === undefined || (o.method ?? "POST") === "GET" ? undefined : JSON.stringify(body) });
 const good = { symbol: "BTCUSDT", strategy: "intraday", accountId: "acct1", riskUsd: 50, maxNotionalUsd: 5000 };
 const realFetch = globalThis.fetch; test.afterEach(() => { globalThis.fetch = realFetch; });
@@ -33,9 +33,8 @@ test("sizeFor: smaller of risk-based and notional-capped, zero on bad input", ()
   assert.equal(sizeFor(100, 99, 50, 1e9), 50); assert.equal(sizeFor(100, 99, 50, 1000), 10);
   for (const [e, s, r, n] of [[100, 101, 50, 1000], [0, -1, 50, 1000], [100, 99, 0, 1000], [100, 99, 50, 0], [NaN, 1, 1, 1]]) assert.equal(sizeFor(e, s, r, n), 0);
 });
-test("executionBase derives the Python origin", () => {
-  assert.equal(executionBase({ ETI_RISK_GATE_URL: "https://api.test/api/risk-gateway/preflight" } as any), "https://api.test");
-  assert.equal(executionBase({ ETI_EXECUTION_API_URL: "https://x.test/y", ETI_RISK_GATE_URL: "https://api.test/z" } as any), "https://x.test");
+test("executionBase is the optional Python engine origin and nothing else", () => {
+  assert.equal(executionBase({ ETI_EXECUTION_API_URL: "https://x.test/y" } as any), "https://x.test");
   assert.equal(executionBase({} as any), null);
 });
 test("guards: auth, method, kill switch, bad input, missing config", async () => {
@@ -45,7 +44,6 @@ test("guards: auth, method, kill switch, bad input, missing config", async () =>
   assert.equal((await run(req(good, { method: "GET" }), envOf(), w)).status, 405);
   assert.equal((await run(req(good), envOf({ ETI_KILL_SWITCH: "true" }), w)).status, 423);
   for (const bad of [undefined, { ...good, symbol: "x" }, { ...good, strategy: "bogus" }, { ...good, accountId: "a b" }, { ...good, riskUsd: 0 }, { ...good, maxNotionalUsd: -1 }, { ...good, riskUsd: "5" }]) assert.equal((await run(req(bad), envOf(), w)).status, 400);
-  assert.equal((await run(req(good), envOf({ ETI_RISK_GATE_URL: undefined, ETI_RISK_GATE_TOKEN: undefined }), w)).status, 503);
   assert.equal(w.calls.filter(c => c.url.includes("/signals")).length, 0);
 });
 test("live accounts, halted accounts and unreachable API never reach order submission", async () => {
@@ -80,4 +78,18 @@ test("an engine failure or unreachable engine is reported, never claimed as succ
   w = world(); const flaky = async (i: any, init?: any) => { if (String(i).endsWith("/signals")) throw new TypeError("net"); return w.fetchImpl(i, init); };
   globalThis.fetch = w.fetchImpl; r = await handleTestnetExecute(req(good), envOf(), { fetchImpl: flaky as any, now: () => NOW }); b = await j(r);
   if (b.decision === "BUY") { assert.equal(r.status, 502); assert.match(b.message, /outcome is unknown/); assert.ok(b.signalId); }
+});
+test("without any separate execution engine, a BUY plan still executes in-Worker as a simulated paper order and is audited", async () => {
+  const w = world(), env = envOf({ ETI_EXECUTION_API_URL: undefined, ETI_EXECUTION_API_TOKEN: undefined, ETI_READINESS_GATE: "off" });
+  const r = await run(req(good), env, w), b = await j(r);
+  assert.equal(b.decision, "BUY", "fixture should yield an actionable plan");
+  assert.equal(r.status, 200, JSON.stringify(b.execution).slice(0, 500));
+  assert.equal(b.submitted, true); assert.equal(b.path, "in_worker");
+  assert.equal(b.execution.simulated, true); assert.equal(b.execution.exchangeOrderPlaced, false);
+  assert.equal(b.protectiveOrders.placed, false, "stop/targets are not claimed as placed");
+  assert.ok(b.plan.stopLoss > 0 && b.plan.takeProfits.length === 3);
+  assert.equal(w.calls.filter(c => c.url.includes("api.test")).length, 0, "no separate service is contacted");
+  // the same signal is refused (idempotent signal id), not executed twice
+  const again = await j(await run(req(good), env, world()));
+  assert.equal(again.submitted, false); assert.equal(again.execution.error, "duplicate_client_order_id");
 });

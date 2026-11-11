@@ -16,8 +16,22 @@ let alpacaStatus = 200, binanceStatus = 200, brokerCalls: string[] = [];
 async function brokerFetch(u: any, init?: any): Promise<Response> {
   const url = String(u); brokerCalls.push(init?.method ? init.method + " " + url : "GET " + url);
   const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s });
-  if (url.includes("paper-api.alpaca.markets")) return alpacaStatus === 200 ? j(url.endsWith("/orders") ? { id: "alp-1" } : { status: "ACTIVE" }) : j({ message: "forbidden" }, alpacaStatus);
-  if (url.includes("testnet.binance.vision")) return binanceStatus === 200 ? j(url.includes("/order") ? { orderId: 77 } : { balances: [] }) : j({ code: -2015, msg: "Invalid API-key" }, binanceStatus === 401 ? 401 : 400);
+  // Stand-in paper/testnet brokers: they answer the account, position, symbol and order endpoints the Worker's in-process safeguards read.
+  if (url.includes("paper-api.alpaca.markets")) {
+    if (alpacaStatus !== 200) return j({ message: "forbidden" }, alpacaStatus);
+    if (url.endsWith("/orders")) return j({ id: "alp-1", status: "accepted" });
+    if (url.includes("/v2/positions/")) return j({ message: "position does not exist" }, 404);
+    return j({ status: "ACTIVE", buying_power: "1000000" });
+  }
+  if (url.includes("data.alpaca.markets")) return j({ trade: { p: 50 } });
+  if (url.includes("testnet.binance.vision")) {
+    if (binanceStatus !== 200) return j({ code: -2015, msg: "Invalid API-key" }, binanceStatus === 401 ? 401 : 400);
+    const path = new URL(url).pathname;
+    if (path.endsWith("/exchangeInfo")) return j({ symbols: [{ symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING" }] });
+    if (path.endsWith("/ticker/price")) return j({ price: "50000" });
+    if (path.endsWith("/order")) return j({ orderId: 77 });
+    return j({ canTrade: true, balances: [{ asset: "USDT", free: "1000000" }, { asset: "BTC", free: "10" }] });
+  }
   return j({}, 404);
 }
 const jar = (res: Response) => { const o: Record<string, string> = {}; for (const c of (res.headers as any).getSetCookie?.() ?? []) { const [kv] = c.split(";"); const i = kv.indexOf("="); o[kv.slice(0, i)] = kv.slice(i + 1); } return o; };
@@ -25,7 +39,8 @@ const cookieHeader = (c: Record<string, string>) => Object.entries(c).filter(([,
 const hdr = (cookies: Record<string, string> = {}, extra: Record<string, string> = {}) => ({ origin: ORIGIN, "content-type": "application/json", ...(Object.keys(cookies).length ? { cookie: cookieHeader(cookies) } : {}), ...extra });
 const post = (path: string, body: unknown, headers: Record<string, string>) => new Request(ORIGIN + path, { method: "POST", headers, body: JSON.stringify(body) });
 const session = async (env: any, environment: string, cookies: Record<string, string> = {}) => { const r = await handleAuth(post("/api/auth/session", { environment }, hdr(cookies)), env, deps()); return { r, body: await r.json() as any, cookies: { ...cookies, ...jar(r) } }; };
-const order = (over: Record<string, unknown> = {}, id = "eti" + Math.random().toString(36).slice(2, 12) + "abcd") => ({ broker: "eti_paper", symbol: "BTCUSDT", side: "buy", type: "market", quantity: 0.01, clientOrderId: id, riskConfirmed: true, executionSource: { actorType: "manual_user", actorId: "tester", sourceName: "test" }, ...over });
+let seq = 0; // each default order has its own quantity so the duplicate-order guard (identical order inside its window) stays active
+const order = (over: Record<string, unknown> = {}, id = "eti" + Math.random().toString(36).slice(2, 12) + "abcd") => ({ broker: "eti_paper", symbol: "BTCUSDT", side: "buy", type: "market", quantity: 0.001 + (++seq) * 1e-6, clientOrderId: id, riskConfirmed: true, executionSource: { actorType: "manual_user", actorId: "tester", sourceName: "test" }, ...over });
 const exec = async (env: any, body: unknown, headers: Record<string, string>, path = "/api/orders") => { const r = await handleExecution(post(path, body, headers), env, { now: () => clock, fetchImpl: brokerFetch as any, priceOf: async () => 50_000 }); return { r, body: await r.json() as any }; };
 const reset = () => { clock = T0; alpacaStatus = 200; binanceStatus = 200; brokerCalls = []; };
 
@@ -172,7 +187,7 @@ test("live trading stays disabled: no session reaches it, and the master path st
   assert.equal((await exec(off, live, m, "/api/orders/live")).r.status, 423, "live switch off");
   const noGate = await exec({ ...env, ETI_LIVE_MAX_NOTIONAL_USD: "100", ETI_LIVE_MAX_ORDER_QUANTITY: "1" }, live, hdr({}, { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "x-eti-live-authorization": "wrong-secret-0123456789012" }), "/api/orders/live"); assert.equal(noGate.r.status, 423, "wrong activation secret");
   assert.ok(!brokerCalls.some(c => c.includes("api.alpaca.markets") || c.includes("api.binance.com")), "no live endpoint contacted");
-  assert.equal((await exec(env, order({ broker: "eti_paper", liveConfirmed: true }), hdr({}, { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "x-eti-live-authorization": "activation-secret-0123456789" }), "/api/orders/live")).r.status, 400, "internal paper is not a live broker");
+  assert.equal((await exec(env, order({ broker: "eti_paper", liveConfirmed: true }), hdr({}, { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "x-eti-live-authorization": "activation-secret-0123456789" }), "/api/orders/live")).r.status, 423, "live is disabled for every broker, internal paper included");
   for (const p of ["/api/withdraw", "/api/withdrawals", "/api/transfer", "/api/orders/withdraw", "/api/auth/withdraw"]) { const r = p.startsWith("/api/auth") ? await handleAuth(post(p, {}, hdr(s.cookies)), env, deps()) : await handleExecution(post(p, {}, hdr(s.cookies)), env, { now: () => clock }); assert.equal(r.status, 404, p); }
   const st = await (await handleAuth(new Request(ORIGIN + "/api/auth/status"), env, deps())).json() as any; assert.equal(st.environments.live.sessionsIssued, false); assert.equal(st.withdrawalsAndTransfers, "not implemented");
 });

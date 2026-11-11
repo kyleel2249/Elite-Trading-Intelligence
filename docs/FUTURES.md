@@ -21,10 +21,10 @@ A plain order against an open position is rejected (`opposing_order_must_be_redu
 * `POST /api/agents/futures/execute` (bearer) – forwards the plan's ticket to the gateway only if the plan is eligible. Body adds `execution: { clientOrderId, riskConfirmed: true }`.
 
 ## Enabling (all required)
-Worker secrets `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_SECRET_KEY` (testnet keys, **trade permission only, never withdrawal**), `ETI_EXECUTION_TOKEN`, `ETI_RISK_GATE_URL`/`ETI_RISK_GATE_TOKEN`, the `ETI_EXECUTION_LOG` KV, `ETI_FUTURES_MAX_NOTIONAL_USD`, optional `ETI_FUTURES_MAX_LEVERAGE` (default 3, hard cap 5), and finally `ETI_FUTURES_ENABLED=true`. Without the flag every futures order returns 423.
+Worker secrets `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_SECRET_KEY` (testnet keys, **trade permission only, never withdrawal**), `ETI_EXECUTION_TOKEN`, the `ETI_EXECUTION_LOG` KV, optional `ETI_DUPLICATE_WINDOW_SECONDS` (default 60), `ETI_FUTURES_MAX_NOTIONAL_USD`, optional `ETI_FUTURES_MAX_LEVERAGE` (default 3, hard cap 5), and finally `ETI_FUTURES_ENABLED=true`. Without the flag every futures order returns 423.
 
 ## Controls (deterministic, final)
-Kill switch; bearer token; audit log required; server-side risk gate required (fails closed); account state, position, funding and mark price must all load; `canTrade`; leverage ≤ cap; order and total notional ≤ cap; limit within 2 % of mark; margin used ≤ 50 % of available balance; stop on the correct side; **estimated liquidation must lie beyond the stop by at least the entry-to-stop distance** (exchange-reported liquidation used when a position exists); extreme adverse funding (> 0.1 % / 8 h) rejected; existing positions must be isolated and at the same leverage. Margin type is set to ISOLATED and leverage set only when opening a new position.
+Kill switch; bearer token; audit log required; duplicate-order protection (a `clientOrderId` is used once; an identical rapid order is refused); account state, position, funding and mark price must all load; `canTrade`; leverage ≤ cap; order and total notional ≤ cap; limit within 2 % of mark; margin used ≤ 50 % of available balance; stop on the correct side; **estimated liquidation must lie beyond the stop by at least the entry-to-stop distance** (exchange-reported liquidation used when a position exists); extreme adverse funding (> 0.1 % / 8 h) rejected; existing positions must be isolated and at the same leverage. Margin type is set to ISOLATED and leverage set only when opening a new position.
 
 **Exit policy.** SELL/COVER are risk-reducing. They skip entry-sizing vetoes (event hazard, open-risk budget, caps on leverage/notional) but still require the kill switch off, fresh market data, an existing opposite position, quantity ≤ position and a price near mark. Entries (BUY/SHORT) additionally need Commander consensus **and** Risk Manager approval, net reward:risk ≥ 2 after costs, and exchange-filter compliance.
 
@@ -32,7 +32,7 @@ Kill switch; bearer token; audit log required; server-side risk gate required (f
 
 ## Known limits
 * **No protective stop is placed automatically.** `stopPrice` is used for the liquidation-buffer and risk maths only; manage the stop yourself and watch `/api/futures/positions`.
-* The existing FastAPI risk gate evaluates the order as a Binance testnet spot order (it ignores the futures-specific fields); futures-specific limits are enforced in the Worker. Extending the Python engine for leverage and funding is not done.
+* No external risk service is involved: every futures-specific limit (leverage, notional, margin, liquidation distance, funding) is enforced in-process in the Worker, together with duplicate protection and the kill switch. Refused orders never reach the exchange and are recorded under `reject:` in the audit log; executed orders under `order:`.
 * Liquidation estimate uses a flat 0.5 % maintenance-margin rate; real tiers differ.
 * Analysis uses spot candles/order book; funding and mark come from the futures venue.
 * Equity is the futures wallet balance; daily PnL and drawdown are not derived.

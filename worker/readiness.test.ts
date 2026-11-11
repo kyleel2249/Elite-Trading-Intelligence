@@ -358,35 +358,41 @@ test("reports list every exchange with state and next change", () => {
   assert.equal(r.exchanges.length, 3); assert.ok(r.exchanges.every(e => e.next)); assert.match(r.text, /Exchange hours \(as of 2026-11-09 09:00 UTC\):/); assert.match(r.text, /Tokyo Stock Exchange: OPEN|Tokyo Stock Exchange: CLOSED/);
 });
 
-// ------------------------------------------------------------------ order gateway integration
+// ------------------------------------------------------------------ order handler integration
+// The Binance testnet below is a stand-in that mimics the HTTP shapes the handler reads (exchangeInfo, signed account, ticker, order).
 function orderHarness(now: number, gate: string | undefined, events: string, seed = 7) {
-  mockMarket(now, { seed }); const market = globalThis.fetch, brokerCalls: string[] = [], stored: string[] = [];
+  mockMarket(now, { seed }); const market = globalThis.fetch, brokerCalls: string[] = [], kv = new Map<string, string>();
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
-    const u = new URL(String((input as Request).url ?? input));
-    if (u.hostname === "risk.example") return new Response(JSON.stringify({ approved: true, decision: "approved" }), { status: 200 });
-    if (u.hostname === "testnet.binance.vision") { brokerCalls.push(u.pathname); return new Response(JSON.stringify({ orderId: 42 }), { status: 200 }); }
+    const u = new URL(String((input as Request).url ?? input)), json = (b: unknown, st = 200) => new Response(JSON.stringify(b), { status: st });
+    if (u.hostname === "testnet.binance.vision") {
+      if (u.pathname === "/api/v3/exchangeInfo") return json({ symbols: [{ symbol: "BTCUSDT", status: "TRADING", baseAsset: "BTC", quoteAsset: "USDT" }] });
+      if (u.pathname === "/api/v3/account") return json({ canTrade: true, balances: [{ asset: "USDT", free: "100000", locked: "0" }, { asset: "BTC", free: "0", locked: "0" }] });
+      if (u.pathname === "/api/v3/ticker/price") return json({ symbol: "BTCUSDT", price: "60000" });
+      if (u.pathname === "/api/v3/order") { brokerCalls.push(u.pathname); return json({ orderId: 42, status: "FILLED" }); }
+    }
     return market(input as never, init);
   }) as unknown as typeof fetch;
-  const env = { ETI_EXECUTION_TOKEN: "tok-12345678", ETI_RISK_GATE_URL: "https://risk.example/gate", ETI_RISK_GATE_TOKEN: "g", BINANCE_API_KEY: "k", BINANCE_SECRET_KEY: "s", ETI_EVENTS_JSON: events, ...(gate ? { ETI_READINESS_GATE: gate } : {}),
-    ETI_EXECUTION_LOG: { put: async (_k: string, v: string) => { stored.push(v); }, get: async () => null, list: async () => ({ keys: [] }) } };
+  const env = { ETI_EXECUTION_TOKEN: "tok-12345678", BINANCE_API_KEY: "k", BINANCE_SECRET_KEY: "s", ETI_EVENTS_JSON: events, ...(gate ? { ETI_READINESS_GATE: gate } : {}),
+    ETI_EXECUTION_LOG: { put: async (k: string, v: string) => { kv.set(k, v); }, get: async (k: string) => kv.get(k) ?? null, delete: async (k: string) => { kv.delete(k); }, list: async (o: { prefix: string }) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(o.prefix)).map((name) => ({ name })) }) } };
   const order = () => handleExecution(new Request("https://eti.test/api/orders", { method: "POST", headers: { authorization: "Bearer tok-12345678", "content-type": "application/json" },
     body: JSON.stringify({ broker: "binance", symbol: "BTCUSDT", side: "buy", type: "market", quantity: 0.01, clientOrderId: "order-12345678", riskConfirmed: true, executionSource: { actorType: "manual_user", actorId: "u1", sourceName: "test" } }) }), env as never);
+  const keys = (prefix: string) => [...kv.keys()].filter((k) => k.startsWith(prefix)), stored = { get orders() { return keys("order:").map((k) => kv.get(k)!); }, get rejects() { return keys("reject:").map((k) => JSON.parse(kv.get(k)!)); } };
   return { order, brokerCalls, stored, env };
 }
-test("order gateway: readiness=enforce blocks orders during a high-impact release and never reaches the broker", async () => {
+test("order handler: readiness=enforce blocks orders during a high-impact release and never reaches the broker", async () => {
   const now = utc(2026, 11, 9, 13, 20); Date.now = () => now as never;
   const cpi = JSON.stringify([{ title: "US CPI", time: new Date(now + 10 * MIN).toISOString(), impact: "high", currency: "USD" }]);
   const h = orderHarness(now, "enforce", cpi), res = await h.order(), d = await res.json() as any;
-  assert.equal(res.status, 403); assert.equal(d.error, "readiness_gate_rejected"); assert.equal(d.readiness.status, "AVOID_TRADING"); assert.deepEqual(h.brokerCalls, []); assert.deepEqual(h.stored, []);
+  assert.equal(res.status, 403); assert.equal(d.error, "readiness_gate_rejected"); assert.equal(d.readiness.status, "AVOID_TRADING"); assert.deepEqual(h.brokerCalls, []); assert.deepEqual(h.stored.orders, [], "no executed-order record"); assert.equal(h.stored.rejects.length, 1, "the refusal itself is audited"); assert.equal(h.stored.rejects[0].stage, "readiness"); assert.equal(h.stored.rejects[0].brokerContacted, false);
 });
-test("order gateway: advisory (the default) records the verdict on the audit record without blocking; off omits it", async () => {
+test("order handler: advisory (the default) records the verdict on the audit record without blocking; off omits it", async () => {
   const now = utc(2026, 11, 9, 13, 20); Date.now = () => now as never;
   const cpi = JSON.stringify([{ title: "US CPI", time: new Date(now + 10 * MIN).toISOString(), impact: "high", currency: "USD" }]);
   const h = orderHarness(now, undefined, cpi), res = await h.order(), d = await res.json() as any;
-  assert.equal(res.status, 201); assert.equal(d.readiness.status, "AVOID_TRADING"); assert.equal(d.readiness.gate, "advisory"); assert.deepEqual(h.brokerCalls, ["/api/v3/order"]); assert.equal(JSON.parse(h.stored[0]).readiness.status, "AVOID_TRADING");
+  assert.equal(res.status, 201); assert.equal(d.readiness.status, "AVOID_TRADING"); assert.equal(d.readiness.gate, "advisory"); assert.deepEqual(h.brokerCalls, ["/api/v3/order"]); assert.equal(JSON.parse(h.stored.orders[0]).readiness.status, "AVOID_TRADING");
   const off = orderHarness(now, "off", cpi), r2 = await off.order(); assert.equal(r2.status, 201); assert.equal(((await r2.json()) as any).readiness, null);
 });
-test("order gateway: readiness=enforce lets an order through when conditions are not adverse", async () => {
+test("order handler: readiness=enforce lets an order through when conditions are not adverse", async () => {
   const now = utc(2026, 11, 9, 9, 30); Date.now = () => now as never;
   const h = orderHarness(now, "enforce", JSON.stringify([{ title: "Far", time: new Date(now + 5 * DAY).toISOString(), impact: "high", currency: "USD" }]), 1), res = await h.order(), d = await res.json() as any;
   assert.equal(res.status, 201, JSON.stringify(d)); assert.ok(!["AVOID_TRADING", "HIGH_RISK"].includes(d.readiness.status));

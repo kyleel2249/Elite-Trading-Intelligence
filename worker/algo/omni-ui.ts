@@ -203,7 +203,7 @@ function loadPaper(){
   if(rs[0].status===401){state.token=null;put("paper-body",note("Unauthorised: the token was rejected.","bad"));return}
   if(!rs[0].ok){put("paper-body",note("Paper API error: "+(rs[0].body.error||rs[0].status)+(rs[0].body.message?" - "+rs[0].body.message:""),"bad"));return}
   var s=rs[0].body,perf=rs[1].body,audit=rs[2].body,box=el("div");
-  box.appendChild(kv([["Equity (simulated)",num(s.equity)],["Start",num(s.startingEquity)],["Open positions",s.openPositions.length],["Closed trades",s.closedTrades],["Kill switch",s.killSwitch?"ENGAGED":"off",s.killSwitch?"bear":"bull"],["Risk gateway",s.riskGateConfigured?"configured":"NOT configured: orders are rejected",s.riskGateConfigured?"bull":"bear"],["Live trading",s.liveTradingAvailable?"available":"unavailable"],["Withdrawals",s.withdrawalPermissions?"enabled":"none"]]));
+  box.appendChild(kv([["Equity (simulated)",num(s.equity)],["Start",num(s.startingEquity)],["Open positions",s.openPositions.length],["Closed trades",s.closedTrades],["Kill switch",s.killSwitch?"ENGAGED":"off",s.killSwitch?"bear":"bull"],["Safeguards",s.safeguards&&s.safeguards.engine==="in_process"?"in-process (no external gateway)":"unknown",s.safeguards&&s.safeguards.engine==="in_process"?"bull":"bear"],["Live trading",s.liveTradingAvailable?"available":"unavailable"],["Withdrawals",s.withdrawalPermissions?"enabled":"none"]]));
   $("p-kill").textContent=s.killSwitch?"Release kill switch":"Engage kill switch";$("p-kill").dataset.on=s.killSwitch?"0":"1";
   var sc=s.scheduler;if(sc){var lr=sc.lastRun;box.appendChild(note("Scheduled cycle: "+(sc.symbols.length?sc.symbols.join(", ")+" ("+sc.strategy+")":"no symbols configured")+" | auto-execute "+(sc.autoExecute?"ON":"off")+(lr?" | last run "+lr.at+(lr.ran?"":" (skipped: "+lr.reason+")"):" | has not run yet"),"ok"))}
   box.appendChild(el("h2",{text:"Open positions"}));
@@ -216,7 +216,7 @@ function loadPaper(){
 function paperAction(kind){
  var q=params(),symbol=q.symbol;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){setStatus("Enter a valid symbol",true);return}
  var path,body;if(kind==="tick"){path="/api/paper/tick";body={symbol:symbol}}else if(kind==="kill"){path="/api/paper/kill";body={on:$("p-kill").dataset.on!=="0"}}else{path="/api/paper/evaluate";body={symbol:symbol,strategy:q.strategy,execute:kind==="open"}}
- if(kind==="open"&&!window.confirm("Open a SIMULATED paper position on "+symbol+" if the plan is BUY/SELL and the risk gateway approves? No real order is sent."))return;
+ if(kind==="open"&&!window.confirm("Open a SIMULATED paper position on "+symbol+" if the plan is BUY/SELL and the in-process paper safeguards approve (quantity cap, simulated balance)? No real order is sent."))return;
  setStatus("Sending…");api(path,{auth:true,method:"POST",body:body}).then(function(r){
   var b=r.body||{},m=r.ok?"Done":"HTTP "+r.status;if(b.event&&b.event.type)m=b.event.type+(b.event.reasons?": "+b.event.reasons.join("; "):"");else if(b.events&&b.events.length)m="Events: "+b.events.map(function(e){return e.type}).join(", ");else if(b.message)m=b.message;else if(b.error)m=b.error;
   setStatus(m,!r.ok&&r.status!==200);return loadPaper()}).catch(function(e){setStatus(e.message,true)})}

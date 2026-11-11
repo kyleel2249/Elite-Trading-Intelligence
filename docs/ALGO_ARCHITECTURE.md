@@ -54,4 +54,4 @@ Through a price gap the screen fills the stop at the gap price (conservative) wh
 
 ## Safety boundaries (unchanged)
 
-No route in this folder submits a live order. Paper orders require the risk-gateway preflight and fail closed. No route can withdraw or move funds.
+No route in this folder submits a live order. Simulated paper orders pass the in-process safeguards (kill switch, idempotency, limits, quantity cap, simulated balance) before they open. No route can withdraw or move funds.
