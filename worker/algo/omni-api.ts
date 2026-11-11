@@ -2,6 +2,8 @@
 // Analytical and read-only. It never submits orders; execution stays behind the existing risk-gated /api/orders routes.
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
+import { expectancyFor, expectancyOptions, expectancyStatus } from "./expectancy.ts";
+import { journalFromRoute } from "./journal.ts";
 import { loadSignalInputs } from "./market-inputs.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions } from "./params.ts";
@@ -49,8 +51,10 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const inputs = await loadSignalInputs(env, symbol, strategy, url.searchParams.get("provider"));
   if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", error: inputs.error, executionTimeframe: inputs.executionTimeframe, failures: inputs.failures, submitsOrder: false, liveExecutionAllowed: false }, 503);
   const { candles, depth, provider, failures } = inputs;
-  const result = runOmnisignal({ symbol, strategy, candles, depth, now: Date.now() }, { ...opts, roundTripCostBps: costBpsFrom(env as any), enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") } });
+  const now = Date.now(), exp = await expectancyFor(env, strategy, symbol, now);   // measured evidence from replay/paper, or "unproven"
+  const result = runOmnisignal({ symbol, strategy, candles, depth, now }, { ...opts, roundTripCostBps: costBpsFrom(env as any), enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") }, ...expectancyOptions(exp) });
+  const journal = await journalFromRoute(env, result, strategy, now, { status: exp.status, expectancyR: exp.expectancyR, samples: exp.samples });
   return reply({ ...result, parameters: { version, name }, dataQuality: { provider, timeframesLoaded: Object.keys(candles), failures, orderBook: depth ? "rest_snapshot" : "unavailable", providerCrossCheck: "not_performed",
     note: "Single validated provider per request; cross-provider reconciliation is not performed and the REST order-book snapshot is timestamped at fetch time." },
-    validationStatus: { expectancy: "unmeasured_until_backtest_lab", accountRisk: "not_evaluated_by_analytical_endpoint", execution: "Orders require POST /api/orders, which applies in-process paper safeguards; there is no live trading path." } });
+    validationStatus: { expectancy: expectancyStatus(exp), accountRisk: "not_evaluated_by_analytical_endpoint", execution: "Orders require POST /api/orders, which applies in-process paper safeguards; there is no live trading path." }, journal });
 }
