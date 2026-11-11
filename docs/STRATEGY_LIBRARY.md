@@ -1,6 +1,6 @@
 # Elite Strategy Intelligence
 
-23 independent, configurable strategy modules in `app/strategies/`, a shared cost-aware backtester, and a validation layer. The library produces **research signals and evidence grades only**; it never places orders (`execution_eligible` is always `false`). Execution stays behind `/api/risk-gateway` and the promotion authority.
+23 independent, configurable strategy modules in `app/strategies/`, a shared cost-aware backtester, and a validation layer. The library produces **research signals and evidence grades only**; it never places orders (`execution_eligible` is always `false`). Execution stays behind the in-process risk engine and the promotion authority.
 
 ## Modules (specification order)
 

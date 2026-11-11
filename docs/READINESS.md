@@ -110,7 +110,7 @@ portfolio risk preflight:
 | `off` | not consulted |
 
 Binance orders are assessed as crypto, Alpaca orders as US equities. There is no override flag: change the setting if you
-want to trade through a warning. The gate cannot loosen any existing control (kill switch, live lock, caps, risk gate).
+want to trade through a warning. The gate cannot loosen any existing control (kill switch, live lock, caps, risk checks).
 
 ## API
 

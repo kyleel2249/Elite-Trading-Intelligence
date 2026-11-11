@@ -26,7 +26,7 @@ from .health import CircuitBreaker, retry_async
 from .store import AccountRecord, OrderRow, ProposalRow
 
 # (intent, policy, quote, equity, positions, environment) -> (approved, reasons)
-RiskGate = Callable[..., Awaitable[tuple]]
+RiskCheck = Callable[..., Awaitable[tuple]]
 
 UNKNOWN_GRACE_SECONDS = 120
 EMERGENCY_SLIPPAGE_BPS = 100.0
@@ -35,11 +35,11 @@ _EPS = 1e-12
 
 class ExecutionEngine:
     def __init__(self, store, adapter_factory: Callable[[AccountRecord], object], *,
-                 risk_gate: Optional[RiskGate] = None, clock: Callable[[], datetime] = utcnow,
+                 risk_check: Optional[RiskCheck] = None, clock: Callable[[], datetime] = utcnow,
                  sleep: Callable[[float], Awaitable] = asyncio.sleep,
                  kill_switch: Callable[[], bool] = lambda: False,
                  breaker_threshold: int = 3, breaker_cooldown: float = 30.0):
-        self.store, self._factory, self.risk_gate = store, adapter_factory, risk_gate
+        self.store, self._factory, self.risk_check = store, adapter_factory, risk_check
         self.clock, self._sleep, self._kill = clock, sleep, kill_switch
         self._adapters: dict = {}
         self._breakers: dict = {}
@@ -296,12 +296,12 @@ class ExecutionEngine:
                 reasons.append(f"Daily order limit reached ({len(today)}/{policy.max_daily_orders})")
 
             # --- independent risk officer (fail closed on live) ---
-            if self.risk_gate is None:
+            if self.risk_check is None:
                 if acct.environment == "live":
-                    reasons.append("No risk gate configured; live execution refused")
+                    reasons.append("No in-process risk check configured; live execution refused")
             else:
                 try:
-                    ok, rg = await self.risk_gate(intent, policy, quote, equity, positions, acct.environment)
+                    ok, rg = await self.risk_check(intent, policy, quote, equity, positions, acct.environment)
                 except Exception as e:     # a broken risk officer is a veto
                     ok, rg = False, [f"Risk gate failed: {type(e).__name__}"]
                 if not ok:

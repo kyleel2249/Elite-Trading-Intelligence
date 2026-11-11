@@ -1,7 +1,7 @@
 # ETI analytics (`/api/analytics/*`)
 
 Stateless research and risk computations in `app/analytics/` (stdlib only), exposed by `app/api/analytics.py`.
-Nothing here places orders; execution stays behind the RiskEngine / risk gateway. Where inputs are
+Nothing here places orders; execution stays behind the RiskEngine. Where inputs are
 insufficient, results say `insufficient_data` instead of guessing.
 
 | Capability | Endpoint | Notes |

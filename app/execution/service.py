@@ -44,7 +44,7 @@ def adapter_for(acct: AccountRecord):
     return build_adapter(acct.provider, creds, acct.environment, symbols=acct.policy.allowed_symbols)
 
 
-async def risk_gate(intent: OrderIntent, policy, quote, equity, positions, environment) -> tuple:
+async def risk_check(intent: OrderIntent, policy, quote, equity, positions, environment) -> tuple:
     """Independent risk officer: reuses the existing RiskEngine on broker-derived (never client-supplied) inputs."""
     settings = get_settings()
     store = get_store()
@@ -79,6 +79,6 @@ def get_store() -> SqlStore:
 def get_engine() -> ExecutionEngine:
     global _engine
     if _engine is None:
-        _engine = ExecutionEngine(get_store(), adapter_for, risk_gate=risk_gate,
+        _engine = ExecutionEngine(get_store(), adapter_for, risk_check=risk_check,
                                   kill_switch=lambda: bool(get_settings().kill_switch))
     return _engine

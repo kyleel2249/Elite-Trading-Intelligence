@@ -1,8 +1,9 @@
-"""Server-side preflight bridge for the Cloudflare execution gateway.
+"""Server-side pre-trade check: a dry run of ETI's in-process risk engine.
 
-The gateway calls this API before a live order. Inputs that affect risk are
-derived from ETI's market and portfolio services; client-supplied equity,
-drawdown, positions and freshness are never accepted.
+Nothing depends on this endpoint: orders are checked inside the execution paths themselves (the Cloudflare Worker and the
+Python execution engine), and no separately deployed risk service exists. This endpoint lets an operator or the dashboard
+ask "would this order pass?" without submitting it. Inputs that affect risk are derived from ETI's market and portfolio
+services; client-supplied equity, drawdown, positions and freshness are never accepted.
 """
 from __future__ import annotations
 
@@ -23,10 +24,10 @@ from app.security.auth import require_api_key
 from app.services.activity_store import ActivityStore
 from app.trading.risk_context import build_risk_context
 
-router = APIRouter(prefix="/api/risk-gateway", tags=["risk-gateway"])
+router = APIRouter(prefix="/api/pretrade", tags=["pretrade"])
 
 
-class PreflightRequest(BaseModel):
+class PretradeRequest(BaseModel):
     provider: Literal["alpaca", "binance"]
     environment: Literal["paper", "testnet", "live"]
     symbol: str = Field(min_length=2, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
@@ -38,13 +39,13 @@ class PreflightRequest(BaseModel):
     @model_validator(mode="after")
     def live_requires_limit(self):
         if self.environment == "live" and (self.order_type != "limit" or self.limit_price is None):
-            raise ValueError("Live preflight requires a limit order and limit_price")
+            raise ValueError("Live pre-trade checks require a limit order and limit_price")
         return self
 
 
-@router.post("/preflight")
-async def execution_preflight(
-    req: PreflightRequest,
+@router.post("/check")
+async def pretrade_check(
+    req: PretradeRequest,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
     _auth=Depends(require_api_key),
@@ -72,7 +73,7 @@ async def execution_preflight(
             klines = None
 
     # Disclosures are surfaced as evidence, never interpreted as an automatic
-    # buy/sell instruction. The trading gateway remains the only order path.
+    # buy/sell instruction. Orders are only placed by the execution paths, never by this endpoint.
     disclosures = ActivityStore(db).list_activities(ticker=req.symbol.upper(), limit=20)
     high_impact = [
         row for row in disclosures
@@ -132,7 +133,7 @@ async def execution_preflight(
         and 0 <= quote_age <= settings.data_max_age_seconds
     )
     if not quote_is_valid:
-        reasons.append("Order preflight requires a valid, timestamped, fresh market quote")
+        reasons.append("Pre-trade check requires a valid, timestamped, fresh market quote")
     if req.environment == "live" and council.risk_veto:
         reasons.extend(council.risk_notes or ["Trading Council risk veto"])
     approved = decision.approved and quote_is_valid and not (

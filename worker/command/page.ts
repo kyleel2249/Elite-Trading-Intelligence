@@ -225,7 +225,7 @@ async function loadHealth(){
  var h='<table>';var ms=0;
  var r=rs[0];if(r.status==='fulfilled'){ms=r.value.ms;h+=hrow('Cloudflare Worker','ok','status '+esc(r.value.data.status)+' · '+r.value.ms+' ms');}else h+=hrow('Cloudflare Worker','bad',r.reason.message);
  r=rs[1];if(r.status==='fulfilled'){var d=r.value.data;h+=hrow('Execution gateway','ok','mode '+d.mode+' · live trading '+(d.live_trading_enabled?'ON':'off'));
-  h+=hrow('Live risk gate',d.live_risk_gate_configured===true?'ok':'warn',d.live_risk_gate_configured===true?'configured':(d.live_risk_gate_configured===false?'not configured: live orders are refused (paper/testnet unaffected)':'not reported'));
+  h+=hrow('Order safeguards',d.safeguards&&d.safeguards.engine==='in_process'?'ok':'warn',d.safeguards&&d.safeguards.engine==='in_process'?'in-process (no external service); live trading disabled':'not reported');
   h+=hrow('Execution audit log',d.audit_log_configured===true?'ok':'warn',d.audit_log_configured===true?'configured':(d.audit_log_configured===false?'not configured':'not reported'));
   h+=hrow('Kill switch',d.kill_switch?'bad':'ok',d.kill_switch?'ACTIVE: execution blocked':'inactive');
   h+=hrow('Alpaca paper',d.alpaca_paper_configured===true?'ok':'warn',d.alpaca_paper_configured===true?'credentials configured (not connection-tested here)':'not configured');
@@ -311,7 +311,7 @@ async function loadHistory(){
 }
 async function loadLimits(){
  if(!S.token)return {source:'not loaded'};var r=await api('/api/paper/status',authHdr());var c=r.data.config||{};
- $('b-limits').innerHTML='<table>'+Object.keys(c).map(function(k){return '<tr><td>'+esc(k)+'</td><td>'+esc(typeof c[k]==='object'?JSON.stringify(c[k]):c[k])+'</td></tr>';}).join('')+'</table><div class="foot">Read-only. Limits are enforced server-side by the paper engine and risk gateway, never by this page.</div>';
+ $('b-limits').innerHTML='<table>'+Object.keys(c).map(function(k){return '<tr><td>'+esc(k)+'</td><td>'+esc(typeof c[k]==='object'?JSON.stringify(c[k]):c[k])+'</td></tr>';}).join('')+'</table><div class="foot">Read-only. Limits are enforced server-side by the paper engine and the in-process order safeguards, never by this page.</div>';
  return {ms:r.ms,source:'paper trading engine'};
 }
 
@@ -415,7 +415,7 @@ async function runAnalysis(){
 async function loadRisk(){
  var rs=await Promise.allSettled([api('/api/execution/status'),api('/api/futures/status')]);if(rs[0].status==='rejected')throw new Error(rs[0].reason.message);
  var d=rs[0].value.data,f=rs[1].status==='fulfilled'?rs[1].value.data:null;
- var rows=[['Execution mode',d.mode],['Live trading enabled',d.live_trading_enabled],['Live activation configured',d.live_activation_configured],['Live risk gate configured',d.live_risk_gate_configured],['Paper risk gate required',d.paper_risk_gate_required],['Readiness gate',d.readiness_gate],['Kill switch',d.kill_switch],['Audit log configured',d.audit_log_configured],['Withdrawal permissions enabled',d.withdrawal_permissions],['Alpaca paper configured',d.alpaca_paper_configured],['Binance testnet configured',d.binance_testnet_configured],['Live credentials configured',d.live_credentials_configured]];
+ var rows=[['Execution mode',d.mode],['Live trading available',d.live_trading_available],['Safeguards',d.safeguards&&d.safeguards.engine],['Max order quantity',d.safeguards&&d.safeguards.max_order_quantity],['Duplicate window (s)',d.safeguards&&d.safeguards.duplicate_window_seconds],['External risk gateway',d.external_risk_gateway],['Readiness gate',d.readiness_gate],['Kill switch',d.kill_switch],['Audit log configured',d.audit_log_configured],['Withdrawal permissions enabled',d.withdrawal_permissions],['Alpaca paper configured',d.alpaca_paper_configured],['Binance testnet configured',d.binance_testnet_configured]];
  if(f){rows.push(['Futures testnet enabled',f.enabled],['Futures credentials configured',f.credentials_configured],['Futures caps configured',f.caps_configured],['Futures hard leverage cap',f.max_leverage_hard_cap],['Futures risk gate configured',f.risk_gate_configured],['Live futures',f.live_futures]);}
  var show=function(v){return v===true?'yes':v===false?'no':(v==null?'not reported':String(v));};
  $('b-risk').innerHTML='<table>'+rows.map(function(r){return '<tr><td>'+esc(r[0])+'</td><td><b>'+esc(show(r[1]))+'</b></td></tr>';}).join('')+'</table><div class="foot">Read-only view. Live trading can only be activated through the separate authenticated process; no button here can do it.</div>';

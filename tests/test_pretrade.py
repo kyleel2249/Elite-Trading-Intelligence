@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.config import Settings
-from app.api import risk_gateway
+from app.api import pretrade
 
 
 class _Market:
@@ -36,15 +36,15 @@ class _Activities:
 
 
 def test_preflight_connects_market_risk_and_disclosures_without_submitting(monkeypatch):
-    monkeypatch.setattr(risk_gateway, "MarketService", _Market)
-    monkeypatch.setattr(risk_gateway, "ActivityStore", _Activities)
+    monkeypatch.setattr(pretrade, "MarketService", _Market)
+    monkeypatch.setattr(pretrade, "ActivityStore", _Activities)
     settings = Settings(paper_starting_equity=10000.0)
-    req = risk_gateway.PreflightRequest(
+    req = pretrade.PretradeRequest(
         provider="binance", environment="paper", symbol="BTCUSDT",
         side="buy", quantity=0.01, order_type="market",
     )
 
-    result = asyncio.run(risk_gateway.execution_preflight(
+    result = asyncio.run(pretrade.pretrade_check(
         req, settings=settings, db=None, _auth=None,
     ))
 
@@ -59,15 +59,15 @@ def test_preflight_connects_market_risk_and_disclosures_without_submitting(monke
 
 
 def test_live_preflight_fails_closed_without_live_account_equity(monkeypatch):
-    monkeypatch.setattr(risk_gateway, "MarketService", _Market)
-    monkeypatch.setattr(risk_gateway, "ActivityStore", _Activities)
+    monkeypatch.setattr(pretrade, "MarketService", _Market)
+    monkeypatch.setattr(pretrade, "ActivityStore", _Activities)
     settings = Settings(live_trading_enabled=False, live_account_equity=None)
-    req = risk_gateway.PreflightRequest(
+    req = pretrade.PretradeRequest(
         provider="binance", environment="live", symbol="BTCUSDT",
         side="buy", quantity=0.01, order_type="limit", limit_price=100.0,
     )
 
-    result = asyncio.run(risk_gateway.execution_preflight(
+    result = asyncio.run(pretrade.pretrade_check(
         req, settings=settings, db=None, _auth=None,
     ))
 
@@ -78,7 +78,7 @@ def test_live_preflight_fails_closed_without_live_account_equity(monkeypatch):
 
 def test_live_preflight_rejects_market_orders():
     with pytest.raises(ValueError):
-        risk_gateway.PreflightRequest(
+        pretrade.PretradeRequest(
             provider="binance", environment="live", symbol="BTCUSDT",
             side="buy", quantity=0.01, order_type="market",
         )
@@ -95,14 +95,14 @@ def test_preflight_rejects_missing_or_stale_market_quote(monkeypatch):
                 "ts_utc": None,
             }
 
-    monkeypatch.setattr(risk_gateway, "MarketService", _UnavailableMarket)
-    monkeypatch.setattr(risk_gateway, "ActivityStore", _Activities)
+    monkeypatch.setattr(pretrade, "MarketService", _UnavailableMarket)
+    monkeypatch.setattr(pretrade, "ActivityStore", _Activities)
     settings = Settings(paper_starting_equity=10000.0)
-    req = risk_gateway.PreflightRequest(
+    req = pretrade.PretradeRequest(
         provider="binance", environment="paper", symbol="BTCUSDT",
         side="buy", quantity=0.01, order_type="market",
     )
-    result = asyncio.run(risk_gateway.execution_preflight(
+    result = asyncio.run(pretrade.pretrade_check(
         req, settings=settings, db=None, _auth=None,
     ))
     assert result["approved"] is False
@@ -121,14 +121,14 @@ def test_preflight_only_counts_explicitly_verified_disclosures(monkeypatch):
                 "category": "disclosure",
             }]
 
-    monkeypatch.setattr(risk_gateway, "MarketService", _Market)
-    monkeypatch.setattr(risk_gateway, "ActivityStore", _UnverifiedActivities)
+    monkeypatch.setattr(pretrade, "MarketService", _Market)
+    monkeypatch.setattr(pretrade, "ActivityStore", _UnverifiedActivities)
     settings = Settings(paper_starting_equity=10000.0)
-    req = risk_gateway.PreflightRequest(
+    req = pretrade.PretradeRequest(
         provider="binance", environment="paper", symbol="BTCUSDT",
         side="buy", quantity=0.01, order_type="market",
     )
-    result = asyncio.run(risk_gateway.execution_preflight(
+    result = asyncio.run(pretrade.pretrade_check(
         req, settings=settings, db=None, _auth=None,
     ))
     assert result["disclosure_context"]["matched_count"] == 1

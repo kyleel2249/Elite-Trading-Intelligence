@@ -207,7 +207,7 @@ The same checks cover every pathway: the dashboard Buy/Sell buttons, `POST /api/
 
 **Omnisignal execute (`POST /api/omnisignal/execute`)** works with no extra service: a BUY plan becomes an ordinary limit order for the same in-Worker flow (ETI Internal Paper, or Binance testnet) and is subject to every safeguard above; the plan's stop and targets are returned but the Worker does not place resting stop/take-profit orders. Optionally set `ETI_EXECUTION_API_URL` + `ETI_EXECUTION_API_TOKEN` to route plans to the Python execution engine instead, which adds per-account limits and protective OCO orders. **Retired settings:** `ETI_RISK_GATE_URL` / `ETI_RISK_GATE_TOKEN` are never read; a deployment that still has them keeps working and `/api/execution/status` reports `legacy_gateway_config_ignored: true` so they can be deleted. A test (`worker/execution.test.ts`) fails the build if any Worker source or config file starts depending on a risk gateway or a live-trading switch again.
 
-The Python/FastAPI `POST /api/risk-gateway/preflight` endpoint still exists as an independent service of the Python application; the Cloudflare Worker neither calls nor requires it. Never enable withdrawals, transfers or wallet management with any key used here.
+The project has no risk gateway anywhere: the Python app's former preflight endpoint is now `POST /api/pretrade/check`, a dry run of the in-process `RiskEngine` that nothing depends on. Never enable withdrawals, transfers or wallet management with any key used here.
 
 
 ## Elite-method signal engine (incremental release)

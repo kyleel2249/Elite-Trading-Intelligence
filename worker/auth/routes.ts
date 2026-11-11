@@ -44,7 +44,7 @@ export async function handleAuth(req: Request, env: AuthRouteEnv, deps: AuthDeps
         exchange_testnet: { scope: "testnet", ready: mode === "paper_testnet" && elig.eligible, authentication: mode === "paper_testnet" ? "automatic_session" : "manual_token_required",
           brokers: Object.fromEntries(elig.brokers.map(b => [b.broker, { environment: b.environment, status: b.status === "unreachable" && !b.checkedAt ? "unverified" : b.status, checkedAt: b.checkedAt }])),
           fallback: elig.eligible ? null : { to: "internal_paper", reason: "exchange_credentials_missing_or_invalid" }, session: testnet },
-        live: { status: "disabled", enabledInWorkerConfig: env.ETI_LIVE_TRADING_ENABLED === "true", sessionsIssued: false, requires: "master execution token + live activation secret + live broker keys + external risk gate; never reachable by a session" },
+        live: { status: "disabled", enabledInWorkerConfig: env.ETI_LIVE_TRADING_ENABLED === "true", sessionsIssued: false, requires: "not available: this build has no live order path and never routes orders to a real-money account" },
       },
       killSwitch: env.ETI_KILL_SWITCH === "true", signingKey: keys, withdrawalsAndTransfers: "not implemented",
       caller: { master: auth.master, scopes: [...auth.scopes] },

@@ -1,6 +1,6 @@
 """Elite Strategy Intelligence API: 23 strategy modules, backtests, out-of-sample / walk-forward validation, research signals.
 
-Nothing here places orders. Execution remains behind /api/risk-gateway and the promotion authority.
+Nothing here places orders. Execution remains behind the in-process RiskEngine and the promotion authority.
 """
 from __future__ import annotations
 

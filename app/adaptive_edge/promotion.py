@@ -49,7 +49,7 @@ class PromotionDecision:
 class StrategyPromotionAuthority:
     """
     Independent gate. May advance candidates through research → paper.
-    Live deployment always requires external authorization and risk-gateway.
+    Live deployment always requires external authorization and the in-process risk engine.
     """
 
     MIN_OOS_TRADES = 5
@@ -106,7 +106,7 @@ class StrategyPromotionAuthority:
         if stage in (s.value for s in LIVE_STAGES):
             return PromotionDecision(
                 candidate.candidate_id, stage, stage, False,
-                ["live_stages_require_explicit_user_authorization_and_risk_gateway"],
+                ["live_stages_require_explicit_user_authorization_and_risk_checks"],
                 True, ts,
             )
 

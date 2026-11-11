@@ -46,7 +46,7 @@ from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
-from app.api.risk_gateway import router as risk_gateway_router
+from app.api.pretrade import router as pretrade_router
 from app.api.execution import router as execution_router
 from app.api.paper import router as paper_router
 from app.api.markets import router as markets_router
@@ -200,7 +200,7 @@ app.include_router(knowledge_router)
 app.include_router(backtest_router)
 app.include_router(intelligence_data_router)
 app.include_router(stream_router)
-app.include_router(risk_gateway_router)
+app.include_router(pretrade_router)
 app.include_router(execution_router)
 app.include_router(paper_router)
 app.include_router(markets_router)

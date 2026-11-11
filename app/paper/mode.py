@@ -49,5 +49,5 @@ def resolve_mode(provider: str, environment: str, *, creds_configured: bool, liv
             return ModeDecision(REJECT, env, "live_trading_disabled")
         if not creds_configured:
             return ModeDecision(REJECT, env, "live_credentials_missing")
-        return ModeDecision(EXCHANGE_LIVE, env, "live enabled and credentials present (risk gateway applies)")
+        return ModeDecision(EXCHANGE_LIVE, env, "live enabled and credentials present (the in-process risk engine applies)")
     return ModeDecision(REJECT, env, "unknown_environment")

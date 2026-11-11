@@ -73,7 +73,7 @@ async def run_adaptive_cycle(
 ):
     """
     Run one adaptive cycle: regime → change → health → discovery → lab → selection → portfolio plan.
-    Does not place live orders. Live path remains risk-gateway gated.
+    Does not place live orders. The live path remains gated by the in-process risk engine.
     """
     closes = body.closes
     if len(closes) < 5:
@@ -165,7 +165,7 @@ def promotion_policy():
     return {
         "autonomous_max_stage": "PAPER_TRADING",
         "live_authorization_by_engine": auth.can_authorize_live(),
-        "requires_risk_gateway_for_orders": True,
+        "requires_risk_checks_for_orders": True,
         "max_individual_position_pct": 6.0,
         "stages": [s.value for s in __import__("app.adaptive_edge.promotion", fromlist=["PromotionStage"]).PromotionStage],
     }
@@ -199,6 +199,6 @@ def adaptive_edge_module_health():
             "suspend_strategies": True,
             "propose_replacements": True,
             "authorize_live_deployment": False,
-            "orders_require_risk_gateway": True,
+            "orders_require_risk_checks": True,
         },
     }

@@ -388,10 +388,10 @@ def test_snapshot_for_unintegrated_market_is_honest(client):
     assert j["price"] is None and j["data_status"] == "provider_not_integrated"
 
 
-def test_risk_gateway_exposes_market_context_without_new_client_inputs(monkeypatch):
+def test_pretrade_check_exposes_market_context_without_new_client_inputs(monkeypatch):
     import asyncio
 
-    from app.api import risk_gateway
+    from app.api import pretrade
 
     class _Market:
         def __init__(self, settings):
@@ -408,10 +408,10 @@ def test_risk_gateway_exposes_market_context_without_new_client_inputs(monkeypat
         def list_activities(self, **kwargs):
             return []
 
-    monkeypatch.setattr(risk_gateway, "MarketService", _Market)
-    monkeypatch.setattr(risk_gateway, "ActivityStore", _Activities)
-    req = risk_gateway.PreflightRequest(provider="binance", environment="paper", symbol="BTCUSDT", side="buy", quantity=0.01)
-    result = asyncio.run(risk_gateway.execution_preflight(req, settings=Settings(paper_starting_equity=10000.0), db=None, _auth=None))
+    monkeypatch.setattr(pretrade, "MarketService", _Market)
+    monkeypatch.setattr(pretrade, "ActivityStore", _Activities)
+    req = pretrade.PretradeRequest(provider="binance", environment="paper", symbol="BTCUSDT", side="buy", quantity=0.01)
+    result = asyncio.run(pretrade.pretrade_check(req, settings=Settings(paper_starting_equity=10000.0), db=None, _auth=None))
     assert result["market_context"]["asset_class"] == "crypto" and result["market_context"]["tier"] == "major"
     assert "warnings" in result and result["submits_order"] is False
-    assert set(risk_gateway.PreflightRequest.model_fields) == {"provider", "environment", "symbol", "side", "quantity", "order_type", "limit_price"}
+    assert set(pretrade.PretradeRequest.model_fields) == {"provider", "environment", "symbol", "side", "quantity", "order_type", "limit_price"}

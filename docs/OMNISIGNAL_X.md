@@ -105,7 +105,7 @@ The research workflow is now a matrix: `symbols` (default BTC, ETH, SOL, BNB, XR
 ## Exchange execution steps (Phase 8)
 
 `POST /api/omnisignal/execute {symbol, strategy, accountId, riskUsd, maxNotionalUsd}` (bearer token) analyses with the champion parameters and,
-for a BUY plan only (spot cannot short), submits to the Python engine (`ETI_EXECUTION_API_URL`, else the origin of `ETI_RISK_GATE_URL`; key `ETI_RISK_GATE_TOKEN`).
+for a BUY plan only (spot cannot short), executes it in the Worker's own paper/testnet flow (ETI Internal Paper, or Binance testnet) under the in-process safeguards. If the optional Python engine is configured (`ETI_EXECUTION_API_URL` + `ETI_EXECUTION_API_TOKEN`) the plan is submitted there instead, which adds protective OCO orders. No risk gateway is involved either way.
 It refuses `live` accounts (403), halted accounts (409) and an active kill switch. Size = the smaller of `riskUsd / (entry - stop)` and `maxNotionalUsd / entry`.
 The engine then runs: risk authorization, balance, precision and minimum-notional checks, acknowledgement, fill verification, **protective orders** and reconciliation.
 Protective orders are three Binance spot SELL OCO tranches (40/30/30 targets sharing the stop), sized to the quantity actually filled minus a fee buffer

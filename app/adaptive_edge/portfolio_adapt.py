@@ -16,7 +16,7 @@ class PortfolioAdaptationPlan:
     actions: list[dict[str, Any]]
     target_cash_pct: float
     notes: list[str]
-    requires_risk_gateway: bool
+    requires_risk_checks: bool
     timestamp: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -27,7 +27,7 @@ class PortfolioAdaptationEngine:
     """
     Propose reallocations when regimes/edges change.
     Holding cash is acceptable. Never exceed 6% single-name.
-    Does not place orders — every live order must hit risk-gateway preflight.
+    Does not place orders — every order must pass the in-process risk engine.
     """
 
     def plan(
@@ -87,7 +87,7 @@ class PortfolioAdaptationEngine:
             "type": "constraint",
             "max_individual_position_pct": MAX_INDIVIDUAL_POSITION_PCT,
             "fractional_kelly_default": True,
-            "all_orders_require": "POST /api/risk-gateway/preflight",
+            "all_orders_require": "the in-process risk engine (RiskEngine) on every order",
         })
 
         return PortfolioAdaptationPlan(
@@ -96,6 +96,6 @@ class PortfolioAdaptationEngine:
             actions=actions,
             target_cash_pct=round(min(100.0, cash), 2),
             notes=notes,
-            requires_risk_gateway=True,
+            requires_risk_checks=True,
             timestamp=ts,
         )

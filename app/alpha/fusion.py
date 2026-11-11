@@ -311,7 +311,7 @@ def validate(db: Session, cand: AlphaCandidate, bars: Sequence[dict[str, Any]], 
               "plan": {k: (round(v, 8) if isinstance(v, float) else v) for k, v in plan.items()},
               "engines": [asdict(e) for e in evidences], "champion_strategies_long": champ_long, "attribution": attribution,
               "validated_at": datetime.now(timezone.utc).isoformat(), "executable": status in ("CONFIRMED_OPPORTUNITY", "HIGH_CONVICTION_OPPORTUNITY"),
-              "note": "Executable means eligible to be sent to the server-side risk gateway, not an instruction to trade."}
+              "note": "Executable means eligible to be sent to the in-process risk engine, not an instruction to trade."}
     sub = dict(cand.scores or {})
     sub.update({"independent_validation": score, "early_alpha": early.get("score"), "risk": sub.get("risk")})
     cand.scores, cand.status, cand.stage = sub, status, stg["stage"]

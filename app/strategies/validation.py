@@ -24,7 +24,7 @@ CRITERIA = {
 }
 STATEMENT = ("An evidence grade is NOT a claim that the strategy works or will be profitable. Historical results, including out-of-sample "
              "and walk-forward results, are estimates with sampling error and selection bias. Any strategy must still pass paper/forward "
-             "testing and the ETI risk gateway before capital is committed.")
+             "testing and ETI's in-process risk engine before capital is committed.")
 
 
 # ------------------------------------------------------------------ statistics
@@ -191,7 +191,7 @@ def validate(strategy_id: str, bars: Bars, aux: Optional[dict] = None, *, params
         "assumptions": {"costs": asdict(cost), "risk": asdict(risk), "bars_per_year": bpy,
                         "fills": "signal on close of bar i, fill at open of bar i+1; stops intrabar (stop wins ties); gaps fill at the worse open"},
         "execution_eligible": False,
-        "promotion_note": "The strategy library emits research signals only. Order placement stays behind the ETI risk gateway and promotion authority.",
+        "promotion_note": "The strategy library emits research signals only. Order placement stays behind ETI's in-process risk engine and promotion authority.",
     }
     try:
         ev = _Evaluator(strategy_id, bars, aux, cost, risk, bpy)

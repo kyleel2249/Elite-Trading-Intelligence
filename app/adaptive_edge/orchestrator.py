@@ -205,7 +205,7 @@ class AdaptiveEdgeOrchestrator:
             "candidates": [c.to_dict() for c in self.lab.list(10)],
             "top_priorities": [p.to_dict() for p in prios],
             "governance": {
-                "suspend_strategies": True, "authorize_live_deployment": False, "orders_require_risk_gateway": True,
+                "suspend_strategies": True, "authorize_live_deployment": False, "orders_require_risk_checks": True,
             },
             "generated_at": _now(),
         }

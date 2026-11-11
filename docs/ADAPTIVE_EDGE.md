@@ -17,7 +17,7 @@ Independent authority that continuously:
 
 - The Adaptive Edge Engine **may suspend** strategies and **propose** replacements.
 - It **cannot** authorize its own live deployment (`StrategyPromotionAuthority.can_authorize_live() == False`).
-- Every live order must still pass `POST /api/risk-gateway/preflight`.
+- Every order must still pass the in-process `RiskEngine` inside the execution path (no separate gateway service exists).
 - Max individual position allocation remains **6%** of bankroll.
 - Live trading remains disabled by default (`LIVE_TRADING_ENABLED=false`).
 
@@ -40,7 +40,7 @@ Independent authority that continuously:
 | POST | `/api/adaptive-edge/cycle` | Full adaptive cycle |
 | GET | `/api/trading/broker-status` | Broker connectivity |
 | POST | `/api/trading/order` | Risk-gated paper/live orders |
-| POST | `/api/risk-gateway/preflight` | Mandatory live preflight |
+| POST | `/api/pretrade/check` | Dry-run of the in-process risk engine (never submits an order; no execution path depends on it) |
 
 ## Tests
 

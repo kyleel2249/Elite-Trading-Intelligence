@@ -78,4 +78,4 @@ price, never a quantity in the underlying's units. Futures are never routed to E
 | `GET /api/markets/snapshot?symbol=` | Live quote from the provider that can serve it (proxies labelled) |
 
 Verdicts: `ready`, `caution`, `wait_for_session`, `analysis_only`, `blocked`. Nothing here submits an order.
-`POST /api/risk-gateway/preflight` additionally returns `market_context` and `warnings`.
+`POST /api/pretrade/check` (a dry run of the in-process risk engine) additionally returns `market_context` and `warnings`.

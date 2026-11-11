@@ -117,7 +117,7 @@ def test_adaptive_edge_package_imports_and_runs_a_cycle():
     db = SessionLocal()
     try:
         res = AdaptiveEdgeOrchestrator(db).run_cycle(sym, "binance", closes, strategy_trades={"turtle_trend": []})
-        assert res.regime["primary_regime"] and res.portfolio_plan["requires_risk_gateway"] is True
+        assert res.regime["primary_regime"] and res.portfolio_plan["requires_risk_checks"] is True
         assert res.strategy_health["turtle_trend"]["status"] == "UNDER_VALIDATION"
         assert db.query(RegimeObservation).filter(RegimeObservation.symbol == sym).count() == 1
         snap = AdaptiveEdgeOrchestrator(db).dashboard_snapshot()

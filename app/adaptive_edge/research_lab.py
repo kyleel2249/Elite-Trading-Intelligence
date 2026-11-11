@@ -149,7 +149,7 @@ class StrategyResearchLab:
 
         live_values = {s.value for s in LIVE_STAGES}
         if decision.to_stage in live_values:
-            c.notes = [*c.notes, "awaiting explicit user authorization and risk-gateway; lab does not enter live stages"]
+            c.notes = [*c.notes, "awaiting explicit user authorization and the in-process risk engine; lab does not enter live stages"]
         elif decision.to_stage == "REJECTED":
             c.stage = "REJECTED"
             c.rejection_reasons = list(decision.reasons)

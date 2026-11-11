@@ -10,7 +10,7 @@ Independent authority that:
 
 Governance: may suspend strategies and propose replacements;
 cannot independently authorize live deployment. All live orders
-must still pass POST /api/risk-gateway/preflight.
+must still pass the in-process risk engine (RiskEngine).
 """
 from app.adaptive_edge.regime import MarketRegimeEngine, RegimeSnapshot
 from app.adaptive_edge.change_detection import MarketChangeDetector, ChangeEvent

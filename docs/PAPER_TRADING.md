@@ -1,6 +1,6 @@
 # Internal paper trading (no exchange credentials)
 
-ETI can run simulated BUY/SELL trading with **no exchange API key, secret or external risk gateway**. It is on by
+ETI can run simulated BUY/SELL trading with **no exchange API key, secret or separate risk service**. It is on by
 default and is the dashboard's *Paper Trading* tab. Live trading stays disabled and is never a fallback.
 
 ## Modes (always labelled, never switched silently)
