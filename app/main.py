@@ -216,6 +216,7 @@ for _module_path, _label in (
     ("app.api.adaptive_edge", "adaptive_edge"),
     ("app.api.alpha", "alpha"),
     ("app.api.auth_session", "auth_session"),
+    ("app.api.command_centre", "command_centre"),
 ):
     try:
         _mod = __import__(_module_path, fromlist=["router"])
