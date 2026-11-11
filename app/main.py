@@ -52,6 +52,7 @@ from app.api.strategies import router as strategies_router
 from app.prediction_ledger.api import router as predictions_router
 from app.prediction_ledger.job import prediction_resolver_job
 from app.prediction_ledger.service import record_from_forecast
+from app.api.capital_protection import router as capital_protection_router
 from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
@@ -124,6 +125,7 @@ app.include_router(markets_router)
 app.include_router(analytics_router)
 app.include_router(strategies_router)
 app.include_router(predictions_router)
+app.include_router(capital_protection_router)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -143,6 +145,11 @@ class OrderRequest(BaseModel):
     limit_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
     thesis: Optional[str] = Field(default=None, max_length=2000)
     council_action: Optional[str] = Field(default=None, max_length=32)
+    # Capital Protection inputs: validated by the protection system, never able to relax it.
+    stop_loss: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    take_profit: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    strategy_id: Optional[str] = Field(default=None, max_length=128)
+    atr_pct: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
 
     # Deprecated: accepted so existing clients keep working, but IGNORED. The server
     # derives equity, positions, PnL, drawdown and data freshness itself.
@@ -514,7 +521,9 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
         current_open_positions=ctx.current_open_positions, daily_realized_pnl_pct=ctx.daily_realized_pnl_pct,
         current_drawdown_pct=ctx.current_drawdown_pct, data_age_seconds=ctx.data_age_seconds,
         data_status=ctx.data_status, fill_price_hint=fill_hint, thesis=req.thesis,
-        council_action=req.council_action,
+        council_action=req.council_action, strategy_id=req.strategy_id, stop_loss=req.stop_loss,
+        take_profit=req.take_profit, atr_pct=req.atr_pct,
+        reference_price=(snapshot.get("price") if snapshot else None),
     )
     result["risk_inputs"] = {"source": "server", **ctx.to_dict()}
     return result
