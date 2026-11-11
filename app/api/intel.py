@@ -3,16 +3,19 @@
 Mounted under /api/analytics/intel. Read-only; nothing here can place an order. Provider failures are reported
 as structured errors (never a fabricated empty success).
 """
+import hmac
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
+from app.config import get_settings
 from app.providers import intel as intel_logic
+from app.providers.feed import to_readiness_events
 from app.providers.base import ProviderError
 from app.providers.registry import Registry, get_registry
-from app.security.auth import require_api_key
+from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti.api.intel")
 router = APIRouter(prefix="/intel", tags=["analytics-intel"])
@@ -56,6 +59,29 @@ async def economic_calendar(days: int = Query(7, ge=1, le=90), currencies: Optio
     wanted = {c.strip().upper() for c in currencies.split(",")} if currencies else None
     rows = [r for r in res.data if order.get(r["impact"], 0) >= order[min_impact] and (not wanted or (r["currency"] or "").upper() in wanted)]
     return {"count": len(rows), "events": rows, "provenance": res.provenance(), "failover_attempts": attempts}
+
+
+def _feed_auth(authorization: Optional[str] = Header(default=None), reg: Registry = Depends(get_registry)) -> None:
+    """Bearer check for the Worker's ETI_EVENT_FEED_TOKEN. Fails closed in production when no token is configured."""
+    if not reg.event_feed_token:
+        if (get_settings().app_env or "").strip().lower() in PROTECTED_ENVS:
+            raise HTTPException(status_code=503, detail="EVENT_FEED_TOKEN is not configured")
+        return
+    supplied = authorization[7:] if authorization and authorization.startswith("Bearer ") else ""
+    if not hmac.compare_digest(supplied.encode(), reg.event_feed_token.encode()):
+        raise HTTPException(status_code=401, detail="invalid feed token")
+
+
+@router.get("/calendar/feed")
+async def readiness_event_feed(days: int = Query(14, ge=1, le=30), reg: Registry = Depends(get_registry), _=Depends(_feed_auth)):
+    """Economic calendar in the Worker readiness engine's feed format. Point the Worker's ETI_EVENT_FEED_URL here."""
+    start = datetime.now(timezone.utc).date()
+    try:
+        res, attempts = await reg.capabilities["calendar"].call("economic_calendar", start - timedelta(days=1), start + timedelta(days=days))
+    except ProviderError as e:
+        raise _http(e)
+    return {**to_readiness_events(res.data), "source": res.provider, "generated_at": res.fetched_at.isoformat(),
+            "failover_attempts": attempts}
 
 
 @router.get("/calendar/earnings")
