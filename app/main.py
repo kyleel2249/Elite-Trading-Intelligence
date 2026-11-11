@@ -28,6 +28,7 @@ from app.trading.service import TradingService
 from app.trading.portfolio import PortfolioService
 from app.trading.reconciliation import OrderReconciler
 from app.trading.risk_context import build_risk_context
+from app.trading.sizing import SizingError, quote_to_qty
 from app.market.service import MarketService
 from app.intelligence.council import TradingCouncil
 from app.intelligence.traders import list_trader_profiles
@@ -243,7 +244,11 @@ class OrderRequest(BaseModel):
     environment: Literal["paper", "testnet", "live"] = Field(..., examples=["paper", "testnet", "live"])
     symbol: str = Field(..., min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
     side: Literal["buy", "sell"]
-    qty: float = Field(..., gt=0, allow_inf_nan=False)
+    qty: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False,
+                                 description="Quantity in base units. Send this OR quote_amount, not both.")
+    quote_amount: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False,
+                                          description="Amount to buy or sell in USDT (USDT-quoted symbols only). "
+                                                      "Converted to a quantity server-side. Send this OR qty.")
     order_type: str = Field("market", pattern=r"^[a-z_]{1,24}$")
     limit_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
     thesis: Optional[str] = Field(default=None, max_length=2000)
@@ -267,6 +272,12 @@ class OrderRequest(BaseModel):
     def _limit_needs_price(self):
         if self.order_type == "limit" and self.limit_price is None:
             raise ValueError("limit_price is required for limit orders")
+        return self
+
+    @model_validator(mode="after")
+    def _qty_xor_quote_amount(self):
+        if (self.qty is None) == (self.quote_amount is None):
+            raise ValueError("send exactly one of qty (base units) or quote_amount (USDT)")
         return self
 
 
@@ -625,6 +636,20 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
     except Exception:
         logger.warning("snapshot failed for %s %s", req.provider, req.symbol, exc_info=True)
 
+    # Amount in USDT -> quantity, computed here from a server-side price (never trusted from the client).
+    qty = req.qty
+    sizing = None
+    if req.quote_amount is not None:
+        ref_price = req.limit_price if req.order_type == "limit" else (snapshot.get("price") if snapshot else None)
+        try:
+            sizing = quote_to_qty(req.quote_amount, ref_price, req.symbol)
+        except SizingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        sizing["price_source"] = "limit_price" if req.order_type == "limit" else "live_quote"
+        sizing["note"] = ("Quantity is rounded down from the USDT amount at the reference price. Market-order fills can "
+                          "differ from it, and exchange lot-size/minimum-notional rules still apply.")
+        qty = sizing["qty"]
+
     # Risk inputs are derived from the database/market data, never from the request body.
     ctx = build_risk_context(db, settings, environment=req.environment, snapshot=snapshot)
 
@@ -636,13 +661,15 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
     service = TradingService(settings, db=db)
     result = await service.place_order(
         provider=req.provider, environment=req.environment, symbol=req.symbol, side=req.side,
-        qty=req.qty, order_type=req.order_type, limit_price=req.limit_price, equity=ctx.equity,
+        qty=qty, order_type=req.order_type, limit_price=req.limit_price, equity=ctx.equity,
         current_open_positions=ctx.current_open_positions, daily_realized_pnl_pct=ctx.daily_realized_pnl_pct,
         current_drawdown_pct=ctx.current_drawdown_pct, data_age_seconds=ctx.data_age_seconds,
         data_status=ctx.data_status, fill_price_hint=fill_hint, thesis=req.thesis,
         council_action=req.council_action,
     )
     result["risk_inputs"] = {"source": "server", **ctx.to_dict()}
+    if sizing is not None:
+        result["sizing"] = sizing
     return result
 
 
