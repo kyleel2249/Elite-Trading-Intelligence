@@ -1,7 +1,7 @@
 """Analytics API: scanning, ranking, regime, risk simulation, walk-forward, reporting and research.
 
 Compute endpoints are stateless and work on supplied data or on candles fetched server-side through
-``MarketService``. Nothing here places orders; execution stays behind the RiskEngine.
+``MarketService``. Nothing here places orders; execution stays behind the RiskEngine / risk gateway.
 """
 import asyncio
 import logging
@@ -269,3 +269,8 @@ async def nlq_endpoint(body: QueryRequest):
         return research.parse_query(body.text)
     except ValueError as e:
         raise _value_error(e)
+
+
+from app.api.intel import router as intel_router  # noqa: E402  (mounted at /api/analytics/intel)
+
+router.include_router(intel_router)
