@@ -107,7 +107,7 @@ SESSIONS: dict[str, SessionSpec] = {s.id: s for s in (
                 windows=_days(_MON_FRI, hm(9, 30), hm(11, 30)) + _days(_MON_FRI, hm(13), hm(15)),
                 schedule_confidence="approximate"),
     SessionSpec("nse_in", "NSE / BSE India", "Asia/Kolkata",
-                windows=_days(_MON_FRI, hm(9, 15), hm(15, 30)), schedule_confidence="approximate"),
+                windows=_days(_MON_FRI, hm(9, 15), hm(15, 30)), holiday_key="nse_in", schedule_confidence="approximate"),
     SessionSpec("krx", "Korea Exchange", "Asia/Seoul",
                 windows=_days(_MON_FRI, hm(9), hm(15, 30)), schedule_confidence="approximate"),
     SessionSpec("asx", "Australian Securities Exchange", "Australia/Sydney",

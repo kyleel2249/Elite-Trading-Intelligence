@@ -275,6 +275,33 @@
         "2027-12-31": "14:10"
       },
       "notes": "Early close = end of normal trading (Sydney time). Per ASX, ANZAC Day 2027 (Mon 26 April) is a normal trading day."
+    },
+    "nse_in": {
+      "name": "NSE India (equities; BSE follows the same list)",
+      "verification": "official",
+      "source": "https://nsearchives.nseindia.com/content/circulars/FAOP71777.pdf",
+      "years": [
+        2026
+      ],
+      "holidays": [
+        "2026-01-26",
+        "2026-03-03",
+        "2026-03-26",
+        "2026-03-31",
+        "2026-04-03",
+        "2026-04-14",
+        "2026-05-01",
+        "2026-05-28",
+        "2026-06-26",
+        "2026-09-14",
+        "2026-10-02",
+        "2026-10-20",
+        "2026-11-10",
+        "2026-11-24",
+        "2026-12-25"
+      ],
+      "early_closes": {},
+      "notes": "NSE circular 212/2025 (12 Dec 2025), weekday holidays only. The Muhurat session on Sun 8 Nov 2026 (time to be notified) is not modelled. Holidays tied to moon sighting (Eid, Muharram) can shift; check NSE notices. 2027 not published yet."
     }
   }
 }

@@ -87,11 +87,12 @@ at import (a malformed file degrades to "no calendar", never to an error). `GET 
 | Xetra | 2026-27 | official |
 | TSE | 2026-27 | official |
 | ASX (incl. 14:10 early closes on 24/31 Dec) | 2026-27 | official |
+| NSE India / BSE (weekday holidays; Muhurat session not modelled; moon-sighting dates can shift) | 2026 | official |
 | Euronext: common closures only (Amsterdam, Brussels, Dublin, Lisbon, Paris); no venue-specific closures or 24/31 Dec half days | 2026-27 | official |
 | LSE (12:30 early closes) | 2026-27 | secondary: verify |
 | JSE | 2026 secondary, 2027 derived from statute rules and Easter | verify with the JSE |
 | HKEX | 2026 | secondary: verify |
-| **NGX, GSE, EGX, NSE Kenya, Milan/Madrid/SIX, SSE, NSE India, KRX, CME/ICE** | none | `not_applied`: may be closed on a holiday ETI does not know |
+| **NGX, GSE, EGX, NSE Kenya, Milan/Madrid/SIX, SSE, KRX, CME/ICE** | none | `not_applied`: may be closed on a holiday ETI does not know |
 
 `applied` = official, `partial` = secondary/derived. The JSE's official notice could not be fetched (robots.txt) and was
 not circumvented. Add your own with `register_holidays()`.

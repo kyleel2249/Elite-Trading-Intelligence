@@ -562,3 +562,10 @@ def test_ngx_uses_the_extended_2026_hours():
     assert session_status("ngx", at(2026, 11, 10, 14, 0)).state == "open"                         # 15:00 WAT, closed under the old 14:30 close
     assert session_status("ngx", at(2026, 11, 10, 8, 30)).state == "open"                         # 09:30 WAT
     assert session_status("ngx", at(2026, 11, 10, 16, 30)).state == "closed"
+
+
+def test_nse_india_official_2026_calendar():
+    s = session_status("nse_in", at(2026, 11, 24, 5))                       # Guru Nanak Jayanti, 10:30 IST
+    assert s.state == "closed" and s.reason == "holiday" and s.holiday_calendar == "applied"
+    assert session_status("nse_in", at(2026, 11, 25, 5)).state == "open"
+    assert session_status("nse_in", at(2027, 3, 3, 5)).holiday_calendar == "not_applied"     # 2027 list not published yet
