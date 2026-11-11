@@ -90,6 +90,7 @@ ${PORTFOLIO_CSS}
 <label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off"></label>
 <label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop-loss (sell, Internal Paper)</option></select></label>
 <label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
+<label>Amount (<span id="orderQuote">USDT</span>)<input id="orderAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter amount to trade"><small id="orderAmountNote" class="mut" aria-live="polite">Type an amount and the quantity is filled in at the reference price.</small></label>
 <label id="limitPriceWrap" style="display:none">Limit price<input id="orderLimitPrice" type="number" min="0" step="any" placeholder="Enter limit price"></label>
 <label id="stopPriceWrap" style="display:none">Stop price<input id="orderStopPrice" type="number" min="0" step="any" placeholder="Trigger price"></label>
 <label>Time in force<select id="orderTif"><option value="gtc">GTC</option><option value="day">DAY (Alpaca)</option><option value="ioc">IOC (Binance)</option></select></label>
@@ -461,6 +462,7 @@ function orderValidation(o,requireCredentials=true){
 function renderPreview(o){
  const summary={venue:o.broker==='eti_paper'?'ETI INTERNAL PAPER (simulated, no exchange)':o.broker,mode:o.broker==='eti_paper'?'internal paper (simulated)':'exchange paper/testnet',symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
  if(o.type==='limit')summary.limitPrice=o.limitPrice;
+ {const px=o.type==='limit'?o.limitPrice:o.type==='stop'?o.stopPrice:orderRefPrice();if(px>0&&o.quantity>0){summary.referencePrice=px;summary['estimatedAmount_'+orderQuoteName()]=Math.round(o.quantity*px*100)/100;}}
  summary.executionSource={actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'};
  $('orderOutput').textContent='Review this order carefully before submission: | '+JSON.stringify(summary,null,2);
 }
@@ -531,6 +533,24 @@ $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').va
 $('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();};
 function syncOrderMarket(){const l=$('last').textContent;$('orderMarketPrice').textContent=l;$('orderChartSymbol').textContent=$('symbol').value;}
 new MutationObserver(syncOrderMarket).observe($('last'),{childList:true,characterData:true,subtree:true});syncOrderMarket();
+let amtDriver='qty';
+function orderRefPrice(){const t=$('orderType').value;const raw=t==='limit'?$('orderLimitPrice').value:t==='stop'?$('orderStopPrice').value:String($('last').textContent).replace(/,/g,'');const v=Number(raw);return Number.isFinite(v)&&v>0?v:0;}
+function orderQuoteName(){const m=/(USDT|USDC|BUSD|USD|EUR|BTC|ETH)$/.exec($('orderSymbol').value.trim().toUpperCase());return m?m[1]:'USD';}
+function fmtQty(v){return String(Math.floor(v*1e6)/1e6);}
+function syncAmount(){
+ $('orderQuote').textContent=orderQuoteName();
+ const px=orderRefPrice(),note=$('orderAmountNote');
+ if(!px){note.textContent=$('orderType').value==='market'?'Waiting for a live price to convert between amount and quantity.':'Enter the '+($('orderType').value==='limit'?'limit':'stop')+' price to convert between amount and quantity.';return;}
+ note.textContent='Reference price '+px.toLocaleString(undefined,{maximumFractionDigits:8})+' ('+($('orderType').value==='market'?'live market price':$('orderType').value+' price')+'). Market fills can differ slightly.';
+ if(amtDriver==='usd'){const a=Number($('orderAmount').value);$('orderQuantity').value=Number.isFinite(a)&&a>0?fmtQty(a/px):'';}
+ else{const q=Number($('orderQuantity').value);$('orderAmount').value=Number.isFinite(q)&&q>0?String(Math.round(q*px*100)/100):'';}
+}
+$('orderAmount').addEventListener('input',()=>{amtDriver='usd';syncAmount();});
+$('orderQuantity').addEventListener('input',()=>{amtDriver='qty';syncAmount();});
+['orderLimitPrice','orderStopPrice'].forEach(id=>$(id).addEventListener('input',syncAmount));
+['orderType','orderSymbol','symbol'].forEach(id=>$(id).addEventListener('change',syncAmount));
+new MutationObserver(syncAmount).observe($('last'),{childList:true,characterData:true,subtree:true});
+syncAmount();
 $('useMarketPrice').onclick=()=>{const v=Number(String($('last').textContent).replace(/,/g,''));if(!Number.isFinite(v)||v<=0){$('orderOutput').textContent='No live market price is available yet.';return;}$('orderType').value='limit';$('orderType').onchange();$('orderLimitPrice').value=String(v);};
 $('orderSymbol').onchange=()=>{const v=$('orderSymbol').value.trim().toUpperCase();$('orderSymbol').value=v;const opt=Array.prototype.find.call($('symbol').options,o=>o.value===v);if(opt&&$('symbol').value!==v){$('symbol').value=v;resetAndLoad();}syncOrderMarket();};
 $('symbol').addEventListener('change',syncOrderMarket);
