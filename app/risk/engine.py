@@ -122,16 +122,29 @@ class RiskEngine:
             reasons.append("Account equity must be positive for risk sizing")
 
         # --- Max position notional (6% default) ---
-        max_notional_pct = getattr(s, "max_position_notional_pct", 6.0) * review.notional_cap_multiplier
+        # Market profiles may only tighten the approved limits (rule 7): clamp any multiplier above 1 to 1.
+        notional_mult = min(1.0, review.notional_cap_multiplier)
+        risk_mult = min(1.0, review.risk_multiplier)
+        max_notional_pct = getattr(s, "max_position_notional_pct", 6.0) * notional_mult
+        # Orders that open or add exposure outside the paper simulator must have verifiable risk and notional.
+        needs_verification = proposal.side == "buy" and proposal.environment in ("testnet", "live")
+        px = proposal.limit_price or (proposal.meta or {}).get("ref_price")
+        try:
+            px = float(px) if px else None
+        except (TypeError, ValueError):
+            px = None
         if proposal.equity > 0 and proposal.qty > 0:
-            px = proposal.limit_price or (proposal.meta or {}).get("ref_price")
-            if px and float(px) > 0:
-                notional = float(proposal.qty) * float(px)
+            if px and px > 0:
+                notional = float(proposal.qty) * px
                 notional_pct = (notional / proposal.equity) * 100.0
                 if notional_pct > max_notional_pct + 1e-9:
                     reasons.append(
                         f"Position notional {notional_pct:.2f}% exceeds max {max_notional_pct}% of equity"
                     )
+            elif needs_verification:
+                reasons.append("Position notional cannot be verified (no limit_price or ref_price); order rejected (fail-closed)")
+            else:
+                warnings.append("Position notional not verified: no limit_price or ref_price supplied")
 
         # --- Position limits ---
         if proposal.current_open_positions >= s.max_open_positions:
@@ -153,13 +166,22 @@ class RiskEngine:
 
         # --- Risk per trade ---
         risk_pct = s.default_risk_per_trade_pct
-        if proposal.estimated_risk_amount is not None and proposal.equity > 0:
-            risk_pct = (proposal.estimated_risk_amount / proposal.equity) * 100
-            risk_limit = s.default_risk_per_trade_pct * review.risk_multiplier
+        risk_amount = proposal.estimated_risk_amount
+        if risk_amount is None and proposal.stop_loss and px and proposal.qty > 0 and proposal.side == "buy":
+            # Derive the amount at risk from the stop so a stop-protected order is verified, not assumed.
+            risk_amount = float(proposal.qty) * max(0.0, px - float(proposal.stop_loss))
+        if risk_amount is not None and proposal.equity > 0:
+            risk_pct = (risk_amount / proposal.equity) * 100
+            risk_limit = s.default_risk_per_trade_pct * risk_mult
             if risk_pct > risk_limit + 1e-9:
                 reasons.append(
                     f"Risk per trade {risk_pct:.2f}% exceeds limit {risk_limit:g}%"
                 )
+        elif proposal.side == "buy" and proposal.equity > 0:
+            if needs_verification:
+                reasons.append("Risk per trade cannot be verified (no stop_loss or estimated_risk_amount); order rejected (fail-closed)")
+            else:
+                warnings.append("Risk per trade not verified: no stop_loss or estimated_risk_amount supplied")
 
         # --- Data freshness (live only) ---
         if proposal.environment == "live" and s.require_fresh_data_for_live_orders:

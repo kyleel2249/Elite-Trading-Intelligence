@@ -159,6 +159,8 @@ class AdaptiveEdgeOrchestrator:
             dec = self.selector.decide(
                 sid, rep["status"], rep["sample_size"], snap.strategy_suitability.get(sid, 0.5),
                 rep.get("expected_value"), current_allocation_pct=reg.allocation_pct or 0.0,
+                # Recent results worse than the long-term record (or unknown) must never raise allocation.
+                block_increase=(rep.get("recent_vs_long_term") is None or rep["recent_vs_long_term"] < 1.0),
             )
             d = dec.to_dict()
             decisions.append(d)

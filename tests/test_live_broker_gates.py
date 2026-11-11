@@ -114,6 +114,7 @@ def test_live_approved_when_all_gates_pass():
             qty=0.01,
             order_type="limit",
             limit_price=50000,
+            stop_loss=49000,  # risk must be verifiable: 0.01 * 1000 = 10 = 0.1% of equity
             equity=10000,
             data_status="fresh",
             data_age_seconds=5,

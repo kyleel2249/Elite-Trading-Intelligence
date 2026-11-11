@@ -38,6 +38,7 @@ class AdaptiveStrategySelector:
         correlation_with_active: float = 0.0,
         current_allocation_pct: float = 0.0,
         replacement_candidate_id: Optional[str] = None,
+        block_increase: bool = False,
     ) -> StrategyAllocationDecision:
         reasons: list[str] = []
         action = "maintain"
@@ -59,7 +60,11 @@ class AdaptiveStrategySelector:
                 action = "observe"
                 reasons.append("low_regime_suitability")
         elif edge_status in ("HEALTHY", "EXCEPTIONAL") and regime_suitability >= 0.55:
-            if expected_value and expected_value > 0 and correlation_with_active < 0.7:
+            if block_increase:
+                # Rule 14: risk is never raised automatically after losses; it can only be held or reduced.
+                action = "maintain"
+                reasons.append("increase_blocked_after_recent_losses")
+            elif expected_value and expected_value > 0 and correlation_with_active < 0.7:
                 action = "increase"
                 alloc = min(6.0, max(current_allocation_pct, 1.0) * 1.25)
                 reasons.append("healthy_edge_compatible_regime")

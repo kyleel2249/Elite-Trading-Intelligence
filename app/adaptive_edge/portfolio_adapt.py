@@ -63,6 +63,10 @@ class PortfolioAdaptationEngine:
                     "allocation_pct": alloc,
                 })
                 notes.append(f"reduce_{sid}_to_{alloc}")
+            elif action == "increase" and current_drawdown_pct > 0:
+                # Rule 14: never add risk while the account is below its equity peak.
+                actions.append({"type": "hold_allocation", "strategy_id": sid, "reason": "increase_blocked_in_drawdown"})
+                notes.append(f"increase_blocked_in_drawdown_{sid}")
             elif action == "increase":
                 actions.append({
                     "type": "increase_allocation",
