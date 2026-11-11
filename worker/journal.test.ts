@@ -135,3 +135,10 @@ test("the journal source contains no external gateway or live-order reference", 
   const bad = /risk[-_ ]?gateway|RISK_GATEWAY|api\.binance\.com\/api\/v3\/order|live_trading:\s*true/i;
   for (const f of readdirSync(new URL("./journal/", import.meta.url))) assert.doesNotMatch(readFileSync(new URL("./journal/" + f, import.meta.url), "utf8"), bad, f);
 });
+test("a kill-switch refusal from an authenticated caller is journaled; an unauthenticated one writes nothing", async () => {
+  const kv = new MemKV(), env: any = { ETI_EXECUTION_LOG: kv, ETI_EXECUTION_TOKEN: TOKEN, ETI_KILL_SWITCH: "true" }, body = JSON.stringify({ broker: "eti_paper", symbol: "BTCUSDT", side: "buy", quantity: 1, clientOrderId: "kill-switch-1" });
+  const anon = await handleExecution(new Request("https://x.test/api/orders", { method: "POST", body }), env, { now: () => T0 }); assert.equal(anon.status, 423);
+  assert.equal((await openJournal(env)!.all()).entries.length, 0);
+  const auth = await handleExecution(new Request("https://x.test/api/orders", { method: "POST", headers: { authorization: "Bearer " + TOKEN }, body }), env, { now: () => T0 }); assert.equal(auth.status, 423);
+  const rows = (await openJournal(env)!.all()).entries; assert.equal(rows.length, 1); assert.equal(rows[0].kind, "order_rejected"); assert.equal(rows[0].tradeId, "kill-switch-1"); assert.equal((rows[0].data as any).stage, "kill_switch");
+});

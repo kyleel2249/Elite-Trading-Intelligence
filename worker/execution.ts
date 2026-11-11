@@ -186,7 +186,17 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
   }
   if (url.pathname !== "/api/orders" && url.pathname !== "/api/orders/live") return reply({ error: "not_found" }, 404);
   if (req.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
-  if (env.ETI_KILL_SWITCH === "true") return reply({ error: "execution_disabled", reason: "Emergency kill switch is active" }, 423);
+  if (env.ETI_KILL_SWITCH === "true") {
+    // The refusal is still part of the permanent journal, but only for a caller that proved who they are (no unauthenticated writes).
+    try {
+      const a = await authenticate(req.clone(), env as any, now);
+      if (a.master || a.scopes.size > 0) {
+        const b: any = await req.clone().json().catch(() => ({})), at = new Date(now).toISOString();
+        await journalRejection(env, "reject:" + at + ":killswitch", { outcome: "rejected", stage: "kill_switch", error: "execution_disabled", reasons: ["Emergency kill switch is active"], brokerContacted: false, at, request: summariseRequest(b), executionSource: summariseSource(b?.executionSource) });
+      }
+    } catch { /* never changes the refusal */ }
+    return reply({ error: "execution_disabled", reason: "Emergency kill switch is active" }, 423);
+  }
   const auth = await authenticate(req, env, now);
   if (!auth.master && auth.scopes.size === 0) return reply({ error: "unauthorized", message: "No valid ETI session or execution token. Open the dashboard to start an automatic session." }, 401);
   if (url.pathname === "/api/orders/live") {
