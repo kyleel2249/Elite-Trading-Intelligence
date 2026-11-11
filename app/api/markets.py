@@ -14,6 +14,7 @@ from app import __version__
 from app.markets import (
     PROFILES, SESSIONS, assess, calendar_info, classify, list_instruments, overview, profile_for, session_status,
 )
+from app.markets.calibration import calibrated_assess
 from app.markets.live import route_snapshot
 from app.markets.types import AssetClass
 
@@ -136,6 +137,32 @@ async def markets_assess(
         measured_spread_bps=measured_spread_bps, avg_daily_volume_usd=avg_daily_volume_usd, listing_age_days=listing_age_days,
         quote_to_usd=quote_to_usd, max_notional_pct=max_notional_pct, provider=provider, environment=environment,
     )
+
+
+@router.get("/api/markets/calibrated-assess")
+async def markets_calibrated_assess(
+    symbol: str = Query(..., pattern=_SYMBOL),
+    account_equity: float = Query(10000.0, gt=0, le=1e12, allow_inf_nan=False),
+    risk_pct: float = Query(1.0, gt=0, le=10, allow_inf_nan=False),
+    side: Literal["buy", "sell"] = "buy",
+    stop_price: Optional[float] = Query(None, gt=0, le=1e12, allow_inf_nan=False),
+    quote_to_usd: Optional[float] = Query(None, gt=0, le=1e9, allow_inf_nan=False),
+    max_notional_pct: float = Query(6.0, gt=0, le=100, allow_inf_nan=False),
+    provider: Optional[str] = Query(None, pattern=_PROVIDER),
+    environment: Literal["paper", "testnet", "live"] = "paper",
+):
+    """assess() using a measured price, ATR, spread and volume from the routed provider; the `calibration` block says what was used or skipped."""
+    from app.config import get_settings
+    from app.market.service import MarketService
+    _classified(symbol, provider)
+    settings = get_settings()
+    try:
+        return await calibrated_assess(symbol, market_service=MarketService(settings), settings=settings, provider=provider,
+                                       account_equity=account_equity, risk_pct=risk_pct, side=side, stop_price=stop_price,
+                                       quote_to_usd=quote_to_usd, max_notional_pct=max_notional_pct, environment=environment)
+    except Exception:
+        logger.exception("calibrated assess failed")
+        raise HTTPException(status_code=502, detail="Calibration failed; use /api/markets/assess with manual inputs")
 
 
 @router.get("/api/markets/snapshot")

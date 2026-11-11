@@ -46,7 +46,8 @@
     .kv span:nth-child(odd){color:var(--muted)}
     .err{color:var(--red);font-size:.78rem}
     footer{text-align:center;color:var(--muted);font-size:.72rem;padding:1rem}
-  </style>
+  .chk{display:flex;gap:.5rem;align-items:center;grid-column:1/-1;font-size:.85rem}.chk input{width:auto}
+</style>
 </head>
 <body>
   <header>
@@ -78,8 +79,9 @@
         <label>Quote→USD rate (non-USD)<input id="f-q2u" type="number" step="any" min="0" /></label>
         <label>Avg daily volume USD<input id="f-adv" type="number" step="any" min="0" /></label>
         <label>Listing age (days)<input id="f-age" type="number" step="any" min="0" /></label>
-        <label>Provider<select id="f-provider"><option value="">any</option><option>binance</option><option>alpaca</option></select></label>
+        <label>Provider<select id="f-provider"><option value="">any</option><option>binance</option><option>alpaca</option><option>oanda</option></select></label>
         <label>Environment<select id="f-env"><option>paper</option><option>testnet</option><option>live</option></select></label>
+        <label class="chk"><input id="f-cal" type="checkbox" /> Use live calibration (measured price, ATR, spread, volume from the routed provider)</label>
         <button class="btn primary" type="submit">Assess</button>
         <button class="btn" type="button" id="btn-snap">Live quote</button>
       </form>
@@ -174,11 +176,20 @@
     if(a.execution){ var e=a.execution, n=h('div'); n.appendChild(kv([['Executable',e.executable?'yes':'no'],['Quote data',e.data.status+(e.data.provider?(' via '+e.data.provider+(e.data.via==='etf_proxy'?' (proxy '+e.data.symbol+')':'')):'')]]));
       e.routes.forEach(function(r){ n.appendChild(h('div','m',r.provider+' → '+r.symbol+' ['+r.kind+'] '+r.note)); }); g.appendChild(card('Execution route',n)); }
     if(a.warnings&&a.warnings.length){ var w=h('div'); w.style.marginTop='.7rem'; w.appendChild(h('div','t','Warnings')); w.appendChild(list(a.warnings,'warn')); out.appendChild(w); }
+    if(a.calibration){ var cb=a.calibration, cn=h('div'), used=cb.used||{}, skipped=cb.skipped||{};
+      cn.appendChild(kv([['Route',cb.route?(cb.route.provider+' → '+cb.route.symbol+' ['+cb.route.kind+']'):'none'],
+        ['Measured',Object.keys(used).join(', ')||'nothing — static baselines in use']]));
+      Object.keys(skipped).forEach(function(k){ cn.appendChild(h('div','m','Skipped '+k+': '+skipped[k])); });
+      (cb.errors||[]).forEach(function(er){ cn.appendChild(h('div','err',er)); });
+      out.appendChild(h('div','t','Live calibration')); out.appendChild(cn); }
     out.appendChild(h('div','m',a.disclaimer));
   }
   function showErr(e){ var out=document.getElementById('aout'); clear(out); out.appendChild(h('div','err',e.message)); }
 
-  document.getElementById('aform').addEventListener('submit',function(ev){ ev.preventDefault(); api('/api/markets/assess?'+params().toString()).then(render).catch(showErr); });
+  document.getElementById('aform').addEventListener('submit',function(ev){ ev.preventDefault(); 
+    var q=params(), cal=document.getElementById('f-cal').checked;
+    if(cal){ ['price','atr','avg_daily_volume_usd','listing_age_days'].forEach(function(k){ q.delete(k); }); }   // measured by the server instead
+    api((cal?'/api/markets/calibrated-assess?':'/api/markets/assess?')+q.toString()).then(render).catch(showErr); });
   document.getElementById('btn-snap').addEventListener('click',function(){
     var q=new URLSearchParams(); q.set('symbol',document.getElementById('f-symbol').value.trim()); var p=val('f-provider'); if(p) q.set('provider',p);
     api('/api/markets/snapshot?'+q.toString()).then(function(s){

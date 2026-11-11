@@ -111,9 +111,11 @@ limits. Do not silently rely on paid Workers features, Containers, or an externa
 ETI classifies and adapts to forex, precious metals, crypto, stocks, indices, commodities, futures and options:
 per-market trading hours (DST-correct), liquidity by time of day, spread/fee/slippage profiles, volatility-aware
 sizing and market-adjusted risk limits that are enforced inside the `RiskEngine`. Open `/markets` or call
-`/api/markets/assess?symbol=EURUSD`. Execution exists today only for crypto (Binance spot) and US stocks/ETFs
-(Alpaca); metals, indices and commodities route through labelled ETF proxies; forex, non-US stocks, futures and
-options are analysis-only until an adapter is added. See [docs/MARKETS.md](docs/MARKETS.md) for coverage, limits and API.
+`/api/markets/assess?symbol=EURUSD`. Adapters: Binance (crypto), Alpaca (US stocks/ETFs/options) and OANDA (forex, spot
+metals, index/commodity CFDs; practice account = paper, live double-gated). Routes whose provider has no credentials report
+`needs_setup`; non-US stocks and futures stay analysis-only. Optional live calibration derives ATR, spread and volume from
+real data, and the Cloudflare Worker serves the planning endpoints too (`/api/markets/*`). Provider adapters are tested
+against fakes, not live accounts. See [docs/MARKETS.md](docs/MARKETS.md) for coverage, limits and API.
 
 ## Prediction tracking and accountability (FastAPI service)
 

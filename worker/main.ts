@@ -6,6 +6,7 @@
  *  -1. ETI PRECISION SIGNAL ENGINE (/api/precision/*), read-only and analytical
  *   0. command centre (/command) and global-intelligence API (/api/intel/*)
  *   1. ETI algorithmic-intelligence API (/api/algo/*)
+ *   1.5 multi-market intelligence (/api/markets/*, read-only planning endpoints; no quotes or orders)
  *   2. futures agents + gateway + monitor (/api/agents/futures/*, /api/futures/*, /agents/futures)
  *   3. multi-agent system (/api/agents/*, /agents)
  *   4. the existing application (worker/index.ts), left unchanged, which handles every other route.
@@ -35,9 +36,11 @@ import { runPortfolioCycle } from "./portfolio/routes.ts";
 import { withIdentity } from "./identity/routes.ts";
 import { withProviders, runProviderProbe } from "./providers/routes.ts";
 import { withBackup } from "./backup/routes.ts";
+import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
 
-const core = withDailyReport(withPrecision(withCommand(withAlgo(withFutures(withAgents(base as any) as any) as any) as any) as any) as any);
+const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
+const core = withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any);
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
 const app = withSecurityHeaders(withIdentity(withProviders(withBackup(core as any) as any) as any) as any);
 const inner: any = base;

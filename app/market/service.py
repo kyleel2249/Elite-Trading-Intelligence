@@ -40,7 +40,10 @@ class MarketService:
         if provider == "alpaca":
             if not self.alpaca.configured:
                 return {"provider": "alpaca", "symbol": symbol, "data_status": "unavailable", "error": "not_configured"}
-            q = await self.alpaca.get_quote(symbol)
+            from app.markets.registry import classify
+            from app.markets.types import AssetClass
+            is_option = classify(symbol).asset_class == AssetClass.OPTION
+            q = await (self.alpaca.get_option_quote(symbol) if is_option else self.alpaca.get_quote(symbol))
             q = assess_quote(q, self.settings.data_max_age_seconds)
             return {
                 "provider": q.provider,
@@ -114,4 +117,7 @@ class MarketService:
         if provider == "oanda":
             raw = await self.oanda.get_candles(symbol, interval=interval, limit=limit)
             return [assess_kline(normalize_binance_kline(row, symbol, interval)) for row in raw]
+        if provider == "alpaca":
+            raw = await self.alpaca.get_bars(symbol, interval=interval, limit=limit)
+            return [assess_kline(normalize_binance_kline(row, symbol, interval) | {"provider": "alpaca"}) for row in raw]
         raise ValueError(f"History not yet implemented for provider: {provider}")

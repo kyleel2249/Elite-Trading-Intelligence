@@ -9,25 +9,41 @@ so the limits apply to every real order, not just to the planning screen.
 
 ## What is real today (and what is not)
 
+Status vocabulary: **implemented** = code exists and is unit-tested against fakes; **verified live** = exercised against the
+real provider. **Nothing here has been verified live**: the build environment could not reach Binance, Alpaca or OANDA, so
+every provider adapter is tested against a fake HTTP transport (request shape, parsing, error handling), not a real account.
+Do a paper/practice-account smoke test before trusting any of them.
+
 | Market | Classify, sessions, costs, sizing | Live quote | Order execution |
 |---|---|---|---|
 | Crypto (BTC, ETH, SOL, XRP, BNB, DOGE, 1000SATS, DeFi, memes, unknown tokens) | yes | Binance | Binance spot (testnet/paper; live stays gated) |
 | US stocks / ETFs | yes | Alpaca (needs keys) | Alpaca (paper; live stays gated) |
-| Metals (XAU, XAG, XPT, XPD) | yes | via ETF proxy (GLD/SLV/PPLT/PALL) | via ETF proxy only |
-| Indices (SPX, NDX, DJI, FTSE, DAX, N225 ...) | yes | via ETF proxy where one exists (SPY/QQQ/DIA/IWM/EWU/EWG/EWJ) | via ETF proxy only |
-| Commodities (crude, gas, grains, softs) | yes | via ETF proxy where one exists | via ETF proxy only |
-| Forex (majors, minors, exotics) | yes | **no adapter** | **no adapter** |
+| US equity options (OCC symbols) | yes | Alpaca options snapshot (**format unverified**) | Alpaca (needs an options-approved account) |
+| Forex (majors, minors, exotics) | yes | **OANDA** (needs token + account id) | OANDA practice = paper; live double-gated |
+| Metals (XAU, XAG, XPT, XPD) | yes | OANDA spot; ETF proxy (GLD/SLV/PPLT/PALL) as second route | OANDA spot; ETF proxy |
+| Indices (SPX, NDX, DJI, FTSE, DAX, N225, HSI, ASX200, Nifty ...) | yes | OANDA **CFD**; ETF proxy where one exists | OANDA CFD; ETF proxy |
+| Commodities (crude, Brent, gas, corn, wheat, soy, sugar) | yes | OANDA **CFD**; ETF proxy where one exists | OANDA CFD; ETF proxy |
+| Coffee, cocoa, cotton | yes | none (OANDA lists no CFD) | none |
 | European / Asian / African stocks | yes | **no adapter** | **no adapter** |
-| Futures, options | yes | **no adapter** | **no adapter** |
+| Futures | yes | **no adapter** | **no adapter** |
 
-"No adapter" means ETI will classify the instrument, tell you whether the market is open, estimate costs
-and size a position, and then report `verdict: analysis_only`. It will not invent a quote or pretend an
-order can be placed. To add a market, register a `ProviderCapability` in `providers.py` and add a client under
-`app/integrations`.
+A route can exist in code yet be unusable until you add credentials. Every route reports `setup.configured`; when no
+route's provider is configured the verdict is **`needs_setup`** and names the missing variables (`OANDA_API_TOKEN`,
+`OANDA_ACCOUNT_ID`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`). "No adapter" means ETI classifies the instrument, says whether the
+market is open, estimates costs, sizes a position, and reports `analysis_only`. It will not invent a quote or pretend an
+order can be placed.
 
-**ETF proxies are not the underlying.** GLD is not spot gold and USO is not WTI (roll decay). Proxy routes are
-labelled `etf_proxy`, quotes carry `is_proxy: true`, and sizing for a proxy gives a notional to divide by the ETF
-price, never a quantity in the underlying's units. Futures are never routed to ETFs (contracts are not shares).
+**OANDA** (`app/integrations/oanda`): v20 REST. The practice host is used for `environment=paper`; the live host is reachable
+only for `environment=live` *and* `OANDA_LIVE_TRADING_ENABLED=true` (default false), on top of the RiskEngine's normal live
+gates. Units and price precision come from the account's own `/instruments` list; a market the account does not list is
+refused rather than guessed (CFDs are not offered to US accounts). A fill-or-kill order that OANDA cancels or rejects raises
+an error and is never journaled as filled; only real fill prices are recorded; a non-tradeable quote becomes
+`market_closed`, which the RiskEngine rejects for live orders. Orders are reconciled by client order id.
+
+**CFD and ETF routes are not the underlying.** An OANDA index/commodity CFD tracks the underlying with financing costs and
+OANDA's own hours. GLD is not spot gold and USO is not WTI (roll decay). Routes are labelled `cfd` / `etf_proxy`, quotes from a
+proxy carry `is_proxy: true`, and sizing for a proxy gives a notional to divide by the ETF price, never a quantity in the
+underlying's units. Futures are never routed to ETFs (contracts are not shares).
 
 ## How ETI adapts to each market
 
@@ -51,19 +67,58 @@ price, never a quantity in the underlying's units. Futures are never routed to E
   an asset class is rejected, live orders are rejected while the market is closed, and a failure in the market layer
   rejects the order (fail-closed). Unclassifiable or heuristic classifications warn but never hard-block.
 
+## Live calibration
+
+`GET /api/markets/calibrated-assess` (and the "Use live calibration" box on `/markets`) replaces static baselines with
+measured inputs from the routed provider: the quote price, **ATR(14, Wilder) on daily candles**, **spread from best
+bid/ask**, and **average daily USD volume** (crypto and stocks). The `calibration` block lists what was used and what was
+skipped and why. It never guesses: ETF-proxy routes are skipped (the ETF's volatility is not the underlying's), forex/CFD
+volume is skipped (OANDA volume is a tick count, not turnover), unconfigured or failing providers fall back to baselines,
+and any value you pass yourself wins. Alpaca stock bars use the IEX feed on free plans, so volume understates the market.
+
+## Holiday calendars
+
+Calendars live in `app/markets/data/holidays.json`, each entry with its source and a verification level, and are loaded
+at import (a malformed file degrades to "no calendar", never to an error). `GET /api/markets/calendars` lists coverage.
+
+| Market | Years | Verification |
+|---|---|---|
+| NYSE (incl. 13:00 early closes) | 2026-27 | official |
+| Xetra | 2026-27 | official |
+| TSE | 2026-27 | official |
+| LSE (12:30 early closes) | 2026-27 | secondary: verify |
+| JSE | 2026 secondary, 2027 derived from statute rules and Easter | verify with the JSE |
+| HKEX | 2026 | secondary: verify |
+| **NGX, GSE, EGX, NSE Kenya, Euronext, ASX, SSE, NSE India, KRX, CME/ICE** | none | `not_applied`: may be closed on a holiday ETI does not know |
+
+`applied` = official, `partial` = secondary/derived. The JSE's official notice could not be fetched (robots.txt) and was
+not circumvented. Add your own with `register_holidays()`.
+
+## Cloudflare Worker
+
+`worker/markets.ts` is a TypeScript port of the classifier, session engine, profiles, routing, sizing, assessment and risk
+review, served at `/api/markets/{overview,instruments,classify,sessions,calendars,profile,assess,review}` (GET only).
+Data tables are exported from Python (`python scripts/export_markets.py` -> `worker/markets.generated.json`), and the port
+is checked against **Python-computed golden vectors** (`worker/markets.golden.json`: 70+ classifications, every session at 22
+DST/holiday instants, 108 assessments, 24 risk reviews). `tests/test_markets_worker_sync.py` fails when those files are stale;
+rerun the exporter after changing `app/markets`.
+
+Not on the Worker: `/snapshot`, `/calibrated-assess`, the `/markets` page, and any order path. The Worker has no OANDA or
+Alpaca adapter, and its own execution gateway (Alpaca paper / Binance testnet) does not call the market-review gate. Its
+`setup.configured` flags only say whether the matching secrets exist in the Worker environment.
+
 ## Honest limits
 
-* Profile numbers are **planning defaults** (`source: planning_default`), not measured data. Real spreads, fees and
-  volatility depend on your broker, venue, size and regime. Supply `measured_spread_bps`, `atr`, and
-  `avg_daily_volume_usd` where you have them; replace the defaults with your broker's schedule before sizing for real.
-* Holiday calendars exist only for NYSE and LSE (2026). Other markets report `holiday_calendar: not_applied`.
-  Hours marked `schedule_confidence: approximate` (African exchanges, ASX, JSE, ICE softs, grains ...) are reference
-  hours to verify with the exchange. Use `register_holidays()` to add calendars.
-* African exchanges (JSE, NGX, GSE, EGX, NSE Kenya) are modelled for classification, hours, costs and risk. There is
-  no data or trading access to them in this repository.
-* `account_equity` in `/api/markets/assess` is a planning input only. Order approval still derives equity server-side.
-* The Cloudflare Worker dashboard (`worker/`) is **not** extended by this change; it remains Binance-only. The market
-  layer lives in the Python/FastAPI service.
+* Profile numbers are **planning defaults** (`source: planning_default`), not measured data. Use calibration, or pass
+  `measured_spread_bps`, `atr`, `avg_daily_volume_usd`, and replace the defaults with your broker's schedule before sizing for real.
+* **Nothing is verified against a live provider** (see top). OANDA, Alpaca-options and Binance paths are tested with fakes only.
+* Non-US stocks (Europe, Asia, Africa) and futures have **no data or execution adapter**; they stay `analysis_only`.
+  Access to African exchanges (JSE, NGX, GSE, EGX, NSE Kenya) needs a broker or data licence this repository cannot supply.
+* Hours marked `schedule_confidence: approximate` (African exchanges, ASX, JSE, ICE softs, grains ...) are reference hours to
+  verify with the exchange; CME holiday schedules are not modelled.
+* Forex sizing notional in the RiskEngine is computed as `qty x price`; for USD-base pairs (USDZAR) that is in the quote
+  currency, so the cap is stricter than intended (safe direction, but conservative).
+* `account_equity` in `/api/markets/assess` is a planning input only. Order approval derives equity server-side.
 
 ## API
 
@@ -75,7 +130,14 @@ price, never a quantity in the underlying's units. Futures are never routed to E
 | `GET /api/markets/sessions?symbol=` or `?session_id=` | Market state, regime, next open/close |
 | `GET /api/markets/profile?symbol=` | Liquidity, volatility, cost and risk profile |
 | `GET /api/markets/assess?symbol=&price=&stop_price=&atr=...` | Full plan: verdict, costs, size, route, warnings |
-| `GET /api/markets/snapshot?symbol=` | Live quote from the provider that can serve it (proxies labelled) |
+| `GET /api/markets/calibrated-assess?symbol=` | `assess` using measured price, ATR, spread and volume (see Live calibration) |
+| `GET /api/markets/calendars` | Holiday-calendar coverage and provenance, plus markets with none |
+| `GET /api/markets/snapshot?symbol=` | Live quote from the provider that can serve it (CFD/proxy labelled) |
 
+<<<<<<< HEAD
 Verdicts: `ready`, `caution`, `wait_for_session`, `analysis_only`, `blocked`. Nothing here submits an order.
 `POST /api/pretrade/check` (a dry run of the in-process risk engine) additionally returns `market_context` and `warnings`.
+=======
+Verdicts: `ready`, `caution`, `wait_for_session`, `needs_setup`, `analysis_only`, `blocked`. Nothing here submits an order.
+`POST /api/risk-gateway/preflight` additionally returns `market_context` and `warnings`.
+>>>>>>> 053ecb9 (Add live calibration, Alpaca bars/options quote, and Cloudflare Worker market intelligence)
