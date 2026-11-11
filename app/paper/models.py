@@ -29,3 +29,15 @@ class PaperEventRow(Base):
     event: Mapped[str] = mapped_column(String(48), index=True)
     order_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     details: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class PaperAuditRow(Base):
+    """Append-only: rows are only ever inserted."""
+    __tablename__ = "paper_audit_log"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    ts: Mapped[str] = mapped_column(String(40))
+    event: Mapped[str] = mapped_column(String(48), index=True)
+    order_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
