@@ -12,6 +12,7 @@ import { STRATEGIES } from "./omni-api.ts";
 import type { Strategy } from "./timeframes.ts";
 import { loadSignalInputs } from "./market-inputs.ts";
 import { journalAnalysis } from "../journal/hooks.ts";
+import { expectancyFor, expectancyOptions } from "./expectancy.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions } from "./params.ts";
 import type { PaperEnv } from "./paper-api.ts";
@@ -60,7 +61,7 @@ export async function handleTestnetExecute(req: Request, env: TestnetEnv, deps: 
   const inputs = await loadSignalInputs(env, symbol, strategy, null, now);
   if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", error: inputs.error, submitsOrder: false }, 503);
   const { version, name, ...opts } = active;
-  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env), ...opts });
+  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env), ...opts, ...expectancyOptions(await expectancyFor(env, strategy, symbol, now)) });
   // Trade journal: every analysis is kept, including NO_TRADE and SELL, so predictions can later be judged. Never throws, never blocks.
   const jrSignalId = `omni-${symbol}-${strategy}-${plan.generatedAt.slice(0, 16)}`, jrTradeId = "omni" + (await sha256Hex(jrSignalId)).slice(0, 28);
   await journalAnalysis(env as any, { tradeId: jrTradeId, symbol, decision: String(plan.decision), strategy, confidence: plan.confidence, entryZone: plan.entryZone ?? null, stop: plan.stopLoss ?? null, targets: (plan.takeProfits ?? []).map((t: any) => t?.price ?? null),

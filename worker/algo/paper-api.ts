@@ -15,6 +15,7 @@ import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { STRATEGIES } from "./omni-api.ts";
 import { loadMinuteBars, loadSignalInputs } from "./market-inputs.ts";
+import { expectancyFor, expectancyOptions } from "./expectancy.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions, paramsOp, PARAMS_KEY } from "./params.ts";
 import { raiseAlerts } from "./alerts.ts";
@@ -111,7 +112,7 @@ export async function evaluateSymbol(engine: PaperEngine, env: PaperEnv, symbol:
   const inputs = await loadSignalInputs(env, symbol, strategy, null, now);
   if ("error" in inputs) return { status: 503, body: { decision: "DATA_UNRELIABLE", ...inputs, submitsOrder: false } };
   const { version, name, ...opts } = active;
-  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env), ...opts });
+  const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env), ...opts, ...expectancyOptions(await expectancyFor(env, strategy, symbol, now)) });
   const out: Record<string, unknown> = { symbol, strategy, parameters: { version, name }, plan, executed: false, event: null, submitsOrder: false };
   if (!execute) return { status: 200, body: out };
   if (envKill) { out.event = { type: "REJECTED", reasons: ["Emergency kill switch (ETI_KILL_SWITCH) is active"] }; return { status: 423, body: out }; }
