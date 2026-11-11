@@ -2,6 +2,7 @@
  * Worker entrypoint. Layers, outermost first:
  *  -4. security headers (nonce CSP, nosniff, HSTS, ...) on every response
  *  -3. identity (/account, /api/identity/*), provider status (/providers, /api/providers/*), encrypted backup (/api/backup/*)
+ *  -2.5 ETI Pro dashboard (/pro): neon dashboard that reads only live ETI endpoints
  *  -2. ETI DAILY INTELLIGENCE REPORT (/api/daily-report/*, /daily), read-only and analytical
  *  -1. ETI PRECISION SIGNAL ENGINE (/api/precision/*), read-only and analytical
  *   0. command centre (/command) and global-intelligence API (/api/intel/*)
@@ -23,6 +24,7 @@ import { withCommand } from "./command/route.ts";
 import { withPrecision } from "./precision/route.ts";
 import { withDailyReport } from "./daily/route.ts";
 import { runDailyReportCycle } from "./daily/api.ts";
+import { withPro } from "./pro/route.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runPaperCycle } from "./algo/paper-api.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
@@ -40,7 +42,7 @@ import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
-const core = withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any);
+const core = withPro(withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any) as any);
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
 const app = withSecurityHeaders(withIdentity(withProviders(withBackup(core as any) as any) as any) as any);
 const inner: any = base;
