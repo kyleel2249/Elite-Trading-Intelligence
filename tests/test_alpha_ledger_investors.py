@@ -294,3 +294,16 @@ def test_seykota_single_account_is_labelled_as_selected_and_estimated():
     n = next(x for x in get_trader("ed_seykota")["historical_returns"] if "250,000%" in x["claim"] and "2026-11-10" in x["source"])
     assert n["classification"] == "estimate" and "Selection bias" in n["notes"] and "Contradictory evidence recorded" in n["notes"]
     assert audit_profiles(None, ["ed_seykota"])["results"][0]["categories"]["returns"]["status"] == "DOCUMENTED"
+
+
+def test_not_documented_results_are_explicit_scoped_and_counted_as_unknown_not_gap():
+    from app.knowledge.registry import get_trader
+    for pid in ("richard_wyckoff", "kathy_lien"):
+        n = [x for x in get_trader(pid)["historical_returns"] if x["classification"] == "not_documented" and "2026-11-10" in x["source"]]
+        assert n and "One search pass, not exhaustive" in n[0]["notes"]  # the scope of the search is stated, not implied to be complete
+        c = audit_profiles(None, [pid])["results"][0]["categories"]
+        assert c["returns"]["status"] == "UNKNOWN_PUBLICLY" and c["drawdowns"]["status"] == "UNKNOWN_PUBLICLY"
+    on = get_trader("william_oneil")["historical_returns"]
+    est = next(x for x in on if "40% a year" in x["claim"] and "2026-11-10" in x["source"])
+    assert est["classification"] == "estimate" and "unverified" in est["notes"]
+    assert any("lagged" in x["claim"] and x["classification"] == "reported" for x in on)  # counter-evidence is kept alongside the flattering claim

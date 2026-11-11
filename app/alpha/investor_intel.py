@@ -235,6 +235,11 @@ def _category_state(p: TraderKnowledgeProfile, attr: str) -> dict[str, Any]:
         return {"status": "MISSING", "cited": False}
     real = [t for t in texts if not _is_placeholder(t)]
     cited = any(getattr(i, "source", None) for i in items if hasattr(i, "claim"))
+    notes = [i for i in items if hasattr(i, "claim")]
+    sourced_unknown = [i for i in notes if getattr(i, "classification", "") == "not_documented" and getattr(i, "source", None)]
+    claims_data = [i for i in notes if getattr(i, "classification", "") not in ("not_documented", "speculation")]
+    if sourced_unknown and not claims_data:
+        return {"status": "UNKNOWN_PUBLICLY", "cited": cited}  # a sourced "none found", with no note asserting actual data, is a complete answer
     if attr in ("win_rates",) and all("no " in t.lower() or "usually not" in t.lower() or "not fully public" in t.lower() for t in texts):
         return {"status": "UNKNOWN_PUBLICLY", "cited": cited}  # honest 'unknown' is a valid, complete answer
     if not real:

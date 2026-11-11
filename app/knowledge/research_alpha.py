@@ -24,6 +24,21 @@ RETURNS: dict[str, list[SourceNote]] = {
         "Fidelity Magellan Fund averaged 29.2% a year from May 1977 to May 1990, growing from about $18 million to about $14 billion in assets (fund-level)",
         "reported", "Fidelity Magellan Fund and Peter Lynch entries on Wikipedia (citing Fidelity/press), Motley Fool 'Peter Lynch Averaged a 29.2% Annual Return...' (2026-08/10); accessed " + RESEARCH_DATE,
         "Mutual-fund total return after expenses, not Lynch's personal returns. Secondary sources; the primary Fidelity annual-return table was not retrieved.")],
+    "richard_wyckoff": [
+        _n("No audited or contemporaneous account-level return series for Wyckoff's own trading was found in the sources checked; his books describe individual trades and rules, and he is documented chiefly as founder and editor of The Magazine of Wall Street",
+           "not_documented", "Checked on " + RESEARCH_DATE + ": Wikipedia 'Richard Wyckoff'; archive.org scan of 'How I Trade and Invest in Stocks and Bonds' (1925 ed.); web search for verified-performance sources",
+           "One search pass, not exhaustive. Third-party back-tests of Wyckoff-style patterns exist (e.g. oxfordstrat.com) but are hypothetical simulations of a rule set, not Wyckoff's results, and carry the CFTC 4.41 simulated-performance limitation.")],
+    "william_oneil": [
+        _n("Personal record is thinly documented: he reportedly turned about $5,000 into about $200,000 in 1962-63 through three trades (short Korvette, long Chrysler, long Syntex), and unverified secondary sources say he averaged over 40% a year on his personal account in the ten years to 1989 ('thought to have'); no audited series was found",
+           "estimate", "Schwager, quoted in a 2020 stock-market discussion and at hedgefundalpha.com 'William O'Neil's CAN SLIM trading strategy explained'; thewealthofgenerations.blogspot.com (2010-01); accessed " + RESEARCH_DATE,
+           "The 1962-63 figure is one episode, not an annualised return. The 40% claim is low-quality, unverified and unattributed to an audited statement. The same source concedes his record had 'ups and downs', especially around the late-1960s go-go years."),
+        _n("Independent evidence on the method is mixed: the IBD 100 reportedly beat the S&P 500 by 132.8% to 20.8% over its first years from May 2003 (index published by his own firm, not an investable result at the time), while the real-money CAN SLIM Select Growth Fund (CANGX, launched late 2005) was reported to have lagged the Vanguard Mid-Cap Growth Fund over ten years",
+           "reported", "CBS News MoneyWatch 'Don't Confuse Strategy with Outcome'; GuruFocus 'William O'Neil: Fundamental and Technical Analyses Combined' (citing Morningstar); accessed " + RESEARCH_DATE,
+           "Index-level and fund-level figures, not O'Neil's personal returns; publishing-firm back-calculated index results carry selection and survivorship concerns. The fund comparison depends on the dates and category chosen.")],
+    "kathy_lien": [
+        _n("No audited return record was found; she is documented as an FX strategist, analyst and author (JPMorgan, FXCM/DailyFX, GFT) who co-founded BKForex (2007, NFA-registered CTA) and BK Asset Management (June 2012). A company profile says the launch followed 'five years of positive returns' without figures",
+           "not_documented", "Checked on " + RESEARCH_DATE + ": BabyPips 'Kathy Lien'; FXStreet company profile for BK Asset Management; Technical Analysis of Stocks & Commodities interview (2012-09); NexusFi listing; forum thread asking for the fund's returns (unanswered)",
+           "The 'five years of positive returns' statement is promotional and unquantified. The NFA BASIC database and any CTA disclosure documents were not retrieved. One search pass, not exhaustive."),],
     "ed_seykota": [
         _n("A single client 'model account' he managed from a $5,000 start in 1972 reportedly grew about 250,000% on a cash-on-cash basis (to roughly $12-15 million) by 1988, and several million percent if adjusted for withdrawals (account-level)",
            "estimate", "Jack Schwager, Market Wizards (1989), as cited by trendfollowing.com 'Ed Seykota', the7circles.uk and theshortbear.substack.com; accessed " + RESEARCH_DATE,
@@ -66,6 +81,15 @@ DRAWDOWNS: dict[str, list[SourceNote]] = {
         "No calendar-year loss from 1986 through 2009; the fund was reported down about 5% year-to-date when he announced its closure on 2010-08-18 (a drawdown, not a calendar-year result)",
         "reported", "Reuters (2010-08-18) and Bloomberg (2010-08-18) as syndicated by InvestmentNews and Financial Planning; accessed " + RESEARCH_DATE,
         "Intra-year and peak-to-trough drawdowns are not disclosed in the sources.")],
+    "richard_wyckoff": [_n(
+        "No drawdown or losing-period record for Wyckoff's own trading was found; no account-level series exists in the sources checked",
+        "not_documented", "Checked on " + RESEARCH_DATE + ": Wikipedia 'Richard Wyckoff'; archive.org scan of 'How I Trade and Invest in Stocks and Bonds'; web search", "One search pass, not exhaustive.")],
+    "william_oneil": [_n(
+        "No quantified drawdown for O'Neil's personal account was found; one secondary source says only that his record had 'ups and downs', particularly around the late-1960s go-go years",
+        "not_documented", "Checked on " + RESEARCH_DATE + ": Wikipedia 'William O'Neil'; thewealthofgenerations.blogspot.com; IBD-related coverage", "Qualitative remark only; one search pass.")],
+    "kathy_lien": [_n(
+        "No drawdown or monthly return record for BKForex/BK Asset Management was found in the sources checked",
+        "not_documented", "Checked on " + RESEARCH_DATE + ": BabyPips; FXStreet; NexusFi; traders.com interview", "CTA disclosure documents were not retrieved; one search pass.")],
     "michael_burry": [_n(
         "Scion's worst calendar year was 2006 at about -18.2% (gross and net), when the S&P 500 gained about 15.8%; the fund then returned about +138% net in 2007",
         "reported", "Year-by-year Scion Capital table at hedgefundalpha.com 'Michael Burry bio' (secondary, reproducing investor-letter figures); accessed " + RESEARCH_DATE,
