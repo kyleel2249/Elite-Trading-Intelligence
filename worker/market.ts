@@ -425,11 +425,44 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string):
   return body;
 }
 
+export interface SymbolRow { s: string; b: string; q: string }
+let symbolCache: { at: number; rows: SymbolRow[]; host: string } | null = null;
+const SYMBOL_TTL_MS = 60 * 60 * 1000;
+/** Every spot pair Binance currently lists as TRADING, slimmed to symbol/base/quote. Hosts are tried in order; nothing is invented when all fail. */
+export async function listBinanceSymbols(fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; attempts: { host: string; status: number | null; errorClass: string | null }[] }> {
+  if (symbolCache && now() - symbolCache.at < SYMBOL_TTL_MS) return { rows: symbolCache.rows, host: symbolCache.host, cached: true, attempts: [] };
+  const attempts: { host: string; status: number | null; errorClass: string | null }[] = [];
+  for (const host of PROVIDERS.binance.hosts) {
+    try {
+      const res = await fetchImpl(host + "/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING", { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 1800 } } as RequestInit);
+      if (!res.ok) { attempts.push({ host, status: res.status, errorClass: classifyStatus(res.status) }); continue; }
+      const j: any = await res.json(), list = Array.isArray(j?.symbols) ? j.symbols : null;
+      if (!list) { attempts.push({ host, status: res.status, errorClass: "invalid_payload" }); continue; }
+      const rows: SymbolRow[] = list.filter((x: any) => x && x.status === "TRADING" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol)) && x.isSpotTradingAllowed !== false)
+        .map((x: any) => ({ s: String(x.symbol), b: String(x.baseAsset), q: String(x.quoteAsset) })).sort((a: SymbolRow, b: SymbolRow) => a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
+      if (rows.length === 0) { attempts.push({ host, status: res.status, errorClass: "empty_symbols" }); continue; }
+      symbolCache = { at: now(), rows, host }; return { rows, host, cached: false, attempts };
+    } catch (e) { attempts.push({ host, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" }); }
+  }
+  if (symbolCache) return { rows: symbolCache.rows, host: symbolCache.host, cached: true, attempts }; // stale list beats no list
+  throw new AllProvidersFailed(attempts.map((a) => ({ provider: "binance" as ProviderId, host: a.host, status: a.status, ok: false, errorClass: a.errorClass, latencyMs: 0 })));
+}
+export const _resetSymbolCache = () => { symbolCache = null; };
+
 export async function handleMarket(request: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "access-control-allow-methods": "GET,OPTIONS" } });
   if (request.method !== "GET") return jsonResp({ error: "method_not_allowed" }, 405);
   const endpoint = url.pathname.slice("/api/market/".length);
+  if (endpoint === "symbols") {
+    try {
+      const r = await listBinanceSymbols();
+      return jsonResp({ provider: "binance", market: "spot", host: r.host.replace("https://", ""), cached: r.cached, count: r.rows.length, generatedAt: new Date().toISOString(), symbols: r.rows.map((x) => [x.s, x.b, x.q]) }, 200, { "cache-control": "public, max-age=600" });
+    } catch (e) {
+      if (e instanceof AllProvidersFailed) return jsonResp({ error: "symbols_unavailable", detail: "Binance did not return its symbol list.", attempts: e.attempts.map(({ host, status, errorClass }) => ({ host, status, errorClass })) }, 502);
+      throw e;
+    }
+  }
 
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";

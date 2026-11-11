@@ -73,7 +73,7 @@ ${PORTFOLIO_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
-<div class="toolbar"><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select>
+<div class="toolbar"><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="refresh" class="active">Refresh market</button><span class="muted" id="stamp">Waiting for market data…</span></div>
 <div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
@@ -87,7 +87,7 @@ ${PORTFOLIO_CSS}
 <details class="execution-note"><summary>Execution safeguards (read before trading)</summary><p class="execution-note">Orders are sent only after you preview and confirm them. ETI Internal Paper and exchange testnets authenticate automatically with short-lived server-side sessions: nothing to type, and nothing stored in this page. Exchange testnet keys are read from Worker secrets; if they are missing or rejected, orders run in ETI Internal Paper and this panel says so. Live mode stays disabled and needs the live switch, live broker keys, the execution token and the separate live activation secret. Protect this dashboard with Cloudflare Access. Never enter withdrawal or transfer credentials here.</p></details>
 <div class="execution-grid">
 <label>Venue<select id="orderBroker"><option value="eti_paper">ETI Internal Paper (automatic)</option><option value="alpaca">Alpaca paper (exchange testnet)</option><option value="binance">Binance testnet (exchange)</option></select></label>
-<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off"></label>
+<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off" list="symbolList"><datalist id="symbolList"></datalist></label>
 <label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop-loss (sell, Internal Paper)</option></select></label>
 <label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
 <label>Amount (<span id="orderQuote">USDT</span>)<input id="orderAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter amount to trade"><small id="orderAmountNote" class="mut" aria-live="polite">Type an amount and the quantity is filled in at the reference price.</small></label>
@@ -687,6 +687,33 @@ setInterval(loadSignal,60000);
 
 ${PORTFOLIO_JS}
 pfInit();
+const SYM={all:[],quote:'',q:'',loaded:false};
+function symRebuild(){
+ const sel=$('symbol'),cur=sel.value,qf=SYM.quote,t=SYM.q.trim().toUpperCase();
+ const rows=SYM.all.filter(r=>(!qf||r[2]===qf)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));
+ const frag=document.createDocumentFragment();let hasCur=false;
+ rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=r[1]+'/'+r[2];if(r[0]===cur){hasCur=true;}frag.appendChild(o);});
+ sel.textContent='';
+ if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
+ sel.appendChild(frag);sel.value=cur;
+ $('symCount').textContent=rows.length+' of '+SYM.all.length+' Binance pairs';
+}
+async function loadSymbols(){
+ try{
+  const j=(await getJson('/api/market/symbols')).data||{};
+  SYM.all=j.symbols||[];SYM.loaded=true;
+  const cnt={};SYM.all.forEach(r=>{cnt[r[2]]=(cnt[r[2]]||0)+1;});
+  const qs=Object.keys(cnt).sort((a,b)=>(a==='USDT'?-1:b==='USDT'?1:cnt[b]-cnt[a]||(a<b?-1:1)));
+  const qsel=$('symQuote');qsel.textContent='';const all=document.createElement('option');all.value='';all.textContent='All quotes';qsel.appendChild(all);
+  qs.forEach(q=>{const o=document.createElement('option');o.value=q;o.textContent=q+' ('+cnt[q]+')';qsel.appendChild(o);});
+  const dl=$('symbolList');dl.textContent='';SYM.all.forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});
+  symRebuild();
+ }catch(e){$('symCount').textContent='Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. Type any Binance symbol in Order Execution.';}
+}
+$('symSearch').addEventListener('input',()=>{SYM.q=$('symSearch').value;symRebuild();});
+$('symSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const t=SYM.q.trim().toUpperCase();if(!t)return;const m=SYM.all.find(r=>r[0]===t)||SYM.all.find(r=>(!SYM.quote||r[2]===SYM.quote)&&(r[0].indexOf(t)>=0||r[1]===t));if(m){$('symbol').value=m[0];$('symbol').dispatchEvent(new Event('change'));$('symSearch').value='';SYM.q='';symRebuild();}});
+$('symQuote').addEventListener('change',()=>{SYM.quote=$('symQuote').value;symRebuild();});
+loadSymbols();
 $('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
 </script></body></html>`;
 const page = withMotion(html);
