@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="ETI Trading Command Centre: paper-account analytics and system status. Research output, not investment advice." />
+<meta name="robots" content="noindex,nofollow" />
+<title>ETI — Trading Command Centre</title>
+<link rel="stylesheet" href="/static/eti.css" />
+</head>
+<body data-page="trading">
+<canvas id="scene" aria-hidden="true"></canvas>
+<header>
+  <div><h1>Trading Command Centre</h1><div class="sub">Paper-account performance and risk status</div></div>
+    <nav aria-label="ETI sections">
+      <a class="nav" href="/">Dashboard</a><a class="nav" href="/command">Trading</a><a class="nav" href="/intelligence">Intelligence</a><a class="nav" href="/alpha">Alpha</a><a class="nav" href="/predictions">Predictions</a><a class="nav" href="/markets">Markets</a>
+    </nav>
+</header>
+<main>
+  <div class="banner">Research and paper-trading analytics only. Nothing here is investment advice, a prediction of profit, or a guarantee. Missing or stale data is shown as unavailable, never estimated.</div>
+  <div class="row">
+    <a class="btn primary" href="/alpha">DISCOVER OPPORTUNITIES</a>
+    <label for="range" class="sub">Range</label>
+    <select id="range"><option>1D</option><option>1W</option><option selected>1M</option><option>3M</option><option>1Y</option><option>ALL</option></select>
+    <button class="btn" id="refresh" type="button">Refresh</button>
+    <span class="sub" id="status" role="status" aria-live="polite"></span>
+  </div>
+  <p class="note" id="mode">Loading account mode…</p>
+  <section class="kpis" id="kpis" aria-label="Account summary"></section>
+  <div class="grid2">
+    <section class="panel"><div class="ph"><h2>Equity curve</h2></div><div class="pb"><canvas id="curve" role="img" aria-label="Paper account equity curve"></canvas></div></section>
+    <section class="panel"><div class="ph"><h2>Performance (all trades, wins and losses)</h2></div><div class="pb" id="perf"></div></section>
+  </div>
+  <section class="panel"><div class="ph"><h2>Open positions</h2></div><div class="pb" id="positions"></div></section>
+</main>
+<footer>ETI v{{ version }} · All figures come from the ETI API; nothing on this page is sample data.</footer>
+<script src="/static/scenes.js" defer></script>
+<script src="/static/eti.js" defer></script>
+</body>
+</html>

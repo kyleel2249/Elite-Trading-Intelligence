@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="ETI Intelligence Command Centre: paper-account analytics and system status. Research output, not investment advice." />
+<meta name="robots" content="noindex,nofollow" />
+<title>ETI — Intelligence Command Centre</title>
+<link rel="stylesheet" href="/static/eti.css" />
+</head>
+<body data-page="intelligence">
+<canvas id="scene" aria-hidden="true"></canvas>
+<header>
+  <div><h1>Intelligence Command Centre</h1><div class="sub">Agent health, activity and research directory</div></div>
+    <nav aria-label="ETI sections">
+      <a class="nav" href="/">Dashboard</a><a class="nav" href="/command">Trading</a><a class="nav" href="/intelligence">Intelligence</a><a class="nav" href="/alpha">Alpha</a><a class="nav" href="/predictions">Predictions</a><a class="nav" href="/markets">Markets</a>
+    </nav>
+</header>
+<main>
+  <div class="banner">Research and paper-trading analytics only. Nothing here is investment advice, a prediction of profit, or a guarantee. Missing or stale data is shown as unavailable, never estimated.</div>
+  <div class="row">
+    <a class="btn primary" href="/alpha">DISCOVER OPPORTUNITIES</a>
+    <button class="btn" id="refresh" type="button">Refresh</button>
+  </div>
+  <section class="kpis" id="kpis" aria-label="Intelligence summary"></section>
+  <section class="panel"><div class="ph"><h2>Intelligence agents</h2></div><div class="pb" id="agents"></div></section>
+  <section class="panel"><div class="ph"><h2>Recorded agent activity</h2></div><div class="pb" id="log"></div></section>
+  <section class="panel"><div class="ph"><h2>Trader philosophy directory</h2></div><div class="pb"><p class="note">High-level public principles only. ETI does not have, and does not claim, any trader's private algorithm.</p><div id="traders"></div></div></section>
+</main>
+<footer>ETI v{{ version }} · All figures come from the ETI API; nothing on this page is sample data.</footer>
+<script src="/static/scenes.js" defer></script>
+<script src="/static/eti.js" defer></script>
+</body>
+</html>
