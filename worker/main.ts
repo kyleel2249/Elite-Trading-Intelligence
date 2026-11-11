@@ -1,5 +1,6 @@
 /**
  * Worker entrypoint. Layers, outermost first:
+ *  -2. ETI DAILY INTELLIGENCE REPORT (/api/daily-report/*, /daily), read-only and analytical
  *  -1. ETI PRECISION SIGNAL ENGINE (/api/precision/*), read-only and analytical
  *   0. command centre (/command) and global-intelligence API (/api/intel/*)
  *   1. ETI algorithmic-intelligence API (/api/algo/*)
@@ -7,7 +8,8 @@
  *   3. multi-agent system (/api/agents/*, /agents)
  *   4. the existing application (worker/index.ts), left unchanged, which handles every other route.
  * Scheduled events: the every-minute cron runs the futures protective-stop monitor; any other cron is forwarded
- * unchanged to the existing application's scheduled handler (if it has one).
+ * unchanged to the existing application's scheduled handler (if it has one). Other cron ticks also run the daily-report
+ * cycle, which generates and stores at most one report per UTC weekday (see docs/DAILY_REPORT.md).
  */
 import base from "./index.ts";
 import { withAlgo } from "./algo/route.ts";
@@ -15,6 +17,8 @@ import { withAgents } from "./agents/route.ts";
 import { withFutures } from "./agents/futures-route.ts";
 import { withCommand } from "./command/route.ts";
 import { withPrecision } from "./precision/route.ts";
+import { withDailyReport } from "./daily/route.ts";
+import { runDailyReportCycle } from "./daily/api.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runPaperCycle } from "./algo/paper-api.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
@@ -23,7 +27,7 @@ import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
 import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
 
-const app = withPrecision(withCommand(withAlgo(withFutures(withAgents(base as any) as any) as any) as any) as any);
+const app = withDailyReport(withPrecision(withCommand(withAlgo(withFutures(withAgents(base as any) as any) as any) as any) as any) as any);
 const inner: any = base;
 export const MONITOR_CRON = "* * * * *";
 
@@ -45,6 +49,8 @@ export default {
     // Each pass is isolated so one failing never blocks the other.
     ctx.waitUntil(runPaperCycle(env).then(() => undefined, e => console.error("paper cycle failed", e instanceof Error ? e.message : e)));
     ctx.waitUntil(runAlphaCycle(env).then(() => undefined, e => console.error("alpha cycle failed", e instanceof Error ? e.message : e)));
+    // Daily intelligence report: one stored report per UTC weekday (no-op when already generated, on weekends, before ETI_DAILY_HOUR_UTC, or without the KV binding).
+    ctx.waitUntil(runDailyReportCycle(env, Date.now()).then(() => undefined, e => console.error("daily report failed", e instanceof Error ? e.message : e)));
     if (typeof inner.scheduled === "function") return inner.scheduled(event, env, ctx);
   },
 };
