@@ -8,11 +8,16 @@
     "dev": "wrangler dev",
     "check:worker": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
     "test": "node --test worker/*.test.ts worker/algo/*.test.ts worker/alpha/*.test.ts worker/command/*.test.ts worker/precision/*.test.ts",
-    "check": "npm run test && npm run check:worker",
+    "check": "npm run test && npm run typecheck:analysis && npm run check:worker",
     "build:knowledge": "node scripts/build-knowledge.mjs",
-    "pretest": "npm run build:knowledge"
+    "pretest": "npm run build:knowledge",
+    "typecheck:analysis": "node scripts/typecheck-analysis.mjs",
+    "calibrate": "node scripts/calibrate-analysis.ts"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261110.1",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
     "wrangler": "^4.45.0"
   }
 }

@@ -18,6 +18,8 @@ import { handleOmniUi } from "./algo/omni-ui.ts";
 import { handleTestnetExecute } from "./algo/testnet-api.ts";
 import { handleManage } from "./algo/manage.ts";
 import { handleAlerts } from "./algo/alerts-api.ts";
+import { handleAnalysis } from "./analysis/api.ts";
+import type { AnalysisEnv } from "./analysis/fundamental-sources.ts";
 import { handleKnowledge } from "./knowledge.ts";
 import { handleReadiness } from "./readiness/api.ts";
 import type { ReadinessEnv } from "./readiness/api.ts";
@@ -25,7 +27,7 @@ import type { MarketEnv } from "./market.ts";
 import { handleAlpha, type AlphaEnv } from "./alpha/routes.ts";
 import { handleAuth } from "./auth/routes.ts";
 
-export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv {
+export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
   ETI_EDGE?: string;
   MARKET_CACHE?: KVNamespace;
 }
@@ -141,6 +143,10 @@ ${PORTFOLIO_HTML}
 <button id="rdRefresh" class="active">Assess readiness</button><button id="rdTextBtn">Text report</button></div>
 <div id="rdOut" role="status" aria-live="polite"><span class="muted">Waiting for assessment...</span></div>
 <pre id="rdText" class="execution-output" style="display:none"></pre>
+<section class="panel" id="intelPanel" style="margin-top:14px">
+<div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Analysis Intelligence</h2><span class="muted" id="intelMeta">Technical, multi-timeframe, fundamental and news engines, weighed by a central intelligence layer</span></div>
+<div class="toolbar"><select id="intelStrategy"><option value="intraday">Intraday</option><option value="scalp">Scalp</option><option value="swing">Swing</option><option value="position">Position</option></select><select id="intelDetail" title="Lite skips the heaviest detectors to fit Workers Free CPU limits"><option value="full">Full detail</option><option value="lite">Lite (low CPU)</option></select><button id="intelRun">Run analysis for selected symbol</button></div>
+<div id="intelOut" class="execution-note">Not run yet. Analysis is evidence for review, not an instruction to trade; it never places orders.</div>
 </section>
 <section class="panel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Execution Audit History</h2><button id="refreshExecutionHistory">Refresh audit history</button></div>
@@ -627,6 +633,32 @@ $('rdSymbol').onchange=()=>{$('rdSymbol').value=$('rdSymbol').value.trim().toUpp
 $('rdTextBtn').onclick=()=>{const t=$('rdText');t.style.display=t.style.display==='none'?'block':'none';};
 $('symbol').addEventListener('change',()=>{if($('rdMarket').value==='crypto'){$('rdSymbol').value=$('symbol').value;loadReadiness();}});
 $('rdSymbol').value=$('symbol').value;rdSync();loadReadiness();rdTimer=setInterval(loadReadiness,120000);
+function intelRow(a,b){return '<tr><td style="padding:3px 8px 3px 0;color:#94a3b8">'+esc(a)+'</td><td style="padding:3px 0">'+b+'</td></tr>';}
+async function runIntel(){
+ const out=$('intelOut'),btn=$('intelRun'),sym=$('symbol').value,strat=$('intelStrategy').value,det=$('intelDetail').value;
+ out.textContent='Running engines for '+sym+' ('+strat+')… this fetches candles, fundamentals and news and can take several seconds.';btn.disabled=true;
+ try{
+  const r=await fetch('/api/analysis/intelligence?symbol='+encodeURIComponent(sym)+'&strategy='+encodeURIComponent(strat)+'&detail='+encodeURIComponent(det)+'&include=omnisignal',{cache:'no-store'}),j=await r.json();
+  if(!r.ok||!j.verdict){out.textContent='Analysis unavailable: '+(j.detail||j.error||('HTTP '+r.status));btn.disabled=false;return;}
+  let h='<div style="font-size:16px;margin-bottom:6px"><b>'+esc(j.headline)+'</b></div><div class="muted" style="margin-bottom:8px">Generated '+esc(j.generatedAt)+' | evidence quality '+esc(j.confidence)+'/100 (not a probability of profit)</div><table>';
+  j.domains.forEach(function(d){h+=intelRow(d.domain,esc(d.stance)+(d.effectiveWeight>0?' | score '+esc(d.score)+' | confidence '+esc(d.confidence)+' | weight '+esc(Math.round(d.effectiveWeight*100))+'%':' | '+esc(d.summary)));});
+  h+='</table>';
+  if(j.vetoes.length)h+='<div style="margin-top:8px"><b>Vetoes and safeguards</b><ul>'+j.vetoes.map(function(v){return '<li>['+esc(v.effect)+'] '+esc(v.reason)+'</li>';}).join('')+'</ul></div>';
+  if(j.conflicts.length)h+='<div style="margin-top:8px"><b>Engine conflicts (not averaged away)</b><ul>'+j.conflicts.map(function(c){return '<li>'+esc(c.detail)+'</li>';}).join('')+'</ul></div>';
+  if(j.timing.length)h+='<div style="margin-top:8px"><b>Timeframe read</b><ul>'+j.timing.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
+  if(j.risks.length)h+='<div style="margin-top:8px"><b>Risks and warnings</b><ul>'+j.risks.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
+  if(j.whatWouldChangeThisView.length)h+='<div style="margin-top:8px"><b>What would change this view</b><ul>'+j.whatWouldChangeThisView.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
+  if(j.technicalDetail){h+='<div style="margin-top:8px"><b>Multi-timeframe</b> '+esc(j.technicalDetail.alignment.replace(/_/g,' '))+'<table style="margin-top:4px">'+j.technicalDetail.timeframes.map(function(t){return '<tr><td style="padding:2px 10px 2px 0">'+esc(t.timeframe)+'</td><td style="padding:2px 10px 2px 0;color:#94a3b8">'+esc(t.layer)+'</td><td style="padding:2px 10px 2px 0">'+esc(t.mode==='full'||t.mode==='macro'?t.stance:t.mode)+'</td><td style="padding:2px 10px 2px 0">'+(t.mode==='full'||t.mode==='macro'?esc(t.score)+' / conf '+esc(t.confidence):'')+'</td><td class="muted">'+esc(t.closedCandles)+' candles</td></tr>';}).join('')+'</table></div>';}
+  const sent=j.engineReports.filter(function(e){return e.domain==='sentiment';})[0];
+  if(sent)h+='<div style="margin-top:8px"><b>News and sentiment</b><ul>'+sent.findings.slice(0,6).map(function(f){return '<li>'+esc(f.description)+'</li>';}).join('')+'</ul></div>';
+  if(j.crossCheck&&j.crossCheck.omnisignal)h+='<div style="margin-top:8px"><b>Omnisignal cross-check</b> '+esc(j.crossCheck.omnisignal.decision)+': '+esc(j.crossCheck.omnisignal.note)+'</div>';
+  if(j.dataQuality&&j.dataQuality.setupRequired)h+='<div style="margin-top:8px"><b>Setup required</b> '+esc(j.dataQuality.setupRequired)+'</div>';
+  h+='<div class="muted" style="margin-top:10px">'+esc(j.disclaimer)+'</div>';
+  out.innerHTML=h;$('intelMeta').textContent='Last run '+new Date().toLocaleTimeString();
+ }catch(e){out.textContent='Analysis failed: '+e.message;}
+ btn.disabled=false;
+}
+$('intelRun').onclick=runIntel;
 loadTraders();
 refreshExecutionStatus();startSessions().then(()=>refreshExecutionHistory());
 loadSignal();
@@ -669,6 +701,9 @@ export default {
     if (url.pathname === "/api/omnisignal/alerts" || url.pathname === "/api/omnisignal/alerts/test") return handleAlerts(request, env as any);
     if (url.pathname === "/omnisignal" || url.pathname === "/omnisignal.js") {
       return handleOmniUi(request) as Response;
+    }
+    if (url.pathname === "/api/analysis" || url.pathname.startsWith("/api/analysis/")) {
+      return handleAnalysis(request, _env);
     }
     if (url.pathname === "/api/omnisignal" || url.pathname === "/api/omnisignal/scan" || url.pathname === "/api/omnisignal/universe" || url.pathname === "/api/omnisignal/universe/refresh") {
       return handleOmnisignal(request, _env);

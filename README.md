@@ -87,6 +87,12 @@ failed gate forces NO TRADE regardless of score. Confidence is qualitative unles
 outcomes exists. Fundamentals, news and expectancy are operator-supplied (token-protected admin routes); missing evidence is
 reported as unavailable and caps the score. It cannot place orders. See [docs/PRECISION_ENGINE.md](docs/PRECISION_ENGINE.md).
 
+## Advanced market analysis engine
+
+Technical, multi-timeframe, fundamental and news/sentiment engines feed a central intelligence layer at
+`/api/analysis/*` (and an on-demand dashboard panel). See [docs/ANALYSIS_ENGINE.md](docs/ANALYSIS_ENGINE.md) for
+methodology, endpoints, required secrets and limitations. It is analytical only and cannot place orders.
+
 ## Important feature boundary
 
 This Cloudflare edge deployment is a working market dashboard foundation, not a completed
