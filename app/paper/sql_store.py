@@ -16,12 +16,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-class PaperAccountRow(Base):
-    __tablename__ = "paper_accounts"
-    account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    state: Mapped[dict] = mapped_column(JSON)
-    version: Mapped[int] = mapped_column(Integer, default=1)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+from app.paper.models import PaperAccountRow  # noqa: E402,F401  (single definition of the paper_accounts table)
 
 
 class PaperAuditRow(Base):

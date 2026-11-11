@@ -192,10 +192,8 @@
   <footer>Every order, including live, passes the in-process risk engine. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a> · <a href="/predictions" style="color:#a78bfa">Predictions</a></footer>
   <script>
     const $ = (id) => document.getElementById(id);
-    const apiKey = localStorage.getItem('eti_api_key') || '';
     function authHeaders() {
       const h = {'Content-Type': 'application/json'};
-      if (apiKey) h['X-API-Key'] = apiKey;
       return h;
     }
     document.querySelectorAll('nav button[data-panel]').forEach(btn => btn.addEventListener('click', () => {
