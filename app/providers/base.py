@@ -237,4 +237,8 @@ class Capability:
             except ProviderError as e:
                 attempts.append({"provider": p.name, "error": e.kind})
         detail = ", ".join(f"{a['provider']}={a['error']}" for a in attempts) or f"no provider implements {method}"
-        raise ProviderError(self.name, "upstream", "all providers failed or unavailable: " + detail)
+        # When every provider failed the same way, report that cause (not_configured -> 503, auth/plan_restricted ...) instead of
+        # flattening it to "upstream": callers and HTTP mapping need the real reason. Mixed failures stay "upstream".
+        kinds = {a["error"] for a in attempts}
+        kind = kinds.pop() if len(kinds) == 1 else "upstream"
+        raise ProviderError(self.name, kind, "all providers failed or unavailable: " + detail)
