@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETI — Paper Exchange (INTERNAL PAPER)</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#121821; --text:#e8eef6; --muted:#8b9bb0; --accent:#3d8bfd; --good:#22c55e; --warn:#f59e0b; --bad:#ef4444; --border:#1e293b; --cyan:#22d3ee; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Inter, system-ui, sans-serif; background:var(--bg); color:var(--text); line-height:1.45; }
+    header { padding:.9rem 1.2rem; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:.6rem; justify-content:space-between; align-items:center; }
+    h1 { margin:0; font-size:1.1rem; } a { color:var(--cyan); text-decoration:none; font-size:.85rem; }
+    .banner { margin:.9rem 1.2rem 0; padding:.7rem 1rem; border-radius:10px; background:#052e2b; border:1px solid #0f766e; color:#99f6e4; font-size:.9rem; }
+    .banner.kill { background:#450a0a; border-color:#b91c1c; color:#fecaca; }
+    main { padding:1rem 1.2rem 2rem; max-width:1250px; margin:0 auto; }
+    .modes { display:flex; flex-wrap:wrap; gap:.5rem; margin:.8rem 0; }
+    .chip { padding:.25rem .65rem; border-radius:999px; font-size:.72rem; border:1px solid var(--border); background:#0f172a; color:var(--muted); }
+    .chip.on { background:#064e3b; border-color:#10b981; color:#a7f3d0; font-weight:600; }
+    .chip.off { opacity:.7; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.7rem; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:.85rem 1rem; }
+    .card h2 { margin:0 0 .35rem; font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .big { font-size:1.15rem; font-weight:650; font-variant-numeric:tabular-nums; }
+    .good { color:var(--good); } .bad { color:var(--bad); } .muted { color:var(--muted); font-size:.82rem; }
+    .row { display:flex; flex-wrap:wrap; gap:.5rem; align-items:end; margin:.4rem 0; }
+    label { display:flex; flex-direction:column; font-size:.7rem; color:var(--muted); gap:.2rem; }
+    input, select, button { background:#0f172a; border:1px solid var(--border); color:var(--text); padding:.42rem .55rem; border-radius:8px; font-size:.85rem; }
+    button { cursor:pointer; background:#1e293b; } button:hover { border-color:var(--accent); }
+    button.buy { background:#14532d; border-color:#16a34a; } button.sell { background:#7f1d1d; border-color:#dc2626; }
+    table { width:100%; border-collapse:collapse; font-size:.78rem; font-variant-numeric:tabular-nums; }
+    th, td { text-align:left; padding:.32rem .45rem; border-bottom:1px solid var(--border); white-space:nowrap; }
+    th { color:var(--muted); font-weight:500; } .scroll { overflow:auto; max-height:320px; }
+    pre { background:#0f172a; padding:.7rem; border-radius:8px; overflow:auto; font-size:.75rem; max-height:300px; margin:.4rem 0 0; }
+    section { margin-top:1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ETI — Paper Exchange <span class="chip on">INTERNAL PAPER</span> <span class="muted">v{{ version }}</span></h1>
+    <span><a href="/">← Dashboard</a></span>
+  </header>
+  <div class="banner" id="banner">INTERNAL PAPER — orders are simulated by ETI against live market data. No exchange is contacted, no API keys are needed, and no real money is involved.</div>
+  <main>
+    <div class="modes" id="modes"></div>
+    <div class="grid" id="cards"></div>
+
+    <section class="card">
+      <h2>Order ticket</h2>
+      <div class="row">
+        <label>Symbol<input id="symbol" value="BTCUSDT" size="10" /></label>
+        <label>Side<select id="side"><option>buy</option><option>sell</option></select></label>
+        <label>Type<select id="type"><option>market</option><option>limit</option><option>stop</option><option>take_profit</option></select></label>
+        <label>Quantity<input id="qty" type="number" step="any" value="0.01" /></label>
+        <label id="lw">Limit price<input id="limit" type="number" step="any" /></label>
+        <label id="tw">Trigger price<input id="trigger" type="number" step="any" /></label>
+        <label>Time in force<select id="tif"><option value="">default</option><option>gtc</option><option>ioc</option></select></label>
+        <button id="preview">Preview</button>
+        <button id="buy" class="buy">Submit BUY</button>
+        <button id="sell" class="sell">Submit SELL</button>
+      </div>
+      <div class="muted">Market orders are IOC by default (unfilled remainder is cancelled). Stop and take-profit orders trigger on the live quote, then execute as market orders. Sells cannot exceed available holdings.</div>
+      <pre id="ticket-out">—</pre>
+    </section>
+
+    <section class="card"><h2>Protective exit (OCO stop-loss + take-profit on holdings)</h2>
+      <div class="row">
+        <label>Symbol<input id="o-symbol" value="BTCUSDT" size="10" /></label>
+        <label>Quantity<input id="o-qty" type="number" step="any" /></label>
+        <label>Stop price<input id="o-stop" type="number" step="any" /></label>
+        <label>Take-profit price<input id="o-tp" type="number" step="any" /></label>
+        <button id="oco">Place OCO</button>
+      </div>
+    </section>
+
+    <section class="card"><h2>Positions</h2><div class="scroll"><table id="t-pos"></table></div></section>
+    <section class="card"><h2>Open orders</h2><div class="scroll"><table id="t-open"></table></div></section>
+    <section class="card"><h2>Execution history (fills)</h2><div class="scroll"><table id="t-fills"></table></div></section>
+    <section class="card"><h2>Closed orders</h2><div class="scroll"><table id="t-closed"></table></div></section>
+    <section class="card"><h2>Audit log</h2><div class="scroll"><table id="t-audit"></table></div></section>
+
+    <section class="card"><h2>Account</h2>
+      <div class="row"><label>Reset to cash<input id="reset-cash" type="number" step="any" placeholder="default" /></label><button id="reset">Reset paper account</button>
+      <button id="cancel-all">Cancel all open orders</button></div>
+      <div class="muted">Reset wipes simulated balances, positions and orders (the audit log is kept and records the reset).</div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const apiKey = localStorage.getItem('eti_api_key') || '';
+    const hdr = () => { const h = {'Content-Type': 'application/json'}; if (apiKey) h['X-API-Key'] = apiKey; return h; };
+    const money = (x) => x == null ? '—' : Number(x).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const num = (x, d = 6) => x == null ? '—' : Number(x).toLocaleString(undefined, {maximumFractionDigits: d});
+    const cls = (x) => x > 0 ? 'good' : (x < 0 ? 'bad' : '');
+    function cell(tr, text, c) { const td = document.createElement('td'); td.textContent = text == null ? '—' : String(text); if (c) td.className = c; tr.appendChild(td); return td; }
+    function table(id, heads, rows, build) {
+      const t = $(id); t.textContent = '';
+      const hr = document.createElement('tr'); heads.forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); }); t.appendChild(hr);
+      if (!rows.length) { const tr = document.createElement('tr'); const td = cell(tr, 'none'); td.className = 'muted'; t.appendChild(tr); return; }
+      rows.forEach(r => { const tr = document.createElement('tr'); build(tr, r); t.appendChild(tr); });
+    }
+    async function api(path, opts) {
+      const r = await fetch(path, opts); let j = null; try { j = await r.json(); } catch (_) {}
+      if (!r.ok) throw new Error((j && (j.detail && (j.detail.message || j.detail) || j.message)) ? JSON.stringify(j.detail || j) : ('HTTP ' + r.status));
+      return j;
+    }
+    function card(title, value, c, sub) {
+      const d = document.createElement('div'); d.className = 'card';
+      const h = document.createElement('h2'); h.textContent = title; const v = document.createElement('div'); v.className = 'big ' + (c || ''); v.textContent = value; d.append(h, v);
+      if (sub) { const s = document.createElement('div'); s.className = 'muted'; s.textContent = sub; d.appendChild(s); } return d;
+    }
+    async function load() {
+      try {
+        const [st, ac, op, cl, fl, au] = await Promise.all([api('/api/paper/status'), api('/api/paper/account'), api('/api/paper/orders?status=open'),
+          api('/api/paper/orders?status=closed'), api('/api/paper/fills?limit=100'), api('/api/paper/audit?limit=60')]);
+        const modes = $('modes'); modes.textContent = '';
+        const m = st.modes; const mk = (txt, on) => { const s = document.createElement('span'); s.className = 'chip ' + (on ? 'on' : 'off'); s.textContent = txt; modes.appendChild(s); };
+        mk('INTERNAL PAPER — active (no keys needed)', true);
+        mk('EXCHANGE TESTNET — ' + (m.EXCHANGE_TESTNET.available ? 'credentials present (used only when you choose testnet)' : 'not connected (no credentials)'), false);
+        mk('LIVE TRADING — disabled', false);
+        const b = $('banner'); const killed = st.kill_switch;
+        b.className = 'banner' + (killed ? ' kill' : '');
+        b.textContent = killed ? 'KILL SWITCH ACTIVE — new orders are rejected and simulated fills are frozen. Cancels are still allowed.'
+          : 'INTERNAL PAPER — orders are simulated by ETI against live market data. No exchange is contacted, no API keys are needed, and no real money is involved.';
+        const c = $('cards'); c.textContent = '';
+        c.append(card('Equity', money(ac.equity), '', 'start ' + money(ac.starting_cash)), card('Cash', money(ac.cash)), card('Available cash', money(ac.available_cash), '', 'reserved ' + money(ac.reserved_cash)),
+          card('Realized P&L', money(ac.realized_pnl), cls(ac.realized_pnl)), card('Unrealized P&L', money(ac.unrealized_pnl), cls(ac.unrealized_pnl), ac.unmarked_symbols.length ? 'no live price: ' + ac.unmarked_symbols.join(', ') : 'marked at mid'),
+          card('Total P&L', money(ac.total_pnl), cls(ac.total_pnl)), card('Fees paid', money(ac.fees_paid)), card('Open orders / positions', ac.open_orders + ' / ' + ac.open_positions));
+        table('t-pos', ['Symbol', 'Qty', 'Available', 'Avg cost', 'Mark', 'Value', 'Unrealized', 'Realized'], ac.positions.filter(p => p.open), (tr, p) => {
+          cell(tr, p.symbol); cell(tr, num(p.qty)); cell(tr, num(p.available_qty)); cell(tr, num(p.avg_cost, 4)); cell(tr, num(p.mark_price, 4)); cell(tr, money(p.market_value));
+          cell(tr, money(p.unrealized_pnl), cls(p.unrealized_pnl)); cell(tr, money(p.realized_pnl), cls(p.realized_pnl)); });
+        table('t-open', ['Order', 'Symbol', 'Side', 'Type', 'Qty', 'Filled', 'Limit', 'Trigger', 'Status', 'Created', ''], op.orders, (tr, o) => {
+          cell(tr, o.id); cell(tr, o.symbol); cell(tr, o.side, o.side === 'buy' ? 'good' : 'bad'); cell(tr, o.type); cell(tr, num(o.qty)); cell(tr, num(o.filled_qty)); cell(tr, num(o.limit_price, 4)); cell(tr, num(o.trigger_price, 4)); cell(tr, o.status); cell(tr, o.created_at.slice(0, 19));
+          const td = document.createElement('td'); const bt = document.createElement('button'); bt.textContent = 'Cancel'; bt.onclick = async () => { try { await api('/api/paper/orders/' + o.id + '/cancel', {method: 'POST', headers: hdr()}); } catch (e) { alert(e.message); } load(); }; td.appendChild(bt); tr.appendChild(td); });
+        table('t-fills', ['Time', 'Order', 'Symbol', 'Side', 'Qty', 'Price', 'Fee', 'Role', 'Slippage bps', 'Realized'], fl.fills, (tr, f) => {
+          cell(tr, f.ts.slice(0, 19)); cell(tr, f.order_id); cell(tr, f.symbol); cell(tr, f.side, f.side === 'buy' ? 'good' : 'bad'); cell(tr, num(f.qty)); cell(tr, num(f.price, 4)); cell(tr, money(f.fee)); cell(tr, f.role + (f.liquidity_known ? '' : ' (liquidity unknown)'));
+          cell(tr, num(f.slippage_bps, 2)); cell(tr, f.side === 'sell' ? money(f.realized_pnl) : '—', f.side === 'sell' ? cls(f.realized_pnl) : ''); });
+        table('t-closed', ['Order', 'Symbol', 'Side', 'Type', 'Qty', 'Filled', 'Avg price', 'Fees', 'Status', 'Reason'], cl.orders.slice(0, 60), (tr, o) => {
+          cell(tr, o.id); cell(tr, o.symbol); cell(tr, o.side); cell(tr, o.type); cell(tr, num(o.qty)); cell(tr, num(o.filled_qty)); cell(tr, num(o.avg_fill_price, 4)); cell(tr, money(o.fees)); cell(tr, o.status); cell(tr, o.reason); });
+        table('t-audit', ['#', 'Time', 'Event', 'Order', 'Detail'], au.events, (tr, a) => { cell(tr, a.seq); cell(tr, a.ts.slice(0, 19)); cell(tr, a.event); cell(tr, a.order_id); cell(tr, JSON.stringify(a.detail || {}).slice(0, 140)); });
+      } catch (e) { $('banner').textContent = 'Could not load paper exchange: ' + e.message; }
+    }
+    function body() {
+      const b = {symbol: $('symbol').value.trim(), side: $('side').value, type: $('type').value, qty: parseFloat($('qty').value)};
+      if (b.type === 'limit') b.limit_price = parseFloat($('limit').value);
+      if (b.type === 'stop' || b.type === 'take_profit') b.trigger_price = parseFloat($('trigger').value);
+      if ($('tif').value) b.time_in_force = $('tif').value; return b;
+    }
+    function syncType() { const t = $('type').value; $('lw').style.display = t === 'limit' ? '' : 'none'; $('tw').style.display = (t === 'stop' || t === 'take_profit') ? '' : 'none'; }
+    $('type').onchange = syncType; syncType();
+    async function submit(side) {
+      $('side').value = side; const b = body();
+      if (!confirm('INTERNAL PAPER order (simulated): ' + side.toUpperCase() + ' ' + b.qty + ' ' + b.symbol + ' ' + b.type + '. Continue?')) return;
+      try { $('ticket-out').textContent = JSON.stringify(await api('/api/paper/orders', {method: 'POST', headers: hdr(), body: JSON.stringify(b)}), null, 2); } catch (e) { $('ticket-out').textContent = 'Error: ' + e.message; }
+      load();
+    }
+    $('buy').onclick = () => submit('buy'); $('sell').onclick = () => submit('sell');
+    $('preview').onclick = async () => { try { $('ticket-out').textContent = JSON.stringify(await api('/api/paper/orders/preview', {method: 'POST', headers: hdr(), body: JSON.stringify(body())}), null, 2); } catch (e) { $('ticket-out').textContent = 'Error: ' + e.message; } };
+    $('oco').onclick = async () => { try { const b = {symbol: $('o-symbol').value.trim(), qty: parseFloat($('o-qty').value), stop_price: parseFloat($('o-stop').value), take_profit_price: parseFloat($('o-tp').value)};
+      $('ticket-out').textContent = JSON.stringify(await api('/api/paper/orders/oco', {method: 'POST', headers: hdr(), body: JSON.stringify(b)}), null, 2); } catch (e) { $('ticket-out').textContent = 'Error: ' + e.message; } load(); };
+    $('cancel-all').onclick = async () => { try { await api('/api/paper/orders/cancel-all', {method: 'POST', headers: hdr()}); } catch (e) { alert(e.message); } load(); };
+    $('reset').onclick = async () => { if (prompt('Type RESET to wipe the simulated account') !== 'RESET') return;
+      const c = parseFloat($('reset-cash').value); const b = {confirm: 'RESET'}; if (c > 0) b.starting_cash = c;
+      try { await api('/api/paper/account/reset', {method: 'POST', headers: hdr(), body: JSON.stringify(b)}); } catch (e) { alert(e.message); } load(); };
+    load(); setInterval(load, 5000);
+  </script>
+</body>
+</html>
