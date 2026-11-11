@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#020817">
+  <title>{% block title %}ETI{% endblock %} — Elite Trading Intelligence</title>
+  <link rel="stylesheet" href="/static/eti.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+{% set nav = [
+  ("COMMAND CENTRE", [("◈", "Trading Command Centre", "/command"), ("◉", "Intelligence Command Centre", "/intelligence")]),
+  ("TRADING", [("▤", "Live Markets", "/command#markets"), ("◎", "AI Trade Signals", "/command#signals"), ("▧", "Paper Trading", "/command#paper"), ("▥", "Trade Journal", "/command#journal"), ("◔", "Performance", "/command#performance"), ("♥", "Risk & Health", "/command#health"), ("⚡", "Live Execution", "/command#live")]),
+  ("INTELLIGENCE", [("✵", "Crawler Intelligence", "/intelligence#crawler"), ("◌", "Global Network", "/intelligence#globe"), ("▣", "Institutional", "/intelligence#institutional"), ("▲", "Market Intelligence", "/intelligence#market-intel"), ("★", "Opportunities", "/intelligence#opportunities"), ("◇", "Blockchain", "/intelligence#blockchain"), ("⛨", "Security Centre", "/intelligence#security"), ("❖", "Academic Research", "/intelligence#academic"), ("⚙", "Agent Management", "/intelligence#agents")]),
+  ("ANALYTICS & TOOLS", [("◆", "Prediction Ledger", "/predictions"), ("▦", "Markets & Readiness", "/markets"), ("α", "Alpha Research", "/alpha"), ("▢", "Data Intelligence", "/data-intel"), ("⚑", "Alerts", "/alerts"), ("⌂", "Classic Dashboard", "/")]),
+] %}
+<div class="shell" id="shell">
+  <aside class="side" id="side" aria-label="Primary navigation">
+    <div class="brand"><span class="logo">ETI</span><span class="bt"><b>Elite Trading Intelligence</b><br><small>Analyse • Strategise • Trade • Learn</small></span></div>
+    <nav>
+      {% for group, items in nav %}
+      <div class="nav-g">{{ group }}</div>
+      {% for icon, label, href in items %}
+      <a class="nav-a" href="{{ href }}" title="{{ label }}"><span class="nav-i" aria-hidden="true">{{ icon }}</span><span class="nav-t">{{ label }}</span></a>
+      {% endfor %}
+      {% endfor %}
+    </nav>
+    <div class="nav-g"></div>
+    <button class="btn sm" id="collapse" type="button" aria-label="Collapse or expand navigation" title="Collapse / expand">⇔</button>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <div class="row">
+        <button class="btn menu-btn" id="menu" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
+        <span class="tag">DISCOVER OPPORTUNITIES. DETECT THREATS. PROTECT CAPITAL.</span>
+      </div>
+      <div class="row">
+        <span class="chip" id="chip-mode" title="Portfolio figures on this screen come from the internal paper account"><span class="dot warn"></span>INTERNAL PAPER · SIMULATED</span>
+        <span class="chip" id="chip-live"><span class="dot"></span>Live trading: checking…</span>
+        <span class="chip" id="chip-sys"><span class="dot"></span>API: checking…</span>
+        <span class="chip" id="clock">—</span>
+        <button class="btn sm" id="btn-key" type="button">API key</button>
+        <button class="btn sm danger" id="btn-emergency" type="button">EMERGENCY STOP</button>
+      </div>
+    </header>
+    <main id="main">{% block content %}{% endblock %}</main>
+    <footer>PROFITABLE. DISCIPLINED. INTELLIGENT. · Withdrawal permissions are never requested · Research output, not investment advice · ETI v{{ version }}</footer>
+  </div>
+</div>
+<dialog id="dlg" aria-modal="true"></dialog>
+<div id="toasts" aria-live="polite"></div>
+<script src="/static/eti.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

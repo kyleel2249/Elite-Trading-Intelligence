@@ -1,40 +1,389 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="ETI Trading Command Centre: paper-account analytics and system status. Research output, not investment advice." />
-<meta name="robots" content="noindex,nofollow" />
-<title>ETI — Trading Command Centre</title>
-<link rel="stylesheet" href="/static/eti.css" />
-</head>
-<body data-page="trading">
-<canvas id="scene" aria-hidden="true"></canvas>
-<header>
-  <div><h1>Trading Command Centre</h1><div class="sub">Paper-account performance and risk status</div></div>
-    <nav aria-label="ETI sections">
-      <a class="nav" href="/">Dashboard</a><a class="nav" href="/command">Trading</a><a class="nav" href="/intelligence">Intelligence</a><a class="nav" href="/alpha">Alpha</a><a class="nav" href="/predictions">Predictions</a><a class="nav" href="/markets">Markets</a>
-    </nav>
-</header>
-<main>
-  <div class="banner">Research and paper-trading analytics only. Nothing here is investment advice, a prediction of profit, or a guarantee. Missing or stale data is shown as unavailable, never estimated.</div>
-  <div class="row">
-    <a class="btn primary" href="/alpha">DISCOVER OPPORTUNITIES</a>
-    <label for="range" class="sub">Range</label>
-    <select id="range"><option>1D</option><option>1W</option><option selected>1M</option><option>3M</option><option>1Y</option><option>ALL</option></select>
-    <button class="btn" id="refresh" type="button">Refresh</button>
-    <span class="sub" id="status" role="status" aria-live="polite"></span>
-  </div>
-  <p class="note" id="mode">Loading account mode…</p>
-  <section class="kpis" id="kpis" aria-label="Account summary"></section>
-  <div class="grid2">
-    <section class="panel"><div class="ph"><h2>Equity curve</h2></div><div class="pb"><canvas id="curve" role="img" aria-label="Paper account equity curve"></canvas></div></section>
-    <section class="panel"><div class="ph"><h2>Performance (all trades, wins and losses)</h2></div><div class="pb" id="perf"></div></section>
-  </div>
-  <section class="panel"><div class="ph"><h2>Open positions</h2></div><div class="pb" id="positions"></div></section>
-</main>
-<footer>ETI v{{ version }} · All figures come from the ETI API; nothing on this page is sample data.</footer>
-<script src="/static/scenes.js" defer></script>
-<script src="/static/eti.js" defer></script>
-</body>
-</html>
+{% extends "eti_base.html" %}
+{% block title %}Trading Command Centre{% endblock %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js" defer></script>{% endblock %}
+{% block content %}
+<h1>Trading Command Centre</h1>
+<div class="sub">PROFITABLE. DISCIPLINED. INTELLIGENT. · Figures come from the internal paper account and are labelled as simulated. Missing data is shown as unavailable, never filled in.</div>
+<div class="row tabs" style="margin:12px 0" id="range-tabs" role="group" aria-label="Performance period"></div>
+<div class="kpis" id="kpis" aria-live="polite"></div>
+
+<div class="grid">
+  <section id="markets" class="panel s8" aria-labelledby="h-markets">
+    <h2 id="h-markets">Market overview <span class="chip" id="mk-status">loading…</span></h2>
+    <div class="tabs" id="cat-tabs" role="group" aria-label="Market category"></div>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
+      <label>Symbol<select id="mk-symbol"></select></label>
+      <div class="tabs" id="tf-tabs" role="group" aria-label="Timeframe" style="align-self:end"></div>
+      <div class="tabs" id="ov-tabs" role="group" aria-label="Indicator overlays" style="align-self:end"></div>
+    </div>
+    <div id="chart" class="chart" role="img" aria-label="Candlestick chart"></div>
+    <div id="mk-note"></div>
+    <div class="row" id="readout" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px"></div>
+  </section>
+
+  <section id="signals" class="panel green s4" aria-labelledby="h-sig">
+    <h2 id="h-sig">ETI trade signal</h2>
+    <div class="row" style="display:flex;gap:8px;margin-bottom:8px"><select id="sig-symbol" aria-label="Signal asset"></select><button class="btn primary sm" id="sig-run" type="button">Analyse</button></div>
+    <div id="sig-body"><div class="empty">Choose an asset and press Analyse. The signal comes from the multi-specialist council plus the volatility-scaled forecast; confidence is a model heuristic, not a probability of success.</div></div>
+    <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px" id="sig-actions"></div>
+    <div id="watchlist" class="legend" style="margin-top:8px"></div>
+  </section>
+</div>
+
+<div class="grid">
+  <section id="health" class="panel s4"><h2>Trading health</h2><div id="health-body"></div></section>
+  <section id="recommendation" class="panel s4"><h2>ETI recommendation</h2><div id="reco-body"></div></section>
+  <section id="performance" class="panel s4"><h2>Performance overview <span class="sub" id="perf-range"></span></h2><div id="perf-chart"></div><div id="perf-stats"></div></section>
+</div>
+
+<div class="grid">
+  <section id="trades" class="panel s6"><h2>Recent trades (paper fills)</h2><div id="trades-body"></div></section>
+  <section id="journal" class="panel s6"><h2>ETI trade journal (automatic record)</h2><div id="journal-body"></div><p class="sub">Every order, fill, rejection and trigger is recorded automatically by the paper engine. Manual annotations and automated lesson reviews need a server-side notes table and are not part of this build.</p></section>
+</div>
+
+<div class="grid">
+  <section id="paper" class="panel s8"><h2>Paper trading <button class="btn primary sm" id="paper-new" type="button">New paper order</button></h2><div id="paper-body"></div></section>
+  <section id="live" class="panel gold s4"><h2>Live execution readiness</h2><div id="live-body"></div></section>
+</div>
+
+<section id="risk" class="panel" style="margin-bottom:14px"><h2>Risk limits in force (paper engine)</h2><div id="risk-body"></div></section>
+
+<section id="actions" class="panel purple"><h2>Command actions</h2><div class="cmdbar" id="cmdbar"></div></section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const { $, el, fmt, api, toast, busy, modal, confirmTyped, prompt, kv, table, autoTable, unavailable, gauge, area, enc } = ETI;
+  const S = { range: '1M', cat: 'crypto', symbol: 'BTCUSDT', tf: '1h', d: null, sig: null, flags: {}, live: null, ov: { sma20: true, sma50: true, bb: false, vwap: false } };
+  const CATS = {
+    crypto: { label: 'Crypto', provider: 'binance', symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'] },
+    stocks: { label: 'Stocks', provider: 'alpaca', symbols: ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY'], needs: 'alpaca_configured', why: 'Alpaca market data is not configured (ALPACA_API_KEY / ALPACA_SECRET_KEY).' },
+    forex: { label: 'Forex', why: 'No forex market-data adapter is configured. Trading hours and liquidity assessment are available on the Markets & Readiness page.' },
+    indices: { label: 'Indices', why: 'No index market-data adapter is configured. Index ETFs can be charted under Stocks when Alpaca is configured.' },
+    commodities: { label: 'Commodities', why: 'No commodity market-data adapter is configured.' },
+  };
+  const TFS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'];
+  const TFL = { '1d': '1D', '1w': '1W' };
+  const RANGES = ['1D', '1W', '1M', '3M', '6M', '1Y', 'ALL'];
+  const wl = { get: () => { try { return JSON.parse(localStorage.getItem('eti_watchlist') || '[]'); } catch (_) { return []; } }, set: (a) => localStorage.setItem('eti_watchlist', JSON.stringify(a)) };
+
+  function tabs(box, items, current, onPick, labelFn) {
+    box.replaceChildren(...items.map((x) => el('button', { class: 'btn sm', type: 'button', 'aria-pressed': String(x === current), onclick: () => onPick(x) }, labelFn ? labelFn(x) : x)));
+  }
+
+  // ---------------------------------------------------------------- account, KPIs, health, performance
+  async function loadAccount() {
+    const d = await api('/api/command/performance?account_id=default&range=' + S.range);
+    S.d = d; renderKpis(d); renderHealth(d); renderPerf(d); renderRisk(d);
+  }
+  function renderKpis(d) {
+    const s = d.summary, p = d.performance, cfg = s.config || {};
+    const cap = Math.min(s.available_cash, s.equity * ((cfg.max_order_notional_pct || 0) / 100));
+    const K = [
+      ['Total portfolio value', fmt.usd(s.equity), '', 'Cash plus open positions marked to the best bid'],
+      ['Available trading balance', fmt.usd(s.available_cash), '', 'Cash minus cash reserved by resting buy orders'],
+      ['Realized P&L (' + p.range + ')', fmt.signed(p.net_realized_pnl), fmt.cls(p.net_realized_pnl), 'Fee-inclusive, closed (sell) fills in the period'],
+      ['Unrealized P&L', fmt.signed(s.unrealized_pnl), fmt.cls(s.unrealized_pnl), 'Open positions vs average cost'],
+      ['Net profit (all-time)', fmt.signed(s.total_pnl) + ' (' + fmt.pct(s.return_pct) + ')', fmt.cls(s.total_pnl), 'Equity minus starting cash'],
+      ['Win rate', p.win_rate == null ? '\u2014' : fmt.pct(p.win_rate * 100) + ' (' + p.wins + '/' + p.trades + ')', '', 'Winning closed trades / closed trades in the period'],
+      ['Profit factor', p.profit_factor == null ? '\u2014' : p.profit_factor.toFixed(2), '', p.profit_factor_note || 'Gross profit / gross loss'],
+      ['Max drawdown', fmt.pct(p.max_drawdown_pct), p.max_drawdown_pct > 0 ? 'neg' : '', 'Peak-to-trough on the realized equity curve'],
+      ['Total trading volume', fmt.usd(p.volume), '', 'Sum of fill notional in the period'],
+      ['Active positions', String(s.positions.length), '', ''],
+      ['Active orders', String(s.open_orders), '', ''],
+      ['Daily P&L (rolling 24h)', fmt.signed(p.rolling_pnl.daily), fmt.cls(p.rolling_pnl.daily), 'Realized'],
+      ['Weekly P&L (rolling 7d)', fmt.signed(p.rolling_pnl.weekly), fmt.cls(p.rolling_pnl.weekly), 'Realized'],
+      ['Monthly P&L (rolling 30d)', fmt.signed(p.rolling_pnl.monthly), fmt.cls(p.rolling_pnl.monthly), 'Realized'],
+      ['Capital allocated', fmt.usd(s.market_value + s.reserved_cash), '', 'Open position value plus cash reserved for resting orders'],
+      ['Max order size now', fmt.usd(cap), '', 'Smaller of available cash and the per-order cap (' + (cfg.max_order_notional_pct || '?') + '% of equity)'],
+    ];
+    $('#kpis').replaceChildren(...K.map(([l, v, c, t]) => el('div', { class: 'kpi', title: t }, el('div', { class: 'l', text: l }), el('div', { class: 'v ' + c, text: v }))));
+  }
+  function renderHealth(d) {
+    const h = d.health, col = h.score == null ? '#9cb2cc' : h.score >= 70 ? '#00e676' : h.score >= 50 ? '#ffc247' : '#ff304f';
+    $('#health-body').replaceChildren(
+      gauge(h.score, { color: col, label: h.label || 'not evaluated' }),
+      el('dl', { class: 'kv', style: 'margin-top:8px' },
+        el('dt', { text: 'Risk level' }), el('dd', { class: h.risk_level === 'High' ? 'neg' : h.risk_level === 'Low' ? 'pos' : 'warn', text: h.risk_level || 'not evaluated' }),
+        el('dt', { text: 'Readiness' }), el('dd', { text: h.readiness }),
+        el('dt', { text: 'Account balance' }), el('dd', { text: fmt.usd(d.summary.equity) }),
+        el('dt', { text: 'Exposure' }), el('dd', { text: d.summary.equity > 0 ? fmt.pct(d.summary.market_value / d.summary.equity * 100) : '\u2014' }),
+        el('dt', { text: 'Criteria measured' }), el('dd', { text: Math.round(h.coverage * 100) + '% of weight' })),
+      el('details', {}, el('summary', { class: 'sub', text: 'How the score is calculated' }), table([{ k: 'name', label: 'Criterion' }, { k: 'weight', label: 'Wt' }, { k: 'score', label: 'Score', fmt: (v) => (v == null ? 'not evaluated' : (v * 100).toFixed(0) + '%') }, { k: 'rule', label: 'Rule', wrap: true }], h.components)));
+    const reco = $('#reco-body'); const hs = h.components.filter((c) => c.score != null);
+    let head, cls;
+    if (h.readiness === 'halted') { head = 'Trading is halted.'; cls = 'neg'; }
+    else if (h.readiness === 'not_ready') { head = 'Trading is not advisable right now: the live market stream is disconnected.'; cls = 'neg'; }
+    else if (h.score == null) { head = 'Not enough measured data to assess trading readiness yet.'; cls = 'warn'; }
+    else if (h.risk_level === 'High') { head = 'Elevated risk: reduce exposure or pause new entries.'; cls = 'neg'; }
+    else if (h.risk_level === 'Moderate') { head = 'Trade with caution: moderate risk indicators.'; cls = 'warn'; }
+    else { head = 'No blocking risk conditions detected. This is not a trade signal.'; cls = 'pos'; }
+    reco.replaceChildren(el('p', { class: 'signal ' + cls, style: 'font-size:16px', text: head }),
+      el('ul', { class: 'list' }, h.components.map((c) => el('li', {}, el('span', { text: c.name.replace('_', ' ') }), el('span', { class: c.score == null ? 'muted' : '', text: c.score == null ? 'not evaluated' : (c.score * 100).toFixed(0) + '% \u2014 ' + c.rule })))),
+      el('p', { class: 'sub', text: 'Based on measured account, stream and agent state only. Market direction, economic events and sentiment are not inputs here; see the signal panel and Markets & Readiness.' }));
+    void hs;
+  }
+  function renderPerf(d) {
+    const p = d.performance;
+    $('#perf-range').textContent = '(' + p.range + ')';
+    $('#perf-chart').replaceChildren(area(p.equity_curve.map((x) => x.equity), { label: 'Realized equity curve' }));
+    $('#perf-stats').replaceChildren(el('dl', { class: 'kv', style: 'margin-top:8px' },
+      ...[['Total trades', p.trades], ['Wins / losses', p.wins + ' / ' + p.losses], ['Average win', fmt.signed(p.avg_win)], ['Average loss', fmt.signed(p.avg_loss)],
+        ['Expectancy', fmt.signed(p.expectancy)], ['Avg holding time', fmt.dur(p.avg_holding_seconds)], ['Recovery factor', p.recovery_factor == null ? '\u2014' : p.recovery_factor.toFixed(2)],
+        ['Sharpe / Sortino', p.sharpe == null ? 'not computed' : p.sharpe.toFixed(2) + ' / ' + (p.sortino == null ? '\u2014' : p.sortino.toFixed(2))], ['Fees paid', fmt.usd(p.fees_paid)]]
+        .flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { text: String(v) })])),
+      p.ratio_note ? el('p', { class: 'sub', text: p.ratio_note }) : null);
+  }
+  function renderRisk(d) {
+    const c = d.summary.config || {};
+    $('#risk-body').replaceChildren(kv({ ...c, kill_switch: d.mode.kill_switch, halted: d.summary.halted, live_trading_flag: d.mode.live_trading_enabled }),
+      el('p', { class: 'sub', text: 'Limits are enforced inside the paper engine and, for execution accounts, by the risk gateway. Changing critical limits requires editing server configuration; the browser cannot loosen them.' }));
+  }
+
+  // ---------------------------------------------------------------- trades, journal, paper
+  async function loadActivity() {
+    const [fills, events, orders] = await Promise.allSettled([api('/api/paper/fills?account_id=default&limit=15'), api('/api/paper/events?account_id=default&limit=25'), api('/api/paper/orders?account_id=default&status=open&limit=50')]);
+    $('#trades-body').replaceChildren(fills.status === 'fulfilled' ? table([
+      { k: 'symbol', label: 'Asset' }, { k: 'side', label: 'Action', cls: (v) => (v === 'buy' ? 'pos' : 'neg') }, { k: 'qty', label: 'Qty', fmt: (v) => fmt.num(v, 6) },
+      { k: 'price', label: 'Price', fmt: (v) => fmt.usd(v) }, { k: 'fee', label: 'Fees', fmt: (v) => fmt.usd(v, 4) },
+      { k: 'realized_pnl', label: 'Realized P&L', fmt: (v, r) => (r.side === 'sell' ? fmt.signed(v) : '\u2014'), cls: (v, r) => (r.side === 'sell' ? fmt.cls(v) : '') },
+      { k: 'ts', label: 'Time', fmt: fmt.time }], fills.value.fills, 'No paper fills yet. Place a paper order to start the record.') : unavailable(fills.reason.message, 'Fills'));
+    $('#journal-body').replaceChildren(events.status === 'fulfilled' ? table([
+      { k: 'ts', label: 'Time', fmt: fmt.time }, { k: 'event', label: 'Event' }, { k: 'order_id', label: 'Order' },
+      { k: (r) => Object.entries(r.details || {}).filter(([, v]) => ['string', 'number', 'boolean'].includes(typeof v)).slice(0, 5).map(([k, v]) => k + '=' + (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v)).join(' \u00b7 '), label: 'Details', wrap: true }],
+      events.value.events, 'No journal entries yet.') : unavailable(events.reason.message, 'Journal'));
+    const s = S.d && S.d.summary;
+    const open = orders.status === 'fulfilled' ? orders.value.orders : [];
+    $('#paper-body').replaceChildren(
+      el('p', { class: 'sub', text: 'Mode: INTERNAL PAPER (simulated fills against live public order books; no exchange credentials).' }),
+      el('h3', { class: 'sub', text: 'Positions' }),
+      s ? table([{ k: 'symbol', label: 'Symbol' }, { k: 'qty', label: 'Qty', fmt: (v) => fmt.num(v, 6) }, { k: 'avg_cost', label: 'Avg cost', fmt: (v) => fmt.usd(v) }, { k: 'mark', label: 'Mark', fmt: (v) => fmt.usd(v) }, { k: 'market_value', label: 'Value', fmt: (v) => fmt.usd(v) }, { k: 'unrealized_pnl', label: 'Unrealized', fmt: (v) => fmt.signed(v), cls: fmt.cls }], s.positions, 'No open positions.') : unavailable('Account not loaded.'),
+      s && s.marks_stale_for && s.marks_stale_for.length ? el('p', { class: 'warn', text: 'Live marks unavailable for: ' + s.marks_stale_for.join(', ') + ' (showing last stored mark).' }) : null,
+      el('h3', { class: 'sub', text: 'Open orders' }),
+      table([{ k: 'id', label: 'Order' }, { k: 'symbol', label: 'Symbol' }, { k: 'side', label: 'Side' }, { k: 'type', label: 'Type' }, { k: 'qty', label: 'Qty', fmt: (v) => fmt.num(v, 6) },
+        { k: (r) => r.limit_price || r.stop_price, label: 'Price', fmt: (v) => fmt.usd(v) }, { k: 'status', label: 'Status' },
+        { k: 'id', label: '', fmt: (id) => el('button', { class: 'btn sm danger', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { await api('/api/paper/orders/' + enc(id) + '?account_id=default', { method: 'DELETE' }); toast('Order ' + id + ' cancelled (engine confirmed)', 'good'); await refresh(); }) }, 'Cancel') }], open, 'No open orders.'));
+  }
+
+  // ---------------------------------------------------------------- chart
+  let chart = null, cs = null, vs = null; const lines = {};
+  const sma = (v, n) => v.map((_, i) => (i < n - 1 ? null : v.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n));
+  const ema = (v, n) => { const k = 2 / (n + 1), o = []; v.forEach((x, i) => o.push(i ? x * k + o[i - 1] * (1 - k) : x)); return o; };
+  function boll(v, n = 20, k = 2) { const m = sma(v, n); return v.map((_, i) => { if (m[i] == null) return null; const w = v.slice(i - n + 1, i + 1); const sd = Math.sqrt(w.reduce((a, b) => a + (b - m[i]) ** 2, 0) / n); return [m[i] - k * sd, m[i], m[i] + k * sd]; }); }
+  function rsi(v, n = 14) { if (v.length <= n) return null; let g = 0, l = 0; for (let i = 1; i <= n; i++) { const d = v[i] - v[i - 1]; if (d >= 0) g += d; else l -= d; } g /= n; l /= n; for (let i = n + 1; i < v.length; i++) { const d = v[i] - v[i - 1]; g = (g * (n - 1) + Math.max(d, 0)) / n; l = (l * (n - 1) + Math.max(-d, 0)) / n; } return l === 0 ? 100 : 100 - 100 / (1 + g / l); }
+  function atr(c, n = 14) { if (c.length <= n) return null; const tr = c.map((x, i) => (i ? Math.max(x.high - x.low, Math.abs(x.high - c[i - 1].close), Math.abs(x.low - c[i - 1].close)) : x.high - x.low)); let a = tr.slice(1, n + 1).reduce((p, q) => p + q, 0) / n; for (let i = n + 1; i < tr.length; i++) a = (a * (n - 1) + tr[i]) / n; return a; }
+  function macd(v) { if (v.length < 35) return null; const e12 = ema(v, 12), e26 = ema(v, 26), line = v.map((_, i) => e12[i] - e26[i]), sig = ema(line, 9), i = v.length - 1; return { line: line[i], signal: sig[i], hist: line[i] - sig[i] }; }
+  function vwap(c) { let pv = 0, vv = 0; return c.map((x) => { pv += ((x.high + x.low + x.close) / 3) * x.vol; vv += x.vol; return vv ? pv / vv : null; }); }
+
+  function ensureChart() {
+    if (chart || !window.LightweightCharts) return !!chart;
+    const box = $('#chart');
+    chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.06)' }, horzLines: { color: 'rgba(0,168,255,.06)' } }, crosshair: { mode: 0 }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
+    cs = chart.addCandlestickSeries({ upColor: '#00e676', downColor: '#ff304f', borderVisible: false, wickUpColor: '#00e676', wickDownColor: '#ff304f' });
+    vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol', color: 'rgba(0,168,255,.35)' });
+    chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    const mk = (color, dash) => chart.addLineSeries({ color, lineWidth: 1, lineStyle: dash ? 2 : 0, priceLineVisible: false, lastValueVisible: false, visible: false });
+    lines.sma20 = mk('#00a8ff'); lines.sma50 = mk('#ffc247'); lines.bbU = mk('#a970ff', true); lines.bbL = mk('#a970ff', true); lines.vwap = mk('#00e5ff');
+    new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight })).observe(box);
+    return true;
+  }
+  function applyOverlays() { lines.sma20?.applyOptions({ visible: S.ov.sma20 }); lines.sma50?.applyOptions({ visible: S.ov.sma50 }); lines.bbU?.applyOptions({ visible: S.ov.bb }); lines.bbL?.applyOptions({ visible: S.ov.bb }); lines.vwap?.applyOptions({ visible: S.ov.vwap }); }
+  const ld = (c, arr) => c.map((x, i) => (arr[i] == null ? null : { time: x.time, value: arr[i] })).filter(Boolean);
+
+  async function loadChart() {
+    const cat = CATS[S.cat]; const note = $('#mk-note'); const status = $('#mk-status');
+    note.replaceChildren();
+    if (!cat.provider || (cat.needs && !S.flags[cat.needs])) {
+      status.textContent = 'unavailable'; $('#readout').replaceChildren();
+      if (chart) { cs.setData([]); vs.setData([]); Object.values(lines).forEach((s) => s.setData([])); }
+      note.append(unavailable(cat.why, cat.label + ' data')); return;
+    }
+    if (!ensureChart()) { status.textContent = 'chart library unavailable'; note.append(unavailable('The charting library could not be loaded (network or CDN blocked). Prices are still available through the API.', 'Chart')); return; }
+    status.textContent = 'loading\u2026';
+    let rows;
+    try { rows = await api(`/api/market/history?provider=${cat.provider}&symbol=${enc(S.symbol)}&interval=${S.tf}&limit=500`); }
+    catch (e) { status.textContent = 'disconnected'; note.append(unavailable(e.message, 'Market data')); return; }
+    const c = rows.filter((k) => k.data_status !== 'invalid' && [k.open, k.high, k.low, k.close].every((x) => Number.isFinite(Number(x))))
+      .map((k) => ({ time: Math.floor(Number(k.open_time) / 1000), open: +k.open, high: +k.high, low: +k.low, close: +k.close, vol: +k.volume || 0 }))
+      .sort((a, b) => a.time - b.time).filter((x, i, a) => !i || x.time !== a[i - 1].time);
+    if (!c.length) { status.textContent = 'no data'; note.append(unavailable('The provider returned no usable candles for this symbol/timeframe.')); return; }
+    cs.setData(c.map(({ vol, ...o }) => o));
+    vs.setData(c.map((x) => ({ time: x.time, value: x.vol, color: x.close >= x.open ? 'rgba(0,230,118,.35)' : 'rgba(255,48,79,.35)' })));
+    const closes = c.map((x) => x.close), bb = boll(closes);
+    lines.sma20.setData(ld(c, sma(closes, 20))); lines.sma50.setData(ld(c, sma(closes, 50)));
+    lines.bbU.setData(ld(c, bb.map((b) => b && b[2]))); lines.bbL.setData(ld(c, bb.map((b) => b && b[0]))); lines.vwap.setData(ld(c, vwap(c)));
+    applyOverlays(); chart.timeScale().fitContent();
+    status.textContent = 'live data \u00b7 ' + fmt.time(new Date().toISOString());
+    const r = rsi(closes), a = atr(c), m = macd(closes), last = closes[closes.length - 1];
+    const chip = (l, v) => el('span', { class: 'chip' }, l + ': ', el('b', { text: v }));
+    $('#readout').replaceChildren(chip('Last', fmt.num(last, 6)), chip('RSI 14', r == null ? 'n/a' : r.toFixed(1)), chip('ATR 14', a == null ? 'n/a' : fmt.num(a, 6) + ' (' + fmt.pct(a / last * 100, 2) + ')'),
+      chip('MACD hist', m ? fmt.num(m.hist, 6) : 'n/a'), chip('Regime', '\u2026'));
+    api(`/api/analytics/regime?symbol=${enc(S.symbol)}&provider=${cat.provider}&interval=${S.tf}&limit=300`).then((g) => {
+      const label = g.regime || g.primary_regime || g.label || g.trend || 'unclassified';
+      $('#readout').lastChild.replaceChildren('Regime: ', el('b', { text: typeof label === 'object' ? JSON.stringify(label) : String(label) }));
+    }).catch(() => $('#readout').lastChild.replaceChildren('Regime: unavailable'));
+  }
+  function renderMarketControls() {
+    tabs($('#cat-tabs'), Object.keys(CATS), S.cat, (c) => { S.cat = c; const s = CATS[c].symbols; if (s) S.symbol = s[0]; renderMarketControls(); loadChart(); }, (c) => CATS[c].label);
+    tabs($('#tf-tabs'), TFS, S.tf, (t) => { S.tf = t; renderMarketControls(); loadChart(); }, (t) => TFL[t] || t);
+    const ov = [['sma20', 'SMA20'], ['sma50', 'SMA50'], ['bb', 'Bollinger'], ['vwap', 'VWAP']];
+    $('#ov-tabs').replaceChildren(...ov.map(([k, l]) => el('button', { class: 'btn sm', type: 'button', 'aria-pressed': String(S.ov[k]), onclick: () => { S.ov[k] = !S.ov[k]; applyOverlays(); renderMarketControls(); } }, l)));
+    const sel = $('#mk-symbol'); const syms = CATS[S.cat].symbols || [];
+    sel.replaceChildren(...syms.map((s) => el('option', { value: s, text: s, selected: s === S.symbol })));
+    sel.disabled = !syms.length;
+  }
+
+  // ---------------------------------------------------------------- signals
+  async function analyse(sym, persist) {
+    $('#sig-body').replaceChildren(el('div', { class: 'empty', text: 'Analysing ' + sym + ' (council + forecast)\u2026' }));
+    const [c, f] = await Promise.allSettled([api(`/api/intelligence/council?symbol=${enc(sym)}&persist=${persist}`, { timeout: 90000 }), api(`/api/intelligence/forecast?symbol=${enc(sym)}&persist=${persist}`)]);
+    S.sig = { symbol: sym, council: c.status === 'fulfilled' ? c.value : null, forecast: f.status === 'fulfilled' ? f.value : null, errors: [c, f].filter((x) => x.status === 'rejected').map((x) => x.reason.message) };
+    renderSignal(); return S.sig;
+  }
+  function derive(sig) {
+    const c = sig.council, f = sig.forecast; const act = String((c && c.action) || '').toUpperCase();
+    const last = f && f.last_price, sc = f && f.scenarios; let stop = null, target = null;
+    if (sc && last) { if (act.includes('BUY')) { stop = sc.bear; target = sc.bull; } else if (act.includes('SELL')) { stop = sc.bull; target = sc.bear; } }
+    const rr = stop != null && target != null && last && Math.abs(last - stop) > 0 ? Math.abs(target - last) / Math.abs(last - stop) : null;
+    const conf = c && c.confidence != null ? (c.confidence <= 1 ? c.confidence * 100 : c.confidence) : null;
+    return { act, last, stop, target, rr, conf };
+  }
+  function renderSignal() {
+    const sig = S.sig; const body = $('#sig-body'); const acts = $('#sig-actions');
+    if (!sig || (!sig.council && !sig.forecast)) { body.replaceChildren(unavailable((sig && sig.errors.join(' | ')) || 'No analysis available.', 'Signal')); acts.replaceChildren(); return; }
+    const d = derive(sig), c = sig.council || {};
+    const cls = d.act.includes('BUY') ? 'pos' : d.act.includes('SELL') ? 'neg' : 'warn';
+    const horizon = sig.forecast && sig.forecast.horizon;
+    const rows = [['Asset', sig.symbol], ['Reference price', fmt.num(d.last, 6)], ['Stop-loss (forecast bear/bull scenario)', d.stop == null ? '\u2014' : fmt.num(d.stop, 6)], ['Take-profit (forecast scenario)', d.target == null ? '\u2014' : fmt.num(d.target, 6)],
+      ['Risk / reward', d.rr == null ? '\u2014' : d.rr.toFixed(2)], ['Confidence (model heuristic)', d.conf == null ? '\u2014' : d.conf.toFixed(0) + '%'], ['Expected value', 'not computed (needs a validated win rate)'],
+      ['Strategy', 'ETI council (multi-specialist) + volatility forecast'], ['Data quality', c.data_quality == null ? '\u2014' : typeof c.data_quality === 'object' ? JSON.stringify(c.data_quality) : String(c.data_quality)],
+      ['Generated', fmt.time(c.timestamp || (S.d && S.d.generated_at))], ['Valid for', horizon ? horizon + ' model horizon' : '\u2014']];
+    body.replaceChildren(
+      el('div', { class: 'signal ' + cls, text: d.act || 'NO ACTION' }),
+      c.risk_veto ? el('div', { class: 'badge bad', text: 'RISK VETO \u2014 do not execute' }) : null,
+      el('dl', { class: 'kv', style: 'margin-top:8px' }, rows.flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { text: String(v) })])),
+      c.summary ? el('p', { class: 'sub', text: c.summary }) : null,
+      sig.errors.length ? el('p', { class: 'warn', text: 'Partial result: ' + sig.errors.join(' | ') }) : null);
+    const veto = !!c.risk_veto, canTrade = d.act.includes('BUY') || d.act.includes('SELL');
+    const side = d.act.includes('SELL') ? 'sell' : 'buy';
+    acts.replaceChildren(
+      el('button', { class: 'btn sm', type: 'button', onclick: viewAnalysis }, 'View analysis'),
+      el('button', { class: 'btn sm', type: 'button', onclick: () => { const a = wl.get(); if (!a.includes(sig.symbol)) { a.push(sig.symbol); wl.set(a); } renderWatch(); toast(sig.symbol + ' added to watchlist (this browser)', 'good'); } }, 'Add to watchlist'),
+      el('button', { class: 'btn sm ok', type: 'button', disabled: veto || !canTrade, title: veto ? 'Blocked by risk veto' : canTrade ? '' : 'Signal is not BUY or SELL', onclick: () => paperTicket(sig.symbol, side) }, 'Send to paper trading'),
+      el('button', { class: 'btn sm danger', type: 'button', disabled: veto || !canTrade, onclick: () => sendLive(sig.symbol, side) }, 'Send to live execution'));
+  }
+  function viewAnalysis() {
+    const c = (S.sig && S.sig.council) || {}; const f = S.sig && S.sig.forecast;
+    modal('Analysis: ' + S.sig.symbol, el('div', {}, c.summary ? el('p', { text: c.summary }) : null,
+      table([{ k: 'trader_name', label: 'Specialist' }, { k: 'role', label: 'Role' }, { k: 'bias', label: 'Bias' }, { k: 'confidence', label: 'Conf', fmt: (v) => (v == null ? '\u2014' : String(v)) }, { k: 'analysis', label: 'Analysis', wrap: true }], c.specialists || [], 'No specialist reports.'),
+      c.risk_notes && c.risk_notes.length ? el('div', {}, el('h3', { class: 'sub', text: 'Risk officer notes' }), el('ul', {}, c.risk_notes.map((n) => el('li', { text: String(n) })))) : null,
+      c.contradictory_signals && c.contradictory_signals.length ? el('div', {}, el('h3', { class: 'sub', text: 'Contradictory signals' }), el('ul', {}, c.contradictory_signals.map((n) => el('li', { text: String(n) })))) : null,
+      f ? el('div', {}, el('h3', { class: 'sub', text: 'Forecast assumptions' }), el('ul', {}, (f.assumptions || []).map((n) => el('li', { text: String(n) })))) : null,
+      el('p', { class: 'sub', text: 'Signals are research output. Confidence is a heuristic, not a probability; the forecast is a volatility-scaled scenario, not a prediction of certainty.' })));
+  }
+  function renderWatch() {
+    const a = wl.get(); const box = $('#watchlist');
+    box.replaceChildren(a.length ? el('span', { class: 'muted', text: 'Watchlist:' }) : el('span', { class: 'muted', text: 'Watchlist is empty (stored in this browser).' }),
+      ...a.map((s) => el('span', { class: 'chip' }, el('a', { href: '#signals', onclick: (e) => { e.preventDefault(); $('#sig-symbol').value = s; busy($('#sig-run'), () => analyse(s, false)); } }, s), el('button', { class: 'btn sm', type: 'button', 'aria-label': 'Remove ' + s, onclick: () => { wl.set(wl.get().filter((x) => x !== s)); renderWatch(); } }, '\u00d7'))));
+  }
+
+  // ---------------------------------------------------------------- paper + live tickets
+  async function paperTicket(sym, side) {
+    const symIn = el('input', { value: sym || S.symbol }), qty = el('input', { type: 'number', step: 'any', min: '0', placeholder: 'quantity' });
+    const sideSel = el('select', {}, ['buy', 'sell'].map((s) => el('option', { value: s, text: s, selected: s === (side || 'buy') })));
+    const type = el('select', {}, ['market', 'limit'].map((s) => el('option', { value: s, text: s })));
+    const lim = el('input', { type: 'number', step: 'any', min: '0', placeholder: 'limit price (limit orders)' });
+    const v = await modal('Paper order ticket (INTERNAL PAPER, simulated)', el('div', { class: 'form' }, el('label', {}, 'Symbol', symIn), el('label', {}, 'Side', sideSel), el('label', {}, 'Type', type), el('label', {}, 'Quantity', qty), el('label', {}, 'Limit price', lim)),
+      [{ label: 'Cancel', value: 'no' }, { label: 'Preview', value: 'go', kind: 'primary' }]);
+    if (v !== 'go') return;
+    const body = { account_id: 'default', symbol: symIn.value.trim().toUpperCase(), side: sideSel.value, type: type.value, qty: Number(qty.value), limit_price: lim.value ? Number(lim.value) : null };
+    let pv;
+    try { pv = await api('/api/paper/preview', { method: 'POST', body }); } catch (e) { return toast('Preview rejected: ' + e.message, 'bad'); }
+    const go = await modal('Preview (nothing has been sent yet)', el('div', {}, kv(pv.preview || pv), el('p', { class: 'sub', text: 'Paper fills are simulated by walking the live order book with fees and slippage.' })), [{ label: 'Cancel', value: 'no' }, { label: 'Place paper order', value: 'go', kind: 'ok' }]);
+    if (go !== 'go') return;
+    try {
+      const r = await api('/api/paper/orders', { method: 'POST', body });
+      await modal('Paper order result (as reported by the engine)', kv(r.order || r)); toast('Paper order: ' + ((r.order && r.order.status) || 'submitted'), 'good'); await refresh();
+    } catch (e) { toast('Order rejected: ' + e.message, 'bad'); }
+  }
+  async function liveState() {
+    try { const st = await api('/api/execution/status'); let accts = []; try { accts = await api('/api/execution/accounts'); } catch (_) { /* listed below */ } return { st, accts, err: null }; }
+    catch (e) { return { st: null, accts: [], err: e }; }
+  }
+  function liveChecks(L) {
+    const st = L.st || {}, a = L.accts || [];
+    const eligible = a.filter((x) => x.environment === 'live' && x.has_credentials && x.policy && x.policy.mode !== 'intelligence_only' && !x.halted);
+    const checks = [['Execution engine enabled (EXECUTION_ENABLED)', !!st.enabled], ['Credential vault configured', !!st.vault_configured], ['LIVE_TRADING_ENABLED set by the operator', !!st.live_trading_enabled],
+      ['Kill switch off', st.kill_switch === false], ['A live account with credentials is registered', a.some((x) => x.environment === 'live' && x.has_credentials)],
+      ['Account policy permits execution (not intelligence-only)', a.some((x) => x.environment === 'live' && x.policy && x.policy.mode !== 'intelligence_only')], ['Account is not halted', eligible.length > 0]];
+    return { checks, eligible, ready: !!L.st && checks.every((c) => c[1]) };
+  }
+  function liveView(L) {
+    if (L.err) return unavailable(L.err.message, 'Execution API');
+    const { checks, ready } = liveChecks(L);
+    return el('div', {}, el('ul', { class: 'list' }, checks.map(([t, ok]) => el('li', {}, el('span', { text: t }), el('span', { class: 'badge ' + (ok ? 'good' : 'bad'), text: ok ? 'yes' : 'no' })))),
+      el('p', { class: ready ? 'pos' : 'warn', text: ready ? 'Live orders can be submitted (each still passes the risk gateway and account policy).' : 'NOT READY: live orders cannot be submitted.' }),
+      el('p', { class: 'sub', text: 'The live flag, vault and limits are operator-controlled server settings. This page can verify them but never loosens them.' }));
+  }
+  async function renderLive() { S.live = await liveState(); $('#live-body').replaceChildren(liveView(S.live)); return S.live; }
+  async function sendLive(sym, side) {
+    const L = S.live || (await renderLive()); const R = liveChecks(L);
+    if (!R.ready) return modal('Live execution is not available', liveView(L));
+    const acct = el('select', {}, R.eligible.map((a) => el('option', { value: a.account_id, text: a.account_id + ' (' + a.provider + ')' }))), qty = el('input', { type: 'number', step: 'any', min: '0' });
+    const v = await modal('Send to LIVE execution', el('div', { class: 'form' }, el('label', {}, 'Account', acct), el('label', {}, 'Quantity', qty), el('p', { class: 'warn', text: sym + ' ' + side.toUpperCase() + ' (market)' })), [{ label: 'Cancel', value: 'no' }, { label: 'Continue', value: 'go', kind: 'danger' }]);
+    if (v !== 'go') return;
+    if (!(await confirmTyped('Confirm LIVE order', el('p', { text: `Submit ${side.toUpperCase()} ${qty.value} ${sym} to account ${acct.value}. The engine will apply its risk checks and may create a proposal for approval instead of an order.` }), 'LIVE'))) return;
+    try { const r = await api('/api/execution/signals', { method: 'POST', body: { account_id: acct.value, symbol: sym, side, qty: Number(qty.value), order_type: 'market', strategy: 'command-centre', thesis: (S.sig && S.sig.council && S.sig.council.summary) || null } });
+      await modal('Execution engine response (this is not a fill confirmation)', kv(r)); } catch (e) { toast('Rejected: ' + e.message, 'bad'); }
+  }
+
+  // ---------------------------------------------------------------- command actions
+  const SCAN = () => (CATS.crypto.symbols).join(',');
+  async function scan() { return api('/api/analytics/scan?symbols=' + SCAN() + '&interval=1h', { timeout: 90000 }); }
+  const A = [
+    ['SCAN ALL MARKETS', '', async () => { const r = await scan(); await modal('Market scan', el('div', {}, autoTable(r.ranked), r.failed && Object.keys(r.failed).length ? el('p', { class: 'warn', text: 'Failed: ' + Object.keys(r.failed).join(', ') }) : null, el('p', { class: 'sub', text: (r.notes || []).join(' ') }))); }],
+    ['ANALYSE ASSET', '', async () => { const s = await prompt('Analyse asset', 'Symbol', S.symbol); if (!s) return; $('#sig-symbol').value = s.toUpperCase(); location.hash = '#signals'; await analyse(s.toUpperCase(), false); }],
+    ['FIND BEST OPPORTUNITIES', 'primary', async () => { const r = await scan(); const w = r.watchlist || []; const v = await modal('Best opportunities (ranked, not validated)', el('div', {}, autoTable(r.ranked), el('p', { class: 'sub', text: 'Scores rank where to look first. They are not probabilities and not signals.' })), [{ label: 'Close', value: 'x' }, { label: 'Add watchlist to this browser', value: 'wl', kind: 'ok' }]); if (v === 'wl') { const a = wl.get(); w.forEach((x) => { const s = typeof x === 'string' ? x : x.symbol; if (s && !a.includes(s)) a.push(s); }); wl.set(a); renderWatch(); toast('Watchlist updated', 'good'); } }],
+    ['GENERATE SIGNALS', 'primary', async () => { const list = wl.get().length ? wl.get().slice(0, 5) : CATS.crypto.symbols.slice(0, 3); const rows = []; for (const s of list) { const r = await analyse(s, true); const d = derive(r); rows.push({ symbol: s, action: d.act || '\u2014', confidence: d.conf == null ? '\u2014' : d.conf.toFixed(0) + '%', veto: r.council ? String(!!r.council.risk_veto) : '\u2014', ledger: r.forecast && r.forecast.ledger && r.forecast.ledger.prediction_uid ? 'recorded' : '\u2014' }); } await modal('Generated signals (forecasts written to the prediction ledger)', autoTable(rows)); }],
+    ['MARKET READINESS', '', async () => { const r = await api('/api/markets/assess?symbol=' + enc(S.symbol)); await modal('Market readiness: ' + S.symbol, kv(r)); }],
+    ['START PAPER TRADING', 'ok', async () => { const a = await api('/api/paper/account?account_id=default'); toast('Paper account ready: equity ' + fmt.usd(a.equity), 'good'); location.hash = '#paper'; await refresh(); }],
+    ['START LIVE TRADING', 'danger', async () => { const L = await renderLive(); await modal('Live trading readiness', liveView(L)); }],
+    ['ENABLE LIVE TRADING', 'danger', async () => { const L = await renderLive(); await modal('Enabling live trading', el('div', {}, el('p', { text: 'Live trading is enabled only by the server operator (LIVE_TRADING_ENABLED, vault, account policy). It cannot be switched on from the browser.' }), liveView(L))); }],
+    ['PAUSE ALL TRADING', 'danger', async () => { if (!(await confirmTyped('Pause all trading', el('p', { text: 'Halts every registered execution account. Paper trading has no pause switch (KILL_SWITCH is environment-controlled).' }), 'PAUSE'))) return; const rep = await ETI.haltAll('paused from ETI command centre'); await modal('Pause: actual outcome', ETI.reportView(rep)); }],
+    ['CLOSE ALL POSITIONS', 'danger', async () => { if (!(await confirmTyped('Close all positions', el('p', { text: 'Cancels open paper orders and market-sells all paper holdings; sends emergency-flatten to every execution account (ETI-managed positions). Results below are exactly what each system confirmed.' }), 'CLOSE ALL'))) return; const rep = [];
+      try { const r = await api('/api/paper/flatten', { method: 'POST', body: { account_id: 'default', confirm: 'FLATTEN default' } }); rep.push(['paper', `cancelled ${r.canceled.length} order(s); sold ${r.sold.length}; failed ${r.failed.length}` + (r.failed.length ? ' (' + r.failed.map((f) => f.symbol + ': ' + f.reason).join('; ') + ')' : ''), r.failed.length ? 'fail' : 'ok']); } catch (e) { rep.push(['paper', 'FAILED: ' + e.message, 'fail']); }
+      try { const ac = await api('/api/execution/accounts'); for (const a of ac) { try { const r = await api(`/api/execution/accounts/${enc(a.account_id)}/emergency-flatten`, { method: 'POST', body: { reason: 'close all from ETI command centre', scope: 'eti_managed', confirm: 'FLATTEN ' + a.account_id } }); rep.push(['execution:' + a.account_id, JSON.stringify(r).slice(0, 400), 'info']); } catch (e) { rep.push(['execution:' + a.account_id, 'FAILED: ' + e.message, 'fail']); } } } catch (e) { rep.push(['execution', e.message, 'info']); }
+      await modal('Close all: actual outcome', ETI.reportView(rep)); await refresh(); }],
+    ['RUN BACKTEST', '', async () => { const r = await api('/api/backtest/run', { method: 'POST', body: { module_id: 'turtle_trend', symbol: S.symbol }, timeout: 120000 }); await modal('Backtest: turtle_trend on ' + S.symbol, el('div', {}, kv(r), el('p', { class: 'sub', text: 'Backtests are historical simulations, not forecasts. Costs and slippage assumptions are in the result.' }))); }],
+    ['COMPARE STRATEGIES', '', async () => { const rows = []; for (const m of ['turtle_trend', 'seykota_mechanical', 'darvas_box', 'oneil_canslim']) { try { const r = await api('/api/backtest/run', { method: 'POST', body: { module_id: m, symbol: S.symbol }, timeout: 120000 }); rows.push({ module_id: m, ...ETI.flat(r) }); } catch (e) { rows.push({ module_id: m, error: e.message }); } } await modal('Strategy comparison on ' + S.symbol, autoTable(rows, 9)); }],
+    ['GENERATE DAILY REPORT', '', async () => { const md = await api('/api/command/report?kind=daily&format=md'); await modal('Daily report', el('pre', { class: 'out', text: md })); }],
+    ['EXPORT REPORT', '', async () => { const csv = await api('/api/command/report?kind=daily&format=csv'); ETI.download('eti-daily-fills.csv', csv, 'text/csv'); toast('CSV exported (fills in the last 24h)', 'good'); }],
+    ['OPEN INTELLIGENCE CENTRE', '', async () => { location.href = '/intelligence'; }],
+    ['MANAGE CRAWLER', '', async () => { location.href = '/intelligence#agents'; }],
+  ];
+  function buildActions() {
+    $('#cmdbar').replaceChildren(...A.map(([label, kind, fn]) => el('button', { class: 'btn ' + kind, type: 'button', onclick: (e) => busy(e.currentTarget, fn) }, label)));
+  }
+
+  // ---------------------------------------------------------------- boot
+  async function refresh() { await loadAccount().catch((e) => toast('Account: ' + e.message, 'bad')); await loadActivity(); }
+  async function main() {
+    tabs($('#range-tabs'), RANGES, S.range, (r) => { S.range = r; tabs($('#range-tabs'), RANGES, S.range, arguments.callee); refresh(); });
+    const setRange = (r) => { S.range = r; drawRanges(); refresh(); };
+    function drawRanges() { tabs($('#range-tabs'), RANGES, S.range, setRange); }
+    drawRanges(); buildActions(); renderWatch();
+    try { const h = await api('/api/system/health'); S.flags.alpaca_configured = !!h.alpaca_configured; S.flags.binance_configured = !!h.binance_configured; } catch (_) { /* chip shows state */ }
+    const symSel = $('#sig-symbol'); symSel.replaceChildren(...CATS.crypto.symbols.concat(CATS.stocks.symbols).map((s) => el('option', { value: s, text: s })));
+    $('#sig-run').addEventListener('click', (e) => busy(e.currentTarget, () => analyse(symSel.value, false)));
+    $('#paper-new').addEventListener('click', () => paperTicket(S.symbol, 'buy'));
+    $('#mk-symbol').addEventListener('change', (e) => { S.symbol = e.target.value; loadChart(); });
+    renderMarketControls();
+    await refresh(); renderLive(); loadChart();
+    ETI.poll(() => refresh(), 30000);
+    ETI.poll(() => loadChart(), 60000);
+  }
+  document.addEventListener('DOMContentLoaded', main);
+})();
+</script>
+{% endblock %}
