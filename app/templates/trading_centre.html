@@ -138,7 +138,7 @@
   function renderRisk(d) {
     const c = d.summary.config || {};
     $('#risk-body').replaceChildren(kv({ ...c, kill_switch: d.mode.kill_switch, halted: d.summary.halted, live_trading_flag: d.mode.live_trading_enabled }),
-      el('p', { class: 'sub', text: 'Limits are enforced inside the paper engine and, for execution accounts, by the risk gateway. Changing critical limits requires editing server configuration; the browser cannot loosen them.' }));
+      el('p', { class: 'sub', text: 'Limits are enforced inside the paper engine and, for execution accounts, by the in-process risk engine. Changing critical limits requires editing server configuration; the browser cannot loosen them.' }));
   }
 
   // ---------------------------------------------------------------- trades, journal, paper
@@ -323,7 +323,7 @@
     if (L.err) return unavailable(L.err.message, 'Execution API');
     const { checks, ready } = liveChecks(L);
     return el('div', {}, el('ul', { class: 'list' }, checks.map(([t, ok]) => el('li', {}, el('span', { text: t }), el('span', { class: 'badge ' + (ok ? 'good' : 'bad'), text: ok ? 'yes' : 'no' })))),
-      el('p', { class: ready ? 'pos' : 'warn', text: ready ? 'Live orders can be submitted (each still passes the risk gateway and account policy).' : 'NOT READY: live orders cannot be submitted.' }),
+      el('p', { class: ready ? 'pos' : 'warn', text: ready ? 'Live orders can be submitted (each still passes the in-process risk engine and account policy).' : 'NOT READY: live orders cannot be submitted.' }),
       el('p', { class: 'sub', text: 'The live flag, vault and limits are operator-controlled server settings. This page can verify them but never loosens them.' }));
   }
   async function renderLive() { S.live = await liveState(); $('#live-body').replaceChildren(liveView(S.live)); return S.live; }

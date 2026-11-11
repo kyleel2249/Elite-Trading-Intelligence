@@ -1,7 +1,7 @@
 """Analytics API: scanning, ranking, regime, risk simulation, walk-forward, reporting and research.
 
 Compute endpoints are stateless and work on supplied data or on candles fetched server-side through
-``MarketService``. Nothing here places orders; execution stays behind the RiskEngine / risk gateway.
+``MarketService``. Nothing here places orders; execution stays behind the in-process RiskEngine.
 """
 import asyncio
 import logging
