@@ -163,3 +163,21 @@ The close is `POST /api/execution/accounts/{id}/positions/{symbol}/close`: venue
 If the sell fails after protection was cancelled, the account is halted with `failed_unprotected_halted`. Fee dust left in the ledger after a full exit is not treated as a position.
 Scheduled monitoring: set `ETI_MANAGE_ACCOUNTS` (comma separated account ids, max 3) and optionally `ETI_MANAGE_STRATEGY`; it runs on the `*/5` cron alongside the universe scan, so mind the subrequest budget (about 10 per position).
 Not built: partial reductions on a weakened thesis (only full exits on invalidation), and exits driven by anything except the conditions above. Tested against the fake venue only, not the real testnet.
+
+## Alerts (Phase 15)
+
+Email alerts with a persisted, auditable alert log. **Nothing is delivered until you configure a provider**; until then every alert is still logged with `delivered: false` and the reason.
+
+Configuration (Cloudflare Worker variables and secrets; the recipient is deliberately not in the repository):
+- `ETI_ALERT_EMAIL`: the recipient address.
+- `ETI_ALERT_FROM`: the sender, which must be on a domain your provider has verified.
+- **Resend:** secret `RESEND_API_KEY`. Or **Cloudflare Email Service:** a `send_email` binding named `ALERT_EMAIL` (its destination address must be verified in Email Routing).
+- Optional: `ETI_ALERT_MAX_PER_HOUR` (default 20; critical alerts always pass), `ETI_ALERTS_DISABLED=true`, `ETI_ALERT_ACCOUNTS` (accounts whose execution log is polled for events; defaults to `ETI_MANAGE_ACCOUNTS`).
+
+Endpoints (bearer token): `POST /api/omnisignal/alerts/test` sends a test email and reports the real result (HTTP 502 if not delivered); `GET /api/omnisignal/alerts` shows configuration status (never the key) and the last 100 alerts with delivery status.
+
+Alerts raised: new BUY/SELL signals and high-conviction signals (universe scan, score 80+), engine disagreement on a held position, trades executed, take-profit hits, stop moved/activated, stop-loss hit, position closed, thesis invalidated, risk rejections, protective-order failures, account halts, exchange outages and recovery,
+market-data failures, strategy degradation (read-only comparison of recent paper trades with the approved baseline; it never rolls back by itself), parameter promotion/rollback, kill switch.
+Execution-engine events come from polling its log on the `*/5` cron (one subrequest per account); the first poll only records a cursor, so no backfill flood.
+Alerts are plain text, redact credential-shaped strings, are de-duplicated (critical 30 min, warning 3 h, info 6 h) and batched into one email per run. A failed send is not marked as seen, so it is retried on the next occurrence.
+Not verified: delivery through a real provider (needs your Resend key or Email Routing setup); the Cloudflare binding path is untested outside the Workers runtime.

@@ -9,6 +9,8 @@ import { loadSignalInputs } from "./market-inputs.ts";
 import { costBpsFrom, runOmnisignal, type OmnisignalResult } from "./omnisignal.ts";
 import { activeOptions } from "./params.ts";
 import { executionBase, type TestnetEnv } from "./testnet-api.ts";
+import { raiseAlerts } from "./alerts.ts";
+import { manageAlerts } from "./alert-rules.ts";
 
 export const MAX_POSITIONS_PER_RUN = 3;
 export const DEFAULT_CONFIRMATIONS = 2;
@@ -45,7 +47,7 @@ export function nextConfirmation(prev: ConfirmState | null, inv: Invalidation, n
 export type ManageEnv = TestnetEnv & { ETI_MANAGE_AUTOCLOSE?: string; ETI_INVALIDATION_CONFIRMATIONS?: string; ETI_KILL_SWITCH?: string };
 export const confirmationsFrom = (env: { ETI_INVALIDATION_CONFIRMATIONS?: string }) => { const n = Number(env.ETI_INVALIDATION_CONFIRMATIONS); return Number.isInteger(n) && n >= 1 && n <= 10 ? n : DEFAULT_CONFIRMATIONS; };
 
-export interface ManageOutcome { symbol: string; entryPrice: number | null; decision: string; evaluable: boolean; invalidated: boolean; confirmations: number; required: number; action: "none" | "report_only" | "close_requested" | "close_failed"; reasons: string[]; execution?: unknown }
+export interface ManageOutcome { symbol: string; entryPrice: number | null; decision: string; evaluable: boolean; invalidated: boolean; confirmations: number; required: number; action: "none" | "report_only" | "close_requested" | "close_failed"; reasons: string[]; execution?: unknown; agreement?: string }
 export async function manageAccount(env: ManageEnv, accountId: string, o: { strategy: Strategy; close: boolean; now: number; fetchImpl?: typeof fetch }): Promise<{ status: number; body: unknown }> {
   const base = executionBase(env), token = env.ETI_EXECUTION_API_TOKEN, f = o.fetchImpl ?? fetch, kv = env.ETI_EXECUTION_LOG as unknown as KV | undefined;
   if (!base || !token) return { status: 503, body: { error: "execution_api_not_configured", message: "Thesis-invalidation management reads managed positions from the optional Python execution engine; set ETI_EXECUTION_API_URL and ETI_EXECUTION_API_TOKEN to enable it. Order execution itself does not need it." } };
@@ -68,7 +70,7 @@ export async function manageAccount(env: ManageEnv, accountId: string, o: { stra
     const plan = runOmnisignal({ symbol: h.symbol, strategy: o.strategy, candles: inputs.candles, depth: inputs.depth, now: o.now }, { roundTripCostBps: costBpsFrom(env), ...opts });
     const inv = evaluateInvalidation(plan, h), st = nextConfirmation(prev, inv, o.now);
     await kv.put(key, JSON.stringify(st), { expirationTtl: 86400 }).catch(() => undefined);
-    const out: ManageOutcome = { symbol: h.symbol, entryPrice: h.entryPrice, decision: plan.decision, evaluable: inv.evaluable, invalidated: inv.invalidated, confirmations: st.count, required, action: "none", reasons: inv.reasons };
+    const out: ManageOutcome = { symbol: h.symbol, entryPrice: h.entryPrice, decision: plan.decision, evaluable: inv.evaluable, invalidated: inv.invalidated, confirmations: st.count, required, action: "none", reasons: inv.reasons, agreement: plan.fusion.agreement };
     if (inv.invalidated && st.count >= required) {
       if (!o.close) out.action = "report_only";
       else {
@@ -81,6 +83,7 @@ export async function manageAccount(env: ManageEnv, accountId: string, o: { stra
     }
     outcomes.push(out);
   }
+  await raiseAlerts(env, manageAlerts(accountId, outcomes, o.now), { fetchImpl: o.fetchImpl, now: () => o.now });
   return { status: 200, body: { accountId, strategy: o.strategy, evaluated: outcomes.length, skippedForBudget: Math.max(0, holdings.length - MAX_POSITIONS_PER_RUN), closeEnabled: o.close, outcomes, opensPositions: false, increasesExposure: false } };
 }
 

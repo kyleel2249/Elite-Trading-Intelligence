@@ -16,7 +16,10 @@ import type { Strategy } from "./timeframes.ts";
 import { STRATEGIES } from "./omni-api.ts";
 import { loadMinuteBars, loadSignalInputs } from "./market-inputs.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
-import { activeOptions, paramsOp } from "./params.ts";
+import { activeOptions, paramsOp, PARAMS_KEY } from "./params.ts";
+import { raiseAlerts } from "./alerts.ts";
+import { paperCycleAlerts } from "./alert-rules.ts";
+import { ParamRegistry, KVParamStore, rollbackCheck } from "./optimizer.ts";
 import { fitCalibration, loadCalibration, outcomesFrom, saveCalibration } from "./calibration.ts";
 import { KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
@@ -75,7 +78,10 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
 
   if (path === "/api/paper/calibration") { const t = await loadCalibration(kv).catch(() => null); return reply({ table: t, status: t?.status ?? "uncalibrated", recordedPaperOutcomes: engine.state.closed.length, note: "Fitted only from this system's own closed paper trades. Clients cannot supply outcomes." }); }
   if (path === "/api/paper/calibration/fit") { const table = fitCalibration(outcomesFrom(engine.state.closed, "paper"), now); await saveCalibration(kv, table); return reply({ table, saved: true }); }
-  if (path.startsWith("/api/paper/params")) { const r = await paramsOp(path.split("/").pop() === "params" ? "get" : (path.split("/").pop() as "propose" | "promote" | "rollback"), env.ETI_EXECUTION_LOG as any, body, now); return reply(r.body, r.status); }
+  if (path.startsWith("/api/paper/params")) { const r = await paramsOp(path.split("/").pop() === "params" ? "get" : (path.split("/").pop() as "propose" | "promote" | "rollback"), env.ETI_EXECUTION_LOG as any, body, now);
+    const op = path.split("/").pop();
+    if (r.status === 200 && (op === "promote" || op === "rollback")) await raiseAlerts(env as any, [{ type: "parameter_change", severity: "warning", title: op === "promote" ? "A challenger configuration was promoted to champion" : "The champion configuration was rolled back", detail: `Active configuration is now "${(r.body as any)?.promoted?.name ?? (r.body as any)?.restored?.name ?? (r.body as any)?.champion?.name ?? "?"}". ${op === "promote" ? "Approved by " + String(body?.approver ?? "?") + "." : "Reason: " + String(body?.reason ?? "manual rollback").slice(0, 200)}`, dedupeKey: `params:${op}:${now}` }], { fetchImpl: deps.fetchImpl, now: () => now });
+    return reply(r.body, r.status); }
 
   const symbol = symbolOf();
   if (!validSymbol(symbol)) return reply({ error: "invalid_symbol" }, 400);
@@ -154,6 +160,14 @@ export async function runPaperCycle(env: PaperEnv, deps: PaperDeps = {}): Promis
     } catch (e) { items.push({ symbol, action: holds ? "tick" : "evaluate", error: e instanceof Error ? e.message : "unknown" }); } // one symbol failing never stops the rest
   }
   const summary: CycleSummary = { ran: true, at, autoExecute: cfg.autoExecute, strategy: cfg.strategy, items, ignoredSymbols: cfg.ignored, killSwitch: killed, equity: engine.state.equity, openPositions: engine.state.positions.length };
+  try {
+    const alerts = paperCycleAlerts(summary);
+    try { // read-only degradation check: compares recent paper trades with the evidence the champion was approved on; it never rolls anything back
+      const reg = await ParamRegistry.open(new KVParamStore(kv as any, PARAMS_KEY), () => now), v = rollbackCheck(reg.champion(), engine.state.closed.slice(-30), engine.cfg.startingEquity);
+      if (v.rollback) alerts.push({ type: "strategy_degradation", severity: "warning", title: `Recent paper results are below the approved baseline (${reg.champion().name})`, detail: v.reasons.join("; ") + ". Nothing was changed automatically; consider POST /api/paper/params/rollback.", dedupeKey: `degrade:${reg.champion().id}:${new Date(now).toISOString().slice(0, 10)}` });
+    } catch { /* the degradation check is advisory */ }
+    await raiseAlerts(env as any, alerts, { fetchImpl: deps.fetchImpl, now: () => now });
+  } catch { /* alerting never breaks the cycle */ }
   try { await kv.put(LASTRUN_KEY, JSON.stringify(summary)); } catch { /* the summary is informational; trading state was already persisted */ }
   return summary;
 }

@@ -26,6 +26,9 @@ import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runPaperCycle } from "./algo/paper-api.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
 import { manageAccount } from "./algo/manage.ts";
+import { raiseAlerts } from "./algo/alerts.ts";
+import { signalAlerts } from "./algo/alert-rules.ts";
+import { pollExecutionAlerts } from "./algo/alerts-api.ts";
 import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
 import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
@@ -47,7 +50,9 @@ export default {
       // Position monitoring for the accounts listed in ETI_MANAGE_ACCOUNTS (comma separated). Closing needs ETI_MANAGE_AUTOCLOSE=true; otherwise report only.
       const accounts = String(env.ETI_MANAGE_ACCOUNTS ?? "").split(",").map((x: string) => x.trim()).filter((x: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(x)).slice(0, 3);
       for (const id of accounts) ctx.waitUntil(manageAccount(env as any, id, { strategy: (["scalp", "intraday", "swing", "position"].includes(env.ETI_MANAGE_STRATEGY) ? env.ETI_MANAGE_STRATEGY : "intraday"), close: env.ETI_MANAGE_AUTOCLOSE === "true", now: Date.now() }).then(r => { if (r.status !== 200) console.error("position management", id, r.status, JSON.stringify(r.body).slice(0, 200)); }, e => console.error("position management failed", e instanceof Error ? e.message : e)));
-      if (env.ETI_UNIVERSE_ENABLED === "true" && env.ETI_EXECUTION_LOG) ctx.waitUntil(runUniverseBatch(env, env.ETI_EXECUTION_LOG, Date.now(), (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday")).then(() => undefined, e => console.error("universe batch failed", e instanceof Error ? e.message : e))); return; }
+      const alertAccounts = String(env.ETI_ALERT_ACCOUNTS ?? env.ETI_MANAGE_ACCOUNTS ?? "").split(",").map((x: string) => x.trim()).filter((x: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(x)).slice(0, 3);
+      for (const id of alertAccounts) ctx.waitUntil(pollExecutionAlerts(env as any, id).then(() => undefined, () => undefined));
+      if (env.ETI_UNIVERSE_ENABLED === "true" && env.ETI_EXECUTION_LOG) ctx.waitUntil(runUniverseBatch(env, env.ETI_EXECUTION_LOG, Date.now(), (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday")).then(async b => { const strat = (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday"); const ev = signalAlerts(b.previous, b.newRows ?? [], strat); if (b.universeError) ev.push({ type: "market_data_failure", severity: "warning", title: "Universe refresh failed", detail: b.universeError, dedupeKey: `universe:${new Date().toISOString().slice(0, 13)}` }); await raiseAlerts(env as any, ev); }, e => console.error("universe batch failed", e instanceof Error ? e.message : e))); return; }
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills

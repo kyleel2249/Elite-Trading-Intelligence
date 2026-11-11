@@ -75,7 +75,7 @@ export async function loadUniverse(kv: KV): Promise<UniverseState | null> {
   try { const s = JSON.parse(raw) as UniverseState; return s?.version === 1 && Array.isArray(s.symbols) && s.rows && typeof s.rows === "object" ? s : null; } catch { return null; }
 }
 
-export interface BatchResult { refreshedUniverse: boolean; universeError?: string; analysed: string[]; errors: string[]; coverage: Coverage }
+export interface BatchResult { refreshedUniverse: boolean; universeError?: string; analysed: string[]; errors: string[]; coverage: Coverage; newRows?: ScanRow[]; previous?: Record<string, { decision: string; direction: string | null }> }
 /** One bounded pass: refresh the universe if it is missing or old, then analyse the next batch and persist. */
 export async function runUniverseBatch(env: MarketEnv & Record<string, any>, kv: KV, now: number, strategy: Strategy = "intraday", deps: { fetchImpl?: typeof fetch; analyse?: typeof scan } = {}): Promise<BatchResult> {
   const cfg = configFrom(env as any); let state = await loadUniverse(kv), refreshed = false, universeError: string | undefined;
@@ -88,11 +88,12 @@ export async function runUniverseBatch(env: MarketEnv & Record<string, any>, kv:
     } catch (e) { universeError = e instanceof Error ? e.message : "universe_error"; if (!state) return { refreshedUniverse: false, universeError, analysed: [], errors: [], coverage: leaderboardOf(null, now).coverage }; }
   }
   state = { ...state!, config: { ...state!.config, batch: cfg.batch, staleMs: cfg.staleMs } };
-  const analyse = deps.analyse ?? scan, analysed: string[] = [], errors: string[] = [];
+  const analyse = deps.analyse ?? scan, analysed: string[] = [], errors: string[] = [], newRows: ScanRow[] = [], previous: Record<string, { decision: string; direction: string | null }> = {};
   for (const symbol of nextBatch(state, now, cfg.batch)) {
-    try { const [row] = await analyse(env, [symbol], strategy, now); if (!row) throw new Error("no_row"); state.rows[symbol] = { ...row, rank: null, analysedAt: now }; analysed.push(symbol); if (row.decision === "DATA_UNRELIABLE" || row.decision === "ERROR") errors.push(symbol); }
+    const old = state.rows[symbol]; if (old) previous[symbol] = { decision: old.decision, direction: old.direction };
+    try { const [row] = await analyse(env, [symbol], strategy, now); if (!row) throw new Error("no_row"); newRows.push(row); state.rows[symbol] = { ...row, rank: null, analysedAt: now }; analysed.push(symbol); if (row.decision === "DATA_UNRELIABLE" || row.decision === "ERROR") errors.push(symbol); }
     catch (e) { errors.push(symbol); state.rows[symbol] = { rank: null, symbol, decision: "ERROR", direction: null, opportunityScore: null, validationScore: null, confidence: 0, riskRewardToTP3: null, agreement: null, liquidity: null, entryZone: null, stopLoss: null, reason: e instanceof Error ? e.message.slice(0, 120) : "error", analysedAt: now } as any; }
   }
   await kv.put(UNIVERSE_KEY, JSON.stringify(state));
-  return { refreshedUniverse: refreshed, universeError, analysed, errors, coverage: leaderboardOf(state, now).coverage };
+  return { refreshedUniverse: refreshed, universeError, analysed, errors, coverage: leaderboardOf(state, now).coverage, newRows, previous };
 }
