@@ -2,6 +2,8 @@
 
 This states what the repository implements today against the recommended stack, what was verified, and what is not done. "Verified" means exercised by tests or a real headless-browser run in this repository. Nothing here was verified against live Cloudflare, exchange or broker accounts, which are not reachable from the build environment.
 
+Run the new Python tests without the web stack: `python -m pytest --noconftest tests/research -q`.
+
 ## Summary
 ETI runs as two cooperating parts: a **Cloudflare Worker (TypeScript)** that serves the dashboards and every authenticated, execution-related API, and a **Python/FastAPI research and execution package** (`app/`) that is deployed separately. The recommended frontend rewrite (Next.js, React, Tailwind, Framer Motion, React Three Fiber) and the Redis/Celery/PyTorch/vector-database infrastructure are **not implemented**; they cannot be built or tested without package-registry access, and claiming them would be false.
 
@@ -27,8 +29,8 @@ ETI runs as two cooperating parts: a **Cloudflare Worker (TypeScript)** that ser
 | Modular LLM integration | **No LLM calls exist anywhere in the Worker.** Signals, scoring and reports are deterministic code. Because there are no LLM prompts, prompt compression, caching and token metering have nothing to act on and were not simulated. |
 | Python quant engine, Pandas/NumPy/SciPy/scikit-learn | Present in `app/` (backtest, analytics, adaptive edge, alpha scoring). |
 | PyTorch | **Not done**; no model here requires it. |
-| Backtesting, forecasting | Backtesting present in `app/backtest`; the Worker has the signal engine and prediction ledger. No dedicated time-series forecasting library. |
-| Vector database for research memory | **Not done.** `app/memory` and `app/knowledge` are relational/keyword based. |
+| Backtesting, forecasting | Backtesting in `app/backtest`. **New:** `app/research/forecast.py`, walk-forward forecasting (naive, drift, EWMA, Holt, AR) on numpy with no look-ahead, scored against naive, intervals from out-of-sample residuals, and an explicit `beats_naive` flag. Tested (7 tests, standalone). Not a deep-learning forecaster. |
+| Vector memory for research and strategy notes | **New, partial:** `app/research/vector_memory.py`, exact cosine search with kind/metadata filters and atomic persistence. The built-in embedder is lexical (hashing), not semantic; plug in a real embedding model for semantic search. Suitable to ~100k entries. It is not yet wired into `app/memory` or served over the API, and it is not a vector database (pgvector, Qdrant) |
 
 ## Data integrations (`worker/providers/`)
 Implemented and tested: a registry where every provider declares **exactly** which data types it serves, how (streaming, polling, delayed, on demand), what credentials it needs and what it cannot do; live probing; per-provider state (`unconfigured`, `unknown`, `ok`, `degraded`, `stale`, `down`) with last good response age, latency and error code; a coverage matrix per data type that reports `uncovered` rather than substituting another source. Unconfigured providers are never contacted. `/providers` and `/api/providers/status` display it, and the cron refreshes it.
