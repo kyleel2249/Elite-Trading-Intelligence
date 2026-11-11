@@ -31,4 +31,5 @@ def init_db() -> None:
     from app.strategies import store as _strategy_store  # noqa: F401  (strategy_validation_runs)
     from app.execution import models as _execution_models  # noqa: F401  (execution engine tables)
     from app.paper import models as _paper_models  # noqa: F401  (internal paper engine tables)
+    from app.security import auth_models as _auth_models  # noqa: F401  (execution sessions + auth audit)
     Base.metadata.create_all(bind=engine)

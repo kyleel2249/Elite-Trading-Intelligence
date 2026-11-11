@@ -75,7 +75,7 @@ async def validate_credentials(creds: dict[str, str], *, adapter_factory: Option
     except (TransientProviderError, ProviderUnavailableError, asyncio.TimeoutError):
         return "unverifiable", "Could not reach the exchange sandbox to verify the credentials."
     except Exception:
-        logger.warning("credential verification failed unexpectedly", exc_info=False)
+        logger.warning("credential verification failed unexpectedly")
         return "unverifiable", "Credential verification failed unexpectedly."
     finally:
         close = getattr(adapter, "aclose", None) or getattr(adapter, "close", None)
@@ -89,7 +89,6 @@ async def validate_credentials(creds: dict[str, str], *, adapter_factory: Option
 
 
 _cache: Optional[CredentialState] = None
-_lock = asyncio.Lock()
 
 
 def reset_cache() -> None:
@@ -111,10 +110,9 @@ async def get_credential_state(settings: Optional[Settings] = None, *, force: bo
         ttl = VALID_TTL if _cache.status == "valid" else INVALID_TTL
         if now - _cache.checked_at < ttl:
             return _cache
-    async with _lock:
-        status, detail = await validate_credentials(creds, adapter_factory=adapter_factory)
-        _cache = CredentialState(status, source, time.time(), detail)
-        return _cache
+    status, detail = await validate_credentials(creds, adapter_factory=adapter_factory)
+    _cache = CredentialState(status, source, time.time(), detail)
+    return _cache
 
 
 def ensure_env_testnet_account(settings: Optional[Settings] = None) -> dict[str, Any]:
@@ -132,7 +130,7 @@ def ensure_env_testnet_account(settings: Optional[Settings] = None) -> dict[str,
     from app.execution.domain import AccountPolicy
     from app.execution.service import get_store, get_vault
     from app.execution.store import AccountRecord
-    from app.execution.vault import CredentialVault, VaultError
+    from app.execution.vault import VaultError
 
     store = get_store()
     if store.get_account(TESTNET_ACCOUNT_ID) is not None:
@@ -145,6 +143,7 @@ def ensure_env_testnet_account(settings: Optional[Settings] = None) -> dict[str,
     rec = AccountRecord(TESTNET_ACCOUNT_ID, "binance", "paper", "Binance testnet (from environment secrets)",
                         AccountPolicy(), credentials_ciphertext=sealed)
     store.save_account(rec)
+    # Audit record names the fields only - no key material, masked or otherwise.
     store.append_log(TESTNET_ACCOUNT_ID, "account_registered",
-                     details={"by": "auto-provision", "source": source, "credentials": CredentialVault.mask(creds)})
+                     details={"by": "auto-provision", "source": source, "credential_fields": sorted(creds)})
     return {"registered": True, "created": True, "account_id": TESTNET_ACCOUNT_ID}
