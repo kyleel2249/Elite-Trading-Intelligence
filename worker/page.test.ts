@@ -23,3 +23,9 @@ test("portfolio fragments are safe to embed in the dashboard template (no backti
     assert.ok(!frag.includes("`") && !frag.includes("${") && !frag.includes("\\"), name + " contains an unsafe character");
   }
 });
+
+test("dashboard ships the 3D motion layer: reduced-motion safe, no external scripts, tilt skips the order panel", async () => {
+  const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
+  assert.match(html, /id="eti-motion"/); assert.match(html, /prefers-reduced-motion/); assert.match(html, /execpanel'\)\)return/);
+  assert.doesNotMatch(html, /<script[^>]+src=/i, "no external script is loaded");
+});

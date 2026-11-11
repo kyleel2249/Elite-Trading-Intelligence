@@ -5,6 +5,7 @@
  * No FastAPI origin / BACKEND_URL is required. Brokerage credentials are never
  * accepted by these public market-data routes.
  */
+import { withMotion } from "./ui/motion.ts";
 import { handleExecution } from "./execution.ts";
 import { handlePortfolio } from "./portfolio/routes.ts";
 import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
@@ -668,6 +669,7 @@ ${PORTFOLIO_JS}
 pfInit();
 $('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
 </script></body></html>`;
+const page = withMotion(html);
 
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
@@ -715,7 +717,7 @@ export default {
       return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Binance/Bybit/OKX public REST with failover (see /api/market/diag)", time: new Date().toISOString() });
     }
     if (url.pathname === "/") {
-      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+      return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     return json({ error: "not_found", path: url.pathname, message: "This Cloudflare-native build currently exposes the live market dashboard and health endpoints. Existing FastAPI research/trading modules have not yet been ported." }, 404);
   },
