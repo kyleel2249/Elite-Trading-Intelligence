@@ -312,8 +312,17 @@ def test_risk_engine_oanda_rules():
     assert not exotic.approved and any("max 3.0%" in r for r in exotic.reasons)
 
 
+def _adapter_path(monkeypatch):
+    """These tests exercise the OANDA adapter itself. Since 9b49f52 environment="paper" is always simulated by the
+    internal paper engine, so route past that mode switch (risk checks still run for environment="paper")."""
+    from app.paper import mode as paper_mode
+    monkeypatch.setattr(paper_mode, "resolve_mode", lambda provider, environment, **kw: paper_mode.ModeDecision(
+        paper_mode.EXCHANGE_TESTNET, (environment or "").lower(), "test: exercise the provider adapter"))
+
+
 @pytest.mark.asyncio
 async def test_trading_service_places_oanda_paper_orders(monkeypatch):
+    _adapter_path(monkeypatch)
     Base.metadata.create_all(bind=engine)
     import app.trading.service as ts
     fake = FakeOanda()
@@ -321,7 +330,7 @@ async def test_trading_service_places_oanda_paper_orders(monkeypatch):
     db = SessionLocal()
     try:
         out = await TradingService(_risk_settings(), db=db).place_order(
-            provider="oanda", environment="testnet", symbol="EURUSD", side="buy", qty=1000, equity=100000.0,
+            provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, equity=100000.0,
             data_age_seconds=5, data_status="fresh")
         assert out["status"] == "submitted" and out["provider_response"]["fill_price"] == 1.08512
         row = db.query(OrderRecord).filter_by(client_order_id=out["client_order_id"]).one()
@@ -334,6 +343,7 @@ async def test_trading_service_places_oanda_paper_orders(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pending_oanda_limit_order_is_not_journaled_as_filled(monkeypatch):
+    _adapter_path(monkeypatch)
     Base.metadata.create_all(bind=engine)
     import app.trading.service as ts
     fake = FakeOanda(order_response={"orderCreateTransaction": {"id": "9001", "type": "LIMIT_ORDER"}})
@@ -341,7 +351,7 @@ async def test_pending_oanda_limit_order_is_not_journaled_as_filled(monkeypatch)
     db = SessionLocal()
     try:
         out = await TradingService(_risk_settings(), db=db).place_order(
-            provider="oanda", environment="testnet", symbol="EURUSD", side="buy", qty=1000, order_type="limit", limit_price=1.08,
+            provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, order_type="limit", limit_price=1.08,
             equity=100000.0, data_age_seconds=5, data_status="fresh", fill_price_hint=1.0851)       # the hint must NOT become a fill
         row = db.query(OrderRecord).filter_by(client_order_id=out["client_order_id"]).one()
         assert out["status"] == "submitted" and row.status == "submitted" and row.fill_price is None
@@ -351,11 +361,12 @@ async def test_pending_oanda_limit_order_is_not_journaled_as_filled(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_oanda_failure_is_reported_as_error_not_success(monkeypatch):
+    _adapter_path(monkeypatch)
     import app.trading.service as ts
     fake = FakeOanda(order_status=201, order_response={"orderCancelTransaction": {"reason": "INSUFFICIENT_LIQUIDITY"}})
     monkeypatch.setattr(ts, "OandaClient", lambda settings, use_practice=True: OandaClient(settings, use_practice=use_practice, transport=fake.transport()))
     out = await TradingService(_risk_settings(), db=None).place_order(
-        provider="oanda", environment="testnet", symbol="EURUSD", side="buy", qty=1000, equity=100000.0, data_age_seconds=5, data_status="fresh")
+        provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, equity=100000.0, data_age_seconds=5, data_status="fresh")
     assert out["status"] == "error" and "INSUFFICIENT_LIQUIDITY" in out["error"]
 
 
