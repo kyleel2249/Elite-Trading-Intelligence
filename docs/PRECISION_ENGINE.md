@@ -159,11 +159,11 @@ shortened so it never outlives the start of a blackout. `bias` is -1 (bearish) t
 
 ### Cloudflare setup
 
-1. Create a KV namespace and bind it as `ETI_PRECISION_DATA` in `wrangler.jsonc` (use the id Cloudflare gives you).
+1. Storage: nothing to do if the existing `ETI_EXECUTION_LOG` namespace is bound (it is used automatically; every key is prefixed `precision:`). To keep Precision data separate, create a KV namespace and bind it as `ETI_PRECISION_DATA` in `wrangler.jsonc` (use the id Cloudflare gives you); it takes priority when both are bound.
 2. Set the secret: `npx wrangler secret put ETI_PRECISION_ADMIN_TOKEN` (at least 16 random characters). Without it the admin routes return 403.
 3. Optional: set the `ETI_PRECISION_CONFIG` variable.
 
-Without the KV binding the engine still works: fundamentals, news, expectancy and calibration are simply `unavailable`, the
+Without any KV binding the engine still works: fundamentals, news, expectancy and calibration are simply `unavailable`, the
 score is capped, and confidence is qualitative.
 
 ## Using a signal with the execution gateway
