@@ -123,6 +123,13 @@ triggers), so failed predictions stay on record and forecasts are never rewritte
 Statistics on small samples are flagged as unreliable; this is research output, not investment advice.
 See [docs/PREDICTION_LEDGER.md](docs/PREDICTION_LEDGER.md).
 
+## ETI CAPITAL PROTECTION SYSTEM
+
+Independent, non-overridable risk veto on every order plus automatic strategy quarantine: per-trade/daily/weekly/drawdown
+limits, position, correlation and leverage caps, volatility-adjusted sizing, mandatory stop-loss, emergency liquidation,
+session and news restrictions, consecutive-loss protection, and a human-gated review/revalidation workflow. See
+[docs/CAPITAL_PROTECTION.md](docs/CAPITAL_PROTECTION.md). API: `/api/capital-protection/*`.
+
 ## Documentation
 
 See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs/MARKETS.md) and

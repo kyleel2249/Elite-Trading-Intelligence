@@ -239,3 +239,81 @@ class DisclosureOutcome(Base):
     benchmark_return_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# --- ETI CAPITAL PROTECTION SYSTEM + strategy quarantine (new tables only; nothing above is altered) ---
+class ProtectionStateRecord(Base):
+    """Key/value state: halt latches ('halt:<env>'), equity high-water marks ('peak:<env>'), news calendar heartbeat."""
+
+    __tablename__ = "protection_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ProtectionNewsEvent(Base):
+    """Scheduled market-moving events that trigger an order blackout window."""
+
+    __tablename__ = "protection_news_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(256))
+    impact: Mapped[str] = mapped_column(String(16), default="high")
+    scope: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    event_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class StrategyQuarantineRecord(Base):
+    __tablename__ = "strategy_quarantine"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE", index=True)
+    expectations: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    reasons: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    quarantined_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Evidence for ongoing evaluation counts only from here: set when a strategy is released after revalidation,
+    # so its pre-quarantine losses cannot re-trigger the quarantine it just passed.
+    baseline_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    review: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    history: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class StrategyTradeLog(Base):
+    """Every order attempt attributed to a strategy: feeds execution-quality and divergence tests."""
+
+    __tablename__ = "strategy_trade_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(128), index=True)
+    environment: Mapped[str] = mapped_column(String(16), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    symbol: Mapped[str] = mapped_column(String(64))
+    side: Mapped[str] = mapped_column(String(8))
+    qty: Mapped[float] = mapped_column(Float)
+    reference_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fill_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    slippage_bps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(24), index=True)  # filled|submitted|risk_refused|provider_error
+    client_order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ProtectionAuditRecord(Base):
+    """Append-only, hash-chained audit trail of protection decisions, halts and quarantine transitions."""
+
+    __tablename__ = "protection_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(48), index=True)
+    actor: Mapped[str] = mapped_column(String(64), default="system")
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    prev_hash: Mapped[str] = mapped_column(String(64), default="")
+    hash: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
