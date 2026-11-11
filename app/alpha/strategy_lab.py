@@ -323,7 +323,7 @@ def run_competition(db: Optional[Session], datasets: dict[tuple[str, str], Seque
     """Evaluate every compatible executable strategy on every dataset and rank by OOS t-stat."""
     ids = [i for i in (strategy_ids or list(LIBRARY)) if i in LIBRARY]
     planned: list[tuple[str, str, str]] = []
-    for (ac, sym), bars in datasets.items():
+    for (ac, sym) in datasets:
         for sid in ids:
             s = LIBRARY[sid]
             if s.executable and ac in s.asset_classes and timeframe in s.timeframes:
@@ -365,7 +365,7 @@ def combine_signals(a: str, b: str, bars: Sequence[dict[str, Any]], pa: Optional
     """Long only when both modules are long (AND). Tested as its own independent model."""
     sa, sb = LIBRARY[a], LIBRARY[b]
     xa, xb = sa.signal(bars, pa or sa.param_grid[0]), sb.signal(bars, pb or sb.param_grid[0])
-    return [1 if p == 1 and q == 1 else 0 for p, q in zip(xa, xb)]
+    return [1 if p == 1 and q == 1 else 0 for p, q in zip(xa, xb, strict=True)]
 
 
 def combination_test(db: Optional[Session], a: str, b: str, bars: Sequence[dict[str, Any]], asset_class: str, symbol: str) -> dict[str, Any]:

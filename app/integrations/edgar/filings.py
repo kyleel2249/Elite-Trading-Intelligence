@@ -7,9 +7,23 @@ Neither is a live portfolio feed; callers must carry the delay forward.
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # element type only; parsing goes through defusedxml
+
+from defusedxml import ElementTree as SafeET
+from defusedxml.common import DefusedXmlException
 from datetime import date, datetime
 from typing import Any, Optional
+
+
+class UnsafeXml(ValueError):
+    """Raised for malformed XML or XML using entity/DTD tricks (billion-laughs, external entities)."""
+
+
+def _safe_parse(xml_text: str) -> ET.Element:
+    try:
+        return SafeET.fromstring(xml_text, forbid_dtd=True)
+    except (DefusedXmlException, ET.ParseError) as exc:
+        raise UnsafeXml(f"rejected XML: {type(exc).__name__}") from None
 
 
 def _strip_ns(tag: str) -> str:
@@ -36,7 +50,7 @@ def parse_13f_information_table(xml_text: str) -> list[dict[str, Any]]:
     """Return holdings rows. `value_usd` is normalised to dollars: filings for
     periods ending after 2022-12-31 report whole dollars; older ones report thousands
     - callers pass the already-correct scale via `value_usd` after `scale_13f_value`."""
-    root = ET.fromstring(xml_text)
+    root = _safe_parse(xml_text)
     rows: list[dict[str, Any]] = []
     for el in root.iter():
         if _strip_ns(el.tag) != "infoTable":
@@ -95,7 +109,7 @@ def compare_13f(prev: list[dict[str, Any]], curr: list[dict[str, Any]]) -> dict[
 
 def parse_form4(xml_text: str) -> list[dict[str, Any]]:
     """Non-derivative open-market transactions: code P=purchase, S=sale."""
-    root = ET.fromstring(xml_text)
+    root = _safe_parse(xml_text)
     issuer = _text(root, "issuer/issuerName")
     ticker = _text(root, "issuer/issuerTradingSymbol")
     owner = _text(root, "reportingOwner/reportingOwnerId/rptOwnerName")

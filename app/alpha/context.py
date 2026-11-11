@@ -13,9 +13,10 @@ from app.alpha.db_models import AlphaCandidate
 from app.alpha.discovery import candidate_dict
 from app.alpha.fundamentals import SecFundamentals, garp_screen, quality_screen
 from app.alpha.investor_intel import assess_following
+from app.alpha.derivatives import load_derivatives
 from app.alpha.macro import load_macro
 from app.alpha.omnisignal_bridge import fetch_omnisignal
-from app.alpha.providers import SecTickerUniverse
+from app.alpha.providers import BinanceFutures, SecTickerUniverse
 from app.config import Settings
 from app.services.activity_store import ActivityStore
 
@@ -50,8 +51,9 @@ async def load_fundamentals(db: Session, settings: Settings, ticker: str, price:
 async def gather_context(db: Session, settings: Settings, cand: AlphaCandidate, bars: Sequence[dict[str, Any]],
                          omni_client: Optional[httpx.AsyncClient] = None,
                          macro_fn: Optional[Callable[[Settings], Awaitable[dict[str, Any]]]] = None,
-                         fundamentals_fn: Optional[Callable[..., Awaitable[Optional[dict[str, Any]]]]] = None) -> dict[str, Any]:
-    ctx: dict[str, Any] = {"investor_assessments": [], "council": None, "omnisignal": None, "macro": None, "fundamentals": None}
+                         fundamentals_fn: Optional[Callable[..., Awaitable[Optional[dict[str, Any]]]]] = None,
+                         derivatives_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None) -> dict[str, Any]:
+    ctx: dict[str, Any] = {"investor_assessments": [], "council": None, "omnisignal": None, "macro": None, "fundamentals": None, "derivatives": None}
     try:
         m = await (macro_fn or load_macro)(settings)
         ctx["macro"] = m if m.get("status") == "ok" else None
@@ -77,4 +79,8 @@ async def gather_context(db: Session, settings: Settings, cand: AlphaCandidate, 
         except Exception:  # noqa: BLE001
             logger.warning("council unavailable for %s", cand.symbol, exc_info=True)
         ctx["omnisignal"] = await fetch_omnisignal(settings.omnisignal_base_url, cand.symbol, client=omni_client)
+        try:
+            ctx["derivatives"] = await (derivatives_fn or (lambda sym: load_derivatives(BinanceFutures(db=db), sym)))(cand.symbol)
+        except Exception:  # noqa: BLE001
+            logger.warning("derivatives context failed for %s", cand.symbol, exc_info=True)
     return ctx

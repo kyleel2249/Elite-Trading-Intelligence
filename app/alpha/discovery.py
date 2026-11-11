@@ -14,8 +14,9 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.alpha.db_models import AlphaCandidate
+from app.alpha.db_models import AlphaCandidate, AlphaCandidateSnapshot
 from app.alpha.features import compute_features
+from app.alpha.derivatives import detect_new_listings
 from app.alpha.providers import AlpacaMarketData, BinanceUniverse, DexScreener
 from app.alpha.scoring import classify_stage, components_from_features, score_early_alpha
 from app.alpha.token_safety import screen_dex_pair
@@ -96,7 +97,7 @@ def upsert_candidate(db: Session, *, candidate_id: str, asset_class: str, symbol
                      rejection: Optional[list[str]] = None, evidence: Optional[dict] = None, plan: Optional[dict] = None,
                      price: Optional[float] = None, market_cap: Optional[float] = None, volume: Optional[float] = None,
                      name: Optional[str] = None, exchange: Optional[str] = None, chain: Optional[str] = None,
-                     contract: Optional[str] = None, data_status: str = "fresh") -> AlphaCandidate:
+                     contract: Optional[str] = None, data_status: str = "fresh", bench_price: Optional[float] = None) -> AlphaCandidate:
     row = db.query(AlphaCandidate).filter_by(candidate_id=candidate_id).one_or_none()
     now = now_utc().replace(tzinfo=None)
     if row is None:
@@ -121,7 +122,24 @@ def upsert_candidate(db: Session, *, candidate_id: str, asset_class: str, symbol
     row.scan_count = (row.scan_count or 0) + 1
     row.last_seen = now
     db.commit()
+    record_snapshot(db, row, bench_price, now)
     return row
+
+
+SNAPSHOT_MIN_GAP_HOURS = 6
+
+
+def record_snapshot(db: Session, row: AlphaCandidate, bench_price: Optional[float], now: datetime) -> None:
+    """Append what ETI saw now (throttled to one per candidate per few hours). Never rewrites history."""
+    if row.last_price is None or row.last_price <= 0:
+        return
+    last = (db.query(AlphaCandidateSnapshot).filter_by(candidate_id=row.candidate_id)
+            .order_by(AlphaCandidateSnapshot.ts.desc()).first())
+    if last is not None and (now - last.ts).total_seconds() < SNAPSHOT_MIN_GAP_HOURS * 3600:
+        return
+    db.add(AlphaCandidateSnapshot(candidate_id=row.candidate_id, ts=now, asset_class=row.asset_class, symbol=row.symbol, status=row.status,
+                                  stage=row.stage, early_alpha_score=row.early_alpha_score, price=row.last_price, bench_price=bench_price))
+    db.commit()
 
 
 def evaluate_ohlcv(db: Session, *, asset_class: str, symbol: str, bars: list[dict[str, Any]], provider: str,
@@ -149,7 +167,7 @@ def evaluate_ohlcv(db: Session, *, asset_class: str, symbol: str, bars: list[dic
     return upsert_candidate(db, candidate_id=cid, asset_class=asset_class, symbol=symbol, provider=provider, status=status,
                             stage=stg["stage"], early=early, sub=sub, reasons=reasons, rejection=rejection, evidence=evidence,
                             plan=structural_plan(f, stg["stage"]), price=f["last"], market_cap=market_cap, volume=volume_24h,
-                            name=name, exchange=exchange)
+                            name=name, exchange=exchange, bench_price=(bench_closes[-1] if bench_closes else None))
 
 
 class DiscoveryEngine:
@@ -176,21 +194,33 @@ class DiscoveryEngine:
         pool = [t for t in usable if -20 <= t["change_pct"] <= 40]
         pool.sort(key=lambda t: -t["quote_volume"])
         head, tail = pool[: limit // 2], pool[limit // 2:]
-        rng = random.Random(seed if seed is not None else int(now_utc().strftime("%Y%m%d")))
+        rng = random.Random(seed if seed is not None else int(now_utc().strftime("%Y%m%d")))  # noqa: S311 - coverage rotation, not security
         rng.shuffle(tail)  # rotating long-tail sample so results are not only mega-caps
         picks = head + tail[: limit - len(head)]
         btc = await self._bars(self.binance.klines, "BTCUSDT", "1d", 200)
         bench = [b["close"] for b in btc] if btc else None
         results = await asyncio.gather(*[self._bars(self.binance.klines, t["symbol"], "1d", 200) for t in picks])
         scanned, failed = 0, []
-        for t, bars in zip(picks, results):
+        for t, bars in zip(picks, results, strict=True):
             if not bars:
                 failed.append(t["symbol"])
                 continue
             evaluate_ohlcv(self.db, asset_class="crypto", symbol=t["symbol"], bars=bars, provider="binance_public", exchange="BINANCE",
                            bench_closes=bench, volume_24h=t["quote_volume"])
             scanned += 1
-        return {"universe_usdt_pairs": len(tickers), "liquid_pairs": len(usable), "scanned": scanned, "failed": failed,
+        listings: dict[str, Any] = {"status": "skipped"}
+        try:
+            sweep = detect_new_listings(self.db, "binance_public", await self.binance.spot_symbols())
+            for sym in sweep["new"][:10]:
+                bars = await self._bars(self.binance.klines, sym, "1d", 200)
+                if bars:
+                    c = evaluate_ohlcv(self.db, asset_class="crypto", symbol=sym, bars=bars, provider="binance_public", exchange="BINANCE", bench_closes=bench)
+                    c.reasons = [f"NEW_LISTING first seen {now_utc().date().isoformat()}"] + list(c.reasons or [])
+                    self.db.commit()
+            listings = {"status": "ok", "baseline_seeded": sweep["baseline_seeded"], "new_listings": sweep["new"]}
+        except Exception:  # noqa: BLE001 - provider status already recorded
+            listings = {"status": "error"}
+        return {"universe_usdt_pairs": len(tickers), "liquid_pairs": len(usable), "scanned": scanned, "failed": failed, "new_listings": listings,
                 "skipped_already_extended": len(excluded_moved), "coverage_note": "Binance spot USDT pairs only; not all crypto assets."}
 
     async def scan_equities(self, symbols: Optional[list[str]] = None, use_screeners: bool = True, limit: int = 40) -> dict[str, Any]:
@@ -211,7 +241,7 @@ class DiscoveryEngine:
         bench = [b["close"] for b in spy] if spy else None
         results = await asyncio.gather(*[self._bars(self.alpaca.daily_bars, s, 250) for s in syms])
         scanned, failed = 0, []
-        for s, bars in zip(syms, results):
+        for s, bars in zip(syms, results, strict=True):
             if not bars:
                 failed.append(s)
                 continue
@@ -229,7 +259,8 @@ class DiscoveryEngine:
         for chain, addrs in by_chain.items():
             try:
                 pairs = await self.dex.pairs_for_tokens(chain, addrs)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 - provider status already recorded; one chain failing must not stop the sweep
+                logger.warning("dex pair lookup failed for chain %s", chain, exc_info=True)
                 continue
             best: dict[str, dict[str, Any]] = {}
             for pr in pairs:
@@ -237,7 +268,7 @@ class DiscoveryEngine:
                 liq = float((pr.get("liquidity") or {}).get("usd") or 0)
                 if tok and liq >= float((best.get(tok, {}).get("liquidity") or {}).get("usd") or 0):
                     best[tok] = pr
-            for tok, pr in list(best.items())[: max(0, limit - scanned)]:
+            for pr in list(best.values())[: max(0, limit - scanned)]:
                 if self._dex_candidate(pr, chain):
                     scanned += 1
                 else:

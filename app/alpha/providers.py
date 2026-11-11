@@ -15,6 +15,7 @@ from app.alpha.db_models import AlphaSourceStatus
 
 logger = logging.getLogger("eti.alpha")
 BINANCE_PUBLIC = "https://api.binance.com"
+BINANCE_FUTURES = "https://fapi.binance.com"
 DEXSCREENER = "https://api.dexscreener.com"
 ALPACA_DATA = "https://data.alpaca.markets"
 SEC_FILES = "https://www.sec.gov/files"
@@ -98,6 +99,28 @@ class BinanceUniverse(_Base):
                                {"symbol": symbol.upper(), "interval": interval, "limit": limit})
         return [{"open_time": k[0], "open": float(k[1]), "high": float(k[2]), "low": float(k[3]),
                  "close": float(k[4]), "volume": float(k[5]), "close_time": k[6]} for k in rows]
+
+
+    async def spot_symbols(self) -> list[str]:
+        """Currently tradable USDT spot symbols (used to detect new listings)."""
+        data = await self._get(f"{BINANCE_PUBLIC}/api/v3/exchangeInfo", {"permissions": "SPOT"})
+        return sorted(x["symbol"] for x in (data or {}).get("symbols", [])
+                      if x.get("status") == "TRADING" and x.get("quoteAsset") == "USDT" and x.get("symbol"))
+
+
+class BinanceFutures(_Base):
+    """Keyless public USD-M futures data: funding rate and open interest history."""
+    provider = "binance_futures"
+
+    async def funding(self, symbol: str) -> Optional[dict[str, Any]]:
+        d = await self._get(f"{BINANCE_FUTURES}/fapi/v1/premiumIndex", {"symbol": symbol.upper()})
+        if not isinstance(d, dict) or d.get("lastFundingRate") in (None, ""):
+            return None
+        return {"funding_rate": float(d["lastFundingRate"]), "mark_price": float(d.get("markPrice") or 0), "next_funding_time": d.get("nextFundingTime")}
+
+    async def open_interest_hist(self, symbol: str, period: str = "1d", limit: int = 8) -> list[dict[str, float]]:
+        rows = await self._get(f"{BINANCE_FUTURES}/futures/data/openInterestHist", {"symbol": symbol.upper(), "period": period, "limit": limit})
+        return [{"ts": float(r["timestamp"]), "oi_value": float(r["sumOpenInterestValue"])} for r in (rows or []) if r.get("sumOpenInterestValue")]
 
 
 class DexScreener(_Base):

@@ -31,3 +31,10 @@ None active. All flags default off; no withdrawal or transfer capability.
 
 ## Added in rev 4
 * **Role-based access** for all Alpha routes (analyst / trader / admin), live attempts admin-only, audited with role + key fingerprint, tested (including fail-closed and weak-key handling).
+
+## Added in rev 5
+* Discovery quality measurement (snapshots, precision / false-positive / miss rate / recall / lead time, survivorship counted, no claims on small samples) and its dashboard panel. Migration `0009_alpha_snapshots`.
+* Binance futures funding/open-interest crowding evidence and new-listing detection with a baseline.
+* Fixed a pre-existing failure: the futures calculator's `/allocate` and `/exposure` routes formatted money with bare `str(Decimal)`, so output depended on Decimal's internal exponent (`2500` vs `2500.00`); they now use the calculator's explicit 2-decimal formatter.
+* Security hardening found by lint: SEC filings are now parsed with `defusedxml` (DTDs and entities forbidden), proven against billion-laughs and external-entity payloads; new dependency `defusedxml`. Also explicit exception chaining, strict equal-length zips, and logging in previously silent exception handlers.
+

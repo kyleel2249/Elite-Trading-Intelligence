@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -14,15 +14,17 @@ from app.alpha.predictions import STRATEGY_TAG, alpha_predictions
 from app.alpha.access import Access, require_alpha_role
 from app.alpha.context import gather_context, load_fundamentals
 from app.alpha.macro import load_macro
+from app.alpha.performance import evaluate_discovery
 from app.alpha.coverage import build_registry
 from app.alpha.db_models import (AlphaAuditLog, AlphaCandidate, AlphaResearchRun, AlphaStrategyRun, AlphaStrategyState,
                                  AlphaTradePlan, TraderQualification, WalletLabel)
+from app.alpha.derivatives import load_derivatives, recent_listings
 from app.alpha.discovery import DiscoveryEngine, candidate_dict, leaderboard
 from app.alpha.execution import AlphaExecutor, audit
 from app.alpha.fusion import validate
 from app.alpha.investor_intel import (FOUNDATIONAL_35, assess_following, audit_profiles, disclosure_freshness, effective_profile,
                                       overlap_report, profile_history, propose_profile_update, qualify_investor)
-from app.alpha.providers import AlpacaMarketData, BinanceUniverse, DexScreener
+from app.alpha.providers import AlpacaMarketData, BinanceFutures, BinanceUniverse, DexScreener
 from app.alpha.research_job import alpha_research_job, make_bars_fn
 from app.alpha.sec_sync import latest_holdings, sync_13f
 from app.alpha.strategy_lab import compatibility, detect_regime, run_competition, combination_test
@@ -97,6 +99,19 @@ async def rejected(limit: int = Query(100, ge=1, le=300), db: Session = Depends(
     return {"candidates": [candidate_dict(r) for r in rows]}
 
 
+@router.get("/new-listings")
+async def new_listings(days: int = Query(30, ge=1, le=180), db: Session = Depends(get_db)):
+    """Binance spot listings first seen by ETI after its baseline sweep (the first sweep seeds, it never flags)."""
+    return {"listings": recent_listings(db, "binance_public", days),
+            "note": "New listings lack history; ETI will not score one until it has 60 daily bars."}
+
+
+@router.get("/derivatives/{symbol}")
+async def derivatives(symbol: str = Path(pattern=r"^[A-Za-z0-9]{5,20}$"), db: Session = Depends(get_db),
+                      who: Access = Depends(require_alpha_role("analyst"))):
+    return await load_derivatives(BinanceFutures(db=db), symbol.upper())
+
+
 class ScanRequest(BaseModel):
     kind: Literal["crypto", "equities", "dex", "all"] = "all"
     symbols: list[str] = Field(default_factory=list, max_length=100)
@@ -116,7 +131,7 @@ async def scan(req: ScanRequest, db: Session = Depends(get_db), s: Settings = De
         if req.kind in ("dex", "all"):
             out["dex"] = await eng.scan_dex()
     except Exception as exc:  # noqa: BLE001
-        raise _upstream(exc, "Discovery scan")
+        raise _upstream(exc, "Discovery scan") from None
     return out
 
 
@@ -133,7 +148,7 @@ async def validate_candidate(req: ValidateRequest, db: Session = Depends(get_db)
     try:
         bars = await make_bars_fn(binance, alpaca)(cand)
     except Exception as exc:  # noqa: BLE001
-        raise _upstream(exc, "Bar fetch")
+        raise _upstream(exc, "Bar fetch") from None
     from app.trading.risk_context import build_risk_context
     ctx = build_risk_context(db, s, environment="paper", snapshot=None)
     extra = await gather_context(db, s, cand, bars)
@@ -174,6 +189,13 @@ async def plans(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_
 
 
 # ------------------------------------------------------------------ predictions (ETI's single immutable ledger)
+@router.get("/performance/discovery")
+async def discovery_performance(horizon_days: int = Query(14, ge=1, le=90), asset_class: Optional[str] = Query(None, pattern="^(crypto|equity|etf|token)$"),
+                                db: Session = Depends(get_db)):
+    """Precision, false-positive/miss rates, recall and lead time of early flags, from point-in-time snapshots."""
+    return evaluate_discovery(db, horizon_days, asset_class)
+
+
 @router.get("/predictions")
 async def predictions(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
     """Alpha-originated predictions. Outcomes, calibration and reports live in /api/predictions/*."""
@@ -207,7 +229,7 @@ async def strategy_compat(symbol: str = Query("BTCUSDT", pattern=r"^[A-Za-z0-9.]
     try:
         bars = await (binance.klines(symbol, "1d", 300) if asset_class == "crypto" else alpaca.daily_bars(symbol, 300))
     except Exception as exc:  # noqa: BLE001
-        raise _upstream(exc, "Bar fetch")
+        raise _upstream(exc, "Bar fetch") from None
     regime = detect_regime(bars)
     return {"symbol": symbol, "regime": regime, "matrix": [{"strategy_id": k, **compatibility(k, asset_class, timeframe, regime)} for k in LIBRARY]}
 
@@ -223,6 +245,7 @@ async def competition(symbols: list[str] = Query(pattern=r"^[A-Za-z0-9]{3,20}$",
             if len(bars) >= 400:
                 ds[("crypto", sym.upper())] = bars
         except Exception:  # noqa: BLE001
+            logger.info("history fetch failed for %s; skipped in competition", sym, exc_info=True)
             continue
     if not ds:
         raise HTTPException(502, "no usable datasets fetched")
@@ -241,7 +264,7 @@ async def combination(req: ComboRequest, db: Session = Depends(get_db), s: Setti
     try:
         bars = await binance.klines(req.symbol.upper(), "1d", 1000)
     except Exception as exc:  # noqa: BLE001
-        raise _upstream(exc, "Bar fetch")
+        raise _upstream(exc, "Bar fetch") from None
     return combination_test(db, req.a, req.b, bars, "crypto", req.symbol.upper())
 
 
@@ -309,7 +332,7 @@ async def profile_update(req: ProfileUpdate, db: Session = Depends(get_db), who:
     try:
         return propose_profile_update(db, req.trader_id, req.field, req.new_value, req.reason, req.sources)
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from None
 
 
 @router.get("/investors/activity")
@@ -354,7 +377,7 @@ async def sync_13f_route(req: Sync13F, db: Session = Depends(get_db), s: Setting
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise _upstream(exc, "13F sync")
+        raise _upstream(exc, "13F sync") from None
 
 
 @router.get("/investors/13f/overlap")
@@ -380,7 +403,7 @@ async def wallet_label(req: WalletLabelReq, db: Session = Depends(get_db), who: 
     try:
         r = add_wallet_label(db, req.chain, req.address, req.label, req.entity_type, req.source, req.confidence, req.verified)
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from None
     return attribute(db, r.chain, r.address)
 
 
@@ -399,7 +422,7 @@ async def whale_analysis(chain: str, contract: str = Query(min_length=10, max_le
     try:
         tx = await client.token_transfers(contract)
     except Exception as exc:  # noqa: BLE001
-        raise _upstream(exc, "Explorer")
+        raise _upstream(exc, "Explorer") from None
     addrs = {str(t.get(k, "")).lower() for t in tx for k in ("from", "to")}
     labels = {a: attribute(db, chain, a) for a in addrs if a}
     return analyze_transfers(tx, price_usd=price_usd, threshold_usd=threshold_usd, labels={a: v for a, v in labels.items() if v["label"]})

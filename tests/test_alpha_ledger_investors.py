@@ -307,3 +307,18 @@ def test_not_documented_results_are_explicit_scoped_and_counted_as_unknown_not_g
     est = next(x for x in on if "40% a year" in x["claim"] and "2026-11-10" in x["source"])
     assert est["classification"] == "estimate" and "unverified" in est["notes"]
     assert any("lagged" in x["claim"] and x["classification"] == "reported" for x in on)  # counter-evidence is kept alongside the flattering claim
+
+
+def test_sec_xml_parsers_reject_entity_attacks_and_malformed_input():
+    from app.integrations.edgar.filings import UnsafeXml
+    bomb = ('<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">'
+            '<!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">]>'
+            "<informationTable><infoTable><nameOfIssuer>&lol3;</nameOfIssuer></infoTable></informationTable>")
+    xxe = '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY x SYSTEM "file:///etc/passwd">]><ownershipDocument><issuer><issuerName>&x;</issuerName></issuer></ownershipDocument>'
+    with pytest.raises(UnsafeXml):
+        parse_13f_information_table(bomb)
+    with pytest.raises(UnsafeXml):
+        parse_form4(xxe)  # an external entity must never be resolved (no local file read)
+    with pytest.raises(UnsafeXml):
+        parse_form4("<a><b></a>")
+    assert parse_13f_information_table(INFO)[0]["cusip"] == "037833100"  # legitimate filings still parse

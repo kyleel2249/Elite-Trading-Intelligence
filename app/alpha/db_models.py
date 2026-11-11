@@ -206,3 +206,33 @@ class Holding13F(Base):
     shares: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     put_call: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     __table_args__ = (Index("ix_alpha_13f_unique", "accession", "cusip", "put_call", "shares", unique=False),)
+
+
+class AlphaCandidateSnapshot(Base):
+    """Point-in-time record of what ETI saw and said about a candidate. Append-only: used to measure discovery
+    quality later without hindsight (status, score and price are exactly what existed at that moment)."""
+    __tablename__ = "alpha_candidate_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    candidate_id: Mapped[str] = mapped_column(String(160), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)
+    asset_class: Mapped[str] = mapped_column(String(16), index=True)
+    symbol: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    early_alpha_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price: Mapped[float] = mapped_column(Float)
+    bench_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    __table_args__ = (Index("ix_alpha_snap_cand_ts", "candidate_id", "ts"),)
+
+
+class AlphaKnownAsset(Base):
+    """Symbols ETI has already seen per provider; the first sweep seeds a baseline so only genuinely new listings are flagged."""
+    __tablename__ = "alpha_known_assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    symbol: Mapped[str] = mapped_column(String(64))
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    baseline: Mapped[bool] = mapped_column(Boolean, default=False)
+    __table_args__ = (Index("ix_alpha_known_pair", "provider", "symbol", unique=True),)

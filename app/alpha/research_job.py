@@ -89,6 +89,7 @@ class AlphaResearchJob:
                             if len(bars) >= 400:
                                 ds[("crypto", c.symbol)] = bars
                         except Exception:  # noqa: BLE001
+                            logger.info("history fetch failed for %s; skipped in competition", c.symbol, exc_info=True)
                             continue
                     if ds:
                         comp = run_competition(db, ds)
@@ -130,8 +131,10 @@ class AlphaResearchJob:
             self._task.cancel()
             try:
                 await self._task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+            except asyncio.CancelledError:
+                pass  # expected on shutdown
+            except Exception:  # noqa: BLE001
+                logger.warning("research job stopped with an error", exc_info=True)
 
 
 def _jsonable(o: Any) -> Any:

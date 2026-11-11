@@ -38,8 +38,8 @@ def parse_role_keys(raw: Optional[str]) -> tuple[dict[str, str], list[str]]:
     """Return ({key: role}, problems). Invalid entries are dropped (fail closed), never granted."""
     keys: dict[str, str] = {}
     problems: list[str] = []
-    for part in (raw or "").split(","):
-        part = part.strip()
+    for raw_part in (raw or "").split(","):
+        part = raw_part.strip()
         if not part:
             continue
         key, _, role = part.rpartition(":")

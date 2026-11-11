@@ -29,7 +29,7 @@ def _sma(v: Sequence[float], n: int, i: int) -> Optional[float]:
 
 def _hold(entry: list[bool], exit_: list[bool]) -> list[int]:
     pos, out = 0, []
-    for e, x in zip(entry, exit_):
+    for e, x in zip(entry, exit_, strict=True):
         if pos == 0 and e:
             pos = 1
         elif pos == 1 and x:

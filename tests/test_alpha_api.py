@@ -131,3 +131,8 @@ def test_macro_and_fundamentals_routes_are_key_protected_and_validate(locked):
 def test_dashboard_sends_api_key_on_reads_and_uses_main_ledger():
     html = client.get("/alpha").text
     assert "if(k)h['X-API-Key']=k" in html and "/api/predictions/metrics" in html
+
+
+def test_dashboard_shows_discovery_quality_panel():
+    html = client.get("/alpha").text
+    assert "/api/alpha/performance/discovery" in html and "Discovery quality" in html

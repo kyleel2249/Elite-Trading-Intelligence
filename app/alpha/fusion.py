@@ -155,6 +155,18 @@ def engine_fundamentals(ctx: dict[str, Any]) -> EngineEvidence:
     return EngineEvidence("fundamentals", True, "neutral", 0.2, evidence=ev, limitations=lim)
 
 
+def engine_derivatives(ctx: dict[str, Any]) -> EngineEvidence:
+    """Positioning evidence from futures funding / open interest. Soft: a crowded long lowers conviction, never approves."""
+    d = ctx.get("derivatives")
+    if not d or d.get("state") in (None, "UNKNOWN"):
+        return EngineEvidence("derivatives", False, limitations=["no futures funding/open-interest data for this asset"])
+    ev = list(d.get("evidence") or []) + [f"state={d['state']}"]
+    lim = ["positioning evidence only; thresholds are ETI parameters", "never counts as independent agreement and never approves"]
+    if d["state"] == "CROWDED_LONG_RISK":
+        return EngineEvidence("derivatives", True, "bearish", 0.6 if d.get("extreme") else 0.4, evidence=ev, limitations=lim)
+    return EngineEvidence("derivatives", True, "neutral", 0.2, evidence=ev, limitations=lim)
+
+
 def engine_risk(ctx: dict[str, Any]) -> EngineEvidence:
     """Hard-veto engine: liquidity, safety, data, volatility. Cannot be outvoted."""
     f, ac = ctx["features"], ctx["asset_class"]
@@ -179,7 +191,7 @@ def engine_risk(ctx: dict[str, Any]) -> EngineEvidence:
 
 
 for _n, _f in (("technical", engine_technical), ("strategy_lab", engine_strategy_lab), ("investor_intel", engine_investor),
-               ("onchain", engine_onchain), ("trading_council", engine_council), ("omnisignal_x", engine_omnisignal), ("macro_regime", engine_macro), ("fundamentals", engine_fundamentals), ("risk", engine_risk)):
+               ("onchain", engine_onchain), ("trading_council", engine_council), ("omnisignal_x", engine_omnisignal), ("macro_regime", engine_macro), ("fundamentals", engine_fundamentals), ("derivatives", engine_derivatives), ("risk", engine_risk)):
     register_engine(_n, _f)
 
 
@@ -231,7 +243,7 @@ def validate(db: Session, cand: AlphaCandidate, bars: Sequence[dict[str, Any]], 
              investor_assessments: Optional[list[dict[str, Any]]] = None, onchain: Optional[dict[str, Any]] = None,
              dex_pair: Optional[dict[str, Any]] = None, bench_closes: Optional[list[float]] = None,
              omnisignal: Optional[dict[str, Any]] = None, macro: Optional[dict[str, Any]] = None,
-             fundamentals: Optional[dict[str, Any]] = None, record: bool = True) -> dict[str, Any]:
+             fundamentals: Optional[dict[str, Any]] = None, derivatives: Optional[dict[str, Any]] = None, record: bool = True) -> dict[str, Any]:
     """Re-derive everything from `bars`. Returns the decision and updates the candidate."""
     settings = settings or get_settings()
     ac = cand.asset_class
@@ -248,7 +260,7 @@ def validate(db: Session, cand: AlphaCandidate, bars: Sequence[dict[str, Any]], 
     regime = detect_regime(bars) if f.get("sufficient") else {"trend": "unknown", "regimes": ["any"]}
     lab = live_signals(bars, ac if ac != "token" else "crypto") if f.get("sufficient") else []
     ctx = {"asset_class": ac, "features": f, "stage": stg["stage"], "lab": lab, "council": council, "safety": safety,
-           "investor_assessments": investor_assessments or [], "onchain": onchain, "omnisignal": omnisignal, "macro": macro, "fundamentals": fundamentals}
+           "investor_assessments": investor_assessments or [], "onchain": onchain, "omnisignal": omnisignal, "macro": macro, "fundamentals": fundamentals, "derivatives": derivatives}
     evidences: list[EngineEvidence] = []
     for name, fn in _ENGINES.items():
         try:
@@ -280,6 +292,9 @@ def validate(db: Session, cand: AlphaCandidate, bars: Sequence[dict[str, Any]], 
     chk("V9_portfolio_capacity", open_positions < settings.max_open_positions, f"{open_positions}/{settings.max_open_positions} positions")
     chk("V10_discovery_consistency", cand.stage is None or cand.stage == stg["stage"],
         f"discovery stage {cand.stage} vs validation stage {stg['stage']}", hard=False)
+    crowd = (derivatives or {}).get("state")
+    chk("V11_derivatives_crowding", crowd != "CROWDED_LONG_RISK",
+        f"positioning {crowd}: {'; '.join((derivatives or {}).get('evidence') or [])}" if crowd else "not assessed (no futures data)", hard=False)
     hard_fail = [c for c in checks if c["hard"] and not c["pass"]]
     passed = sum(1 for c in checks if c["pass"])
     score = round(passed / len(checks) * 100, 1)
