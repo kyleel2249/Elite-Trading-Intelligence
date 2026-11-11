@@ -10,6 +10,7 @@
  * A refusal at any step never reaches the broker and is written to the audit log under "reject:".
  * No separately hosted risk service is required.
  */
+import { marketRiskReview } from "./markets.ts";
 import { journalExecution, journalRejection } from "./journal/hooks.ts";
 import { readinessForOrder } from "./readiness/api.ts";
 import { authenticate, can, rateLimit, type EnvScope } from "./auth/session.ts";
@@ -286,6 +287,11 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
     }
   }
 
+  // Market review: refuses a broker/symbol pairing that cannot trade (e.g. a London stock on Alpaca, a stock on Binance) before a broker is contacted.
+  // Closed-market and high-risk findings are warnings here (paper/testnet); they are recorded as evidence, never hidden.
+  const marketReview = marketRiskReview(symbol, broker === "eti_paper" ? null : broker, "paper", now);
+  if (marketReview.blocking_reasons.length) return refuse("market_review", 422, "market_review_rejected", marketReview.blocking_reasons, { marketReview });
+
   const execSource = { actorType: source.actorType, actorId: source.actorId, sourceName: source.sourceName, strategyId: source.strategyId ?? null, signalId: source.signalId ?? null, triggerReason: source.triggerReason ?? null };
   const authRef = { kind: auth.master ? "master_token" : "session", sessionRef: auth.master ? null : (auth.refs[needScope] || null) };
 
@@ -296,7 +302,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
     const r = await placeInternal(env as EngineEnv, deps, { clientOrderId, symbol, side, type, qty: quantity, limitPrice: type === "limit" ? num(body.limitPrice) : null, stopPrice: type === "stop" ? num(body.stopPrice) : null, tif, plan, strategy: source.strategyId ?? null, signalId: source.signalId ?? null, actorId: source.actorId, reason: fb ? "fallback:" + fb.reason : null }, now);
     if (!r.ok) return refuse(r.code === "price_unavailable" ? "price" : "ledger", r.status, r.code, [r.message], { marketPrice: r.marketPrice ?? null, order: r.order ?? null });
     const executedAt = new Date(now).toISOString(), f = r.fills[0], resting = !f;
-    const rec = { outcome: resting ? "resting" : "executed", executedAt, broker: "eti_paper", environment: "internal_paper", mode: "internal_paper", simulated: true, exchangeOrderPlaced: false, symbol, side, type, quantity, clientOrderId, marketPrice: r.marketPrice ?? null, fillPrice: f?.price ?? null, notionalUsd: f ? f.price * f.qty : null, status: r.order?.status ?? "open", statusReason: null, readiness: readinessEvidence, brokerOrderId: "paper-" + clientOrderId, fallback: fb, executionSource: execSource, auth: authRef, safeguards: { engine: "in_process" }, plan };
+    const rec = { outcome: resting ? "resting" : "executed", executedAt, broker: "eti_paper", environment: "internal_paper", mode: "internal_paper", simulated: true, exchangeOrderPlaced: false, symbol, side, type, quantity, clientOrderId, marketPrice: r.marketPrice ?? null, fillPrice: f?.price ?? null, notionalUsd: f ? f.price * f.qty : null, status: r.order?.status ?? "open", statusReason: null, readiness: readinessEvidence, marketReview, brokerOrderId: "paper-" + clientOrderId, fallback: fb, executionSource: execSource, auth: authRef, safeguards: { engine: "in_process" }, plan };
     let auditRecorded = true;
     try {
       await kv.put("exec:paper:rec:" + executedAt + ":" + clientOrderId, JSON.stringify(rec), { expirationTtl: AUDIT_TTL_SECONDS });
@@ -304,7 +310,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
     } catch { auditRecorded = false; }
     await journalExecution(env, rec);
     await settleReservation(kv, reservation!, "executed", { brokerOrderId: rec.brokerOrderId }, now).catch(() => undefined);
-    const base = { ok: true, outcome: rec.outcome, broker: "eti_paper", mode: "internal_paper", environment: "internal_paper", simulated: true, exchangeOrderPlaced: false, order: r.order, marketPrice: r.marketPrice, fallback: fb, executionSource: execSource, executedAt, live_trading: false, readiness: readinessEvidence, audit_recorded: auditRecorded };
+    const base = { ok: true, outcome: rec.outcome, broker: "eti_paper", mode: "internal_paper", environment: "internal_paper", simulated: true, exchangeOrderPlaced: false, order: r.order, marketPrice: r.marketPrice, fallback: fb, executionSource: execSource, executedAt, live_trading: false, readiness: readinessEvidence, marketReview, audit_recorded: auditRecorded };
     if (f) return reply({ ...base, fill: { price: f.price, marketPrice: r.marketPrice, quantity: f.qty, notionalUsd: f.price * f.qty, fee: f.fee },
       notice: fb ? "Exchange credentials unavailable (" + fb.reason + "): this order was filled in ETI INTERNAL PAPER mode. No exchange testnet order was placed." : "Simulated fill in ETI internal paper mode. No exchange was contacted." }, 201);
     return reply({ ...base, fill: null, resting: true, notice: r.order?.status === "expired" ? "Immediate-or-cancel order expired unfilled (simulated)." : "Order is resting in the ETI internal paper book; it fills only when the market trades through its price." }, 202);
@@ -346,7 +352,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
   const result = sent.data, executedAt = new Date(now).toISOString();
   const brokerOrderId = result?.id ?? result?.orderId ?? null, brokerStatus = result?.status ?? null;
   const record = {
-    outcome: "executed", executedAt, environment: "exchange_testnet", simulated: false, exchangeOrderPlaced: true, auth: authRef, broker, mode, symbol, side, type, quantity, limitPrice: facts.limitPrice ?? null, clientOrderId, readiness: readinessEvidence,
+    outcome: "executed", executedAt, environment: "exchange_testnet", simulated: false, exchangeOrderPlaced: true, auth: authRef, broker, mode, symbol, side, type, quantity, limitPrice: facts.limitPrice ?? null, clientOrderId, readiness: readinessEvidence, marketReview,
     brokerOrderId, brokerStatus, executionSource: execSource, safeguards: { engine: "in_process", preTrade }, order: result,
   };
   await settleReservation(kv, reservation!, "executed", { brokerOrderId }, now).catch(() => undefined);
@@ -354,5 +360,5 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
   try { await kv.put("order:" + executedAt + ":" + clientOrderId, JSON.stringify(record), { expirationTtl: AUDIT_TTL_SECONDS }); } catch { auditRecorded = false; }
   await journalExecution(env, record);
   await portfolioRecord(true, result);
-  return reply({ ok: true, outcome: "executed", broker, mode, order: result, brokerOrderId, brokerStatus, preTrade, executionSource: execSource, executedAt, live_trading: false, readiness: readinessEvidence, audit_recorded: auditRecorded }, 201);
+  return reply({ ok: true, outcome: "executed", broker, mode, order: result, brokerOrderId, brokerStatus, preTrade, executionSource: execSource, executedAt, live_trading: false, readiness: readinessEvidence, marketReview, audit_recorded: auditRecorded }, 201);
 }

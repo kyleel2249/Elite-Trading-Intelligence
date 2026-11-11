@@ -159,11 +159,11 @@ test("rotation: new key signs new tokens, old tokens survive until expiry, retir
 test("environment isolation: scopes, cookies, records and live are separate", async () => {
   reset(); const env = mkEnv(SECRETS); const paper = await session(env, "paper"); const both = await session(env, "testnet", paper.cookies);
   assert.equal(both.body.environment, "testnet"); assert.ok(both.cookies.eti_paper && both.cookies.eti_testnet && both.cookies.eti_paper !== both.cookies.eti_testnet);
-  assert.equal((await exec(env, order({ broker: "alpaca" }), hdr(paper.cookies))).r.status, 403, "paper session cannot reach exchange testnet");
+  assert.equal((await exec(env, order({ broker: "alpaca", symbol: "AAPL" }), hdr(paper.cookies))).r.status, 403, "paper session cannot reach exchange testnet");
   const onlyTestnet = { eti_testnet: both.cookies.eti_testnet };
   const wrong = await exec(env, order(), hdr(onlyTestnet)); assert.equal(wrong.r.status, 403); assert.equal(wrong.body.required_session, "paper");
-  assert.equal((await exec(env, order({ broker: "alpaca" }), hdr(onlyTestnet))).r.status, 201);
-  assert.equal((await exec(env, order({ broker: "alpaca" }), hdr({ eti_testnet: paper.cookies.eti_paper }))).r.status, 401, "a paper token placed in the testnet cookie is useless");
+  assert.equal((await exec(env, order({ broker: "alpaca", symbol: "AAPL" }), hdr(onlyTestnet))).r.status, 201);
+  assert.equal((await exec(env, order({ broker: "alpaca", symbol: "AAPL" }), hdr({ eti_testnet: paper.cookies.eti_paper }))).r.status, 401, "a paper token placed in the testnet cookie is useless");
   assert.equal((await exec(env, order(), hdr({ eti_paper: both.cookies.eti_testnet }))).r.status, 401, "and the reverse");
   await exec(env, order(), hdr(paper.cookies));
   const h = async (c: Record<string, string>) => (await (await handleExecution(new Request(ORIGIN + "/api/execution/history", { headers: hdr(c) }), env, { now: () => clock })).json() as any);
@@ -196,7 +196,7 @@ test("exchange testnet: authenticates automatically when valid credentials are c
   reset(); const env = mkEnv(SECRETS); const t = await session(env, "testnet");
   assert.equal(t.r.status, 201); assert.equal(t.body.environment, "testnet"); assert.equal(t.body.fallback, null);
   assert.ok(brokerCalls.some(c => c.includes("/v2/account")) && brokerCalls.some(c => c.includes("/api/v3/account")), "credentials were validated against the testnet services");
-  const a = await exec(env, order({ broker: "alpaca" }), hdr(t.cookies)); assert.equal(a.r.status, 201); assert.equal(a.body.mode, "paper"); assert.equal(a.body.live_trading, false);
+  const a = await exec(env, order({ broker: "alpaca", symbol: "AAPL" }), hdr(t.cookies)); assert.equal(a.r.status, 201); assert.equal(a.body.mode, "paper"); assert.equal(a.body.live_trading, false);
   const b = await exec(env, order({ broker: "binance" }), hdr(t.cookies)); assert.equal(b.r.status, 201); assert.equal(b.body.mode, "testnet");
   assert.ok(brokerCalls.some(c => c.startsWith("POST https://testnet.binance.vision/api/v3/order")));
   const sent = brokerCalls.filter(c => c.startsWith("POST")); assert.ok(sent.every(c => !c.includes("api.binance.com") && !c.includes("//api.alpaca.markets")));
@@ -208,7 +208,7 @@ test("missing exchange credentials fall back to INTERNAL PAPER with a notice; no
   const f = await exec(env, order({ broker: "binance" }), hdr(t.cookies)); assert.equal(f.r.status, 403, "the fallback session is a paper session and cannot reach the exchange path");
   // a browser holding a testnet session still gets a visible fallback if credentials disappear afterwards
   const good = mkEnv(SECRETS); const gs = await session(good, "testnet"); const gone = { ...good, ALPACA_API_KEY: undefined, ALPACA_SECRET_KEY: undefined, BINANCE_API_KEY: undefined, BINANCE_SECRET_KEY: undefined };
-  const fb = await exec(gone, order({ broker: "alpaca" }), hdr(gs.cookies)); assert.equal(fb.r.status, 201);
+  const fb = await exec(gone, order({ broker: "alpaca", symbol: "AAPL" }), hdr(gs.cookies)); assert.equal(fb.r.status, 201);
   assert.equal(fb.body.mode, "internal_paper"); assert.equal(fb.body.exchangeOrderPlaced, false); assert.equal(fb.body.fallback.reason, "exchange_credentials_missing"); assert.match(fb.body.notice, /No exchange testnet order was placed/);
   assert.ok(!brokerCalls.some(c => c.startsWith("POST")), "no exchange order was sent");
   const rec = JSON.parse([...good.ETI_EXECUTION_LOG.m.entries()].find(([k]) => k.startsWith("exec:paper:rec:"))![1]); assert.equal(rec.environment, "internal_paper"); assert.equal(rec.exchangeOrderPlaced, false);
@@ -220,7 +220,7 @@ test("invalid exchange credentials fall back, are remembered, and are never repo
   // credentials turn bad only after a testnet session exists: the order-time rejection triggers the fallback
   reset(); const env2 = mkEnv(SECRETS); const ok = await session(env2, "testnet"); assert.equal(ok.body.environment, "testnet");
   env2.ETI_EXECUTION_LOG.m.delete("auth:cred:alpaca"); alpacaStatus = 403; brokerCalls = [];
-  const fb = await exec(env2, order({ broker: "alpaca" }), hdr(ok.cookies)); assert.equal(fb.r.status, 201); assert.equal(fb.body.mode, "internal_paper"); assert.equal(fb.body.fallback.reason, "exchange_credentials_invalid"); assert.equal(fb.body.exchangeOrderPlaced, false);
+  const fb = await exec(env2, order({ broker: "alpaca", symbol: "AAPL" }), hdr(ok.cookies)); assert.equal(fb.r.status, 201); assert.equal(fb.body.mode, "internal_paper"); assert.equal(fb.body.fallback.reason, "exchange_credentials_invalid"); assert.equal(fb.body.exchangeOrderPlaced, false);
   assert.ok(!brokerCalls.some(c => c.startsWith("POST") && c.includes("/orders")), "no order was submitted with rejected credentials");
   const st = await (await handleAuth(new Request(ORIGIN + "/api/auth/status", { headers: hdr(ok.cookies) }), env2, deps())).json() as any; assert.equal(st.environments.exchange_testnet.brokers.alpaca.status, "invalid");
   assert.equal(st.environments.exchange_testnet.brokers.binance.status, "valid");

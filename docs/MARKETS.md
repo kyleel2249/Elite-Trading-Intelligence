@@ -106,9 +106,14 @@ is checked against **Python-computed golden vectors** (`worker/markets.golden.js
 DST/holiday instants, 108 assessments, 24 risk reviews). `tests/test_markets_worker_sync.py` fails when those files are stale;
 rerun the exporter after changing `app/markets`.
 
-Not on the Worker: `/snapshot`, `/calibrated-assess`, the `/markets` page, and any order path. The Worker has no OANDA or
-Alpaca adapter, and its own execution gateway (Alpaca paper / Binance testnet) does not call the market-review gate. Its
-`setup.configured` flags only say whether the matching secrets exist in the Worker environment.
+Not on the Worker: `/snapshot`, `/calibrated-assess`, the `/markets` page, and any OANDA/Alpaca-market-data adapter. Its order
+path (Alpaca paper / Binance testnet / internal paper) now runs the market review before contacting a broker: a pairing the
+broker cannot trade (a London stock on Alpaca, a stock on Binance) is refused with `market_review_rejected`, and warnings
+(closed market, high-risk token) are stored on the audit record. Closed-market blocking applies only to live, which the Worker
+does not offer. Its `setup.configured` flags only say whether the matching secrets exist in the Worker environment.
+
+CME/ICE holiday calendars are not modelled: CME's published schedule is per product with early halts and its own page was not
+machine-readable or self-consistent enough to encode safely.
 
 ## Honest limits
 

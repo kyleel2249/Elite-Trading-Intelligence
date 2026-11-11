@@ -293,3 +293,18 @@ test("an old deployment that still has gateway settings keeps working and never 
   const st: any = await (await handleExecution(new Request("https://e/api/execution/status"), env)).json();
   assert.equal(st.external_risk_gateway, false); assert.equal(st.legacy_gateway_config_ignored, true);
 });
+
+test("market review: a broker that cannot trade the symbol is refused before any broker call, with the reason and evidence", async () => {
+  for (const [body, why] of [[{ broker: "alpaca", symbol: "VOD.L" }, /alpaca cannot trade stock/], [{ broker: "alpaca", symbol: "BTCUSDT" }, /alpaca cannot trade crypto/], [{ broker: "binance", symbol: "AAPL" }, /binance cannot trade stock/]] as const) {
+    const { env, kv } = mkEnv(); world.unexpected.length = 0;
+    const r = await post(env, order(body)); const j: any = await r.json();
+    assert.equal(r.status, 422, JSON.stringify(body)); assert.equal(j.error, "market_review_rejected");
+    assert.ok(j.marketReview.blocking_reasons.some((x: string) => why.test(x)));
+    noForbidden(); void kv;
+  }
+});
+
+test("market review: a supported pairing passes and the review is stored on the audit record", async () => {
+  const { env } = mkEnv(); const r = await post(env, order()); const j: any = await r.json();
+  assert.equal(r.status, 201); assert.equal(j.marketReview.asset_class, "stock"); assert.deepEqual(j.marketReview.blocking_reasons, []);
+});
