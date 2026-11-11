@@ -47,6 +47,16 @@ ETI_KEY_ROTATION_DAYS=7
 # ETI_PAPER_FEE_BPS=10              fee per fill, basis points
 # ETI_PAPER_SLIPPAGE_BPS=5          market-order slippage, basis points
 
+# --- Accounts, roles, MFA (needs the ETI_PORTFOLIO_DB D1 binding) ---
+# 32+ random characters. Encrypts MFA seeds and backups, peppers password hashes. Generate with: openssl rand -base64 48
+ETI_IDENTITY_KEY=
+# Previous value, kept for one rotation so existing hashes, seeds and backups still open (accounts are re-hashed on next sign-in)
+ETI_IDENTITY_KEY_PREVIOUS=
+# Name shown in authenticator apps
+ETI_IDENTITY_ISSUER=ETI
+# Extra browser connection origins allowed by the Content-Security-Policy (space separated)
+# ETI_CSP_CONNECT=
+
 # Optional: separate Python execution engine for /api/omnisignal/execute (per-account limits, protective OCO orders).
 # Leave both unset to execute Omnisignal BUY plans in-Worker (ETI Internal Paper / Binance testnet). No risk gateway is used.
 ETI_EXECUTION_API_URL=

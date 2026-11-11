@@ -9,7 +9,7 @@
  *
  * Tokens are only ever delivered in Set-Cookie. No response body contains a token, key or credential.
  */
-import { SCOPES, POLICY, authenticate, autoMode, clearCookie, issueSession, keySummary, readCookie, refOf, refreshSession, revokeAll, revokeSession, rateLimit, rotateKeys, sameOrigin, sessionCookie, verifyToken, type AuthEnv, type EnvScope } from "./session.ts";
+import { SCOPES, POLICY, authenticate, isOperator, autoMode, clearCookie, issueSession, keySummary, readCookie, refOf, refreshSession, revokeAll, revokeSession, rateLimit, rotateKeys, sameOrigin, sessionCookie, verifyToken, type AuthEnv, type EnvScope } from "./session.ts";
 import { credentialReport, usable, type CredEnv } from "./credentials.ts";
 
 export interface AuthRouteEnv extends AuthEnv, CredEnv { ETI_EXECUTION_TOKEN?: string; ETI_LIVE_TRADING_ENABLED?: string; ETI_KILL_SWITCH?: string }
@@ -56,7 +56,7 @@ export async function handleAuth(req: Request, env: AuthRouteEnv, deps: AuthDeps
   const body: any = await req.json().catch(() => ({}));
 
   if (path === "/api/auth/rotate") {
-    const auth = await authenticate(req, env, now); if (!auth.master) return reply({ error: "unauthorized", message: "Rotating the signing key needs the master ETI_EXECUTION_TOKEN." }, 401);
+    const auth = await authenticate(req, env, now); if (!isOperator(auth)) return reply({ error: "unauthorized", message: "Rotating the signing key needs the master ETI_EXECUTION_TOKEN or an administrator signed in with MFA." }, 401);
     try { return reply({ ok: true, signingKey: await rotateKeys(env, now), note: "Existing unexpired sessions stay valid until they expire; the previous key is retired after the longest session life." }); }
     catch (e) { return reply({ error: e instanceof Error ? e.message : "rotate_failed", message: "The key is held in the ETI_SESSION_SECRET Worker secret: replace it (and put the old value in ETI_SESSION_SECRET_PREVIOUS)." }, 409); }
   }

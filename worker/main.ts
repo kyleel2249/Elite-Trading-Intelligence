@@ -1,5 +1,7 @@
 /**
  * Worker entrypoint. Layers, outermost first:
+ *  -4. security headers (nonce CSP, nosniff, HSTS, ...) on every response
+ *  -3. identity (/account, /api/identity/*), provider status (/providers, /api/providers/*), encrypted backup (/api/backup/*)
  *  -2. ETI DAILY INTELLIGENCE REPORT (/api/daily-report/*, /daily), read-only and analytical
  *  -1. ETI PRECISION SIGNAL ENGINE (/api/precision/*), read-only and analytical
  *   0. command centre (/command) and global-intelligence API (/api/intel/*)
@@ -27,8 +29,14 @@ import { manageAccount } from "./algo/manage.ts";
 import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
 import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
+import { withIdentity } from "./identity/routes.ts";
+import { withProviders, runProviderProbe } from "./providers/routes.ts";
+import { withBackup } from "./backup/routes.ts";
+import { withSecurityHeaders } from "./security/headers.ts";
 
-const app = withDailyReport(withPrecision(withCommand(withAlgo(withFutures(withAgents(base as any) as any) as any) as any) as any) as any);
+const core = withDailyReport(withPrecision(withCommand(withAlgo(withFutures(withAgents(base as any) as any) as any) as any) as any) as any);
+// Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
+const app = withSecurityHeaders(withIdentity(withProviders(withBackup(core as any) as any) as any) as any);
 const inner: any = base;
 export const MONITOR_CRON = "* * * * *";
 
@@ -45,6 +53,7 @@ export default {
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills
       return;
     }
+    ctx.waitUntil(runProviderProbe(env).then(() => undefined, () => undefined)); // refresh provider status and data freshness
     ctx.waitUntil(maintainAuth(env, Date.now()).then(() => undefined, () => undefined)); // rotate an aged signing key, retire old ones
     // Other cron ticks: paper-trading cycle (off unless ETI_PAPER_SYMBOLS is set) and the Global Alpha research loop.
     // Each pass is isolated so one failing never blocks the other.

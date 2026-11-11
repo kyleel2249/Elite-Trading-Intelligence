@@ -148,7 +148,10 @@ export async function revokeAll(env: AuthEnv, scope: EnvScope | "all"): Promise<
 }
 
 // ---------- request authentication ----------
-export interface Auth { master: boolean; scopes: Set<EnvScope>; refs: Partial<Record<EnvScope, string>>; viaCookie: boolean; rejected: string[] }
+export interface AuthUser { uid: string; email: string; role: string; mfa: boolean; limited: boolean }
+export interface Auth { master: boolean; scopes: Set<EnvScope>; refs: Partial<Record<EnvScope, string>>; viaCookie: boolean; rejected: string[]; user?: AuthUser }
+/** Break-glass master token, or a signed-in administrator who has completed MFA. Used for key rotation, migration, backup and user management. */
+export const isOperator = (a: Auth) => a.master || (a.user?.role === "admin" && a.user.mfa && !a.user.limited);
 export function readCookie(req: Request, name: string): string | null {
   const h = req.headers.get("cookie"); if (!h) return null;
   for (const part of h.split(";")) { const i = part.indexOf("="); if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim(); }
@@ -178,6 +181,18 @@ export async function authenticate(req: Request, env: AuthEnv & { ETI_EXECUTION_
     const v = await verifyToken(env, token, scope, now);
     if (v.ok) { auth.scopes.add(scope); auth.refs[scope] = await refOf(v.record.sid); if (usingCookie) auth.viaCookie = true; }
     else if (v.reason !== "scope_mismatch") auth.rejected.push(scope + ":" + v.reason);
+  }
+  // Named accounts (identity layer): the role decides which environment scopes the caller inherits. Loaded lazily so the layer costs nothing when no account cookie is present.
+  const userToken = readCookie(req, "eti_user");
+  if (userToken && (env as any).ETI_PORTFOLIO_DB) {
+    if (mutating && !sameOrigin(req)) auth.rejected.push("user:csrf_origin_mismatch");
+    else {
+      try {
+        const { openCtx, identify } = await import("../identity/service.ts"), c = await openCtx(env as any, now), id = c ? await identify(c, userToken) : null;
+        if (id) { auth.user = { uid: id.uid, email: id.email, role: id.role, mfa: id.mfa, limited: id.limited }; auth.viaCookie = true; for (const sc of id.scopes) { auth.scopes.add(sc); auth.refs[sc] = await refOf("user|" + id.uid); } }
+        else auth.rejected.push("user:invalid_session");
+      } catch { auth.rejected.push("user:identity_unavailable"); }
+    }
   }
   return auth;
 }

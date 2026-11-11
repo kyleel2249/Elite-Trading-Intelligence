@@ -9,7 +9,7 @@
  * Every call is authenticated per environment (INTERNAL PAPER and EXCHANGE TESTNET sessions are isolated; the master token sees all).
  * The live environment has no ledger: it reports "disabled" and never accepts changes.
  */
-import { authenticate, can, rateLimit, type EnvScope } from "../auth/session.ts";
+import { authenticate, can, isOperator, rateLimit, type EnvScope } from "../auth/session.ts";
 import { cancelExchange, cancelInternal, ensureInit, matchInternal, reconcile, setPlan, syncExchange, type EngineDeps, type EngineEnv } from "./engine.ts";
 import { present, type ClosedTrade, type Environment } from "./ledger.ts";
 import { PortfolioStore, importKvToD1, isD1, openStore, storageConfigured, type KVL } from "./store.ts";
@@ -112,7 +112,7 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
     return reply({ ok: true, environment, result: r });
   }
   if (path === "/api/portfolio/migrate-to-d1") {
-    if (!auth.master) return reply({ error: "master_token_required", message: "Migration needs the execution token." }, 403);
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Migration needs the execution token or an administrator signed in with MFA." }, 403);
     if (!isD1(env.ETI_PORTFOLIO_DB) || !env.ETI_EXECUTION_LOG) return reply({ error: "not_applicable", message: "Needs both the ETI_PORTFOLIO_DB D1 binding and the old ETI_EXECUTION_LOG KV namespace." }, 409);
     const r = await importKvToD1(env.ETI_EXECUTION_LOG as KVL, env.ETI_PORTFOLIO_DB, environment); await audit("migrate", r);
     return reply({ ok: true, environment, ...r });

@@ -22,7 +22,7 @@ export const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS pf_kv (env TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, exp INTEGER, PRIMARY KEY (env, k))",
 ];
 const ensured = new WeakSet<object>();
-async function ensureSchema(db: D1DB) { if (ensured.has(db)) return; await db.batch(SCHEMA.map(s => db.prepare(s))); ensured.add(db); }
+export async function ensureSchema(db: D1DB) { if (ensured.has(db)) return; await db.batch(SCHEMA.map(s => db.prepare(s))); ensured.add(db); }
 let UID = 0; const uids = new WeakMap<object, number>();
 const uidOf = (o: object) => { let u = uids.get(o); if (!u) uids.set(o, u = ++UID); return u; };
 const CACHE = new Map<string, { head: string; at: number; value: { ledger: Ledger; version: string; truncated: boolean } }>();
