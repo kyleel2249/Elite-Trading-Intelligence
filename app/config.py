@@ -86,9 +86,46 @@ class Settings(BaseSettings):
     investor_monitor_interval_seconds: int = 1800
     adaptive_edge_interval_seconds: int = 900
 
+    # --- Global Alpha Intelligence ---
+    alpha_research_enabled: bool = True
+    alpha_research_interval_seconds: int = 3600
+    alpha_crypto_scan_limit: int = 40
+    alpha_equity_universe: str = ""  # comma separated tickers to always scan
+    alpha_validation_max_age_hours: int = 24
+    alpha_max_participation_pct: float = 1.0  # max order size as % of average daily dollar volume
+    # Live alpha execution needs BOTH flags plus per-request confirmation; default is paper/testnet only.
+    alpha_live_execution_authorized: bool = False
+    # Extra Global Alpha keys: "key:analyst,key:trader" (each key >= 16 chars). API_KEY stays the admin key.
+    alpha_role_keys: Optional[str] = None
+    # Base URL of the deployed Worker that serves GET /api/omnisignal (Swift/Gainz/OMNISIGNAL X). Empty = engine unavailable.
+    omnisignal_base_url: Optional[str] = None
+    alpha_explorer_base_url: Optional[str] = None  # Etherscan-compatible endpoint chosen by the operator
+    alpha_explorer_api_key: Optional[str] = None
+    sec_user_agent: str = "EliteTradingIntelligence/1.0 (set SEC_USER_AGENT to a contact address)"
+
     data_max_age_seconds: int = 300
     require_fresh_data_for_live_orders: bool = True
     default_timezone: str = "Africa/Accra"
+
+    # --- ETI persistent memory & learning ---------------------------------------------------
+    # Estimated per-side transaction cost applied to every closed trade (paper fills carry no
+    # real fees). Same default as the backtest engine so live and simulated costs compare.
+    memory_fee_bps: float = 5.0
+    # Entry slippage above this (adverse, vs the signal's reference price) is flagged.
+    memory_slippage_alert_bps: float = 10.0
+    # Horizon given to a directional signal that did not declare one (recorded on the signal).
+    memory_default_signal_horizon_seconds: int = 14400
+    # An order may only be linked to a signal created within this window before the fill.
+    memory_signal_link_window_minutes: int = 360
+    # A 'flat' signal is correct when |move| stays inside this band (percent).
+    memory_flat_band_pct: float = 0.5
+    # Closed live/paper trades required before the learning loop may even propose a change.
+    memory_min_trades_for_change: int = 20
+    memory_proposal_cooldown_hours: int = 72
+    # Regime observations older than this are not used to label a trade/signal.
+    memory_regime_max_age_seconds: int = 21600
+    # Identical open signals (same source/symbol/direction) inside this window are de-duplicated.
+    memory_signal_dedupe_seconds: int = 300
 
     @field_validator("database_url", mode="after")
     @classmethod
