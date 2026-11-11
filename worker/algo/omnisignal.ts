@@ -21,7 +21,7 @@ export interface OmnisignalOptions { risk?: RiskContext; expectancyR?: number | 
 export interface OmnisignalResult {
   symbol: string; strategy: string; decision: FinalDecision; fusion: FusionResult; validation: ValidationResult | null; liquidity: LiquidityAnalysis | null;
   /** Compact per-timeframe evidence for the eight-timeframe matrix (null where fewer than the minimum candles exist). */
-  timeframes: Record<string, TimeframeSummary | null>; consensus: Pick<Consensus, "direction" | "weightedScore" | "confidence" | "bullish" | "bearish" | "neutral" | "unavailable" | "conflicts" | "degraded" | "dominantTimeframe"> | null;
+  timeframes: Record<string, TimeframeSummary | null>; consensus: Pick<Consensus, "executionEligible" | "direction" | "weightedScore" | "confidence" | "bullish" | "bearish" | "neutral" | "unavailable" | "conflicts" | "degraded" | "dominantTimeframe"> | null;
   /** Volume-footprint evidence: abnormal activity, absorption, buy/sell pressure proxy. Advisory. */ flow: FlowAnalysis | null;
   /** Elite Trader research-database assessment of the proposed direction (null when there is no directional proposal). */ elite: EliteAssessment | null;
   entryZone: [number, number] | null; stopLoss: number | null; takeProfits: FusionResult["takeProfits"]; riskRewardToTP3: number | null; confidence: number; confidenceType: "heuristic_score_not_probability";
@@ -46,7 +46,7 @@ function runOmnisignalCore(ctx: FusionContext, o: OmnisignalOptions): Omnisignal
   const analyses: Partial<Record<Timeframe, TimeframeAnalysis | null>> = {};
   for (const tf of TIMEFRAMES) { const r = ctx.candles[tf]; analyses[tf] = r ? analyzeTimeframe(tf, r) : null; }
   const consensusFull = buildConsensus(analyses, ctx.strategy);
-  const consensus = { direction: consensusFull.direction, weightedScore: consensusFull.weightedScore, confidence: consensusFull.confidence, bullish: consensusFull.bullish, bearish: consensusFull.bearish, neutral: consensusFull.neutral, unavailable: consensusFull.unavailable, conflicts: consensusFull.conflicts, degraded: consensusFull.degraded, dominantTimeframe: consensusFull.dominantTimeframe };
+  const consensus = { executionEligible: false as const, direction: consensusFull.direction, weightedScore: consensusFull.weightedScore, confidence: consensusFull.confidence, bullish: consensusFull.bullish, bearish: consensusFull.bearish, neutral: consensusFull.neutral, unavailable: consensusFull.unavailable, conflicts: consensusFull.conflicts, degraded: consensusFull.degraded, dominantTimeframe: consensusFull.dominantTimeframe };
   const timeframes = Object.fromEntries(TIMEFRAMES.map(tf => [tf, summarize(analyses[tf])]));
   const base = { symbol: ctx.symbol, strategy: ctx.strategy, fusion, timeframes, consensus, generatedAt: new Date(now).toISOString(), confidenceType: "heuristic_score_not_probability" as const, calibration: { status: "uncalibrated" as const, note: CAL }, submitsOrder: false as const, liveExecutionAllowed: false as const, intellectualProperty: ENGINE_IP };
   const result = (decision: FinalDecision, reasons: string[], extra: Partial<OmnisignalResult> = {}): OmnisignalResult => ({ ...base, decision, validation: null, liquidity: null, flow: null, elite: null, entryZone: null, stopLoss: null, takeProfits: null, riskRewardToTP3: null, confidence: 0, reasons, expiresAt: null, ...extra });

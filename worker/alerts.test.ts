@@ -89,7 +89,7 @@ test("alerts API: auth, test email result is honest, log is readable", async () 
   const g = await (await handleAlerts(rq("/api/omnisignal/alerts"), env)).json() as any; assert.equal(g.delivered, 1); assert.equal(g.provider.configured, true); assert.ok(!JSON.stringify(g).includes("re_aaaa"), "the API key never appears in responses");
 });
 test("polling: the first run only sets a cursor; later runs alert on new events once", async () => {
-  const env = envOf({ ETI_RISK_GATE_URL: "https://api.test/api/risk-gateway/preflight", ETI_RISK_GATE_TOKEN: "gate" }), m = mailer();
+  const env = envOf({ ETI_EXECUTION_API_URL: "https://api.test", ETI_EXECUTION_API_TOKEN: "gate" }), m = mailer();
   let logs: any[] = [{ ts: new Date(NOW - 60000).toISOString(), event: "venue_down" }];
   const fetchImpl = (async (u: any, init: any) => String(u).startsWith("https://api.resend.com") ? m.fetchImpl(u, init) : new Response(JSON.stringify(logs))) as typeof fetch;
   const d = { fetchImpl, now: () => NOW };

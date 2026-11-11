@@ -23,7 +23,7 @@ export async function handleAlerts(req: Request, env: AlertEnv & Record<string, 
 
 /** Poll the Python engine's log for new events on one account and raise alerts. The first run only records a cursor (no backfill flood). */
 export async function pollExecutionAlerts(env: AlertEnv & Record<string, any>, accountId: string, deps: AlertDeps & { fetchImpl?: typeof fetch } = {}): Promise<{ polled: boolean; alerts: number; note: string }> {
-  const base = executionBase(env), token = env.ETI_RISK_GATE_TOKEN, kv = env.ETI_EXECUTION_LOG as { get(k: string): Promise<string | null>; put(k: string, v: string): Promise<void> } | undefined;
+  const base = executionBase(env), token = env.ETI_EXECUTION_API_TOKEN, kv = env.ETI_EXECUTION_LOG as { get(k: string): Promise<string | null>; put(k: string, v: string): Promise<void> } | undefined;
   if (!base || !token || !kv) return { polled: false, alerts: 0, note: "execution API or storage not configured" };
   const now = (deps.now ?? Date.now)(), key = `algo:alert-cursor:${accountId}`;
   try {
