@@ -1,37 +1,101 @@
 {
-  "_comment": "Exchange holiday calendars with provenance. verification: official = published by the exchange/operator; secondary = third-party list cross-checked against statutory rules; derived = computed from the country's public-holiday rules and Easter (verify with the exchange). Dates are local exchange dates (YYYY-MM-DD). early_closes map a date to the local closing time. Calendars NOT listed here (e.g. NGX, GSE, EGX, NSE Kenya, Euronext) are intentionally absent: no verifiable source was available, and Islamic holidays there are announced at short notice.",
-  "retrieved": "2026-11-09",
+  "_comment": "Exchange holiday calendars with provenance. verification: official = published by the exchange/operator; secondary = third-party list cross-checked against statutory rules; derived = computed from the country's public-holiday rules and Easter (verify with the exchange). Dates are local exchange dates (YYYY-MM-DD). early_closes map a date to the local closing time. Calendars NOT listed here (e.g. NGX, GSE, EGX, NSE Kenya, SSE, NSE India, KRX) are intentionally absent: no verifiable source was available, and Islamic holidays there are announced at short notice.",
+  "retrieved": "2026-11-11",
   "calendars": {
     "nyse": {
       "name": "NYSE / Nasdaq",
       "verification": "official",
       "source": "https://www.businesswire.com/news/home/20251223981478/en/NYSE-Group-Announces-2026-2027-and-2028-Holiday-and-Early-Closings-Calendar",
-      "years": [2026, 2027],
-      "holidays": [
-        "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
-        "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24"
+      "years": [
+        2026,
+        2027
       ],
-      "early_closes": { "2026-11-27": "13:00", "2026-12-24": "13:00", "2027-11-26": "13:00" }
+      "holidays": [
+        "2026-01-01",
+        "2026-01-19",
+        "2026-02-16",
+        "2026-04-03",
+        "2026-05-25",
+        "2026-06-19",
+        "2026-07-03",
+        "2026-09-07",
+        "2026-11-26",
+        "2026-12-25",
+        "2027-01-01",
+        "2027-01-18",
+        "2027-02-15",
+        "2027-03-26",
+        "2027-05-31",
+        "2027-06-18",
+        "2027-07-05",
+        "2027-09-06",
+        "2027-11-25",
+        "2027-12-24"
+      ],
+      "early_closes": {
+        "2026-11-27": "13:00",
+        "2026-12-24": "13:00",
+        "2027-11-26": "13:00"
+      }
     },
     "lse": {
       "name": "London Stock Exchange",
       "verification": "secondary",
       "source": "https://www.financecalendar.com/lse-holidays/ (cites the LSE business-days page, the authoritative reference); 2026 dates are the England & Wales bank holidays",
-      "years": [2026, 2027],
-      "holidays": [
-        "2026-01-01", "2026-04-03", "2026-04-06", "2026-05-04", "2026-05-25", "2026-08-31", "2026-12-25", "2026-12-28",
-        "2027-01-01", "2027-03-26", "2027-03-29", "2027-05-03", "2027-05-31", "2027-08-30", "2027-12-27", "2027-12-28"
+      "years": [
+        2026,
+        2027
       ],
-      "early_closes": { "2026-12-24": "12:30", "2026-12-31": "12:30", "2027-12-24": "12:30", "2027-12-31": "12:30" }
+      "holidays": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-04",
+        "2026-05-25",
+        "2026-08-31",
+        "2026-12-25",
+        "2026-12-28",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-03",
+        "2027-05-31",
+        "2027-08-30",
+        "2027-12-27",
+        "2027-12-28"
+      ],
+      "early_closes": {
+        "2026-12-24": "12:30",
+        "2026-12-31": "12:30",
+        "2027-12-24": "12:30",
+        "2027-12-31": "12:30"
+      }
     },
     "xetra": {
       "name": "Xetra (Deutsche Boerse, Frankfurt)",
       "verification": "official",
       "source": "https://cashmarket.deutsche-boerse.com/cash-en/trading/trading-calendar-and-trading-hours",
-      "years": [2026, 2027],
+      "years": [
+        2026,
+        2027
+      ],
       "holidays": [
-        "2026-01-01", "2026-04-03", "2026-04-06", "2026-05-01", "2026-12-24", "2026-12-25", "2026-12-26", "2026-12-31",
-        "2027-01-01", "2027-03-26", "2027-03-29", "2027-05-01", "2027-12-24", "2027-12-25", "2027-12-26", "2027-12-31"
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-12-24",
+        "2026-12-25",
+        "2026-12-26",
+        "2026-12-31",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-12-24",
+        "2027-12-25",
+        "2027-12-26",
+        "2027-12-31"
       ],
       "early_closes": {},
       "notes": "On German/Hessian public holidays that are trading days (e.g. Ascension 2026-05-14), trading in shares ends at 20:00 CET; Dec 30 2026 may have deviating hours (circular pending)."
@@ -40,12 +104,52 @@
       "name": "Tokyo Stock Exchange (JPX)",
       "verification": "official",
       "source": "https://www.jpx.co.jp/english/corporate/about-jpx/calendar/",
-      "years": [2026, 2027],
+      "years": [
+        2026,
+        2027
+      ],
       "holidays": [
-        "2026-01-01", "2026-01-02", "2026-01-03", "2026-01-12", "2026-02-11", "2026-02-23", "2026-03-20", "2026-04-29", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06",
-        "2026-07-20", "2026-08-11", "2026-09-21", "2026-09-22", "2026-09-23", "2026-10-12", "2026-11-03", "2026-11-23", "2026-12-31",
-        "2027-01-01", "2027-01-02", "2027-01-03", "2027-01-11", "2027-02-11", "2027-02-23", "2027-03-21", "2027-03-22", "2027-04-29", "2027-05-03", "2027-05-04", "2027-05-05",
-        "2027-07-19", "2027-08-11", "2027-09-20", "2027-09-23", "2027-10-11", "2027-11-03", "2027-11-23", "2027-12-31"
+        "2026-01-01",
+        "2026-01-02",
+        "2026-01-03",
+        "2026-01-12",
+        "2026-02-11",
+        "2026-02-23",
+        "2026-03-20",
+        "2026-04-29",
+        "2026-05-03",
+        "2026-05-04",
+        "2026-05-05",
+        "2026-05-06",
+        "2026-07-20",
+        "2026-08-11",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-10-12",
+        "2026-11-03",
+        "2026-11-23",
+        "2026-12-31",
+        "2027-01-01",
+        "2027-01-02",
+        "2027-01-03",
+        "2027-01-11",
+        "2027-02-11",
+        "2027-02-23",
+        "2027-03-21",
+        "2027-03-22",
+        "2027-04-29",
+        "2027-05-03",
+        "2027-05-04",
+        "2027-05-05",
+        "2027-07-19",
+        "2027-08-11",
+        "2027-09-20",
+        "2027-09-23",
+        "2027-10-11",
+        "2027-11-03",
+        "2027-11-23",
+        "2027-12-31"
       ],
       "early_closes": {},
       "notes": "JPX notes holidays can change if Japan's national holidays change."
@@ -54,9 +158,20 @@
       "name": "Johannesburg Stock Exchange",
       "verification": "secondary",
       "source": "https://www.calendarlabs.com/jse-market-holidays-2026/ plus South Africa's Public Holidays Act rule that a holiday falling on a Sunday moves to Monday (the list omitted Women's Day, 2026-08-10). The official JSE market notice could not be retrieved (robots.txt disallowed).",
-      "years": [2026],
+      "years": [
+        2026
+      ],
       "holidays": [
-        "2026-01-01", "2026-04-03", "2026-04-06", "2026-04-27", "2026-05-01", "2026-06-16", "2026-08-10", "2026-09-24", "2026-12-16", "2026-12-25"
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-04-27",
+        "2026-05-01",
+        "2026-06-16",
+        "2026-08-10",
+        "2026-09-24",
+        "2026-12-16",
+        "2026-12-25"
       ],
       "early_closes": {}
     },
@@ -65,9 +180,20 @@
       "key": "jse",
       "verification": "derived",
       "source": "Derived from South Africa's public-holiday rules and Easter 2027 (28 March; Good Friday 26 March agrees with NYSE's official calendar). The aggregator's 2027 JSE list was rejected: it puts Good Friday on 3 April 2027 and Family Day on 6 April, which is wrong. Verify against the JSE market notice.",
-      "years": [2027],
+      "years": [
+        2027
+      ],
       "holidays": [
-        "2027-01-01", "2027-03-22", "2027-03-26", "2027-03-29", "2027-04-27", "2027-06-16", "2027-08-09", "2027-09-24", "2027-12-16", "2027-12-27"
+        "2027-01-01",
+        "2027-03-22",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-04-27",
+        "2027-06-16",
+        "2027-08-09",
+        "2027-09-24",
+        "2027-12-16",
+        "2027-12-27"
       ],
       "early_closes": {}
     },
@@ -75,11 +201,80 @@
       "name": "Hong Kong Exchange",
       "verification": "secondary",
       "source": "https://www.calendarlabs.com/hkex-market-holidays-2026/ (holiday names in that list are unreliable; weekday dates were kept). Half-day sessions (Christmas Eve, New Year's Eve, Lunar New Year's Eve) are NOT modelled.",
-      "years": [2026],
+      "years": [
+        2026
+      ],
       "holidays": [
-        "2026-01-01", "2026-02-17", "2026-02-18", "2026-02-19", "2026-04-03", "2026-04-06", "2026-04-07", "2026-05-01", "2026-05-25", "2026-06-19", "2026-07-01", "2026-10-01", "2026-10-19", "2026-12-25"
+        "2026-01-01",
+        "2026-02-17",
+        "2026-02-18",
+        "2026-02-19",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-04-07",
+        "2026-05-01",
+        "2026-05-25",
+        "2026-06-19",
+        "2026-07-01",
+        "2026-10-01",
+        "2026-10-19",
+        "2026-12-25"
       ],
       "early_closes": {}
+    },
+    "euronext": {
+      "name": "Euronext cash markets (Amsterdam, Brussels, Dublin, Lisbon, Paris; common closures only)",
+      "verification": "official",
+      "source": "https://live.euronext.com/en/resources/trading-hours-holidays",
+      "years": [
+        2026,
+        2027
+      ],
+      "holidays": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-12-25",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29"
+      ],
+      "early_closes": {},
+      "notes": "Only closures common to every Euronext market are listed. Venue-specific closures (Oslo, Dublin, Athens, and Milan on 24/31 Dec) and the half-day closes on 24 and 31 December are NOT modelled (closing times are published per market, not on the summary page)."
+    },
+    "asx": {
+      "name": "Australian Securities Exchange (cash market)",
+      "verification": "official",
+      "source": "https://www.asx.com.au/markets/market-resources/trading-hours-calendar/cash-market-trading-hours/trading-calendar",
+      "years": [
+        2026,
+        2027
+      ],
+      "holidays": [
+        "2026-01-01",
+        "2026-01-26",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-04-25",
+        "2026-06-08",
+        "2026-12-25",
+        "2026-12-28",
+        "2027-01-01",
+        "2027-01-26",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-06-14",
+        "2027-12-27",
+        "2027-12-28"
+      ],
+      "early_closes": {
+        "2026-12-24": "14:10",
+        "2026-12-31": "14:10",
+        "2027-12-24": "14:10",
+        "2027-12-31": "14:10"
+      },
+      "notes": "Early close = end of normal trading (Sydney time). Per ASX, ANZAC Day 2027 (Mon 26 April) is a normal trading day."
     }
   }
 }

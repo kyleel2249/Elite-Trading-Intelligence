@@ -86,10 +86,12 @@ at import (a malformed file degrades to "no calendar", never to an error). `GET 
 | NYSE (incl. 13:00 early closes) | 2026-27 | official |
 | Xetra | 2026-27 | official |
 | TSE | 2026-27 | official |
+| ASX (incl. 14:10 early closes on 24/31 Dec) | 2026-27 | official |
+| Euronext: common closures only (Amsterdam, Brussels, Dublin, Lisbon, Paris); no venue-specific closures or 24/31 Dec half days | 2026-27 | official |
 | LSE (12:30 early closes) | 2026-27 | secondary: verify |
 | JSE | 2026 secondary, 2027 derived from statute rules and Easter | verify with the JSE |
 | HKEX | 2026 | secondary: verify |
-| **NGX, GSE, EGX, NSE Kenya, Euronext, ASX, SSE, NSE India, KRX, CME/ICE** | none | `not_applied`: may be closed on a holiday ETI does not know |
+| **NGX, GSE, EGX, NSE Kenya, Milan/Madrid/SIX, SSE, NSE India, KRX, CME/ICE** | none | `not_applied`: may be closed on a holiday ETI does not know |
 
 `applied` = official, `partial` = secondary/derived. The JSE's official notice could not be fetched (robots.txt) and was
 not circumvented. Add your own with `register_holidays()`.
@@ -114,6 +116,7 @@ Alpaca adapter, and its own execution gateway (Alpaca paper / Binance testnet) d
 * **Nothing is verified against a live provider** (see top). OANDA, Alpaca-options and Binance paths are tested with fakes only.
 * Non-US stocks (Europe, Asia, Africa) and futures have **no data or execution adapter**; they stay `analysis_only`.
   Access to African exchanges (JSE, NGX, GSE, EGX, NSE Kenya) needs a broker or data licence this repository cannot supply.
+* NGX hours are 09:00-16:00 WAT since 27 April 2026 (earlier builds used 10:00-14:30, which was wrong), taken from the exchange's announcement relayed by Mondo Visione; auctions are not modelled.
 * Hours marked `schedule_confidence: approximate` (African exchanges, ASX, JSE, ICE softs, grains ...) are reference hours to
   verify with the exchange; CME holiday schedules are not modelled.
 * Forex sizing notional in the RiskEngine is computed as `qty x price`; for USD-base pairs (USDZAR) that is in the quote

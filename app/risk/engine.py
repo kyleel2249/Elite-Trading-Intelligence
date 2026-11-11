@@ -135,9 +135,16 @@ class RiskEngine:
             px = float(px) if px else None
         except (TypeError, ValueError):
             px = None
+        # USD-base FX (USDZAR, USDJPY ...): quantity is already denominated in USD, so notional = qty (price would give quote currency).
+        try:
+            from app.markets.registry import classify as _classify
+            _i = _classify(proposal.symbol, provider_hint=proposal.provider)
+            usd_base = _i.asset_class.value in ("forex", "metal") and _i.base == "USD"
+        except Exception:
+            usd_base = False
         if proposal.equity > 0 and proposal.qty > 0:
-            if px and px > 0:
-                notional = float(proposal.qty) * px
+            if (px and px > 0) or usd_base:
+                notional = float(proposal.qty) if usd_base else float(proposal.qty) * px
                 notional_pct = (notional / proposal.equity) * 100.0
                 if notional_pct > max_notional_pct + 1e-9:
                     reasons.append(

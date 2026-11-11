@@ -308,7 +308,7 @@ def test_risk_engine_oanda_rules():
     assert not unlisted.approved and any("oanda cannot trade" in r for r in unlisted.reasons)
     # exotic pairs get a tighter notional cap (3% vs 6% for majors)
     assert eng.evaluate(_prop(symbol="EURUSD", qty=5000)).approved
-    exotic = eng.evaluate(_prop(symbol="USDZAR", qty=200, meta={"ref_price": 18.0}))
+    exotic = eng.evaluate(_prop(symbol="USDZAR", qty=4000, meta={"ref_price": 18.0}))
     assert not exotic.approved and any("max 3.0%" in r for r in exotic.reasons)
 
 
@@ -373,3 +373,16 @@ def test_order_endpoint_accepts_oanda_provider():
     from app.main import OrderRequest
     r = OrderRequest(provider="OANDA", environment="paper", symbol="EURUSD", side="buy", qty=1000)
     assert r.provider == "oanda"
+
+
+def test_usd_base_fx_notional_is_in_usd_not_quote_currency():
+    eng = RiskEngine(_risk_settings())
+    # 2,000 USD of USDZAR at 18.0 is 2% of $100k equity (exotic cap 3%); qty*price would wrongly read 36% and reject it
+    ok = eng.evaluate(_prop(symbol="USDZAR", qty=2000, meta={"ref_price": 18.0}))
+    assert ok.approved, ok.reasons
+    over = eng.evaluate(_prop(symbol="USDZAR", qty=4000, meta={"ref_price": 18.0}))          # 4% > 3% exotic cap
+    assert not over.approved and any("exceeds max 3.0%" in r for r in over.reasons)
+    # quote-USD pairs keep qty * price
+    assert not eng.evaluate(_prop(symbol="EURUSD", qty=7000, meta={"ref_price": 1.085})).approved
+    # USD-base notional needs no price at all
+    assert eng.evaluate(_prop(symbol="USDJPY", qty=1000, meta={})).approved

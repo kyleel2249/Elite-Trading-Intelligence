@@ -66,7 +66,7 @@ test("holidays and early closes are honoured and tagged by provenance", () => {
 test("catalog, calendars and routing expose what the Python layer does", () => {
   assert.ok(listInstruments().length > 100);
   assert.ok(listInstruments("forex", "EUR").every((i) => i.asset_class === "forex"));
-  assert.deepEqual(calendarKeys(), ["hkex", "jse", "lse", "nyse", "tse", "xetra"]);
+  assert.deepEqual(calendarKeys(), ["asx", "euronext", "hkex", "jse", "lse", "nyse", "tse", "xetra"]);
   assert.equal(calendarInfo("nyse")!.years["2026"], "official");
   assert.equal(calendarInfo("ngx"), null);
   assert.equal(normalizeSymbol(" eur/usd "), "EURUSD");

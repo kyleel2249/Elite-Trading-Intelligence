@@ -475,7 +475,7 @@ def test_adjacent_days_are_open_and_early_closes_apply():
 
 def test_dax_and_xetra_stocks_use_the_frankfurt_session_not_the_generic_one():
     assert classify("DAX").session_id == "xetra" and classify("SAP.DE").session_id == "xetra"
-    assert classify("XETRA:SAP").session_id == "xetra" and classify("CAC40").session_id == "eu_cet"
+    assert classify("XETRA:SAP").session_id == "xetra" and classify("CAC40").session_id == "euronext"
 
 
 def _holiday_file():
@@ -538,3 +538,27 @@ def test_calendars_endpoint_reports_coverage_and_gaps(client):
     assert j["covered"]["us_equity"]["years"] == {"2026": "official", "2027": "official"}
     assert j["covered"]["jse"]["years"] == {"2026": "secondary", "2027": "derived"}
     assert {"ngx", "gse", "egx", "nse_ke", "eu_cet"} <= {m["session_id"] for m in j["missing"]}
+
+
+# ------------------------------------------------------------------ Euronext / ASX calendars, NGX hours
+def test_euronext_official_closures_and_scope():
+    assert session_status("euronext", at(2026, 12, 25, 10)).reason == "holiday"
+    assert session_status("euronext", at(2027, 3, 26, 10)).reason == "holiday"                    # Good Friday 2027
+    assert session_status("euronext", at(2026, 12, 25, 10)).holiday_calendar == "applied"
+    assert session_status("euronext", at(2026, 11, 10, 10)).state == "open"
+    assert session_status("eu_cet", at(2026, 12, 25, 10)).holiday_calendar == "not_applied"      # Milan/Madrid/SIX: still no calendar
+    assert classify("EURONEXT:MC").session_id == "euronext" and classify("MIL:ENI").session_id == "eu_cet"
+
+
+def test_asx_holidays_and_early_close():
+    assert session_status("asx", at(2026, 1, 25, 23)).reason == "holiday"                         # Mon 26 Jan 10:00 AEDT = 23:00Z Sun
+    assert session_status("asx", at(2026, 12, 24, 2, 50)).state == "open"                         # 13:50 AEDT, before the 14:10 early close
+    assert session_status("asx", at(2026, 12, 24, 3, 20)).state == "closed"                       # 14:20 AEDT
+    assert session_status("asx", at(2026, 12, 23, 3, 20)).state == "open"                         # a normal day at the same hour
+    assert session_status("asx", at(2027, 12, 27, 0)).reason == "holiday"                         # Christmas substitute
+
+
+def test_ngx_uses_the_extended_2026_hours():
+    assert session_status("ngx", at(2026, 11, 10, 14, 0)).state == "open"                         # 15:00 WAT, closed under the old 14:30 close
+    assert session_status("ngx", at(2026, 11, 10, 8, 30)).state == "open"                         # 09:30 WAT
+    assert session_status("ngx", at(2026, 11, 10, 16, 30)).state == "closed"
