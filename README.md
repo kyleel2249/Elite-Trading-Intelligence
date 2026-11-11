@@ -140,6 +140,10 @@ triggers), so failed predictions stay on record and forecasts are never rewritte
 Statistics on small samples are flagged as unreliable; this is research output, not investment advice.
 See [docs/PREDICTION_LEDGER.md](docs/PREDICTION_LEDGER.md).
 
+## ETI Autonomous Trade Journal
+
+`/journal` and `/api/journal/*`: a permanent, append-only, hash-chained record of every analysis, order, refusal, cancellation, fill, closed trade (wins and losses) and evaluated prediction, plus manual trades and notes. Details, storage advice (use D1) and limits: [docs/TRADE_JOURNAL.md](docs/TRADE_JOURNAL.md).
+
 ## Documentation
 
 See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs/MARKETS.md),

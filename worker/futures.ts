@@ -6,6 +6,7 @@
  * Refused orders never reach the exchange and are audited under "reject:". No withdrawal, transfer or wallet endpoints are called.
  */
 import type { ExecutionEnv } from "./execution.ts";
+import { journalExecution, journalRejection } from "./journal/hooks.ts";
 import { AUDIT_TTL_SECONDS, duplicateWindowSeconds, recordRejection, releaseReservation, reserveOrder, settleReservation, summariseRequest, summariseSource, type OrderFacts, type Reservation, type SafeKV } from "./safeguards.ts";
 
 export interface FuturesEnv extends ExecutionEnv {
@@ -160,7 +161,7 @@ export async function handleFutures(req: Request, env: FuturesEnv): Promise<Resp
   /** Refuse before the exchange is contacted: free any reservation, audit the refusal, answer. */
   const refuse = async (stage: string, status: number, error: string, reasons: string[], extra: Record<string, unknown> = {}) => {
     if (reservation) { await releaseReservation(kv, reservation).catch(() => undefined); reservation = null; }
-    const recorded = await recordRejection(kv, { stage, error, reasons, mode: "futures_testnet", request: summariseRequest(b), executionSource: summariseSource(src) });
+    const recorded = await recordRejection(kv, { stage, error, reasons, mode: "futures_testnet", request: summariseRequest(b), executionSource: summariseSource(src) }, undefined, (k, r) => journalRejection(env, k, r));
     return reply({ ok: false, outcome: "rejected", error, stage, message: reasons[0], reasons, broker_contacted: false, audit_recorded: recorded, ...extra }, status);
   };
 
@@ -199,13 +200,14 @@ export async function handleFutures(req: Request, env: FuturesEnv): Promise<Resp
     if (!r.ok) {
       const definite = r.status >= 400 && r.status < 500 && r.status !== 408;
       if (definite) await releaseReservation(kv, reservation!).catch(() => undefined); else await settleReservation(kv, reservation!, "indeterminate", { status: r.status }).catch(() => undefined);
-      const recorded = await recordRejection(kv, { outcome: definite ? "broker_rejected" : "unknown", stage: "broker", error: definite ? "broker_rejected" : "broker_outcome_unknown", reasons: [definite ? `Binance futures testnet rejected the order (HTTP ${r.status}).` : `Binance futures testnet gave no definite answer (HTTP ${r.status}); check the exchange before retrying. This clientOrderId stays reserved.`], mode: "futures_testnet", brokerContacted: true, brokerResponse: data, request: summariseRequest(b), executionSource: summariseSource(src) });
+      const recorded = await recordRejection(kv, { outcome: definite ? "broker_rejected" : "unknown", stage: "broker", error: definite ? "broker_rejected" : "broker_outcome_unknown", reasons: [definite ? `Binance futures testnet rejected the order (HTTP ${r.status}).` : `Binance futures testnet gave no definite answer (HTTP ${r.status}, undefined, (k, r) => journalRejection(env, k, r)); check the exchange before retrying. This clientOrderId stays reserved.`], mode: "futures_testnet", brokerContacted: true, brokerResponse: data, request: summariseRequest(b), executionSource: summariseSource(src) }, undefined, (k, r) => journalRejection(env, k, r));
       return reply({ error: definite ? "broker_rejected" : "broker_outcome_unknown", outcome: definite ? "broker_rejected" : "unknown", status: r.status, detail: data, mode: "futures_testnet", broker_contacted: true, audit_recorded: recorded }, 502);
     }
     const rec = { outcome: "executed", executedAt: new Date().toISOString(), broker: "binance", mode: "futures_testnet", symbol, side, type: "limit", quantity, limitPrice, intent: check.intent, reduceOnly, leverage: reduceOnly ? st.leverage : leverage, stopPrice: stopPrice ?? null, clientOrderId: b.clientOrderId, brokerOrderId: data?.orderId ?? null, brokerStatus: data?.status ?? null, executionSource: { actorType: src.actorType, actorId: src.actorId, sourceName: src.sourceName, strategyId: src.strategyId ?? null, signalId: src.signalId ?? null, triggerReason: src.triggerReason ?? null }, preTrade: { positionAmt: st.positionAmt, markPrice: st.markPrice, fundingRate: st.fundingRate, estLiquidation: check.estLiquidation }, safeguards: { engine: "in_process", notionalUsd: check.notionalUsd }, order: data };
     await settleReservation(kv, reservation!, "executed", { brokerOrderId: rec.brokerOrderId }).catch(() => undefined);
     let auditRecorded = true;
     try { await kv.put("order:" + rec.executedAt + ":" + b.clientOrderId, JSON.stringify(rec), { expirationTtl: AUDIT_TTL_SECONDS }); } catch { auditRecorded = false; }
+    await journalExecution(env, { ...rec, environment: "futures_testnet", clientOrderId: b.clientOrderId });
     return reply({ ok: true, outcome: "executed", mode: "futures_testnet", intent: check.intent, order: data, brokerOrderId: rec.brokerOrderId, brokerStatus: rec.brokerStatus, estLiquidation: check.estLiquidation, warnings: check.warnings, protectiveStop: "NOT placed automatically: monitor GET /api/futures/positions and manage the stop yourself", executedAt: rec.executedAt, audit_recorded: auditRecorded }, 201);
   } catch (e) {
     if (reservation) { if (orderSent) await settleReservation(kv, reservation, "indeterminate", {}).catch(() => undefined); else await releaseReservation(kv, reservation).catch(() => undefined); }

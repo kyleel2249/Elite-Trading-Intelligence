@@ -153,12 +153,13 @@ export function summariseSource(src: any): Record<string, unknown> | null {
 }
 
 /** Best effort: a failed audit write must never turn a refusal into a different outcome. Returns whether it was stored. */
-export async function recordRejection(kv: SafeKV, rec: RejectionRecord, now = Date.now()): Promise<boolean> {
-  const at = new Date(now).toISOString();
-  try {
-    await kv.put("reject:" + at + ":" + crypto.randomUUID().slice(0, 8), JSON.stringify({ outcome: "rejected", brokerContacted: false, at, ...rec }), { expirationTtl: AUDIT_TTL_SECONDS });
-    return true;
-  } catch { return false; }
+export async function recordRejection(kv: SafeKV, rec: RejectionRecord, now = Date.now(), onStored?: (key: string, stored: unknown) => Promise<void>): Promise<boolean> {
+  const at = new Date(now).toISOString(), key = "reject:" + at + ":" + crypto.randomUUID().slice(0, 8), stored = { outcome: "rejected", brokerContacted: false, at, ...rec };
+  let ok = false;
+  try { await kv.put(key, JSON.stringify(stored), { expirationTtl: AUDIT_TTL_SECONDS }); ok = true; } catch { ok = false; }
+  // the trade journal keeps the refusal permanently even when this (expiring) audit write failed
+  if (onStored) { try { await onStored(key, stored); } catch { /* journal hooks are best effort; the backfill covers a miss */ } }
+  return ok;
 }
 
 // ---------------------------------------------------------------- balance and holdings

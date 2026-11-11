@@ -10,6 +10,7 @@
  * A refusal at any step never reaches the broker and is written to the audit log under "reject:".
  * No separately hosted risk service is required.
  */
+import { journalExecution, journalRejection } from "./journal/hooks.ts";
 import { readinessForOrder } from "./readiness/api.ts";
 import { authenticate, can, rateLimit, type EnvScope } from "./auth/session.ts";
 import { credentialReport, markInvalid } from "./auth/credentials.ts";
@@ -207,7 +208,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
   /** Refuse before any broker is contacted: free any reservation, audit the refusal, answer. */
   const refuse = async (stage: string, status: number, error: string, reasons: string[], extra: Record<string, unknown> = {}) => {
     if (reservation) { await releaseReservation(kv, reservation).catch(() => undefined); reservation = null; }
-    const recorded = await recordRejection(kv, { stage, error, reasons, mode: broker === "binance" || broker === "alpaca" || internal ? mode : "unknown", ...(internal ? { environment: "internal_paper" as const } : broker === "binance" || broker === "alpaca" ? { environment: "exchange_testnet" as const } : {}), request: summariseRequest(body), executionSource: summariseSource(source) }, now);
+    const recorded = await recordRejection(kv, { stage, error, reasons, mode: broker === "binance" || broker === "alpaca" || internal ? mode : "unknown", ...(internal ? { environment: "internal_paper" as const } : broker === "binance" || broker === "alpaca" ? { environment: "exchange_testnet" as const } : {}), request: summariseRequest(body), executionSource: summariseSource(source) }, now, (k, r) => journalRejection(env, k, r));
     return reply({ ok: false, outcome: "rejected", error, stage, message: reasons[0], reasons, broker_contacted: false, exchangeOrderPlaced: false, audit_recorded: recorded, ...extra }, status);
   };
 
@@ -291,6 +292,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
       await kv.put("exec:paper:rec:" + executedAt + ":" + clientOrderId, JSON.stringify(rec), { expirationTtl: AUDIT_TTL_SECONDS });
       await kv.put("exec:paper:id:" + clientOrderId, "1", { expirationTtl: AUDIT_TTL_SECONDS });
     } catch { auditRecorded = false; }
+    await journalExecution(env, rec);
     await settleReservation(kv, reservation!, "executed", { brokerOrderId: rec.brokerOrderId }, now).catch(() => undefined);
     const base = { ok: true, outcome: rec.outcome, broker: "eti_paper", mode: "internal_paper", environment: "internal_paper", simulated: true, exchangeOrderPlaced: false, order: r.order, marketPrice: r.marketPrice, fallback: fb, executionSource: execSource, executedAt, live_trading: false, readiness: readinessEvidence, audit_recorded: auditRecorded };
     if (f) return reply({ ...base, fill: { price: f.price, marketPrice: r.marketPrice, quantity: f.qty, notionalUsd: f.price * f.qty, fee: f.fee },
@@ -322,12 +324,12 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
     }
     if (sent.definite) {
       await releaseReservation(kv, reservation!).catch(() => undefined);
-      const recorded = await recordRejection(kv, { outcome: "broker_rejected", stage: "broker", error: "broker_rejected", reasons: [`${brokerName} rejected the order (HTTP ${sent.status}).`], mode, environment: "exchange_testnet", brokerContacted: true, brokerResponse: sent.data, request: summariseRequest(body), executionSource: summariseSource(source) }, now);
+      const recorded = await recordRejection(kv, { outcome: "broker_rejected", stage: "broker", error: "broker_rejected", reasons: [`${brokerName} rejected the order (HTTP ${sent.status}).`], mode, environment: "exchange_testnet", brokerContacted: true, brokerResponse: sent.data, request: summariseRequest(body), executionSource: summariseSource(source) }, now, (k, r) => journalRejection(env, k, r));
       await portfolioRecord(false, sent.data);
       return reply({ ok: false, outcome: "broker_rejected", error: "broker_rejected", broker, status: sent.status, detail: sent.data, mode, broker_contacted: true, audit_recorded: recorded }, 502);
     }
     await settleReservation(kv, reservation!, "indeterminate", { status: sent.status }, now).catch(() => undefined);
-    const recorded = await recordRejection(kv, { outcome: "unknown", stage: "broker", error: "broker_outcome_unknown", reasons: [`${brokerName} did not give a definite answer (${sent.status || "no response"}). The order may or may not exist; check the broker before retrying. This clientOrderId stays reserved.`], mode, environment: "exchange_testnet", brokerContacted: true, brokerResponse: sent.data, request: summariseRequest(body), executionSource: summariseSource(source) }, now);
+    const recorded = await recordRejection(kv, { outcome: "unknown", stage: "broker", error: "broker_outcome_unknown", reasons: [`${brokerName} did not give a definite answer (${sent.status || "no response"}). The order may or may not exist; check the broker before retrying. This clientOrderId stays reserved.`], mode, environment: "exchange_testnet", brokerContacted: true, brokerResponse: sent.data, request: summariseRequest(body), executionSource: summariseSource(source) }, now, (k, r) => journalRejection(env, k, r));
     return reply({ ok: false, outcome: "unknown", error: "broker_outcome_unknown", broker, status: sent.status, detail: sent.data, mode, broker_contacted: true, audit_recorded: recorded, message: "The broker did not give a definite answer. Check the broker's order list before retrying; this clientOrderId stays reserved." }, 502);
   }
 
@@ -340,6 +342,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
   await settleReservation(kv, reservation!, "executed", { brokerOrderId }, now).catch(() => undefined);
   let auditRecorded = true;
   try { await kv.put("order:" + executedAt + ":" + clientOrderId, JSON.stringify(record), { expirationTtl: AUDIT_TTL_SECONDS }); } catch { auditRecorded = false; }
+  await journalExecution(env, record);
   await portfolioRecord(true, result);
   return reply({ ok: true, outcome: "executed", broker, mode, order: result, brokerOrderId, brokerStatus, preTrade, executionSource: execSource, executedAt, live_trading: false, readiness: readinessEvidence, audit_recorded: auditRecorded }, 201);
 }

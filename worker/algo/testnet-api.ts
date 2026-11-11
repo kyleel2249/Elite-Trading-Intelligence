@@ -11,6 +11,7 @@ import { sha256Hex } from "../safeguards.ts";
 import { STRATEGIES } from "./omni-api.ts";
 import type { Strategy } from "./timeframes.ts";
 import { loadSignalInputs } from "./market-inputs.ts";
+import { journalAnalysis } from "../journal/hooks.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions } from "./params.ts";
 import type { PaperEnv } from "./paper-api.ts";
@@ -60,6 +61,10 @@ export async function handleTestnetExecute(req: Request, env: TestnetEnv, deps: 
   if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", error: inputs.error, submitsOrder: false }, 503);
   const { version, name, ...opts } = active;
   const plan = runOmnisignal({ symbol, strategy, candles: inputs.candles, depth: inputs.depth, now }, { roundTripCostBps: costBpsFrom(env), ...opts });
+  // Trade journal: every analysis is kept, including NO_TRADE and SELL, so predictions can later be judged. Never throws, never blocks.
+  const jrSignalId = `omni-${symbol}-${strategy}-${plan.generatedAt.slice(0, 16)}`, jrTradeId = "omni" + (await sha256Hex(jrSignalId)).slice(0, 28);
+  await journalAnalysis(env as any, { tradeId: jrTradeId, symbol, decision: String(plan.decision), strategy, confidence: plan.confidence, entryZone: plan.entryZone ?? null, stop: plan.stopLoss ?? null, targets: (plan.takeProfits ?? []).map((t: any) => t?.price ?? null),
+    referencePrice: plan.entryZone ? plan.entryZone[1] : null, horizonMs: 6 * 3600_000, rationale: plan.reasons ?? [], environment: body.broker === "binance" ? "exchange_testnet" : "internal_paper", actor: accountId, signalId: jrSignalId, at: now });
   const out: Record<string, unknown> = { symbol, strategy, parameters: { version, name }, decision: plan.decision, confidence: plan.confidence, calibration: plan.calibration, submitted: false };
   if (plan.decision === "SELL") return reply({ ...out, message: "Spot venues cannot short; SELL plans are not routed. No order submitted." });
   if (plan.decision !== "BUY") return reply({ ...out, message: `Decision is ${plan.decision}; nothing to execute`, reasons: plan.reasons.slice(0, 5) });

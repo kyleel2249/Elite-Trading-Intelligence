@@ -70,7 +70,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 @media(max-width:700px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
 ${PORTFOLIO_CSS}
 </style></head><body>
-<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><div id="connection" class="status">Connecting…</div></div></header>
+<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
 <div class="toolbar"><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>

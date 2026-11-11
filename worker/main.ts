@@ -35,6 +35,8 @@ import { pollExecutionAlerts } from "./algo/alerts-api.ts";
 import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
 import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
+import { withJournal } from "./journal/route.ts";
+import { runJournalCycle } from "./journal/sync.ts";
 import { withIdentity } from "./identity/routes.ts";
 import { withProviders, runProviderProbe } from "./providers/routes.ts";
 import { withBackup } from "./backup/routes.ts";
@@ -42,7 +44,7 @@ import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
-const core = withPro(withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any) as any);
+const core = withJournal(withPro(withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any) as any) as any);
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
 const app = withSecurityHeaders(withIdentity(withProviders(withBackup(core as any) as any) as any) as any);
 const inner: any = base;
@@ -60,6 +62,7 @@ export default {
       if (env.ETI_UNIVERSE_ENABLED === "true" && env.ETI_EXECUTION_LOG) ctx.waitUntil(runUniverseBatch(env, env.ETI_EXECUTION_LOG, Date.now(), (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday")).then(async b => { const strat = (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday"); const ev = signalAlerts(b.previous, b.newRows ?? [], strat); if (b.universeError) ev.push({ type: "market_data_failure", severity: "warning", title: "Universe refresh failed", detail: b.universeError, dedupeKey: `universe:${new Date().toISOString().slice(0, 13)}` }); await raiseAlerts(env as any, ev); }, e => console.error("universe batch failed", e instanceof Error ? e.message : e))); return; }
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
+      ctx.waitUntil(runJournalCycle(env).then(() => undefined, () => undefined)); // journal backfill (throttled inside) and prediction evaluation
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills
       return;
     }
