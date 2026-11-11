@@ -125,6 +125,8 @@ def _run(fn, *args):
         return fn(*args)
     except CalcError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except ArithmeticError:  # decimal.InvalidOperation / DivisionByZero on extreme but schema-valid values
+        raise HTTPException(status_code=422, detail="values are outside the range the calculator can represent")
 
 
 @router.get("/presets")

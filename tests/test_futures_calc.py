@@ -23,8 +23,12 @@ def mk(**kw) -> Inputs:
     return Inputs(**base)
 
 
-def codes(r, key="violations"):
-    return {v["code"] for v in r[key]}
+def codes(r):
+    return {v["code"] for v in r["violations"]}
+
+
+def warn_codes(r):
+    return {w["code"] for w in r["risk"]["warnings"]}
 
 
 def frac(f: F) -> D:
@@ -152,11 +156,8 @@ def test_lowest_of_all_limits_applies():
 
 
 def test_unverified_exchange_limit_is_warned():
-    assert "leverage_unverified" in codes(calculate(mk()), "risk".join(["", ""]) or "violations") or True
-    r = calculate(mk())
-    assert "leverage_unverified" in {w["code"] for w in r["risk"]["warnings"]}
-    r2 = calculate(mk(limits=Limits(exchange_max_leverage=150)))
-    assert "leverage_unverified" not in {w["code"] for w in r2["risk"]["warnings"]}
+    assert "leverage_unverified" in warn_codes(calculate(mk()))
+    assert "leverage_unverified" not in warn_codes(calculate(mk(limits=Limits(exchange_max_leverage=150))))
 
 
 def test_risk_tier_leverage_cap_depends_on_notional():
@@ -175,20 +176,17 @@ def test_risk_tier_leverage_cap_depends_on_notional():
 def test_isolated_long_and_short_liquidation_match_independent_formula():
     # capital 1000, 10x, entry 100000 -> notional 10000, qty 0.1, margin 1000, mmr 0.5%
     long = calculate(mk(leverage=10, maintenance_margin_rate=D("0.005")))["liquidation"]
-    exp_long = frac(F(9000) / (F(1, 10) * F(995, 1000)))
-    close(long["price"], exp_long)
+    close(long["price"], frac(F(9000) / (F(1, 10) * F(995, 1000))))
     short = calculate(mk(direction="short", leverage=10, maintenance_margin_rate=D("0.005")))["liquidation"]
-    exp_short = frac(F(11000) / (F(1, 10) * F(1005, 1000)))
-    close(short["price"], exp_short)
+    close(short["price"], frac(F(11000) / (F(1, 10) * F(1005, 1000))))
     assert long["authoritative"] is False
 
 
 def test_tier_offset_shifts_liquidation_price():
     t = (MarginTier(mmr=D("0.005"), notional_cap=None, cum=D("50")),)
     r = calculate(mk(leverage=10, tiers=t))
-    exp = frac((F(10000) - F(1000) - F(50)) / (F(1, 10) * F(995, 1000)))
-    close(r["liquidation"]["price"], exp)
-    assert D(r["sizing"]["maintenance_margin"]) == D("0") + (D(10000) * D("0.005") - 50)
+    close(r["liquidation"]["price"], frac((F(10000) - F(1000) - F(50)) / (F(1, 10) * F(995, 1000))))
+    assert D(r["sizing"]["maintenance_margin"]) == 0   # 10000 * 0.005 - 50
 
 
 def test_extra_isolated_margin_moves_liquidation_further_away():
@@ -199,11 +197,10 @@ def test_extra_isolated_margin_moves_liquidation_further_away():
 
 def test_150x_has_a_tiny_liquidation_distance_and_extreme_warning():
     r = calculate(mk(capital=D("100"), leverage=150, maintenance_margin_rate=D("0.005")))
-    exp = frac(F(14900) / (F(15, 100) * F(995, 1000)))
-    close(r["liquidation"]["price"], exp)
+    close(r["liquidation"]["price"], frac(F(14900) / (F(15, 100) * F(995, 1000))))
     assert D("0.16") < D(r["liquidation"]["distance_pct_from_entry"]) < D("0.17")
     assert r["risk"]["class"] == "extreme"
-    assert "extreme_leverage" in {w["code"] for w in r["risk"]["warnings"]}
+    assert "extreme_leverage" in warn_codes(r)
 
 
 def test_maintenance_rate_at_or_above_one_over_leverage_is_instant_liquidation():
@@ -216,14 +213,13 @@ def test_cross_margin_needs_account_balance_then_uses_it():
     r = calculate(mk(margin_mode="cross", maintenance_margin_rate=D("0.005")))
     assert r["liquidation"]["price"] is None and r["liquidation"]["status"] == "unavailable"
     r2 = calculate(mk(margin_mode="cross", cross_wallet_balance=D("5000"), maintenance_margin_rate=D("0.005")))
-    exp = frac(F(15000) / (F(2, 10) * F(995, 1000)))
-    close(r2["liquidation"]["price"], exp)
+    close(r2["liquidation"]["price"], frac(F(15000) / (F(2, 10) * F(995, 1000))))
 
 
 def test_default_maintenance_rate_is_flagged_as_assumed():
     r = calculate(mk())
     assert r["sizing"]["maintenance_margin_source"] == "assumed_default"
-    assert "mmr_assumed" in {w["code"] for w in r["risk"]["warnings"]}
+    assert "mmr_assumed" in warn_codes(r)
 
 
 def test_policy_minimum_liquidation_distance():
@@ -241,17 +237,15 @@ def test_inverse_pnl_uses_reciprocal_formula_not_linear():
     assert D(r["sizing"]["initial_margin"]) == D("0.1")  # coin
     exp = frac(F(50000) * (F(1, 50000) - F(1, 55000)))
     close(r["target"]["gross_pnl"], exp, "0.000000005")
-    linear_style = D(50000) / 50000 * D(5000) / 10        # what a (wrong) linear formula would give in coin terms
-    assert abs(D(r["target"]["gross_pnl"]) - linear_style) > D("0.001")
+    linear_style = D(50000) * D(5000) / D(50000) / 10    # a (wrong) linear formula applied to this position: 500
+    assert abs(D(r["target"]["gross_pnl"]) - linear_style) > D("1")
 
 
 def test_inverse_liquidation_matches_closed_form():
     kw = dict(contract_type="inverse", settle_currency="BTC", capital=D("0.1"), leverage=10, entry_price=D("50000"),
               maintenance_margin_rate=D("0.005"))
-    long = calculate(mk(**kw))["liquidation"]["price"]
-    close(long, frac(F(50000) * 10 * F(1005, 1000) / 11), "0.0001")
-    short = calculate(mk(direction="short", **kw))["liquidation"]["price"]
-    close(short, frac(F(50000) * 10 * F(995, 1000) / 9), "0.0001")
+    close(calculate(mk(**kw))["liquidation"]["price"], frac(F(50000) * 10 * F(1005, 1000) / 11))
+    close(calculate(mk(direction="short", **kw))["liquidation"]["price"], frac(F(50000) * 10 * F(995, 1000) / 9))
 
 
 # ------------------------------------------------------------------------------ stops, take-profit, R:R
@@ -296,8 +290,7 @@ def test_scenario_table_matches_spec_and_flags_liquidation():
 # ------------------------------------------------------------------------------ balance
 
 def test_insufficient_balance():
-    r = calculate(mk(available_balance=D("500")))
-    assert "insufficient_balance" in codes(r)
+    assert "insufficient_balance" in codes(calculate(mk(available_balance=D("500"))))
     ok = calculate(mk(available_balance=D("1500")))
     assert D(ok["balance"]["available_after"]) == 500
 
@@ -315,7 +308,7 @@ def test_bad_inputs_raise(kw):
 
 def test_decimal_arithmetic_has_no_float_drift():
     r = calculate(mk(capital=D("0.1"), leverage=3, entry_price=D("0.3"), exit_price=D("0.6")))
-    assert D(r["target"]["gross_pnl"]) == D("0.3")   # qty 1 * (0.6-0.3) with no 0.30000000000000004
+    assert D(r["target"]["gross_pnl"]) == D("0.3")   # qty 1 * (0.6 - 0.3), no 0.30000000000000004
 
 
 # ------------------------------------------------------------------------------ allocation / exposure / portfolio
@@ -325,8 +318,7 @@ def test_allocation_methods_never_exceed_total():
     assert eq == [D("333.33")] * 3 and sum(eq) <= 1000
     assert allocate_capital(D("1000"), "percentage", 2, weights=[D("50"), D("30")]) == [D("500"), D("300")]
     assert allocate_capital(D("1000"), "manual", 2, weights=[D("400"), D("600")]) == [D("400"), D("600")]
-    rw = allocate_capital(D("900"), "risk_weighted", 2, risks=[D("1"), D("2")])   # weights 2:1
-    assert rw == [D("600"), D("300")]
+    assert allocate_capital(D("900"), "risk_weighted", 2, risks=[D("1"), D("2")]) == [D("600"), D("300")]
     for bad in (lambda: allocate_capital(D("1000"), "percentage", 2, weights=[D("60"), D("50")]),
                 lambda: allocate_capital(D("1000"), "manual", 2, weights=[D("600"), D("500")]),
                 lambda: allocate_capital(D("1000"), "ai", 2),
@@ -355,9 +347,10 @@ def test_portfolio_totals_and_balance_check():
     assert D(r["totals"]["notional"]) == 10500          # 5000 + 4500 + 1000
     assert D(r["totals"]["initial_margin"]) == 1000
     assert D(r["exposure_by_group"]["crypto"]["net_notional"]) == 8500   # 9500 long - 1000 short
-    assert not r["valid"] or r["balance"]["available_after"] is not None
-    assert portfolio_preview(_spec_legs(), D("900"))["valid"] is False
-    assert "insufficient_balance" in {v["code"] for v in portfolio_preview(_spec_legs(), D("900"))["violations"]}
+    assert D(r["balance"]["available_after"]) == 0
+    short = portfolio_preview(_spec_legs(), D("900"))
+    assert short["valid"] is False
+    assert "insufficient_balance" in {v["code"] for v in short["violations"]}
 
 
 def test_portfolio_rejects_mixed_settlement_and_reports_a_bad_leg_without_hiding_others():
@@ -372,7 +365,8 @@ def test_portfolio_rejects_mixed_settlement_and_reports_a_bad_leg_without_hiding
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(__import__("app.main", fromlist=["app"]).app)
+    from app.main import app
+    return TestClient(app)
 
 
 BODY = {"direction": "long", "capital": "1000", "leverage": 20, "entry_price": "100000", "move_pct": "1",
@@ -401,7 +395,10 @@ def test_api_calc_error_is_422_with_message(client):
 def test_api_presets_portfolio_allocate_exposure(client):
     p = client.get("/api/futures-calc/presets").json()
     assert p["leverage_presets"][0] == 1 and p["leverage_presets"][-1] == 150 and p["platform_max_leverage"] == 150
-    leg = lambda cap, lev, ent, d="long": {**BODY, "capital": cap, "leverage": lev, "entry_price": ent, "direction": d}
+
+    def leg(cap, lev, ent):
+        return {**BODY, "capital": cap, "leverage": lev, "entry_price": ent}
+
     r = client.post("/api/futures-calc/portfolio", json={"legs": [leg("500", 10, "100000"), leg("300", 15, "4000")],
                                                         "available_balance": "1000"})
     assert r.status_code == 200 and r.json()["totals"]["notional"] == "9500.00"

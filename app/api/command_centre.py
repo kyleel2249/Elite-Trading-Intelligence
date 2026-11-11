@@ -151,3 +151,13 @@ async def command_report(kind: Literal["daily", "weekly", "monthly"] = "daily", 
                         headers={"Content-Disposition": f'attachment; filename="eti-{kind}-fills.csv"'})
     md = metrics.report_markdown(kind, view["performance"], view["summary"], datetime.now(timezone.utc), view["health"])
     return PlainTextResponse(md, media_type="text/markdown")
+
+
+# Read-only futures calculator (app/api/futures_calc.py). Mounted here because this router is already loaded by
+# app.main's defensive loader; a failure to import it is logged and never takes the command centre down.
+try:
+    from app.api.futures_calc import router as _futures_calc_router
+
+    router.include_router(_futures_calc_router)
+except Exception:  # pragma: no cover - defensive
+    logger.warning("futures calculator router unavailable", exc_info=True)
