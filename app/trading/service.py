@@ -1,6 +1,7 @@
 """
 Trading service — single entry point for paper and live orders.
-Every order must pass RiskEngine before any provider submission.
+Paper orders (and testnet orders without exchange credentials) are executed by ETI's INTERNAL PAPER engine and never touch an exchange.
+Exchange testnet / live orders must pass RiskEngine before any provider submission.
 Paper fills update portfolio + journal (Claire Bennett audit trail).
 """
 from __future__ import annotations
@@ -15,6 +16,7 @@ from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
 from app.integrations.oanda import OandaClient
+from app.paper import mode as paper_mode
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
 from app.trading.portfolio import PortfolioService
 
@@ -29,6 +31,14 @@ class TradingService:
 
     def _client_order_id(self) -> str:
         return f"eti-{uuid.uuid4().hex[:20]}"
+
+    def _creds_configured(self, provider: str) -> bool:
+        p = provider.lower()
+        if p == "alpaca":
+            return bool(self.settings.alpaca_configured)
+        if p == "binance":
+            return bool(self.settings.binance_configured)
+        return bool(getattr(self.settings, f"{p}_configured", False))
 
     async def place_order(
         self,
@@ -52,6 +62,27 @@ class TradingService:
         council_action: Optional[str] = None,
     ) -> dict[str, Any]:
         client_order_id = self._client_order_id()
+
+        # Execution-mode resolution. Only INTERNAL_PAPER is diverted here; exchange testnet / live / rejected
+        # requests continue through the existing, risk-gated path below. Live is never simulated.
+        mode = paper_mode.resolve_mode(
+            provider, environment,
+            creds_configured=self._creds_configured(provider),
+            live_enabled=bool(self.settings.live_trading_enabled),
+        )
+        if mode.mode == paper_mode.INTERNAL_PAPER:
+            from app.paper.runtime import place_via_trading_service
+            ot = order_type.lower()
+            if ot not in ("market", "limit"):
+                return {"status": "rejected", "client_order_id": client_order_id, "execution_mode": "INTERNAL_PAPER",
+                        "mode_resolution": mode.to_dict(),
+                        "risk": {"decision": "REJECTED", "reasons": [f"order_type '{order_type}' is not supported here; use /api/paper/orders for stop and take_profit"],
+                                 "notes": "", "officer": "INTERNAL_PAPER_ENGINE"}, "provider_response": None}
+            return await place_via_trading_service(
+                symbol=symbol, side=side, qty=qty, order_type=ot, limit_price=limit_price, thesis=thesis,
+                client_order_id=client_order_id, mode_info=mode.to_dict(),
+            )
+
         proposal = OrderProposal(
             provider=provider.lower(),
             environment=environment.lower(),
@@ -75,6 +106,7 @@ class TradingService:
             result = {
                 "status": "rejected",
                 "client_order_id": client_order_id,
+                "execution_mode": mode.mode,
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
@@ -101,13 +133,14 @@ class TradingService:
 
         try:
             if provider.lower() == "alpaca":
-                if environment.lower() == "paper" and not self.settings.alpaca_paper:
+                # Alpaca "paper"/"testnet" must hit the PAPER API only; never let live keys be used for a sandbox request.
+                if environment.lower() in ("paper", "testnet") and not self.settings.alpaca_paper:
                     return {
                         "status": "rejected",
                         "client_order_id": client_order_id,
                         "risk": {
                             "decision": "REJECTED",
-                            "reasons": ["Alpaca live credentials configured but paper environment requested"],
+                            "reasons": ["Alpaca live credentials configured but paper/testnet environment requested"],
                             "notes": "Mismatch between environment and ALPACA_PAPER",
                             "officer": "Helena Frost",
                         },
@@ -124,26 +157,15 @@ class TradingService:
                 fill_price = fill_price_hint
             elif provider.lower() == "binance":
                 use_testnet = environment.lower() in ("paper", "testnet")
-                # Paper without keys: simulate fill for journal/positions
-                if use_testnet and not self.binance.configured and fill_price_hint is not None:
-                    resp = {
-                        "simulated": True,
-                        "symbol": symbol.upper(),
-                        "side": side.upper(),
-                        "executedQty": str(qty),
-                        "status": "FILLED",
-                    }
-                    fill_price = fill_price_hint
-                else:
-                    client = BinanceClient(self.settings, use_testnet=use_testnet)
-                    resp = await client.submit_order(
-                        symbol=symbol,
-                        side=side,
-                        qty=qty,
-                        order_type=order_type.upper(),
-                        client_order_id=client_order_id,
-                    )
-                    fill_price = fill_price_hint
+                client = BinanceClient(self.settings, use_testnet=use_testnet)
+                resp = await client.submit_order(
+                    symbol=symbol,
+                    side=side,
+                    qty=qty,
+                    order_type=order_type.upper(),
+                    client_order_id=client_order_id,
+                )
+                fill_price = fill_price_hint
             elif provider.lower() == "oanda":
                 # paper -> OANDA practice account; live host is reachable only for environment="live" (risk-gated)
                 client = OandaClient(self.settings, use_practice=environment.lower() != "live")
@@ -170,6 +192,8 @@ class TradingService:
                 "status": "submitted",
                 "client_order_id": client_order_id,
                 "environment": environment,
+                "execution_mode": mode.mode,
+                "mode_label": mode.label,
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
@@ -182,7 +206,7 @@ class TradingService:
             }
 
             if self.db is not None:
-                # For paper/sim: treat as filled when we have a price hint
+                # Exchange testnet fills are only journaled as filled when the provider reported a price.
                 status = "filled" if fill_price is not None and environment.lower() in ("paper", "testnet") else "submitted"
                 PortfolioService(self.db).record_order_event(
                     client_order_id=client_order_id,
@@ -205,6 +229,7 @@ class TradingService:
             return {
                 "status": "error",
                 "client_order_id": client_order_id,
+                "execution_mode": mode.mode,
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
