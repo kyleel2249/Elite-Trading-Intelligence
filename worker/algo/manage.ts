@@ -47,8 +47,8 @@ export const confirmationsFrom = (env: { ETI_INVALIDATION_CONFIRMATIONS?: string
 
 export interface ManageOutcome { symbol: string; entryPrice: number | null; decision: string; evaluable: boolean; invalidated: boolean; confirmations: number; required: number; action: "none" | "report_only" | "close_requested" | "close_failed"; reasons: string[]; execution?: unknown }
 export async function manageAccount(env: ManageEnv, accountId: string, o: { strategy: Strategy; close: boolean; now: number; fetchImpl?: typeof fetch }): Promise<{ status: number; body: unknown }> {
-  const base = executionBase(env), token = env.ETI_RISK_GATE_TOKEN, f = o.fetchImpl ?? fetch, kv = env.ETI_EXECUTION_LOG as unknown as KV | undefined;
-  if (!base || !token) return { status: 503, body: { error: "execution_api_not_configured" } };
+  const base = executionBase(env), token = env.ETI_EXECUTION_API_TOKEN, f = o.fetchImpl ?? fetch, kv = env.ETI_EXECUTION_LOG as unknown as KV | undefined;
+  if (!base || !token) return { status: 503, body: { error: "execution_api_not_configured", message: "Thesis-invalidation management reads managed positions from the optional Python execution engine; set ETI_EXECUTION_API_URL and ETI_EXECUTION_API_TOKEN to enable it. Order execution itself does not need it." } };
   if (!kv) return { status: 503, body: { error: "storage_not_configured" } };
   const call = async (path: string, init?: RequestInit) => { const r = await f(base + path, { ...init, headers: { "content-type": "application/json", "x-api-key": token, "x-operator": "omnisignal-manage" }, signal: AbortSignal.timeout(15000) }); return { status: r.status, body: await r.json().catch(() => ({})) as any }; };
   let acct, pos;

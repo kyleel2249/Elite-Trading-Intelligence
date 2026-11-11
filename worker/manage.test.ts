@@ -28,7 +28,7 @@ function world(o: { drift?: number; positions?: any[]; acct?: any; closeStatus?:
   return { fetchImpl, calls, closes: () => calls.filter(c => c.url.endsWith("/close")) };
 }
 const kv = () => { const m = new Map<string, string>(); return { m, get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); }, list: async () => ({ keys: [] }) }; };
-const envOf = (store = kv(), o: any = {}) => ({ ETI_EXECUTION_TOKEN: TOKEN, ETI_RISK_GATE_URL: "https://api.test/api/risk-gateway/preflight", ETI_RISK_GATE_TOKEN: "gate", ETI_EXECUTION_LOG: store, ETI_ROUND_TRIP_COST_BPS: "0", ...o });
+const envOf = (store = kv(), o: any = {}) => ({ ETI_EXECUTION_TOKEN: TOKEN, ETI_EXECUTION_API_URL: "https://api.test/", ETI_EXECUTION_API_TOKEN: "gate", ETI_EXECUTION_LOG: store, ETI_ROUND_TRIP_COST_BPS: "0", ...o });
 const req = (body: unknown, o: { token?: string | null; method?: string } = {}) => new Request("https://eti.test/api/omnisignal/manage", { method: o.method ?? "POST", headers: { "content-type": "application/json", ...(o.token === null ? {} : { authorization: "Bearer " + (o.token ?? TOKEN) }) }, body: o.method === "GET" ? undefined : JSON.stringify(body) });
 const realFetch = globalThis.fetch; test.afterEach(() => { globalThis.fetch = realFetch; });
 const run = (r: Request, env: any, w: ReturnType<typeof world>, now = NOW) => { globalThis.fetch = w.fetchImpl; return handleManage(r, env, { fetchImpl: w.fetchImpl, now: () => now }); };
