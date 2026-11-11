@@ -44,7 +44,7 @@ const core = withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(with
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
 const app = withSecurityHeaders(withIdentity(withProviders(withBackup(core as any) as any) as any) as any);
 const inner: any = base;
-export const MONITOR_CRON = "* * * * *";
+const MONITOR_CRON = "* * * * *";
 
 export default {
   fetch: (request: Request, env: any) => app.fetch(request, env),
