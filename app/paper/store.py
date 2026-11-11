@@ -111,3 +111,7 @@ class SqlPaperStore:
             return [{"ts": (r.ts.replace(tzinfo=timezone.utc) if r.ts.tzinfo is None else r.ts).isoformat(),
                      "account_id": r.account_id, "event": r.event, "order_id": r.order_id, "details": r.details}
                     for r in q.order_by(PaperEventRow.id.desc()).limit(limit).all()]
+
+
+# File-backed/in-memory stores used by the paper exchange (PaperExchange) live in exchange_store.py; re-exported for existing imports.
+from app.paper.exchange_store import JsonFileStore, MemoryStore, PaperStore, StaleStateError  # noqa: E402,F401

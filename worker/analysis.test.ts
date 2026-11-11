@@ -341,7 +341,8 @@ test("API: POST technical analyses supplied candles and rejects malformed ones",
   assert.equal((await post("/api/analysis/technical?symbol=AAPL", { candles: [[1, 2, 1, 3, 2, 1]] })).status, 400);
   assert.equal((await post("/api/analysis/technical?symbol=AAPL", { candles: reindex(series(20)) })).status, 422);
 });
-test("API: GET technical for a non-crypto symbol explains that candles must be supplied", async () => { const r = await call("/api/analysis/technical?symbol=EURUSD"); assert.equal(r.status, 424); });
+test("API: GET technical for a non-crypto symbol explains that candles must be supplied", async () => { const real = globalThis.fetch; globalThis.fetch = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
+  try { const r = await call("/api/analysis/technical?symbol=EURUSD"); assert.equal(r.status, 424); } finally { globalThis.fetch = real; } });
 test("API: POST intelligence end to end with supplied candles, fundamentals and news", async () => {
   const candles: Record<string, Kline[]> = {}; for (const tf of ["1M", "1w", "1d", "4h", "1h", "30m", "15m"] as const) candles[tf] = tf === "1M" ? upFrames()["1M"]! : series(300, { drift: 0.25, noise: 0.5, seed: 3, stepMs: stepFor(tf), end: Date.now() - stepFor(tf) * 1.5 });
   const g = goodCrypto();

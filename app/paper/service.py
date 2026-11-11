@@ -208,3 +208,8 @@ class PaperService:
     def record_event(self, account_id: str, event: str, **details) -> None:
         self.store.append_events([{"ts": self.clock().isoformat(), "event": event, "order_id": None,
                                    "account_id": account_id, "details": details}])
+
+
+# The file-backed paper exchange (PaperExchange, its tick job and quote providers) lives in exchange_service.py;
+# re-exported here so existing imports (app.paper.runtime, tests) keep working alongside PaperService.
+from app.paper.exchange_service import LiveQuoteProvider, PaperExchange, PaperTickJob, QuoteProvider, config_from_env  # noqa: E402,F401

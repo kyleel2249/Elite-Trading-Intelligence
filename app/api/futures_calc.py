@@ -161,5 +161,5 @@ async def allocate(body: AllocateIn):
 @router.post("/exposure")
 async def exposure(body: ExposureIn):
     amt = _run(lambda: calc.exposure_capital(body.available, body.preset, body.custom_pct, body.max_pct))
-    return {"preset": body.preset, "capital": str(amt),
+    return {"preset": body.preset, "capital": format(amt.quantize(Decimal("0.01")), "f"),
             "note": "Sets how much capital to allocate. It does not change leverage or any balance."}
