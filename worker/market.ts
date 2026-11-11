@@ -18,7 +18,8 @@ export interface MarketEnv {
   MARKET_PROVIDER_ORDER?: string;
 }
 
-export type ProviderId = "binance" | "bybit" | "okx";
+export type ProviderId = "binance" | "bybit" | "okx" | "binance_usdm";
+export type MarketKind = "spot" | "futures";
 export type Endpoint = "klines" | "depth" | "trades" | "ticker";
 /** [openTime, open, high, low, close, volume, takerBuyBaseVolume?]. The optional 7th field is the exchange-reported aggressive-buy volume (Binance klines only). */
 export type Kline = [number, number, number, number, number, number, number?];
@@ -37,6 +38,8 @@ interface Params {
   symbol: string;
   interval: string;
   limit: number;
+  /** "futures" = Binance USDⓈ-M perpetuals only. Never mixed with spot and never failed over to another exchange. */
+  market?: MarketKind;
 }
 
 interface UpstreamRequest {
@@ -195,6 +198,18 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
     },
   },
 
+  // Binance USDⓈ-M futures (perpetual contracts, including equity/commodity/index perpetuals where listed). Same payload shapes as spot.
+  binance_usdm: {
+    hosts: ["https://fapi.binance.com"],
+    request(endpoint, p) {
+      if (endpoint === "klines") return { path: "/fapi/v1/klines", query: { symbol: p.symbol, interval: p.interval, limit: String(p.limit) } };
+      if (endpoint === "depth") return { path: "/fapi/v1/depth", query: { symbol: p.symbol, limit: String(p.limit) } };
+      if (endpoint === "trades") return { path: "/fapi/v1/trades", query: { symbol: p.symbol, limit: String(p.limit) } };
+      return { path: "/fapi/v1/ticker/24hr", query: { symbol: p.symbol } };
+    },
+    parse(endpoint, j, p) { return PROVIDERS.binance.parse(endpoint, j, p); },
+  },
+
   bybit: {
     hosts: ["https://api.bybit.com", "https://api.bytick.com"],
     request(endpoint, p) {
@@ -275,7 +290,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
 
 interface ProviderState { lastSuccessAt?: number; lastStatus?: number | null; lastErrorClass?: string | null; lastLatencyMs?: number; lastHost?: string }
 // Per-isolate memory: resets when the isolate is recycled. Diagnostics say so.
-const state: Record<ProviderId, ProviderState> = { binance: {}, bybit: {}, okx: {} };
+const state: Record<ProviderId, ProviderState> = { binance: {}, bybit: {}, okx: {}, binance_usdm: {} };
 
 function record(a: Attempt) {
   const s = state[a.provider];
@@ -321,8 +336,9 @@ export class AllProvidersFailed extends Error {
   constructor(attempts: Attempt[]) { super("all_providers_failed"); this.attempts = attempts; }
 }
 
-export async function getMarketData(endpoint: Endpoint, p: Params, order: ProviderId[]): Promise<MarketResult> {
+export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: ProviderId[]): Promise<MarketResult> {
   const attempts: Attempt[] = [];
+  const order: ProviderId[] = p.market === "futures" ? ["binance_usdm"] : orderIn; // futures never borrow spot data from another exchange
   for (const id of order) {
     const spec = PROVIDERS[id];
     let req: UpstreamRequest;
@@ -425,29 +441,40 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string):
   return body;
 }
 
-export interface SymbolRow { s: string; b: string; q: string }
-let symbolCache: { at: number; rows: SymbolRow[]; host: string } | null = null;
-const SYMBOL_TTL_MS = 60 * 60 * 1000;
-/** Every spot pair Binance currently lists as TRADING, slimmed to symbol/base/quote. Hosts are tried in order; nothing is invented when all fail. */
-export async function listBinanceSymbols(fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; attempts: { host: string; status: number | null; errorClass: string | null }[] }> {
-  if (symbolCache && now() - symbolCache.at < SYMBOL_TTL_MS) return { rows: symbolCache.rows, host: symbolCache.host, cached: true, attempts: [] };
-  const attempts: { host: string; status: number | null; errorClass: string | null }[] = [];
-  for (const host of PROVIDERS.binance.hosts) {
+export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: string }
+interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
+const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
+/** The pair list is re-read from Binance at most every 10 minutes per isolate (and shared at the edge); browsers re-request it on the same interval. */
+export const SYMBOL_TTL_MS = 10 * 60 * 1000;
+const SYMBOL_SOURCES: Record<MarketKind, { hosts: string[]; path: string }> = {
+  spot: { hosts: PROVIDERS.binance.hosts, path: "/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING" },
+  futures: { hosts: PROVIDERS.binance_usdm.hosts, path: "/fapi/v1/exchangeInfo" },
+};
+const CATEGORY: Record<string, string> = { COIN: "crypto", EQUITY: "stocks", STOCK: "stocks", COMMODITY: "commodities", INDEX: "indices", ETF: "etf", FX: "fx", CURRENCY: "fx" };
+const categoryOf = (x: any) => { const u = String(x?.underlyingType || "COIN").toUpperCase(); return CATEGORY[u] ?? u.toLowerCase().replace(/[^a-z0-9]+/g, "_"); };
+type SymbolAttempt = { host: string; status: number | null; errorClass: string | null };
+/** Every pair Binance currently lists as TRADING for one market: spot pairs, or USDⓈ-M perpetual contracts. Hosts are tried in order; a stale list is served if all fail; nothing is invented. */
+export async function listBinanceSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
+  const hit = symbolCache[market];
+  if (hit && now() - hit.at < SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
+  const attempts: SymbolAttempt[] = [], src = SYMBOL_SOURCES[market];
+  for (const host of src.hosts) {
     try {
-      const res = await fetchImpl(host + "/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING", { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 1800 } } as RequestInit);
+      const res = await fetchImpl(host + src.path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 540 } } as RequestInit);
       if (!res.ok) { attempts.push({ host, status: res.status, errorClass: classifyStatus(res.status) }); continue; }
       const j: any = await res.json(), list = Array.isArray(j?.symbols) ? j.symbols : null;
       if (!list) { attempts.push({ host, status: res.status, errorClass: "invalid_payload" }); continue; }
-      const rows: SymbolRow[] = list.filter((x: any) => x && x.status === "TRADING" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol)) && x.isSpotTradingAllowed !== false)
-        .map((x: any) => ({ s: String(x.symbol), b: String(x.baseAsset), q: String(x.quoteAsset) })).sort((a: SymbolRow, b: SymbolRow) => a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
+      const rows: SymbolRow[] = list.filter((x: any) => x && x.status === "TRADING" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol)) && (market === "futures" ? /PERPETUAL/.test(String(x.contractType || "")) : x.isSpotTradingAllowed !== false))
+        .map((x: any) => ({ s: String(x.symbol), b: String(x.baseAsset), q: String(x.quoteAsset), m: market, c: market === "futures" ? categoryOf(x) : "crypto" }))
+        .sort((a: SymbolRow, b: SymbolRow) => a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
       if (rows.length === 0) { attempts.push({ host, status: res.status, errorClass: "empty_symbols" }); continue; }
-      symbolCache = { at: now(), rows, host }; return { rows, host, cached: false, attempts };
+      symbolCache[market] = { at: now(), rows, host }; return { rows, host, cached: false, stale: false, fetchedAt: now(), attempts };
     } catch (e) { attempts.push({ host, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" }); }
   }
-  if (symbolCache) return { rows: symbolCache.rows, host: symbolCache.host, cached: true, attempts }; // stale list beats no list
-  throw new AllProvidersFailed(attempts.map((a) => ({ provider: "binance" as ProviderId, host: a.host, status: a.status, ok: false, errorClass: a.errorClass, latencyMs: 0 })));
+  if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at, attempts }; // an old list beats no list, and is labelled as old
+  throw new AllProvidersFailed(attempts.map((a) => ({ provider: (market === "futures" ? "binance_usdm" : "binance") as ProviderId, host: a.host, status: a.status, ok: false, errorClass: a.errorClass, latencyMs: 0 })));
 }
-export const _resetSymbolCache = () => { symbolCache = null; };
+export const _resetSymbolCache = () => { delete symbolCache.spot; delete symbolCache.futures; };
 
 export async function handleMarket(request: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(request.url);
@@ -455,19 +482,25 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   if (request.method !== "GET") return jsonResp({ error: "method_not_allowed" }, 405);
   const endpoint = url.pathname.slice("/api/market/".length);
   if (endpoint === "symbols") {
-    try {
-      const r = await listBinanceSymbols();
-      return jsonResp({ provider: "binance", market: "spot", host: r.host.replace("https://", ""), cached: r.cached, count: r.rows.length, generatedAt: new Date().toISOString(), symbols: r.rows.map((x) => [x.s, x.b, x.q]) }, 200, { "cache-control": "public, max-age=600" });
-    } catch (e) {
-      if (e instanceof AllProvidersFailed) return jsonResp({ error: "symbols_unavailable", detail: "Binance did not return its symbol list.", attempts: e.attempts.map(({ host, status, errorClass }) => ({ host, status, errorClass })) }, 502);
-      throw e;
-    }
+    const want = url.searchParams.get("market") || "all";
+    if (!["spot", "futures", "all"].includes(want)) return jsonResp({ error: "invalid_market", allowed: ["spot", "futures", "all"] }, 400);
+    const markets: MarketKind[] = want === "all" ? ["spot", "futures"] : [want as MarketKind];
+    const settled = await Promise.allSettled(markets.map((m) => listBinanceSymbols(m)));
+    const rows: SymbolRow[] = [], sources: Record<string, unknown> = {}, warnings: unknown[] = [];
+    settled.forEach((r, i) => {
+      if (r.status === "fulfilled") { rows.push(...r.value.rows); sources[markets[i]] = { host: r.value.host.replace("https://", ""), count: r.value.rows.length, fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale }; }
+      else warnings.push({ market: markets[i], error: "unavailable", attempts: r.reason instanceof AllProvidersFailed ? r.reason.attempts.map(({ host, status, errorClass }) => ({ host, status, errorClass })) : [] });
+    });
+    if (rows.length === 0) return jsonResp({ error: "symbols_unavailable", detail: "Binance did not return its symbol list.", warnings }, 502);
+    return jsonResp({ provider: "binance", markets, refreshEverySeconds: SYMBOL_TTL_MS / 1000, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings, symbols: rows.map((x) => [x.s, x.b, x.q, x.m, x.c]) }, 200, { "cache-control": "public, max-age=60" });
   }
 
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) return jsonResp({ error: "invalid_symbol" }, 400);
   if (!INTERVALS.includes(interval)) return jsonResp({ error: "invalid_interval" }, 400);
+  const marketParam = url.searchParams.get("market") || "spot";
+  if (marketParam !== "spot" && marketParam !== "futures") return jsonResp({ error: "invalid_market", allowed: ["spot", "futures"] }, 400);
 
   if (endpoint === "diag") return jsonResp(await runDiagnostics(env, symbol, interval));
   if (endpoint === "providers") {
@@ -489,7 +522,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
 
   const order = providerOrder(env, url.searchParams.get("provider"));
   try {
-    const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw) }, order);
+    const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw), market: marketParam as MarketKind }, order);
     const data = endpoint === "klines" && Array.isArray(r.data) ? (r.data as Kline[]).map(k => k.slice(0, 6)) : r.data; // public contract stays 6 columns; taker volume is internal
     return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
   } catch (e) {

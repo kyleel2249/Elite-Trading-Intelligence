@@ -422,6 +422,7 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1h";
   const requestedProvider = url.searchParams.get("provider");
+  const market = url.searchParams.get("market") === "futures" ? "futures" : "spot";
   if (!/^[A-Z0-9]{5,20}$/.test(symbol) || !INTERVALS.includes(interval)) return jsonError({ error: "invalid_symbol_or_interval" }, 400);
   const windowRaw = url.searchParams.get("window");
   let windowSize = DEFAULT_WINDOW;
@@ -430,7 +431,7 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
     windowSize = Number(windowRaw);
   }
   try {
-    const result = await getMarketData("klines", { symbol, interval, limit: 1000 }, providerOrder(env, requestedProvider));
+    const result = await getMarketData("klines", { symbol, interval, limit: 1000, market }, providerOrder(env, requestedProvider));
     const rows = result.data as Kline[];
     const latestAge = (Date.now() - rows.at(-1)![0]) / 1000;
     if (latestAge < -60 || latestAge > (INTERVAL_SECONDS[interval] || 60) * 3) return jsonError({ error: "stale_market_data", ageSeconds: Math.round(latestAge), maxAgeSeconds: (INTERVAL_SECONDS[interval] || 60) * 3 }, 503);

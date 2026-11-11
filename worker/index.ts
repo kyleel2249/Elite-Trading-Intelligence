@@ -73,7 +73,7 @@ ${PORTFOLIO_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
-<div class="toolbar"><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
+<div class="toolbar"><select id="symMarket" aria-label="Market type" title="Spot pairs, or USDT/USDC-margined perpetual futures (includes stock, commodity and index perpetuals where Binance lists them)"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="refresh" class="active">Refresh market</button><span class="muted" id="stamp">Waiting for market data…</span></div>
 <div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
@@ -364,10 +364,11 @@ function renderTrades(){$('trades').innerHTML='<table><tr><th>Time</th><th>Side<
 let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='';
 function setConn(t,c){$('connection').textContent=t;$('connection').style.color=c;}
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
+function mkt(){const e=$('symMarket');return e&&e.value==='futures'?'&market=futures':'';}
 async function getJson(url){const r=await fetch(url,{cache:'no-store'}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
 function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
 async function load(){
- const seq=++reqSeq,s=$('symbol').value,i=$('interval').value,key=s+'|'+i,q='symbol='+encodeURIComponent(s);
+ const seq=++reqSeq,s=$('symbol').value,i=$('interval').value,key=s+'|'+i+'|'+mkt(),q='symbol='+encodeURIComponent(s)+mkt();
  try{
   const k=await getJson('/api/market/klines?'+q+'&interval='+encodeURIComponent(i)+'&limit='+BARS);
   if(seq!==reqSeq)return;
@@ -450,6 +451,7 @@ function selectedOrder(){
  return order;
 }
 function orderValidation(o,requireCredentials=true){
+ if($('symMarket').value==='futures')return 'Futures pairs are chart-only here. Switch Market to Spot to place an order.';
  if(!/^[A-Z0-9._-]{2,24}$/.test(o.symbol))return 'Enter a valid symbol.';
  if(!Number.isFinite(o.quantity)||o.quantity<=0)return 'Enter a quantity greater than zero.';
  if(o.type==='limit'&&(!Number.isFinite(o.limitPrice)||o.limitPrice<=0))return 'Enter a valid limit price.';
@@ -563,7 +565,7 @@ async function loadSignal(){
  const sym=$('symbol').value, iv=$('interval').value, seq=++sigSeq;
  $('signalAction').textContent='ANALYSING…';$('signalAction').style.color='#8fa3bd';
  try{
-  const r=await fetch('/api/signals?symbol='+encodeURIComponent(sym)+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
+  const r=await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
   const d=await r.json();
   if(seq!==sigSeq)return;
   if(!r.ok)throw Error(d.error||('HTTP '+r.status));
@@ -687,33 +689,51 @@ setInterval(loadSignal,60000);
 
 ${PORTFOLIO_JS}
 pfInit();
-const SYM={all:[],quote:'',q:'',loaded:false};
+const SYM={all:[],market:'spot',quote:'',cat:'',q:'',at:0,warn:''};
+function symRows(){return SYM.all.filter(r=>r[3]===SYM.market);}
+function symFill(sel,first,values,label){sel.textContent='';const a=document.createElement('option');a.value='';a.textContent=first;sel.appendChild(a);values.forEach(v=>{const o=document.createElement('option');o.value=v[0];o.textContent=label(v);sel.appendChild(o);});}
+function symFilters(){
+ const rows=symRows(),cnt={},cats={};rows.forEach(r=>{cnt[r[2]]=(cnt[r[2]]||0)+1;cats[r[4]]=(cats[r[4]]||0)+1;});
+ const qs=Object.keys(cnt).sort((a,b)=>(a==='USDT'?-1:b==='USDT'?1:cnt[b]-cnt[a]||(a<b?-1:1)));
+ symFill($('symQuote'),'All quotes',qs.map(q=>[q]),v=>v[0]+' ('+cnt[v[0]]+')');$('symQuote').value=cnt[SYM.quote]?SYM.quote:'';SYM.quote=$('symQuote').value;
+ const cs=Object.keys(cats).sort((a,b)=>(a==='crypto'?-1:b==='crypto'?1:a<b?-1:1));
+ symFill($('symCat'),'All types',cs.map(c=>[c]),v=>v[0]+' ('+cats[v[0]]+')');$('symCat').value=cats[SYM.cat]?SYM.cat:'';SYM.cat=$('symCat').value;
+ $('symCat').style.display=SYM.market==='futures'&&cs.length>1?'':'none';
+}
 function symRebuild(){
- const sel=$('symbol'),cur=sel.value,qf=SYM.quote,t=SYM.q.trim().toUpperCase();
- const rows=SYM.all.filter(r=>(!qf||r[2]===qf)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));
+ const sel=$('symbol'),cur=sel.value,t=SYM.q.trim().toUpperCase(),all=symRows();
+ const rows=all.filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));
  const frag=document.createDocumentFragment();let hasCur=false;
- rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=r[1]+'/'+r[2];if(r[0]===cur){hasCur=true;}frag.appendChild(o);});
+ rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=r[1]+'/'+r[2]+(r[4]&&r[4]!=='crypto'?' · '+r[4]:'');if(r[0]===cur)hasCur=true;frag.appendChild(o);});
  sel.textContent='';
  if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
  sel.appendChild(frag);sel.value=cur;
- $('symCount').textContent=rows.length+' of '+SYM.all.length+' Binance pairs';
+ const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', refreshes every 10 min':'';
+ $('symCount').textContent=rows.length+' of '+all.length+' Binance '+(SYM.market==='futures'?'perpetual futures':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'');
+ const dl=$('symbolList');if(dl&&dl.dataset.n!==String(SYM.at)){dl.textContent='';SYM.all.filter(r=>r[3]==='spot').forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});dl.dataset.n=String(SYM.at);}
 }
 async function loadSymbols(){
  try{
   const j=(await getJson('/api/market/symbols')).data||{};
-  SYM.all=j.symbols||[];SYM.loaded=true;
-  const cnt={};SYM.all.forEach(r=>{cnt[r[2]]=(cnt[r[2]]||0)+1;});
-  const qs=Object.keys(cnt).sort((a,b)=>(a==='USDT'?-1:b==='USDT'?1:cnt[b]-cnt[a]||(a<b?-1:1)));
-  const qsel=$('symQuote');qsel.textContent='';const all=document.createElement('option');all.value='';all.textContent='All quotes';qsel.appendChild(all);
-  qs.forEach(q=>{const o=document.createElement('option');o.value=q;o.textContent=q+' ('+cnt[q]+')';qsel.appendChild(o);});
-  const dl=$('symbolList');dl.textContent='';SYM.all.forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});
-  symRebuild();
- }catch(e){$('symCount').textContent='Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. Type any Binance symbol in Order Execution.';}
+  SYM.all=j.symbols||[];SYM.at=Date.now();
+  SYM.warn=(j.warnings||[]).length?'could not refresh '+j.warnings.map(w=>w.market).join(', ')+' list':'';
+  Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)SYM.warn=(SYM.warn?SYM.warn+'; ':'')+k+' list is stale';});
+  symFilters();symRebuild();
+ }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any Binance symbol in Order Execution.';}
 }
+function symMarketChanged(){
+ SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';symFilters();
+ const rows=symRows(),cur=$('symbol').value;
+ if(rows.length&&!rows.some(r=>r[0]===cur)){const d=rows.find(r=>r[0]==='BTCUSDT')||rows[0];$('symbol').value=d[0];}
+ symRebuild();$('orderSymbol').value=$('symbol').value;resetAndLoad();syncOrderMarket();
+ if(SYM.market==='futures')$('orderOutput').textContent='Futures are chart-only here. Orders are placed on spot pairs.';
+}
+$('symMarket').addEventListener('change',symMarketChanged);
 $('symSearch').addEventListener('input',()=>{SYM.q=$('symSearch').value;symRebuild();});
-$('symSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const t=SYM.q.trim().toUpperCase();if(!t)return;const m=SYM.all.find(r=>r[0]===t)||SYM.all.find(r=>(!SYM.quote||r[2]===SYM.quote)&&(r[0].indexOf(t)>=0||r[1]===t));if(m){$('symbol').value=m[0];$('symbol').dispatchEvent(new Event('change'));$('symSearch').value='';SYM.q='';symRebuild();}});
+$('symSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const t=SYM.q.trim().toUpperCase();if(!t)return;const rows=symRows(),m=rows.find(r=>r[0]===t)||rows.find(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(r[0].indexOf(t)>=0||r[1]===t));if(m){$('symbol').value=m[0];$('symbol').dispatchEvent(new Event('change'));$('symSearch').value='';SYM.q='';symRebuild();}});
 $('symQuote').addEventListener('change',()=>{SYM.quote=$('symQuote').value;symRebuild();});
-loadSymbols();
+$('symCat').addEventListener('change',()=>{SYM.cat=$('symCat').value;symRebuild();});
+loadSymbols();setInterval(loadSymbols,600000);
 $('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
 </script></body></html>`;
 const page = withMotion(html);
