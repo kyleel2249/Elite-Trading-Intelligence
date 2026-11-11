@@ -1,32 +1,47 @@
-# ETI analytics (`/api/analytics/*`)
+# ETI analytics: implementation matrix
 
-Stateless research and risk computations in `app/analytics/` (stdlib only), exposed by `app/api/analytics.py`.
-Nothing here places orders; execution stays behind the RiskEngine. Where inputs are
-insufficient, results say `insufficient_data` instead of guessing.
+Status key: **UNIT** = covered by offline unit tests (synthetic data or fake transport; run in the author's sandbox 2026-11-11, 41/41 passing).
+**NOT RUN LIVE** = never executed against a running server or a live provider. Nothing below is classified PASS yet, because
+PASS requires verification against real data.
 
-| Capability | Endpoint | Notes |
-|---|---|---|
-| Multi-market scan, ranking, watchlist | `GET /scan?symbols=A,B,C` | Candles via `MarketService` (provider must support the symbol). Ranking is an attention heuristic, not a probability. |
-| Market regime | `GET /regime` | Efficiency ratio + EMA 20/50 + volatility percentile |
-| Unusual volume | `GET /unusual-volume` | Relative volume and z-score vs 20-bar baseline |
-| Volatility breakout | `GET /volatility-breakout` | Squeeze + ATR expansion + channel break |
-| Correlation | `GET /correlation?symbols=` | Pearson on aligned returns, concentration warnings |
-| Monte Carlo | `GET /monte-carlo` | Block bootstrap, seeded, VaR/CVaR, ruin probability |
-| Stress test / scenarios | `POST /stress`, `POST /scenario`, `GET /stress/scenarios` | Hypothetical shocks, not historical claims |
-| Walk-forward | `POST /walk-forward` | Parameters fit on train window only; scored on unseen window; overfit warning |
-| Strategy lab | `POST /strategy-lab/compare` | Same data and costs; full-sample = in-sample |
-| Tax lots / transactions | `POST /tax/realized-gains` | FIFO/LIFO/HIFO, CSV option. Support tooling, not tax advice |
-| Multi-currency | `POST /portfolio/multi-currency` | Caller-supplied FX rates; missing rates reported, never guessed |
-| Live vs backtest | `POST /live-vs-backtest` | Welch t-test on per-trade returns |
-| Risk alerts | `POST /risk-alerts` | Drawdown, daily loss, concentration, correlated exposure |
-| Research mode | `POST /research` | Evidence-gated: no exposure recommendation until required evidence is supplied |
-| Natural-language queries | `POST /query` | Rule-based router to the endpoints above (no LLM) |
+All routes are under `/api/analytics`. Auth: none for GET/compute routes; `POST /intel/providers/probe` needs `X-API-Key`.
 
-Tests: `python -m unittest tests.test_analytics` (also collected by pytest).
+| Capability | Method + route | Provider / data | Status |
+|---|---|---|---|
+| Scan + ranking + watchlist | GET `/scan` | MarketService candles (Binance/Alpaca) | PARTIAL (UNIT logic; route NOT RUN LIVE) |
+| Regime | GET `/regime` | MarketService | PARTIAL |
+| Unusual volume | GET `/unusual-volume` | MarketService | PARTIAL |
+| Volatility breakout | GET `/volatility-breakout` | MarketService | PARTIAL |
+| Correlation | GET `/correlation` | MarketService | PARTIAL |
+| Monte Carlo | GET `/monte-carlo` | MarketService | PARTIAL |
+| Stress / scenarios | POST `/stress`, `/scenario`; GET `/stress/scenarios` | request body | PARTIAL (UNIT) |
+| Walk-forward | POST `/walk-forward` | MarketService | PARTIAL |
+| Strategy lab | POST `/strategy-lab/compare` | MarketService | PARTIAL |
+| Tax lots / CSV | POST `/tax/realized-gains` | request body | PARTIAL (UNIT; not tax advice) |
+| Multi-currency | POST `/portfolio/multi-currency` | caller FX rates | PARTIAL (UNIT) |
+| Live vs backtest | POST `/live-vs-backtest` | request body | PARTIAL (UNIT) |
+| Risk alerts | POST `/risk-alerts` | request body | PARTIAL (UNIT) |
+| Research dossier | POST `/research` | evidence in body + optional candles | PARTIAL |
+| NL query router | POST `/query` | none (rules) | PARTIAL (UNIT) |
+| Provider health | GET `/intel/providers`, `/intel/providers/health-log` | in-process | PARTIAL (UNIT of health logic) |
+| Provider probe | POST `/intel/providers/probe` | FMP, Tokenomist (live) | BLOCKED until keys are set |
+| Economic calendar | GET `/intel/calendar/economic` | FMP | BLOCKED (no key verified) |
+| Earnings calendar | GET `/intel/calendar/earnings` | FMP | BLOCKED |
+| Event risk | GET `/intel/event-risk` | FMP | BLOCKED (logic UNIT) |
+| Token unlocks | GET `/intel/unlocks/{token_id}` | Tokenomist | BLOCKED (logic UNIT) |
+| Whale activity | none | Whale Alert (selected) | NOT BUILT |
+| Institutional holdings | none as analytics (Quiver exists for ticker context in the Council) | | NOT BUILT |
+| Multi-account, marketplace, AI reports, voice, replay endpoint | none | | NOT BUILT |
 
-## Not implemented yet (needs data providers, persistence or UI)
+Dependencies: Python stdlib only for `app/analytics`; `httpx` (already in requirements) for providers; `pydantic-settings` for provider env.
+New environment variables: `FMP_API_KEY`, `TOKENOMIST_API_KEY`, `WHALE_ALERT_API_KEY` (reserved), `TOKENOMIST_CREDIT_RESERVE`.
 
-Economic and earnings calendars (beyond the existing readiness feed), token unlock monitoring, whale activity,
-institutional holdings analytics, multi-account persistence, trade-journal UI changes, strategy marketplace,
-AI-written daily/weekly reports, voice assistant, historical replay endpoint/UI (the `Replay` class exists),
-and any change to live trading. Live trading remains gated as documented in the README.
+## Verification status (honest)
+- The authoring sandbox has no network and cannot install packages, so FastAPI, the app import, route registration, auth, response schemas, database interaction and every live provider call have **not** been executed by the author.
+- Existing CI (`ci.yml`) runs compile, `pytest` and `from app.main import app` on each push to `main`; check its result for the commits that added `/api/analytics`.
+- Live evidence: `PYTHONPATH=. python scripts/live_provider_check.py` with the two keys, or the workflow template in `docs/live-provider-check.workflow.yml`.
+
+## Endpoint test plan (when a runnable environment exists)
+For each route above: registered in `/openapi.json`; wrong method rejected; validation errors are 422; schema as documented; provider errors map to 4xx/5xx as in `app/api/intel.py`; response time recorded; data compared with the provider's own site for 3 sample events/tokens.
+
+See `docs/PROVIDERS.md` for provider selection, pricing, limits and licence notes.
