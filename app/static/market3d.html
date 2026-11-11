@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ETI | 3D Market View</title>
+<link rel="stylesheet" href="/static/eti.css">
+<style>
+#m3d{width:100%;height:clamp(300px,62vh,640px);display:block;background:#0a1220;border-radius:8px;touch-action:pan-y;cursor:grab}
+#m3d:active{cursor:grabbing}
+.legend span{display:inline-block;margin-right:1rem;font-size:.78rem;color:var(--muted)}
+.sw{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;margin-right:.3rem;vertical-align:middle}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ETI &middot; 3D Market View</h1>
+    <div class="sub">Real Binance candles via ETI &middot; read-only &middot; not a trade signal</div>
+  </div>
+  <nav aria-label="ETI pages">
+    <a class="nav" href="/">Dashboard</a>
+    <a class="nav" href="/markets">Markets</a>
+    <a class="nav" href="/predictions">Predictions</a>
+    <a class="nav" href="/alpha">Alpha</a>
+    <a class="nav" href="/alerts">Alerts</a>
+    <a class="nav" href="/data-intel">Data intel</a>
+  </nav>
+</header>
+<main>
+  <div id="banner" class="banner" role="status" aria-live="polite">Loading market data&hellip;</div>
+
+  <section class="panel">
+    <div class="ph">
+      <h2>Price &times; time &times; volume</h2>
+      <div class="row" style="margin:0">
+        <label class="sub" for="sym">Symbol</label>
+        <input id="sym" value="BTCUSDT" maxlength="20" autocapitalize="characters" spellcheck="false" size="10">
+        <label class="sub" for="int">Interval</label>
+        <select id="int">
+          <option>1m</option><option>5m</option><option>15m</option>
+          <option selected>1h</option><option>4h</option><option>1d</option>
+        </select>
+        <button class="btn primary" id="go" type="button">Load</button>
+      </div>
+    </div>
+    <div class="pb">
+      <canvas id="m3d" tabindex="0" role="img" aria-label="3D candlestick and volume chart. Use arrow keys to rotate, plus and minus to zoom. A table of recent candles follows."></canvas>
+      <div class="row" style="margin-top:.6rem">
+        <button class="btn" id="rl" type="button" aria-label="Rotate left">&#8634;</button>
+        <button class="btn" id="rr" type="button" aria-label="Rotate right">&#8635;</button>
+        <button class="btn" id="tu" type="button" aria-label="Tilt up">&#9650;</button>
+        <button class="btn" id="td" type="button" aria-label="Tilt down">&#9660;</button>
+        <button class="btn" id="zi" type="button" aria-label="Zoom in">+</button>
+        <button class="btn" id="zo" type="button" aria-label="Zoom out">&minus;</button>
+        <button class="btn" id="auto" type="button" aria-pressed="false">Auto-rotate</button>
+        <button class="btn" id="rst" type="button">Reset view</button>
+      </div>
+      <div class="legend">
+        <span><i class="sw" style="background:#22c55e"></i>Close &ge; open</span>
+        <span><i class="sw" style="background:#ef4444"></i>Close &lt; open</span>
+        <span><i class="sw" style="background:#3b82f6"></i>Volume (front row)</span>
+      </div>
+      <p class="note">Drag (or use arrow keys) to rotate. Candles are plotted from exchange data; nothing is simulated. If data cannot be loaded or is stale the chart says so instead of showing old values as live.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="ph"><h2>Most recent candles</h2><span class="sub" id="meta"></span></div>
+    <div class="pb">
+      <table>
+        <thead><tr><th>Close time (UTC)</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th><th>Quality</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="7" class="empty">No data yet</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<footer>Research visualisation only. It places no orders and is not investment advice.</footer>
+<script src="/static/market3d.js"></script>
+</body>
+</html>
