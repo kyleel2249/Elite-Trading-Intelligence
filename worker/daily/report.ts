@@ -60,7 +60,7 @@ export const DISCLAIMERS = [
   "Research and decision support only. This is not investment advice and ETI cannot guarantee any outcome. Trading can lose money.",
   "A setup is called validated only when ETI's own gates pass: crypto uses the ETI Precision engine's hard risk gates; other markets need a high-conviction signal on fresh candles whose walk-forward replay has at least 20 resolved samples and a win rate above 50%. Replay excludes fees, slippage and market impact.",
   "Anything ETI could not measure is shown as unavailable or not evaluated and lowers the verdict. ETI never invents prices, events or statistics.",
-  "No order is placed by this report. Execution stays behind the separate authenticated, risk-gated order gateway.",
+  "No order is placed by this report. Orders can only be submitted through ETI's separate authenticated execution API, which is limited to paper and testnet venues and applies in-process safeguards (kill switch, validation, quantity cap, duplicate protection); live trading is disabled.",
 ];
 
 const iso = (ms: number) => new Date(ms).toISOString();
