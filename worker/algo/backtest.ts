@@ -9,14 +9,14 @@
 // Results are HISTORICAL SIMULATIONS. They are never a forecast and never a guaranteed win rate.
 import type { Kline } from "../market.ts";
 import { adaptiveBandsSeries, adxSeries, atrSeries, ema, volFlowSeries } from "./indicators.ts";
-import { manageStop, type TradeLevels } from "./levels.ts";
+import { PARTIALS, walkPosition } from "./trade-walk.ts";
 import { MIN_SAMPLE, computeReport, type ClosedTrade, type PerformanceReport } from "./performance.ts";
 
 export interface BtParams { fast: number; slow: number; atrMult: number; minFlow: number; regimeFilter: boolean }
 export interface Costs { feeBps: number; slippageBps: number }           // charged per side
 export const DEFAULT_COSTS: Costs = { feeBps: 10, slippageBps: 5 };
 export const R_MULTIPLES = [1.2, 2.2, 3.5] as const;
-export const PARTIALS = [0.4, 0.3, 0.3] as const;
+export { PARTIALS };
 export const WARMUP = 60, MAX_HOLD = 100, COOLDOWN = 3, MIN_TRADES = 20, RISK_FRACTION = 0.01;
 
 export const GRID = { fast: [8, 12, 16], slow: [26, 50], atrMult: [1.2, 1.5, 2, 2.5], minFlow: [5, 15, 30], regimeFilter: [false, true] } as const;
@@ -50,28 +50,13 @@ export function simulate(p: Prepared, prm: BtParams, from: number, to: number, c
     if (prm.regimeFilter) regimeOk = adx >= 20 && (rows[t][2] - rows[t][3]) <= 6 * atr && (dir > 0 ? p.plusDI[t] > p.minusDI[t] : p.minusDI[t] > p.plusDI[t]);
     if (!(bandsAgree && flowOk && emaOk && regimeOk)) { t++; continue; }
     const entry = rows[t + 1][1], dist = Math.max(atr * prm.atrMult, entry * 0.001);
-    let stop = entry - dir * dist, hit = 0, rem = 1, realized = 0, trailed = false, exitIdx = -1, exit = NaN, reason: Trade["reason"] = "end", highWater = entry;
-    const feeBuffer = entry * costs.feeBps * 2 / 1e4, beStop = entry + dir * feeBuffer;
-    const lv = { direction: dir, entry, trailDistance: dist * 1.7 } as unknown as TradeLevels;   // same trail distance the paper engine uses
-    const last = Math.min(to - 1, t + 1 + MAX_HOLD);
-    for (let j = t + 1; j <= last; j++) {
-      const [, o, h, l, c] = rows[j];
-      // Conservative sequencing: the stop in force at the start of the bar is tested first.
-      if (dir > 0 ? l <= stop : h >= stop) { exit = dir > 0 ? Math.min(o, stop) : Math.max(o, stop); exitIdx = j; reason = hit === 0 ? "stop" : trailed ? "trail" : "breakeven"; break; }
-      while (hit < 3) {
-        const tp = entry + dir * dist * R_MULTIPLES[hit];
-        if (dir > 0 ? h >= tp : l <= tp) { realized += PARTIALS[hit] * R_MULTIPLES[hit]; rem -= PARTIALS[hit]; hit++; } else break;
-      }
-      if (hit >= 3) { exit = NaN; exitIdx = j; reason = "tp3"; break; }
-      // Stops only ever tighten: break-even (covering round-trip fees) after TP1, trailing after TP2. Identical to PaperEngine.
-      const m = manageStop(lv, { stop, hitTargets: hit, highWater }, dir > 0 ? h : l, feeBuffer);
-      stop = m.stop; highWater = m.highWater;
-      if (hit >= 2 && (dir > 0 ? stop > beStop : stop < beStop)) trailed = true;
-      if (j === last) { exit = c; exitIdx = j; reason = j === to - 1 ? "end" : "time"; }
-    }
-    if (rem > 1e-9 && Number.isFinite(exit)) realized += rem * ((exit - entry) * dir / dist);
+    const feeBuffer = entry * costs.feeBps * 2 / 1e4, last = Math.min(to - 1, t + 1 + MAX_HOLD);
+    // The single shared trade walk (stop-first, break-even covering fees after TP1, trailing after TP2): identical to PaperEngine.
+    const w = walkPosition(rows, t + 1, last, dir, entry, entry - dir * dist, [entry + dir * dist * R_MULTIPLES[0], entry + dir * dist * R_MULTIPLES[1], entry + dir * dist * R_MULTIPLES[2]], feeBuffer, to - 1);
+    if (!w) { t++; continue; }
+    const { exitIdx, realizedR: realized, targetsHit: hit, reason } = w;
     const costR = entry * rt / dist;
-    trades.push({ entryIdx: t + 1, exitIdx, dir, entry, stop0: entry - dir * dist, exit: Number.isFinite(exit) ? exit : entry + dir * dist * R_MULTIPLES[2], grossR: realized, costR, r: realized - costR, targetsHit: hit, reason });
+    trades.push({ entryIdx: t + 1, exitIdx, dir, entry, stop0: entry - dir * dist, exit: w.exit, grossR: realized, costR, r: realized - costR, targetsHit: hit, reason });
     t = exitIdx + COOLDOWN;
   }
   return trades;
