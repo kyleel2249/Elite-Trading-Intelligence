@@ -45,7 +45,9 @@ class PortfolioService:
         council_action: Optional[str] = None,
         thesis: Optional[str] = None,
         provider_order_id: Optional[str] = None,
+        position_meta: Optional[dict[str, Any]] = None,
     ) -> OrderRecord:
+        """position_meta (stop_loss, take_profit, strategy_id) is stored on a newly opened position."""
         self._pending_fills = []
         row = (
             self.db.query(OrderRecord)
@@ -88,6 +90,7 @@ class PortfolioService:
             thesis=thesis,
             council_action=council_action,
             risk_officer="Helena Frost",
+            payload=({"strategy_id": position_meta.get("strategy_id")} if position_meta and position_meta.get("strategy_id") else None),
         )
 
         if status in ("submitted", "filled") and fill_price is not None and risk_approved:
@@ -103,6 +106,7 @@ class PortfolioService:
                     "thesis": thesis,
                     "council_action": council_action,
                 },
+                meta=position_meta,
             )
 
         self.db.commit()
@@ -135,6 +139,7 @@ class PortfolioService:
         qty: float,
         price: float,
         ctx: Optional[dict[str, Any]] = None,
+        meta: Optional[dict[str, Any]] = None,
     ) -> None:
         symbol = symbol.upper()
         side = side.lower()
@@ -172,6 +177,7 @@ class PortfolioService:
                 avg_entry=price,
                 mark_price=price,
                 status="open",
+                meta=dict(meta) if meta else None,
             )
             self.db.add(pos)
             self._pending_fills.append({**base_event, "kind": "open", "qty": qty, "position_side": pos_side})
@@ -206,6 +212,7 @@ class PortfolioService:
                 event="closed",
                 pnl=pnl,
                 thesis="Partial position reduce",
+                payload=self._strategy_payload(pos),
             )
             self._pending_fills.append({**base_event, "kind": "reduce", "qty": qty, "pnl": pnl})
         elif qty == pos.qty:
@@ -229,6 +236,7 @@ class PortfolioService:
                 event="closed",
                 pnl=pnl,
                 thesis="Full position close",
+                payload=self._strategy_payload(pos),
             )
             self._pending_fills.append({**base_event, "kind": "close", "qty": qty, "pnl": pnl})
         else:
@@ -245,6 +253,8 @@ class PortfolioService:
             pos.mark_price = price
             pos.status = "open"
             pos.updated_at = _utcnow()
+            closed_payload = self._strategy_payload(pos)
+            pos.meta = dict(meta) if meta else None
             self._journal(
                 client_order_id=None,
                 provider=provider,
@@ -256,11 +266,17 @@ class PortfolioService:
                 event="closed",
                 pnl=pnl,
                 thesis="Position flip — closed leg",
+                payload=closed_payload,
             )
             self._pending_fills.append({
                 **base_event, "kind": "flip", "qty": qty, "close_qty": close_qty, "remainder_qty": remainder,
                 "new_side": pos.side, "pnl": pnl,
             })
+
+    @staticmethod
+    def _strategy_payload(pos: Position) -> Optional[dict[str, Any]]:
+        sid = (pos.meta or {}).get("strategy_id")
+        return {"strategy_id": sid} if sid else None
 
     def mark_positions(self, marks: dict[tuple[str, str, str], float]) -> list[Position]:
         open_pos = self.db.query(Position).filter(Position.status == "open").all()

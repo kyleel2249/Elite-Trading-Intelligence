@@ -140,7 +140,11 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
     let gateResponse:Response;
     try {
       gateResponse=await fetch(gateUrl,{method:"POST",headers:{"content-type":"application/json","x-api-key":gateToken},body:JSON.stringify({
-        provider:broker,environment:"live",symbol,side,quantity,order_type:type,limit_price:body.limitPrice??null
+        provider:broker,environment:"live",symbol,side,quantity,order_type:type,limit_price:body.limitPrice??null,
+        stop_loss:num(body.stopLoss)>0?num(body.stopLoss):null,
+        take_profit:num(body.takeProfit)>0?num(body.takeProfit):null,
+        strategy_id:(typeof source.strategyId==="string"&&source.strategyId)?source.strategyId:(typeof body.strategyId==="string"&&body.strategyId?body.strategyId:null),
+        atr_pct:num(body.atrPct)>0?num(body.atrPct):null
       })});
     } catch {
       return reply({error:"risk_gate_unavailable",message:"Live order submission was blocked because ETI risk preflight could not be reached."},503);
@@ -148,7 +152,7 @@ export async function handleExecution(req: Request, env: ExecutionEnv): Promise<
     const gateBody:any=await gateResponse.json().catch(()=>({}));
     if(!gateResponse.ok || gateBody?.approved!==true)
       return reply({error:"risk_gate_rejected",status:gateResponse.status,reasons:Array.isArray(gateBody?.reasons)?gateBody.reasons:["Server-side risk approval unavailable"]},403);
-    riskGateEvidence={decision:gateBody.decision,market:gateBody.market,risk_inputs:gateBody.risk_inputs,market_research:gateBody.market_research?{council_action:gateBody.market_research.council_action,confidence:gateBody.market_research.confidence,risk_veto:gateBody.market_research.risk_veto,data_quality:gateBody.market_research.data_quality}:null,disclosure_context:{
+    riskGateEvidence={capital_protection:gateBody.capital_protection?{system:gateBody.capital_protection.system,approved:gateBody.capital_protection.approved,mode:gateBody.capital_protection.mode,policy_fingerprint:gateBody.capital_protection.policy_fingerprint}:null,decision:gateBody.decision,market:gateBody.market,risk_inputs:gateBody.risk_inputs,market_research:gateBody.market_research?{council_action:gateBody.market_research.council_action,confidence:gateBody.market_research.confidence,risk_veto:gateBody.market_research.risk_veto,data_quality:gateBody.market_research.data_quality}:null,disclosure_context:{
       matched_count:gateBody.disclosure_context?.matched_count??0,
       high_impact_verified_count:gateBody.disclosure_context?.high_impact_verified_count??0
     }};

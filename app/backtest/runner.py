@@ -10,6 +10,7 @@ adaptive-edge governance has suspended.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -18,11 +19,25 @@ from app.backtest.engine import BacktestParams, run_backtest, walk_forward
 from app.backtest.signals import vcp_signals, wyckoff_signals, breakout_signals, sma_trend_signals
 from app.config import Settings
 from app.market.service import MarketService
+from app.risk.data_integrity import check_klines
+from app.risk.protection_service import CapitalProtectionService
 from app.trading.risk_context import build_risk_context
 from app.trading.service import TradingService
 from app.knowledge.strategies import STRATEGY_MODULES
 
 logger = logging.getLogger("eti.runner")
+
+
+def _atr_pct(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> Optional[float]:
+    """Average true range as a percentage of the last close (None if there is too little clean data)."""
+    n = min(len(highs), len(lows), len(closes))
+    if n < period + 1:
+        return None
+    trs = []
+    for i in range(n - period, n):
+        trs.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+    last = closes[n - 1]
+    return (sum(trs) / len(trs)) / last * 100.0 if last > 0 else None
 
 
 class StrategyRunner:
@@ -189,6 +204,26 @@ class StrategyRunner:
         if env in ("paper", "testnet") and snapshot and snapshot.get("price") is not None:
             fill_hint = float(snapshot["price"])
 
+        # --- Capital Protection inputs. The strategy PROPOSES a volatility-based stop; the protection system
+        # validates it and sizes against it. Nothing here can relax a limit.
+        highs = [float(k["high"]) for k in klines if k.get("high") is not None]
+        lows = [float(k["low"]) for k in klines if k.get("low") is not None]
+        atr_pct = _atr_pct(highs, lows, closes)
+        ref_price = fill_hint if fill_hint is not None else (closes[-1] if closes else None)
+        stop_loss = None
+        if side == "buy" and ref_price and atr_pct:
+            stop_loss = ref_price * (1 - 2.0 * atr_pct / 100.0)
+        flags = check_klines(klines, interval="1h", now_ms=int(time.time() * 1000))
+        if self.db is not None:
+            protection = CapitalProtectionService(self.db, self.settings)
+            protection.observe(module_id, atr_pct=atr_pct, integrity_flags=flags)
+            if flags:
+                result["data_integrity_flags"] = flags
+                try:
+                    protection.evaluate_strategy(module_id)  # a data-integrity flag quarantines a registered strategy
+                except KeyError:
+                    pass  # unregistered strategy: nothing to quarantine (live is refused anyway)
+
         order = await self.trading.place_order(
             provider=provider,
             environment=env,
@@ -204,6 +239,10 @@ class StrategyRunner:
             fill_price_hint=fill_hint,
             thesis=f"StrategyRunner:{module_id}:{signal}:{bt.signal_model}",
             council_action=signal.upper(),
+            strategy_id=module_id,
+            stop_loss=stop_loss,
+            atr_pct=atr_pct,
+            reference_price=ref_price,
         )
         result["executed"] = order.get("status") in ("submitted", "filled")
         result["order"] = order
