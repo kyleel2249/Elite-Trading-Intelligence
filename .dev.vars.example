@@ -61,3 +61,21 @@ ETI_IDENTITY_ISSUER=ETI
 # Leave both unset to execute Omnisignal BUY plans in-Worker (ETI Internal Paper / Binance testnet). No risk gateway is used.
 ETI_EXECUTION_API_URL=
 ETI_EXECUTION_API_TOKEN=
+
+# --- ETI Daily Intelligence Report (see docs/DAILY_REPORT.md; /daily and /api/daily-report) ---
+# Economic calendar (HTTPS JSON feed and/or inline JSON). Without one, announcements are reported as UNVERIFIED and the verdict is capped.
+# ETI_EVENT_FEED_URL=
+# ETI_EVENT_FEED_TOKEN=
+# EUR/USD and XAU/USD price data: an HTTPS candle endpoint you are licensed to use; {symbol}, {interval}, {limit} are substituted. Without it those assets show N/A.
+# ETI_FX_CANDLES_URL=
+# ETI_FX_QUOTE_URL=
+# ETI_FX_DATA_TOKEN=
+# Stock watchlist for the "selected stock" row (US tickers, max 5; needs the ALPACA_* keys above)
+ETI_DAILY_STOCKS=AAPL,MSFT,NVDA
+# Upstream request budget per generation (10-900, default 44: Workers Free allows 50 per invocation)
+ETI_DAILY_SUBREQUEST_BUDGET=44
+# Planning risk per trade, percent of equity, used only for the portfolio-risk arithmetic (default 0.5)
+ETI_DAILY_RISK_PCT=0.5
+# UTC hour (0-23) after which the cron generates and stores the day's report on weekdays (default 6); ETI_DAILY_ENABLED=false turns it off
+ETI_DAILY_HOUR_UTC=6
+ETI_DAILY_ENABLED=true
