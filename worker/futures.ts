@@ -2,7 +2,7 @@
  * ETI futures gateway: Binance USD-M Futures TESTNET only (fixed URL). There is no live route.
  * Supports BUY / SELL / SHORT / COVER with one-way mode, isolated margin, limit orders, reduce-only exits.
  * Deterministic hard limits here are final: neither the agents nor the caller can relax them.
- * No withdrawal, transfer or wallet endpoints are called.
+ * No external risk gateway is used; every check runs in this Worker. No withdrawal, transfer or wallet endpoints are called.
  */
 import type { ExecutionEnv } from "./execution.ts";
 
@@ -69,6 +69,7 @@ export function futuresHardChecks(o: FuturesOrder, s: FuturesState, c: FuturesCa
 const H = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: H });
 const fmt = (n: number) => { const s = String(n); return /e/i.test(s) ? n.toFixed(12).replace(/0+$/, "").replace(/\.$/, "") : s; };
+const TTL_90D = 60 * 60 * 24 * 90;
 async function authorized(req: Request, env: FuturesEnv): Promise<boolean> {
   const token = env.ETI_EXECUTION_TOKEN, supplied = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token || !supplied || supplied.length !== token.length) return false;
@@ -118,7 +119,7 @@ export async function handleFutures(req: Request, env: FuturesEnv): Promise<Resp
   const url = new URL(req.url), path = url.pathname;
   const ready = !!(env.BINANCE_FUTURES_API_KEY && env.BINANCE_FUTURES_SECRET_KEY);
   if (path === "/api/futures/status" && req.method === "GET")
-    return reply({ mode: "binance_futures_testnet_only", enabled: env.ETI_FUTURES_ENABLED === "true", credentials_configured: ready, caps_configured: !!caps(env), max_leverage_hard_cap: HARD_MAX_LEVERAGE, risk_gate_configured: !!(env.ETI_RISK_GATE_URL && env.ETI_RISK_GATE_TOKEN), audit_log_configured: !!env.ETI_EXECUTION_LOG, kill_switch: env.ETI_KILL_SWITCH === "true", live_futures: false, withdrawal_permissions: false });
+    return reply({ mode: "binance_futures_testnet_only", enabled: env.ETI_FUTURES_ENABLED === "true", credentials_configured: ready, caps_configured: !!caps(env), max_leverage_hard_cap: HARD_MAX_LEVERAGE, external_risk_gateway_required: false, audit_log_configured: !!env.ETI_EXECUTION_LOG, kill_switch: env.ETI_KILL_SWITCH === "true", live_futures: false, withdrawal_permissions: false });
   if (path === "/api/futures/positions" || path === "/api/futures/reconcile") {
     if (req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
     if (!(await authorized(req, env))) return reply({ error: "unauthorized" }, 401);
@@ -130,7 +131,7 @@ export async function handleFutures(req: Request, env: FuturesEnv): Promise<Resp
       const mark = Number(x.markPrice), liq = Number(x.liquidationPrice), amt = Number(x.positionAmt), dist = liq > 0 && mark > 0 ? (Math.abs(mark - liq) / mark) * 100 : null;
       return { symbol: x.symbol, direction: amt > 0 ? "long" : "short", positionAmt: amt, entryPrice: Number(x.entryPrice), markPrice: mark, liquidationPrice: liq || null, leverage: Number(x.leverage), marginType: x.marginType, unrealizedPnl: Number(x.unRealizedProfit), liquidationDistancePct: dist, liquidationRisk: dist === null ? "unknown" : dist < 8 ? "critical" : dist < 15 ? "warning" : "ok" };
     });
-    if (path === "/api/futures/positions") return reply({ positions, note: "Point-in-time snapshot; no background monitor runs. Poll this endpoint." });
+    if (path === "/api/futures/positions") return reply({ positions, note: "Point-in-time snapshot. The protective-stop monitor also runs on a one-minute cron when futures are enabled." });
     const oo = await signed(env, "GET", "/fapi/v1/openOrders", {}).catch(() => null);
     const open = oo && oo.ok ? ((await oo.json()) as any[]).map((o) => ({ symbol: o.symbol, side: o.side, price: o.price, origQty: o.origQty, reduceOnly: o.reduceOnly, clientOrderId: o.clientOrderId })) : null;
     let audited: Set<string> | null = null;
@@ -146,7 +147,8 @@ export async function handleFutures(req: Request, env: FuturesEnv): Promise<Resp
   if (env.ETI_KILL_SWITCH === "true") return reply({ error: "execution_disabled", reason: "Emergency kill switch is active" }, 423);
   if (!(await authorized(req, env))) return reply({ error: "unauthorized" }, 401);
   if (env.ETI_FUTURES_ENABLED !== "true") return reply({ error: "futures_disabled", message: "Set ETI_FUTURES_ENABLED=true after testnet validation to enable futures orders." }, 423);
-  if (!env.ETI_EXECUTION_LOG) return reply({ error: "audit_log_not_configured" }, 503);
+  const kv = env.ETI_EXECUTION_LOG;
+  if (!kv) return reply({ error: "audit_log_not_configured" }, 503);
   if (!ready) return reply({ error: "futures_credentials_not_configured" }, 503);
   const cp = caps(env); if (!cp) return reply({ error: "futures_caps_not_configured", message: "Set ETI_FUTURES_MAX_NOTIONAL_USD (and optionally ETI_FUTURES_MAX_LEVERAGE, hard cap 5)." }, 503);
   let b: any; try { b = await req.json(); } catch { return reply({ error: "invalid_json" }, 400); }
@@ -156,36 +158,31 @@ export async function handleFutures(req: Request, env: FuturesEnv): Promise<Resp
     return reply({ error: "invalid_order", message: "Provide symbol, buy/sell, positive quantity and limitPrice, unique clientOrderId, riskConfirmed:true (and stopPrice when opening or increasing)." }, 400);
   if (!src || !["manual_user", "strategy", "system", "automation"].includes(src.actorType) || typeof src.actorId !== "string" || !src.actorId.trim() || typeof src.sourceName !== "string" || !src.sourceName.trim())
     return reply({ error: "execution_source_required" }, 400);
+  const idemKey = "idem:futures:" + b.clientOrderId;
+  if (await kv.get(idemKey)) return reply({ error: "duplicate_order", message: "This clientOrderId was already submitted. Use a new unique clientOrderId for a new order." }, 409);
   const st = await loadFuturesState(env, symbol); if (!st) return reply({ error: "futures_state_unavailable", message: "Account, position, funding or mark price could not be read; failing closed." }, 503);
   const check = futuresHardChecks({ side, quantity, limitPrice, reduceOnly, leverage: reduceOnly ? (st.leverage || 1) : leverage, stopPrice }, st, cp);
   if (!check.ok) return reply({ error: "futures_risk_limit_rejected", reasons: check.reasons }, 403);
   if (b.intent !== undefined && b.intent !== check.intent) return reply({ error: "intent_mismatch", expected: check.intent, supplied: b.intent }, 400);
 
-  const gateUrl = env.ETI_RISK_GATE_URL || "", gateToken = env.ETI_RISK_GATE_TOKEN || "";
-  if (!gateUrl || !gateToken) return reply({ error: "risk_gate_not_configured" }, 503);
-  let gate: Response;
-  try { gate = await fetch(gateUrl, { method: "POST", headers: { "content-type": "application/json", "x-api-key": gateToken }, body: JSON.stringify({ provider: "binance", environment: "testnet", symbol, side, quantity, order_type: "limit", limit_price: limitPrice, venue: "futures", intent: check.intent, reduce_only: reduceOnly, leverage: reduceOnly ? st.leverage : leverage }) }); }
-  catch { return reply({ error: "risk_gate_unavailable" }, 503); }
-  const gb: any = await gate.json().catch(() => ({}));
-  if (!gate.ok || gb?.approved !== true) return reply({ error: "risk_gate_rejected", status: gate.status, reasons: Array.isArray(gb?.reasons) ? gb.reasons : ["Server-side risk approval unavailable"] }, 403);
-
+  await kv.put(idemKey, new Date().toISOString(), { expirationTtl: TTL_90D });
   try {
     if (!reduceOnly) {
       if (st.positionAmt === 0 && st.marginType.toLowerCase() !== "isolated") {
         const m = await signed(env, "POST", "/fapi/v1/marginType", { symbol, marginType: "ISOLATED" }), mj: any = await m.json().catch(() => ({}));
-        if (!m.ok && mj?.code !== -4046) return reply({ error: "margin_setup_failed", detail: mj }, 502);
+        if (!m.ok && mj?.code !== -4046) { await kv.delete(idemKey); return reply({ error: "margin_setup_failed", detail: mj }, 502); }
       }
       if (st.leverage !== leverage) {
         const l = await signed(env, "POST", "/fapi/v1/leverage", { symbol, leverage: String(leverage) });
-        if (!l.ok) return reply({ error: "leverage_setup_failed", detail: await l.json().catch(() => ({})) }, 502);
+        if (!l.ok) { await kv.delete(idemKey); return reply({ error: "leverage_setup_failed", detail: await l.json().catch(() => ({})) }, 502); }
       }
     }
     const params: Record<string, string> = { symbol, side: String(side).toUpperCase(), type: "LIMIT", quantity: fmt(quantity), price: fmt(limitPrice), timeInForce: "GTC", newClientOrderId: b.clientOrderId };
     if (reduceOnly) params.reduceOnly = "true";
     const r = await signed(env, "POST", "/fapi/v1/order", params), data: any = await r.json().catch(() => ({}));
-    if (!r.ok) return reply({ error: "broker_rejected", status: r.status, detail: data, mode: "futures_testnet" }, 502);
-    const rec = { executedAt: new Date().toISOString(), broker: "binance", mode: "futures_testnet", symbol, side, type: "limit", quantity, limitPrice, intent: check.intent, reduceOnly, leverage: reduceOnly ? st.leverage : leverage, stopPrice: stopPrice ?? null, clientOrderId: b.clientOrderId, brokerOrderId: data?.orderId ?? null, executionSource: { actorType: src.actorType, actorId: src.actorId, sourceName: src.sourceName, strategyId: src.strategyId ?? null, signalId: src.signalId ?? null, triggerReason: src.triggerReason ?? null }, preTrade: { positionAmt: st.positionAmt, markPrice: st.markPrice, fundingRate: st.fundingRate, estLiquidation: check.estLiquidation }, riskGate: { decision: gb.decision ?? null }, order: data };
-    await env.ETI_EXECUTION_LOG.put("order:" + rec.executedAt + ":" + b.clientOrderId, JSON.stringify(rec), { expirationTtl: 60 * 60 * 24 * 90 });
-    return reply({ ok: true, mode: "futures_testnet", intent: check.intent, order: data, estLiquidation: check.estLiquidation, warnings: check.warnings, protectiveStop: "NOT placed automatically: monitor GET /api/futures/positions and manage the stop yourself", executedAt: rec.executedAt }, 201);
-  } catch (e) { return reply({ error: "execution_upstream_error", message: e instanceof Error ? e.message : "Unknown error" }, 502); }
+    if (!r.ok) { await kv.delete(idemKey); return reply({ error: "broker_rejected", status: r.status, detail: data, mode: "futures_testnet" }, 502); }
+    const rec = { executedAt: new Date().toISOString(), broker: "binance", mode: "futures_testnet", symbol, side, type: "limit", quantity, limitPrice, intent: check.intent, reduceOnly, leverage: reduceOnly ? st.leverage : leverage, stopPrice: stopPrice ?? null, clientOrderId: b.clientOrderId, brokerOrderId: data?.orderId ?? null, executionSource: { actorType: src.actorType, actorId: src.actorId, sourceName: src.sourceName, strategyId: src.strategyId ?? null, signalId: src.signalId ?? null, triggerReason: src.triggerReason ?? null }, preTrade: { positionAmt: st.positionAmt, markPrice: st.markPrice, fundingRate: st.fundingRate, estLiquidation: check.estLiquidation }, order: data };
+    await kv.put("order:" + rec.executedAt + ":" + b.clientOrderId, JSON.stringify(rec), { expirationTtl: TTL_90D });
+    return reply({ ok: true, mode: "futures_testnet", intent: check.intent, order: data, estLiquidation: check.estLiquidation, warnings: check.warnings, protectiveStop: "Not placed with the entry order. The monitor adds a STOP_MARKET after the entry fills (cron, every minute) when the position was opened by ETI.", executedAt: rec.executedAt }, 201);
+  } catch (e) { return reply({ error: "execution_upstream_error", message: e instanceof Error ? e.message : "Unknown error", note: "Outcome unknown; verify at the broker before retrying with a NEW clientOrderId." }, 502); }
 }

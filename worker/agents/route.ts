@@ -39,9 +39,8 @@ const SYMBOL = /^[A-Z0-9]{5,20}$/, MAX_BODY = 200_000, TTL = 60 * 60 * 24 * 90;
 
 export function integrityFromEnv(env: ExecutionEnv): Integrity {
   return {
-    killSwitch: env.ETI_KILL_SWITCH === "true", liveTradingEnabled: env.ETI_LIVE_TRADING_ENABLED === "true",
-    liveCapsConfigured: Number(env.ETI_LIVE_MAX_NOTIONAL_USD) > 0 && Number(env.ETI_LIVE_MAX_ORDER_QUANTITY) > 0,
-    riskGateConfigured: !!(env.ETI_RISK_GATE_URL && env.ETI_RISK_GATE_TOKEN), executionTokenConfigured: !!env.ETI_EXECUTION_TOKEN, auditLogConfigured: !!env.ETI_EXECUTION_LOG,
+    killSwitch: env.ETI_KILL_SWITCH === "true", liveFlagSet: env.ETI_LIVE_TRADING_ENABLED === "true",
+    executionTokenConfigured: !!env.ETI_EXECUTION_TOKEN, auditLogConfigured: !!env.ETI_EXECUTION_LOG,
   };
 }
 
