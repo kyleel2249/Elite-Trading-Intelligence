@@ -19,6 +19,8 @@ from app.market.service import MarketService
 from app.markets.assessment import market_risk_review
 from app.intelligence.council import TradingCouncil
 from app.risk.engine import OrderProposal, RiskEngine
+from app.risk.protection import AccountSnapshot, OrderIntent
+from app.risk.protection_service import CapitalProtectionService
 from app.security.auth import require_api_key
 from app.services.activity_store import ActivityStore
 from app.trading.risk_context import build_risk_context
@@ -34,6 +36,10 @@ class PreflightRequest(BaseModel):
     quantity: float = Field(gt=0, allow_inf_nan=False)
     order_type: Literal["market", "limit"] = "market"
     limit_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    stop_loss: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    take_profit: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    strategy_id: Optional[str] = Field(default=None, max_length=128)
+    atr_pct: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def live_requires_limit(self):
@@ -135,7 +141,18 @@ async def execution_preflight(
         reasons.append("Order preflight requires a valid, timestamped, fresh market quote")
     if req.environment == "live" and council.risk_veto:
         reasons.extend(council.risk_notes or ["Trading Council risk veto"])
-    approved = decision.approved and quote_is_valid and not (
+    # ETI CAPITAL PROTECTION SYSTEM: independent final veto; the council's view can never override it.
+    protection_verdict = CapitalProtectionService(db, settings).check_order(OrderIntent(
+        provider=req.provider, environment=req.environment, symbol=req.symbol.upper(), side=req.side,
+        qty=req.quantity, price=(price if isinstance(price, (int, float)) and price > 0 else None),
+        stop_loss=req.stop_loss, take_profit=req.take_profit, strategy_id=req.strategy_id,
+        atr_pct=req.atr_pct, order_type=req.order_type, source="risk_gateway_preflight",
+    ), fallback=AccountSnapshot(  # used only when no database is available and never for live
+        equity=risk_context.equity, peak_equity=risk_context.equity, daily_pnl_pct=risk_context.daily_realized_pnl_pct,
+        drawdown_pct=risk_context.current_drawdown_pct, source="caller"))
+    if not protection_verdict.approved:
+        reasons.extend(f"[Capital Protection] {r}" for r in protection_verdict.reasons)
+    approved = decision.approved and protection_verdict.approved and quote_is_valid and not (
         req.environment == "live" and council.risk_veto
     )
     return {
@@ -145,6 +162,7 @@ async def execution_preflight(
         "risk_officer": "Helena Frost",
         "warnings": decision.warnings,
         "market_context": market_review.to_dict(),
+        "capital_protection": protection_verdict.to_dict(),
         "risk_inputs": {"source": "server", **risk_context.to_dict()},
         "market": {
             "provider": snapshot.get("provider"),
