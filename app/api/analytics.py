@@ -19,6 +19,8 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 _INTERVAL = r"^[0-9]{1,2}[smhdwM]$"
 MAX_SYMBOLS = 20
+MAX_MC_STEPS = 2_000_000   # paths x horizon; keeps one request to a couple of seconds of CPU
+MAX_GRID = 60              # walk-forward parameter combinations accepted over the API
 
 
 async def _candles(settings: Settings, provider: str, symbol: str, interval: str, limit: int) -> list[dict[str, Any]]:
@@ -102,9 +104,12 @@ async def monte_carlo_endpoint(symbol: str = "BTCUSDT", provider: str = "binance
                                limit: int = Query(365, ge=60, le=1000), horizon: int = Query(90, ge=1, le=2000),
                                paths: int = Query(2000, ge=100, le=10000), block_size: int = Query(5, ge=1, le=50),
                                seed: Optional[int] = 42, settings: Settings = Depends(get_settings)):
+    if paths * horizon > MAX_MC_STEPS:
+        raise HTTPException(status_code=422, detail=f"paths x horizon must be <= {MAX_MC_STEPS}")
     rets = stats.pct_returns(stats.closes_of(await _candles(settings, provider, symbol, interval, limit)))
     try:
-        return {"symbol": symbol.upper(), **montecarlo.monte_carlo(rets, horizon=horizon, n_paths=paths, block_size=block_size, seed=seed)}
+        res = await asyncio.to_thread(montecarlo.monte_carlo, rets, horizon=horizon, n_paths=paths, block_size=block_size, seed=seed)
+        return {"symbol": symbol.upper(), **res}
     except ValueError as e:
         raise _value_error(e)
 
@@ -172,9 +177,15 @@ class CompareRequest(BaseModel):
 
 @router.post("/walk-forward")
 async def walk_forward_endpoint(body: WalkForwardRequest, settings: Settings = Depends(get_settings)):
+    combos = 1
+    for values in body.grid.values():
+        combos *= max(len(values), 1)
+    if combos > MAX_GRID:
+        raise HTTPException(status_code=422, detail=f"parameter grid must have at most {MAX_GRID} combinations (got {combos})")
     closes = stats.closes_of(await _candles(settings, body.provider, body.symbol, body.interval, body.limit))
     try:
-        return {"symbol": body.symbol.upper(), **walkforward.walk_forward(closes, body.strategy, body.grid, body.train_bars, body.test_bars, body.fee_bps)}
+        res = await asyncio.to_thread(walkforward.walk_forward, closes, body.strategy, body.grid, body.train_bars, body.test_bars, body.fee_bps)
+        return {"symbol": body.symbol.upper(), **res}
     except (ValueError, KeyError) as e:
         raise HTTPException(status_code=422, detail=f"invalid walk-forward request: {e}")
 
@@ -183,8 +194,9 @@ async def walk_forward_endpoint(body: WalkForwardRequest, settings: Settings = D
 async def compare_endpoint(body: CompareRequest, settings: Settings = Depends(get_settings)):
     closes = stats.closes_of(await _candles(settings, body.provider, body.symbol, body.interval, body.limit))
     try:
-        return {"symbol": body.symbol.upper(), **walkforward.compare_strategies(closes, body.candidates, body.fee_bps)}
-    except (ValueError, KeyError) as e:
+        res = await asyncio.to_thread(walkforward.compare_strategies, closes, body.candidates, body.fee_bps)
+        return {"symbol": body.symbol.upper(), **res}
+    except (ValueError, KeyError, TypeError) as e:
         raise HTTPException(status_code=422, detail=f"invalid candidate: {e}")
 
 
