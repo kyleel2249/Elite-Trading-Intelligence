@@ -3,7 +3,7 @@ status of background jobs; unavailable inputs are reported as unavailable, never
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -91,22 +91,23 @@ async def _account_view(account_id: str, range_key: str, settings: Settings) -> 
     summary = await svc.summary(account_id)
     fills = svc.fills(account_id, 100000)
     now = datetime.now(timezone.utc)
-    start_cash = summary["starting_cash"]
-    perf = metrics.performance(fills, start_cash, key, now)
-    full = perf if key == "ALL" else metrics.performance(fills, start_cash, "ALL", now)
-    today = perf if key == "1D" else metrics.performance(fills, start_cash, "1D", now)
+    perf = metrics.performance(fills, summary["starting_cash"], key, now)
+    full = perf if key == "ALL" else metrics.performance(fills, summary["starting_cash"], "ALL", now)
+    today = perf if key == "1D" else metrics.performance(fills, summary["starting_cash"], "1D", now)
     snap = crawler_mod.snapshot(_collect_statuses(), now)
-    stream_agent = next((a for a in snap["agents"] if a["id"] == "market_stream"), None)
     eq = summary["equity"]
     positions = summary.get("positions") or []
+    stream = _collect_statuses().get("market_stream") if False else None  # stream state is part of `snap`
+    stream_agent = next((a for a in snap["agents"] if a["id"] == "market_stream"), None)
     health = metrics.health_score(
         drawdown_pct=full["max_drawdown_pct"] if full["trades"] else None,
         exposure_pct=(summary["market_value"] / eq * 100.0) if eq > 0 else None,
         max_position_pct=(max((p["market_value"] for p in positions), default=0.0) / eq * 100.0) if eq > 0 else None,
-        daily_pnl_pct=(today["net_realized_pnl"] / start_cash * 100.0) if start_cash > 0 else None,
+        daily_pnl_pct=(today["net_realized_pnl"] / summary["starting_cash"] * 100.0) if summary["starting_cash"] > 0 else None,
         data_connected=None if stream_agent is None or stream_agent["health"] == "unavailable" else bool(stream_agent["running"]),
         jobs_total=snap["totals"]["available"], jobs_errored=snap["totals"]["errored"],
         halted=bool(summary.get("halted")))
+    del stream
     return {"account_id": account_id, "range": key, "summary": summary, "performance": perf, "health": health,
             "mode": _mode(settings), "generated_at": now.isoformat()}
 
@@ -143,10 +144,20 @@ async def command_report(kind: Literal["daily", "weekly", "monthly"] = "daily", 
     if format == "json":
         return view
     if format == "csv":
-        cut = datetime.now(timezone.utc) - timedelta(days=metrics.RANGE_DAYS[range_key])
+        cut = datetime.now(timezone.utc) - __import__("datetime").timedelta(days=metrics.RANGE_DAYS[range_key])
         rows = [f for f in wiring.get_paper_service().fills(account_id, 100000)
                 if (metrics.parse_ts(f.get("ts")) or cut) >= cut]
         return Response(content=metrics.fills_csv(rows), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="eti-{kind}-fills.csv"'})
     md = metrics.report_markdown(kind, view["performance"], view["summary"], datetime.now(timezone.utc), view["health"])
     return PlainTextResponse(md, media_type="text/markdown")
+
+
+# Read-only routers mounted here because this router is already loaded by app.main's defensive loader; a failure
+# to import one is logged and never takes the command centre down.
+for _module_path in ("app.api.futures_calc", "app.api.market_symbols"):
+    try:
+        _mod = __import__(_module_path, fromlist=["router"])
+        router.include_router(_mod.router)
+    except Exception:  # pragma: no cover - defensive
+        logger.warning("router %s unavailable", _module_path, exc_info=True)

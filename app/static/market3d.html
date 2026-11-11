@@ -16,7 +16,7 @@
 <header>
   <div>
     <h1>ETI &middot; 3D Market View</h1>
-    <div class="sub">Real Binance candles via ETI &middot; read-only &middot; not a trade signal</div>
+    <div class="sub">Real exchange candles via ETI &middot; read-only &middot; not a trade signal</div>
   </div>
   <nav aria-label="ETI pages">
     <a class="nav" href="/">Dashboard</a>
@@ -34,15 +34,23 @@
     <div class="ph">
       <h2>Price &times; time &times; volume</h2>
       <div class="row" style="margin:0">
+        <label class="sub" for="prov">Market</label>
+        <select id="prov">
+          <option value="binance" selected>Binance (crypto)</option>
+          <option value="alpaca">US stocks (Alpaca)</option>
+        </select>
         <label class="sub" for="sym">Symbol</label>
-        <input id="sym" value="BTCUSDT" maxlength="20" autocapitalize="characters" spellcheck="false" size="10">
+        <input id="sym" list="symlist" value="BTCUSDT" maxlength="20" autocapitalize="characters" autocomplete="off" spellcheck="false" size="12" aria-describedby="symhint">
+        <datalist id="symlist"></datalist>
         <label class="sub" for="int">Interval</label>
         <select id="int">
           <option>1m</option><option>5m</option><option>15m</option>
           <option selected>1h</option><option>4h</option><option>1d</option>
         </select>
         <button class="btn primary" id="go" type="button">Load</button>
+        <button class="btn" id="reload" type="button" title="Re-read the exchange's symbol list to pick up new listings">Refresh list</button>
       </div>
+      <div class="sub" id="symhint" role="status" style="margin-top:.4rem">Type to search symbols.</div>
     </div>
     <div class="pb">
       <canvas id="m3d" tabindex="0" role="img" aria-label="3D candlestick and volume chart. Use arrow keys to rotate, plus and minus to zoom. A table of recent candles follows."></canvas>
@@ -61,7 +69,7 @@
         <span><i class="sw" style="background:#ef4444"></i>Close &lt; open</span>
         <span><i class="sw" style="background:#3b82f6"></i>Volume (front row)</span>
       </div>
-      <p class="note">Drag (or use arrow keys) to rotate. Candles are plotted from exchange data; nothing is simulated. If data cannot be loaded or is stale the chart says so instead of showing old values as live.</p>
+      <p class="note">Drag (or use arrow keys) to rotate. Candles are plotted from exchange data; nothing is simulated. If data cannot be loaded or is stale the chart says so instead of showing old values as live. Stock candles are older than expected outside market hours and will be labelled stale.</p>
     </div>
   </section>
 

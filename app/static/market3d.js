@@ -1,7 +1,9 @@
 /* ETI 3D market view.
  * Dependency-free canvas renderer with a manual 3D projection (works offline, no CDN, CSP-friendly).
- * Data comes only from GET /api/market/history. Nothing is generated or simulated: on any failure the view
- * shows an "unavailable" state, and stale data is labelled stale.
+ * Data comes only from the ETI API: Binance pairs via GET /api/market/public-history, stocks via
+ * GET /api/market/history?provider=alpaca; symbols are discovered with GET /api/market/symbols.
+ * Nothing is generated or simulated: on any failure the view shows an "unavailable" state, and stale data is
+ * labelled stale.
  */
 (function () {
   'use strict';
@@ -13,9 +15,11 @@
   var INTERVAL_MS = { '1m': 6e4, '5m': 3e5, '15m': 9e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
   var LIMIT = 60, REFRESH_MS = 30000;
   var DEFAULT_VIEW = { yaw: -0.6, pitch: 0.45, zoom: 1 };
+  var LABEL = { binance: 'Binance', alpaca: 'Alpaca' };
+  var DEFAULT_SYMBOL = { binance: 'BTCUSDT', alpaca: 'AAPL' };
 
   var S = { candles: [], status: 'loading', yaw: DEFAULT_VIEW.yaw, pitch: DEFAULT_VIEW.pitch, zoom: 1,
-            auto: false, drag: null, W: 300, H: 300, req: 0, timer: 0, raf: 0 };
+            auto: false, drag: null, W: 300, H: 300, req: 0, timer: 0, raf: 0, prov: 'binance', symReq: 0, symTimer: 0 };
 
   function setBanner(kind, text) {
     var b = el('banner');
@@ -27,6 +31,35 @@
     return n.toLocaleString(undefined, { maximumFractionDigits: a >= 100 ? 2 : a >= 1 ? 4 : 8 });
   }
   function finite(x) { return typeof x === 'number' && isFinite(x); }
+
+  /* ---------- symbol discovery ---------- */
+  function searchSymbols(refresh) {
+    var prov = el('prov').value, q = (el('sym').value || '').trim().toUpperCase(), my = ++S.symReq;
+    var url = '/api/market/symbols?provider=' + encodeURIComponent(prov) + '&q=' + encodeURIComponent(q) + '&limit=40' + (refresh ? '&refresh=true' : '');
+    fetch(url, { headers: { Accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) {
+        if (my !== S.symReq) return;
+        var dl = el('symlist'); dl.textContent = '';
+        (j.items || []).forEach(function (it) {
+          var o = document.createElement('option'); o.value = it.symbol;
+          o.label = it.name ? it.name : (it.base && it.quote ? it.base + '/' + it.quote : '');
+          dl.appendChild(o);
+        });
+        var src = (j.sources || {})[prov] || {};
+        var hint = el('symhint');
+        if (src.status === 'not_configured' || src.status === 'unavailable') {
+          hint.textContent = (src.message || 'Symbol list unavailable') + '. You can still type a symbol and press Load.';
+        } else {
+          hint.textContent = j.total + ' matching symbol' + (j.total === 1 ? '' : 's') + ' in ' + (src.count || 0) + ' listed' +
+            (src.status === 'stale' ? ' (STALE list: ' + src.message + ')' : '') + '. Showing up to 40.';
+        }
+      })
+      .catch(function () {
+        if (my === S.symReq) el('symhint').textContent = 'Symbol search unavailable. You can still type a symbol and press Load.';
+      });
+  }
+  function searchLater() { clearTimeout(S.symTimer); S.symTimer = setTimeout(function () { searchSymbols(false); }, 250); }
 
   /* ---------- data ---------- */
   function clean(rows) {
@@ -43,37 +76,40 @@
   }
 
   function load() {
+    var prov = el('prov').value;
     var sym = (el('sym').value || '').trim().toUpperCase();
     var iv = el('int').value;
-    if (!/^[A-Z0-9]{3,20}$/.test(sym) || !INTERVAL_MS[iv]) {
+    var okSym = prov === 'binance' ? /^[A-Z0-9]{3,20}$/.test(sym) : /^[A-Z0-9.\-]{1,12}$/.test(sym);
+    if (!okSym || !INTERVAL_MS[iv]) {
       S.candles = []; S.status = 'invalid';
-      setBanner('bad', 'Enter a valid symbol such as BTCUSDT.');
+      setBanner('bad', 'Enter a valid symbol such as ' + DEFAULT_SYMBOL[prov] + '.');
       render(); return;
     }
     var token = ++S.req;
-    var url = '/api/market/history?provider=binance&symbol=' + encodeURIComponent(sym) +
-              '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT;
+    var url = prov === 'binance'
+      ? '/api/market/public-history?symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT
+      : '/api/market/history?provider=alpaca&symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT;
     fetch(url, { headers: { Accept: 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (r) { if (!r.ok) throw new Error(r.status === 404 ? 'unknown symbol' : 'HTTP ' + r.status); return r.json(); })
       .then(function (rows) {
         if (token !== S.req) return; // a newer request superseded this one
         var c = clean(rows);
         if (c.out.length < 5) throw new Error('too few valid candles (' + c.out.length + ')');
-        S.candles = c.out; S.sym = sym; S.iv = iv; S.bad = c.bad;
+        S.candles = c.out; S.sym = sym; S.iv = iv; S.bad = c.bad; S.prov = prov;
         var last = c.out[c.out.length - 1];
         var lag = Date.now() - last.ct; // >0 means the newest candle already closed
         var stale = lag > INTERVAL_MS[iv] * 1.5;
         S.status = stale ? 'stale' : 'live';
         setBanner(stale ? 'bad' : 'ok',
-          stale ? 'STALE: newest candle for ' + sym + ' closed ' + Math.round(lag / 60000) + ' min ago. Do not treat as live.'
-                : 'Showing ' + c.out.length + ' ' + iv + ' candles for ' + sym + ' (Binance, via ETI). Updated ' + new Date().toISOString().slice(11, 19) + ' UTC.' +
+          stale ? 'STALE: newest candle for ' + sym + ' closed ' + Math.round(lag / 60000) + ' min ago' + (prov === 'alpaca' ? ' (the market may be closed)' : '') + '. Do not treat as live.'
+                : 'Showing ' + c.out.length + ' ' + iv + ' candles for ' + sym + ' (' + LABEL[prov] + ', via ETI). Updated ' + new Date().toISOString().slice(11, 19) + ' UTC.' +
                   (c.bad ? ' ' + c.bad + ' invalid candle(s) excluded.' : ''));
         table(); render();
       })
       .catch(function (e) {
         if (token !== S.req) return;
         S.candles = []; S.status = 'unavailable';
-        setBanner('bad', 'Market data unavailable (' + e.message + '). No chart is shown rather than showing unverified data.');
+        setBanner('bad', 'Market data unavailable for ' + sym + ' (' + e.message + '). No chart is shown rather than showing unverified data.');
         table(); render();
       });
   }
@@ -138,7 +174,7 @@
     var cs = S.candles, n = cs.length;
     if (!n) {
       ctx.fillStyle = '#9aaac2'; ctx.font = '14px system-ui,sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(S.status === 'loading' ? 'Loading\u2026' : 'No verified market data to display', W / 2, H / 2);
+      ctx.fillText(S.status === 'loading' ? 'Loading…' : 'No verified market data to display', W / 2, H / 2);
       return;
     }
     var lo = Infinity, hi = -Infinity, vmax = 0;
@@ -227,8 +263,15 @@
   el('zo').onclick = function () { nudge(0, 0, 0.87); };
   el('rst').onclick = function () { S.yaw = DEFAULT_VIEW.yaw; S.pitch = DEFAULT_VIEW.pitch; S.zoom = 1; render(); };
   el('go').onclick = load;
-  el('sym').addEventListener('keydown', function (e) { if (e.key === 'Enter') load(); });
+  el('reload').onclick = function () { searchSymbols(true); };
+  el('sym').addEventListener('keydown', function (e) { if (e.key === 'Enter') { load(); } });
+  el('sym').addEventListener('input', searchLater);
+  el('sym').addEventListener('change', load);   // picking an item from the suggestion list loads it
   el('int').addEventListener('change', load);
+  el('prov').addEventListener('change', function () {
+    el('sym').value = DEFAULT_SYMBOL[el('prov').value];
+    searchSymbols(false); load();
+  });
 
   var autoBtn = el('auto');
   if (reduced) { autoBtn.disabled = true; autoBtn.title = 'Disabled: reduced-motion preference'; }
@@ -258,5 +301,5 @@
     if (!document.hidden) { load(); if (S.auto) spin(); }
   });
 
-  resize(); load(); schedule();
+  resize(); searchSymbols(false); load(); schedule();
 })();
