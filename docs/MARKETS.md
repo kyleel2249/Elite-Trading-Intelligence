@@ -87,12 +87,17 @@ at import (a malformed file degrades to "no calendar", never to an error). `GET 
 | Xetra | 2026-27 | official |
 | TSE | 2026-27 | official |
 | ASX (incl. 14:10 early closes on 24/31 Dec) | 2026-27 | official |
+| SIX Swiss Exchange (from SIX's 2026 market-data availability table; not cross-checked against its trading-calendar PDF) | 2026 | secondary: verify |
+| Ghana Stock Exchange (Interior Ministry declarations as reported; 6 Mar confirmed on mint.gov.gh; Boxing Day substitute not included) | 2026 | secondary: verify |
+| Nairobi Securities Exchange (Eid dates from gazetted declarations; fixed holidays per the Act, not re-confirmed) | 2026 | secondary: verify |
 | NSE India / BSE (weekday holidays; Muhurat session not modelled; moon-sighting dates can shift) | 2026 | official |
 | Euronext: common closures only (Amsterdam, Brussels, Dublin, Lisbon, Paris); no venue-specific closures or 24/31 Dec half days | 2026-27 | official |
 | LSE (12:30 early closes) | 2026-27 | secondary: verify |
 | JSE | 2026 secondary, 2027 derived from statute rules and Easter | verify with the JSE |
 | HKEX | 2026 | secondary: verify |
-| **NGX, GSE, EGX, NSE Kenya, Milan/Madrid/SIX, SSE, KRX, CME/ICE** | none | `not_applied`: may be closed on a holiday ETI does not know |
+| **NGX, EGX, Milan/Madrid, SSE, KRX, CME/ICE** | none | `not_applied`: may be closed on a holiday ETI does not know |
+
+EGX and NGX holidays are announced one event at a time (Islamic dates by moon sighting), so no reliable calendar exists to load. SSE and KRX official pages were not reachable from the build environment and only third-party lists turned up, which are not loaded.
 
 `applied` = official, `partial` = secondary/derived. The JSE's official notice could not be fetched (robots.txt) and was
 not circumvented. Add your own with `register_holidays()`.

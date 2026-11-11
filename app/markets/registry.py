@@ -74,7 +74,7 @@ EXCHANGES: dict[str, tuple[str, str, str, str]] = {
     "LSE": ("lse", "UK", "developed", "GBX"),
     "XETRA": ("xetra", "DE", "developed", "EUR"), "EURONEXT": ("euronext", "EU", "developed", "EUR"),
     "MIL": ("eu_cet", "IT", "developed", "EUR"), "BME": ("eu_cet", "ES", "developed", "EUR"),
-    "SIX": ("eu_cet", "CH", "developed", "CHF"),
+    "SIX": ("six", "CH", "developed", "CHF"),
     "TSE": ("tse", "JP", "developed", "JPY"), "HKEX": ("hkex", "HK", "developed", "HKD"),
     "SSE": ("sse", "CN", "emerging", "CNY"), "SZSE": ("sse", "CN", "emerging", "CNY"),
     "NSE_IN": ("nse_in", "IN", "emerging", "INR"), "BSE": ("nse_in", "IN", "emerging", "INR"),

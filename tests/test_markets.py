@@ -448,7 +448,7 @@ def test_calendar_status_reflects_provenance():
     assert session_status("xetra", at(2026, 11, 9, 10)).holiday_calendar == "applied"            # official
     assert session_status("lse", at(2026, 11, 9, 10)).holiday_calendar == "partial"              # secondary
     assert session_status("jse", at(2027, 6, 1, 10)).holiday_calendar == "partial"               # derived
-    for sid in ("ngx", "gse", "egx", "nse_ke", "eu_cet"):                                         # no verifiable source: say so
+    for sid in ("ngx", "egx", "eu_cet"):                                                           # no verifiable source: say so
         assert session_status(sid, at(2026, 11, 9, 10)).holiday_calendar == "not_applied", sid
 
 
@@ -537,7 +537,8 @@ def test_calendars_endpoint_reports_coverage_and_gaps(client):
     assert {"us_equity", "xetra", "tse", "lse", "jse", "hkex"} <= set(j["covered"])
     assert j["covered"]["us_equity"]["years"] == {"2026": "official", "2027": "official"}
     assert j["covered"]["jse"]["years"] == {"2026": "secondary", "2027": "derived"}
-    assert {"ngx", "gse", "egx", "nse_ke", "eu_cet"} <= {m["session_id"] for m in j["missing"]}
+    assert {"ngx", "egx", "eu_cet"} <= {m["session_id"] for m in j["missing"]}
+    assert not ({"gse", "nse_ke", "six"} & {m["session_id"] for m in j["missing"]})
 
 
 # ------------------------------------------------------------------ Euronext / ASX calendars, NGX hours
@@ -569,3 +570,14 @@ def test_nse_india_official_2026_calendar():
     assert s.state == "closed" and s.reason == "holiday" and s.holiday_calendar == "applied"
     assert session_status("nse_in", at(2026, 11, 25, 5)).state == "open"
     assert session_status("nse_in", at(2027, 3, 3, 5)).holiday_calendar == "not_applied"     # 2027 list not published yet
+
+
+def test_six_ghana_kenya_calendars_are_partial_and_year_limited():
+    for sid, when in (("six", at(2026, 5, 14, 9)), ("gse", at(2026, 12, 4, 11)), ("nse_ke", at(2026, 10, 20, 9))):
+        st = session_status(sid, when)
+        assert st.state == "closed" and st.reason == "holiday" and st.holiday_calendar == "partial", sid
+    assert session_status("gse", at(2026, 12, 3, 11)).state == "open"                       # the day before Farmers' Day
+    assert session_status("six", at(2026, 5, 13, 9)).state == "open"
+    for sid in ("six", "gse", "nse_ke"):                                                    # 2027 is not covered: say so
+        assert session_status(sid, at(2027, 6, 8, 10)).holiday_calendar == "not_applied", sid
+    assert classify("SIX:NESN").session_id == "six" and classify("MIL:ENI").session_id == "eu_cet"

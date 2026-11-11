@@ -1,6 +1,6 @@
 {
-  "_comment": "Exchange holiday calendars with provenance. verification: official = published by the exchange/operator; secondary = third-party list cross-checked against statutory rules; derived = computed from the country's public-holiday rules and Easter (verify with the exchange). Dates are local exchange dates (YYYY-MM-DD). early_closes map a date to the local closing time. Calendars NOT listed here (e.g. NGX, GSE, EGX, NSE Kenya, SSE, NSE India, KRX) are intentionally absent: no verifiable source was available, and Islamic holidays there are announced at short notice.",
-  "retrieved": "2026-11-11",
+  "_comment": "Exchange holiday calendars with provenance. verification: official = published by the exchange/operator; secondary = third-party list cross-checked against statutory rules; derived = computed from the country's public-holiday rules and Easter (verify with the exchange). Dates are local exchange dates (YYYY-MM-DD). early_closes map a date to the local closing time. Calendars NOT listed here (e.g. NGX, EGX, SSE, KRX, Milan, Madrid) are intentionally absent: no verifiable source was available, and Islamic holidays there are announced at short notice.",
+  "retrieved": "2026-11-12",
   "calendars": {
     "nyse": {
       "name": "NYSE / Nasdaq",
@@ -302,6 +302,74 @@
       ],
       "early_closes": {},
       "notes": "NSE circular 212/2025 (12 Dec 2025), weekday holidays only. The Muhurat session on Sun 8 Nov 2026 (time to be notified) is not modelled. Holidays tied to moon sighting (Eid, Muharram) can shift; check NSE notices. 2027 not published yet."
+    },
+    "six": {
+      "name": "SIX Swiss Exchange",
+      "verification": "secondary",
+      "source": "https://www.six-group.com/dam/download/market-data/news/environment-calendar/docs/market-data-service-availability.pdf",
+      "years": [
+        2026
+      ],
+      "holidays": [
+        "2026-01-01",
+        "2026-01-02",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-12-24",
+        "2026-12-25",
+        "2026-12-31"
+      ],
+      "early_closes": {},
+      "notes": "From SIX's 2026 market-data service availability table (closed days for the Swiss Exchange package); the column mapping was read by tooling and not cross-checked against SIX's trading calendar PDF, which could not be fetched. 1 Aug 2026 and 26 Dec 2026 fall on Saturdays. Verify with SIX."
+    },
+    "gse": {
+      "name": "Ghana Stock Exchange",
+      "verification": "secondary",
+      "source": "https://www.mint.gov.gh/declaration-of-friday-6th-march-2026-as-a-statutory-public-holiday/",
+      "years": [
+        2026
+      ],
+      "holidays": [
+        "2026-01-01",
+        "2026-01-09",
+        "2026-03-06",
+        "2026-03-20",
+        "2026-03-23",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-27",
+        "2026-07-03",
+        "2026-09-21",
+        "2026-12-04",
+        "2026-12-25"
+      ],
+      "early_closes": {},
+      "notes": "Ghana public holidays as declared by the Ministry of the Interior (6 March confirmed on mint.gov.gh; the others from Ghanaian press reports of the declarations; 1 May, 4 Dec Farmers' Day and 25 Dec follow the statute and were not re-confirmed). Islamic holidays are declared at short notice. A substitute for Boxing Day (Sat 26 Dec) may be declared later and is NOT included. GSE closes on statutory holidays; confirm with GSE notices."
+    },
+    "nse_ke": {
+      "name": "Nairobi Securities Exchange",
+      "verification": "secondary",
+      "source": "https://www.the-star.co.ke/news/2026-05-25-murkomen-declares-wednesday-a-public-holiday",
+      "years": [
+        2026
+      ],
+      "holidays": [
+        "2026-01-01",
+        "2026-03-20",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-27",
+        "2026-06-01",
+        "2026-10-20",
+        "2026-12-25"
+      ],
+      "early_closes": {},
+      "notes": "Kenyan public holidays: Idd-ul-Fitr (20 Mar) and Eid ul-Adha (27 May) from the Interior CS's gazetted declarations as reported by the press; fixed-date holidays follow the Public Holidays Act and were not re-confirmed. Saturday holidays (10 Oct, 12 Dec, 26 Dec) have no weekday substitute. Verify with NSE notices."
     }
   }
 }
