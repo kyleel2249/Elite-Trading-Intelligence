@@ -19,7 +19,7 @@ import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions, paramsOp, PARAMS_KEY } from "./params.ts";
 import { raiseAlerts } from "./alerts.ts";
 import { paperCycleAlerts } from "./alert-rules.ts";
-import { ParamRegistry, KVParamStore, rollbackCheck } from "./optimizer.ts";
+import { ParamRegistry, KVParamStore, degradationStep } from "./optimizer.ts";
 import { fitCalibration, loadCalibration, outcomesFrom, saveCalibration } from "./calibration.ts";
 import { KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
@@ -162,10 +162,11 @@ export async function runPaperCycle(env: PaperEnv, deps: PaperDeps = {}): Promis
   const summary: CycleSummary = { ran: true, at, autoExecute: cfg.autoExecute, strategy: cfg.strategy, items, ignoredSymbols: cfg.ignored, killSwitch: killed, equity: engine.state.equity, openPositions: engine.state.positions.length };
   try {
     const alerts = paperCycleAlerts(summary);
-    try { // read-only degradation check: compares recent paper trades with the evidence the champion was approved on; it never rolls anything back
-      const reg = await ParamRegistry.open(new KVParamStore(kv as any, PARAMS_KEY), () => now), v = rollbackCheck(reg.champion(), engine.state.closed.slice(-30), engine.cfg.startingEquity);
-      if (v.rollback) alerts.push({ type: "strategy_degradation", severity: "warning", title: `Recent paper results are below the approved baseline (${reg.champion().name})`, detail: v.reasons.join("; ") + ". Nothing was changed automatically; consider POST /api/paper/params/rollback.", dedupeKey: `degrade:${reg.champion().id}:${new Date(now).toISOString().slice(0, 10)}` });
-    } catch { /* the degradation check is advisory */ }
+    try { // Phase 11: restore the last approved configuration when recent results breach the degradation thresholds (ETI_AUTO_ROLLBACK=false makes it advisory)
+      const reg = await ParamRegistry.open(new KVParamStore(kv as any, PARAMS_KEY), () => now), d = await degradationStep(reg, engine.state.closed, engine.cfg.startingEquity, env.ETI_AUTO_ROLLBACK !== "false");
+      if (d.verdict.rollback) alerts.push({ type: d.applied ? "parameter_change" : "strategy_degradation", severity: d.applied ? "critical" : "warning", title: d.applied ? `Strategy degraded: automatically restored "${d.to}" (was "${d.from}")` : `Recent paper results are below the approved baseline ("${d.from}")`,
+        detail: `${d.verdict.reasons.join("; ")}. Judged on ${d.checked} trades since this configuration took over. ${d.applied ? "Only a previously human-approved version is ever restored." : d.autoEnabled ? "No earlier approved version exists to restore." : "Automatic rollback is disabled (ETI_AUTO_ROLLBACK=false); consider POST /api/paper/params/rollback."}`, dedupeKey: `degrade:${d.from}:${d.since}:${new Date(now).toISOString().slice(0, 10)}` });
+    } catch { /* the degradation check never breaks the cycle */ }
     await raiseAlerts(env as any, alerts, { fetchImpl: deps.fetchImpl, now: () => now });
   } catch { /* alerting never breaks the cycle */ }
   try { await kv.put(LASTRUN_KEY, JSON.stringify(summary)); } catch { /* the summary is informational; trading state was already persisted */ }

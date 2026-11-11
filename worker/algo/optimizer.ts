@@ -174,3 +174,20 @@ export async function autoRollbackIfDegraded(reg: ParamRegistry, recent: ClosedT
   const c = reg.champion(), v = rollbackCheck(c, recent, start); if (!v.rollback || c.name === "default" && !reg.st.versions.some(x => x.status === "retired" && x.approvedBy)) return { ...v, applied: false };
   try { await reg.rollback(v.reasons.join("; ")); return { ...v, applied: true }; } catch { return { ...v, applied: false }; }
 }
+
+/** When the current champion took over (the last promote or rollback that made it champion); 0 if it has always been champion. */
+export function championSince(reg: ParamRegistry): number {
+  const c = reg.champion(); let ts = 0;
+  for (const a of reg.st.audit) if ((a.action === "promote" || a.action === "rollback") && a.id === c.id) ts = Math.max(ts, a.ts);
+  return ts;
+}
+export interface DegradationStep { checked: number; since: number; verdict: RollbackVerdict; applied: boolean; from: string; to: string | null; autoEnabled: boolean }
+/** Phase 11: judge the champion only on trades closed since it took over (so a restored version is not blamed for its predecessor's losses),
+ * and restore the last human-approved version when the predefined degradation thresholds are breached. Rollback only ever returns to a
+ * previously approved version; it can never promote anything new. */
+export async function degradationStep(reg: ParamRegistry, closed: ClosedTrade[], start: number, autoEnabled = true): Promise<DegradationStep> {
+  const since = championSince(reg), recent = closed.filter(t => t.closedAt >= since).slice(-60), from = reg.champion().name;
+  if (!autoEnabled) { const verdict = rollbackCheck(reg.champion(), recent, start); return { checked: recent.length, since, verdict, applied: false, from, to: null, autoEnabled }; }
+  const r = await autoRollbackIfDegraded(reg, recent, start);
+  return { checked: recent.length, since, verdict: { rollback: r.rollback, reasons: r.reasons }, applied: r.applied, from, to: r.applied ? reg.champion().name : null, autoEnabled };
+}

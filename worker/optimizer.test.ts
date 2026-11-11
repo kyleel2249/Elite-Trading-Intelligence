@@ -103,3 +103,26 @@ test("registry stores tighten-only parameters and rejects loosening", async () =
   await assert.rejects(reg.propose("tight_rr2", CANDIDATES.default, r, { minRiskReward: 1 }), /tighten-only/);
   const v = await reg.propose("tight_rr2", CANDIDATES.default, r, { minRiskReward: 2 }); assert.deepEqual(v.tighten, { minRiskReward: 2 });
 });
+
+import { championSince, degradationStep } from "./algo/optimizer.ts";
+test("degradationStep: restores the last approved version on degradation, never re-triggers on the old version's trades, and respects the opt-out", async () => {
+  const t = { v: 1000 }; const reg = await ParamRegistry.open(new MemoryParamStore(), () => t.v++);
+  const v = await reg.propose("trend_heavy", CANDIDATES.trend_heavy, rec("trend_heavy")); await reg.promote(v.id, "Kyle");
+  const since = championSince(reg); assert.ok(since > 0);
+  const bad = (n: number, at: number) => Array.from({ length: n }, (_, i) => ({ ...tr(i % 2 ? -1 : -0.5), closedAt: at + i })) as ClosedTrade[];
+  const before = bad(40, 1);                                                    // trades from before the promotion are not this champion's
+  assert.equal((await degradationStep(reg, before, 10_000)).checked, 0);
+  assert.equal(reg.champion().name, "trend_heavy");
+  const mine = bad(40, since + 10);
+  const off = await degradationStep(reg, mine, 10_000, false); assert.equal(off.verdict.rollback, true); assert.equal(off.applied, false); assert.equal(reg.champion().name, "trend_heavy");
+  t.v = since + 5000;                                                           // the rollback happens after those trades closed
+  const on = await degradationStep(reg, mine, 10_000); assert.equal(on.applied, true); assert.equal(on.to, "default"); assert.equal(reg.champion().name, "default");
+  const again = await degradationStep(reg, mine, 10_000); assert.equal(again.applied, false, "the restored version is not blamed for the old version's trades"); assert.equal(again.checked, 0);
+  assert.ok(reg.st.audit.some(a => a.action === "rollback"));
+});
+test("degradationStep: nothing happens when the champion is fine or on small samples", async () => {
+  const reg = await ParamRegistry.open(new MemoryParamStore(), () => 5);
+  const good = Array.from({ length: 40 }, (_, i) => ({ ...tr(0.5), closedAt: i })) as ClosedTrade[];
+  assert.equal((await degradationStep(reg, good, 10_000)).applied, false);
+  assert.equal((await degradationStep(reg, good.slice(0, 5).map(x => ({ ...x, pnl: -100 })), 10_000)).applied, false);
+});

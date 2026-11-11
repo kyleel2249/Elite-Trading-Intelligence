@@ -181,3 +181,9 @@ market-data failures, strategy degradation (read-only comparison of recent paper
 Execution-engine events come from polling its log on the `*/5` cron (one subrequest per account); the first poll only records a cursor, so no backfill flood.
 Alerts are plain text, redact credential-shaped strings, are de-duplicated (critical 30 min, warning 3 h, info 6 h) and batched into one email per run. A failed send is not marked as seen, so it is retried on the next occurrence.
 Not verified: delivery through a real provider (needs your Resend key or Email Routing setup); the Cloudflare binding path is untested outside the Workers runtime.
+
+## Automatic rollback (Phase 11)
+
+On every scheduled paper cycle the champion configuration is judged on the paper trades closed **since it took over** (at least 30, last 60). If recent mean R is more than 0.3R below the baseline it was approved on, is negative, or drawdown exceeds 1.5x the approved baseline,
+the registry automatically restores the last **previously human-approved** version and raises a critical alert. Rollback can only return to an approved version; it can never promote or invent a configuration, and a restored version is not blamed for its predecessor's trades.
+`ETI_AUTO_ROLLBACK=false` makes it advisory (warning alert only; use `POST /api/paper/params/rollback`). With no earlier approved version (the default configuration) there is nothing to restore and only a warning is raised.
