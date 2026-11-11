@@ -1,10 +1,15 @@
-"""Internal paper-trading API. Works with no exchange credentials. Mutating routes need ETI's own X-API-Key
-(only enforced in production-like environments); no exchange key is ever required or accepted here."""
+"""Internal paper-trading API. Works with no exchange credentials.
+
+Authentication is automatic and server-side (see app/security/execution_auth.py): the dashboard gets an
+HttpOnly session for INTERNAL PAPER with no manual token or key. Exchange-testnet orders additionally need
+an operator-established session or the operator X-API-Key. Live is refused. Every order is authorized for
+its exact environment and re-validated at the execution boundary. No exchange key is ever accepted here.
+"""
 from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
@@ -13,6 +18,7 @@ from app.paper.core import OrderRequest, PaperError
 from app.paper.modes import (EXCHANGE_TESTNET, INTERNAL_PAPER, LABELS, LIVE, LiveTradingDisabled, ModeResolution,
                              UnknownMode, resolve_mode)
 from app.security.auth import require_api_key
+from app.security.execution_auth import authorize, execution_gate
 
 router = APIRouter(prefix="/api/paper", tags=["paper"])
 ID = r"^[A-Za-z0-9_.-]{1,64}$"
@@ -96,8 +102,9 @@ async def mode(settings: Settings = Depends(get_settings)):
                            "market_data": "Binance public order books (no API key); crypto spot symbols such as BTCUSDT"},
         "exchange_testnet": {"available": acct is not None,
                              "how_to_enable": None if acct else
-                             "Register Binance testnet credentials as an execution account (EXECUTION_ENABLED=true), "
-                             "then pass mode=exchange_testnet. Without them ETI uses INTERNAL PAPER and says so."},
+                             "Provide Binance testnet credentials as server secrets (BINANCE_TESTNET_API_KEY / "
+                             "BINANCE_TESTNET_SECRET_KEY) with EXECUTION_ENABLED=true, then approve an execution policy. "
+                             "Without them ETI uses INTERNAL PAPER and says so."},
         "live": {"available": False, "reason": "Live trading is disabled in this path and is never a fallback.",
                  "live_trading_enabled_flag": settings.live_trading_enabled},
         "kill_switch": settings.kill_switch,
@@ -131,8 +138,13 @@ async def preview(body: OrderBody, settings: Settings = Depends(get_settings)):
 
 
 @router.post("/orders")
-async def place_order(body: OrderBody, settings: Settings = Depends(get_settings), _auth=Depends(require_api_key)):
+async def place_order(body: OrderBody, request: Request, response: Response, settings: Settings = Depends(get_settings)):
     res, acct = _resolve(body.mode, body.provider, settings)
+    # 1) authenticate for the environment this order will really run in (a testnet request that fell
+    #    back to INTERNAL PAPER is authorized, and executed, as INTERNAL PAPER).
+    principal = await authorize(request, response, res.mode)
+    # 2) re-validate at the execution boundary, bound to this exact order
+    execution_gate(principal, res.mode, {**body.model_dump(), "resolved_mode": res.mode})
     if res.mode == EXCHANGE_TESTNET:
         if body.type not in ("market", "limit"):
             raise HTTPException(422, "Exchange testnet mode supports market and limit orders only; "
@@ -151,8 +163,10 @@ async def place_order(body: OrderBody, settings: Settings = Depends(get_settings
 
 
 @router.post("/orders/bracket")
-async def place_bracket(body: BracketBody, _auth=Depends(require_api_key)):
+async def place_bracket(body: BracketBody, request: Request, response: Response):
     res = ModeResolution(INTERNAL_PAPER, "internal_paper", False, "Simulated by ETI; no exchange credentials are used.")
+    principal = await authorize(request, response, INTERNAL_PAPER)
+    execution_gate(principal, INTERNAL_PAPER, {**body.model_dump(), "op": "bracket"})
     try:
         orders = await svc().submit_bracket(body.account_id, body.symbol, body.qty, body.stop_price,
                                             body.take_profit_price, body.client_order_id)
@@ -162,7 +176,9 @@ async def place_bracket(body: BracketBody, _auth=Depends(require_api_key)):
 
 
 @router.delete("/orders/{order_id}")
-async def cancel_order(order_id: str, account_id: str = Query("default", pattern=ID), _auth=Depends(require_api_key)):
+async def cancel_order(order_id: str, request: Request, response: Response, account_id: str = Query("default", pattern=ID)):
+    principal = await authorize(request, response, INTERNAL_PAPER)
+    execution_gate(principal, INTERNAL_PAPER, {"op": "cancel", "order_id": order_id, "account_id": account_id})
     try:
         o = await svc().cancel(account_id, order_id)
     except PaperError as e:
@@ -171,7 +187,9 @@ async def cancel_order(order_id: str, account_id: str = Query("default", pattern
 
 
 @router.post("/orders/cancel-all")
-async def cancel_all(account_id: str = Query("default", pattern=ID), _auth=Depends(require_api_key)):
+async def cancel_all(request: Request, response: Response, account_id: str = Query("default", pattern=ID)):
+    principal = await authorize(request, response, INTERNAL_PAPER)
+    execution_gate(principal, INTERNAL_PAPER, {"op": "cancel_all", "account_id": account_id})
     return {"canceled": await svc().cancel_all(account_id)}
 
 
@@ -193,19 +211,25 @@ async def events(account_id: str = Query("default", pattern=ID), event: Optional
 
 
 @router.post("/tick")
-async def tick(account_id: str = Query("default", pattern=ID), _auth=Depends(require_api_key)):
+async def tick(request: Request, response: Response, account_id: str = Query("default", pattern=ID)):
+    principal = await authorize(request, response, INTERNAL_PAPER)
+    execution_gate(principal, INTERNAL_PAPER, {"op": "tick", "account_id": account_id})
     return await svc().tick(account_id)
 
 
 @router.post("/flatten")
-async def flatten(body: ConfirmBody, _auth=Depends(require_api_key)):
+async def flatten(body: ConfirmBody, request: Request, response: Response):
+    """Safety control (reduces exposure), so a paper session may use it; the typed confirmation still applies."""
+    principal = await authorize(request, response, INTERNAL_PAPER)
     if body.confirm != f"FLATTEN {body.account_id}":
         raise HTTPException(422, f"confirm must equal: FLATTEN {body.account_id}")
+    execution_gate(principal, INTERNAL_PAPER, {"op": "flatten", "account_id": body.account_id})
     return await svc().flatten(body.account_id)
 
 
 @router.post("/reset")
 async def reset(body: ConfirmBody, _auth=Depends(require_api_key)):
+    """Destructive (wipes history): stays operator-only, it is not a paper-session action."""
     if body.confirm != f"RESET {body.account_id}":
         raise HTTPException(422, f"confirm must equal: RESET {body.account_id}")
     return await svc().reset(body.account_id, body.starting_cash)
