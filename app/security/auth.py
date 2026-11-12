@@ -16,6 +16,7 @@ from fastapi import Header, HTTPException, Query, status
 from app.config import get_settings
 
 LOCAL_ENVS = frozenset({"development", "test", "local"})
+PROTECTED_ENVS = frozenset({"production", "prod", "staging"})  # environments where missing credentials fail closed
 
 
 async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:

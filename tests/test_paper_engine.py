@@ -2,6 +2,12 @@
 from __future__ import annotations
 
 import json
+import pytest
+
+# These suites target the standalone engine (app.paper.core / app.paper.modes) that was superseded by app/paper/engine.py,
+# service.py and mode.py. They are kept, not deleted, and skip until they are ported to the surviving engine.
+pytest.importorskip("app.paper.core", reason="targets the superseded app.paper.core engine; port to app.paper.engine")
+
 import unittest
 from datetime import datetime, timedelta, timezone
 

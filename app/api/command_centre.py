@@ -19,7 +19,7 @@ from app.command_centre import metrics
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import IntelligenceAlert, InvestorActivity
-from app.paper import wiring
+from app.paper import runtime as paper_runtime
 from app.services.activity_store import ActivityStore
 
 logger = logging.getLogger("eti.command_centre")
@@ -83,13 +83,23 @@ def _mode(settings: Settings) -> dict[str, Any]:
             "kill_switch": settings.kill_switch}
 
 
+def _paper_exchange(account_id: str):
+    """The internal paper exchange (one account per deployment); an unknown account id is a 404, never a silent fallback."""
+    ex = paper_runtime.get_exchange()
+    if account_id != ex.account_id:
+        raise HTTPException(status_code=404, detail="unknown paper account")
+    return ex
+
+
 async def _account_view(account_id: str, range_key: str, settings: Settings) -> dict[str, Any]:
     key = range_key.upper()
     if key not in metrics.RANGE_DAYS:
         raise HTTPException(status_code=422, detail=f"range must be one of {', '.join(metrics.RANGE_DAYS)}")
-    svc = wiring.get_paper_service()
-    summary = await svc.summary(account_id)
-    fills = svc.fills(account_id, 100000)
+    ex = _paper_exchange(account_id)
+    summary = await ex.account(tick=False)
+    summary = {**summary, "market_value": sum(float(p.get("market_value") or 0.0) for p in (summary.get("positions") or []) if p.get("open", True)),
+               "halted": bool(settings.kill_switch)}
+    fills = await ex.fills(100000)
     now = datetime.now(timezone.utc)
     perf = metrics.performance(fills, summary["starting_cash"], key, now)
     full = perf if key == "ALL" else metrics.performance(fills, summary["starting_cash"], "ALL", now)
@@ -145,7 +155,7 @@ async def command_report(kind: Literal["daily", "weekly", "monthly"] = "daily", 
         return view
     if format == "csv":
         cut = datetime.now(timezone.utc) - __import__("datetime").timedelta(days=metrics.RANGE_DAYS[range_key])
-        rows = [f for f in wiring.get_paper_service().fills(account_id, 100000)
+        rows = [f for f in await _paper_exchange(account_id).fills(100000)
                 if (metrics.parse_ts(f.get("ts")) or cut) >= cut]
         return Response(content=metrics.fills_csv(rows), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="eti-{kind}-fills.csv"'})

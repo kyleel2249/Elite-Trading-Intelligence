@@ -195,15 +195,9 @@
     function escapeHTML(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[ch]));
     }
-    // Retire persistent credentials from earlier versions. Keys now last only this tab session.
-    localStorage.removeItem('eti_api_key');
+    // Execution auth is a server-issued session cookie: no credential is ever stored or sent from browser storage.
     function authHeaders() {
-      const h = {'Content-Type': 'application/json'};
-      const apiKey = sessionStorage.getItem('eti_api_key') || '';
-      if (apiKey) h['X-API-Key'] = apiKey;
-    function authHeaders() {
-      const h = {'Content-Type': 'application/json'};
-      return h;
+      return {'Content-Type': 'application/json'};
     }
     document.querySelectorAll('nav button[data-panel]').forEach(btn => btn.addEventListener('click', () => {
       document.querySelectorAll('nav button[data-panel]').forEach(b => b.classList.remove('active'));

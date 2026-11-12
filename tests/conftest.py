@@ -13,6 +13,7 @@ if str(_ROOT) not in sys.path:
 
 _tmp = tempfile.mkdtemp(prefix="eti-test-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/eti-test.db"
+os.environ.setdefault("APP_ENV", "test")  # the app defaults to production (auth fails closed); tests run as a local environment
 os.environ["LIVE_TRADING_ENABLED"] = "false"
 os.environ["BINANCE_LIVE_TRADING_ENABLED"] = "false"
 os.environ["ALPACA_PAPER"] = "true"

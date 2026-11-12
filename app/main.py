@@ -80,7 +80,7 @@ async def _start_component(name: str, starter) -> None:
 
 
 def _warn_insecure_config(settings: Settings) -> None:
-    if (settings.app_env or "").strip().lower() not in PROTECTED_ENVS:
+    if (getattr(settings, "app_env", "") or "").strip().lower() not in PROTECTED_ENVS:
         return
     if settings.secret_key in ("change-me", "change-me-to-a-long-random-string"):
         logger.warning("SECRET_KEY is still the default; set a long random value in production")

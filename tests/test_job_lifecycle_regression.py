@@ -29,7 +29,8 @@ async def test_stop_cancels_and_releases_task_and_can_restart(job_type, monkeypa
 async def test_lifespan_cleans_all_components_after_exception(monkeypatch):
     monkeypatch.setattr(main, "init_db", lambda: None)
     monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(mtm_interval_seconds=1,
-        reconcile_interval_seconds=1, investor_monitor_interval_seconds=1, quiver_configured=True))
+        reconcile_interval_seconds=1, investor_monitor_interval_seconds=1, execution_supervisor_interval_seconds=1,
+        quiver_configured=True, app_env="test"))
     components = []
     for name in ("stream_hub", "mtm_job", "reconcile_job", "investor_monitor_job"):
         component = SimpleNamespace(start=AsyncMock(), stop=AsyncMock())

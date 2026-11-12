@@ -89,9 +89,6 @@ class Settings(BaseSettings):
     mtm_interval_seconds: int = Field(60, ge=1)
     reconcile_interval_seconds: int = Field(120, ge=1)
     investor_monitor_interval_seconds: int = Field(1800, ge=1)
-    mtm_interval_seconds: int = 60
-    reconcile_interval_seconds: int = 120
-    investor_monitor_interval_seconds: int = 1800
     adaptive_edge_interval_seconds: int = 900
 
     # --- Global Alpha Intelligence ---
