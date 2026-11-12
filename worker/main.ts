@@ -22,6 +22,7 @@ import { withAgents } from "./agents/route.ts";
 import { withFutures } from "./agents/futures-route.ts";
 import { withCommand } from "./command/route.ts";
 import { withPrecision } from "./precision/route.ts";
+import { runPrecisionCycle } from "./precision/cycle.ts";
 import { withDailyReport } from "./daily/route.ts";
 import { runDailyReportCycle } from "./daily/api.ts";
 import { withPro } from "./pro/route.ts";
@@ -72,6 +73,8 @@ export default {
     // Each pass is isolated so one failing never blocks the other.
     ctx.waitUntil(runPaperCycle(env).then(() => undefined, e => console.error("paper cycle failed", e instanceof Error ? e.message : e)));
     ctx.waitUntil(runAlphaCycle(env).then(() => undefined, e => console.error("alpha cycle failed", e instanceof Error ? e.message : e)));
+    // Precision outcome ledger: record tradeable signals, resolve them from closed candles, refit calibration (off unless ETI_PRECISION_SYMBOLS is set and a KV namespace is bound).
+    ctx.waitUntil(runPrecisionCycle(env, Date.now()).then(() => undefined, e => console.error("precision cycle failed", e instanceof Error ? e.message : e)));
     // Daily intelligence report: one stored report per UTC weekday (no-op when already generated, on weekends, before ETI_DAILY_HOUR_UTC, or without the KV binding).
     ctx.waitUntil(runDailyReportCycle(env, Date.now()).then(() => undefined, e => console.error("daily report failed", e instanceof Error ? e.message : e)));
     if (typeof inner.scheduled === "function") return inner.scheduled(event, env, ctx);
