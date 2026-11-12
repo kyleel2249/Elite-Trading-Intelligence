@@ -1,8 +1,8 @@
 """
 Trading service — single entry point for paper and live orders.
-Paper orders (and testnet orders without exchange credentials) are executed by ETI's INTERNAL PAPER engine and never touch an exchange.
-Exchange testnet / live orders must pass RiskEngine before any provider submission.
-Paper fills update portfolio + journal (Claire Bennett audit trail).
+Paper orders (and testnet orders without exchange credentials) are executed by ETI's INTERNAL PAPER engine
+(app.paper) and never touch an exchange. Exchange testnet / live orders must pass RiskEngine before any
+provider submission. Paper fills update portfolio + journal (Claire Bennett audit trail).
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
 from app.integrations.oanda import OandaClient
-from app.paper import mode as paper_mode
+from app.paper import modes as paper_modes
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
 from app.trading.portfolio import PortfolioService
 
@@ -39,6 +39,41 @@ class TradingService:
         if p == "binance":
             return bool(self.settings.binance_configured)
         return bool(getattr(self.settings, f"{p}_configured", False))
+
+    def _paper_resolution(self, provider: str, environment: str):
+        """INTERNAL_PAPER resolution, or None when the request must continue down the exchange path.
+        Live is never simulated here: it raises in the resolver and falls through to the risk-gated path."""
+        creds = self._creds_configured(provider)
+        try:
+            res = paper_modes.resolve_mode(environment, testnet_account_available=creds, provider=provider.lower(),
+                                           env_credentials_present=creds)
+        except (paper_modes.LiveTradingDisabled, paper_modes.UnknownMode):
+            return None
+        return res if res.mode == paper_modes.INTERNAL_PAPER else None
+
+    async def _place_internal_paper(self, *, res, client_order_id: str, symbol: str, side: str, qty: float,
+                                    order_type: str, limit_price: Optional[float]) -> dict[str, Any]:
+        from app.paper import wiring
+        from app.paper.core import OrderRequest, PaperError
+
+        base = {"client_order_id": client_order_id, "execution_mode": res.mode, "mode_label": res.label,
+                "mode_resolution": res.to_dict(), "provider_response": None}
+        ot = order_type.lower()
+        if ot not in ("market", "limit"):
+            return {**base, "status": "rejected", "risk": {
+                "decision": "REJECTED", "officer": "INTERNAL_PAPER_ENGINE", "notes": "",
+                "reasons": [f"order_type '{order_type}' is not supported here; use /api/paper/orders for stop_loss and take_profit"]}}
+        svc = wiring.get_paper_service()
+        try:
+            order = await svc.submit("default", OrderRequest(symbol.upper(), side.lower(), ot, qty, limit_price, None, client_order_id))
+        except PaperError as e:
+            return {**base, "status": "rejected", "risk": {"decision": "REJECTED", "reasons": [str(e)], "notes": "",
+                                                           "officer": "INTERNAL_PAPER_ENGINE"}}
+        warnings = [res.reason] if res.downgraded else []
+        return {**base, "status": order.status if hasattr(order, "status") else "submitted", "order": order.to_dict(),
+                "account": await svc.summary("default"),
+                "risk": {"decision": "APPROVED", "reasons": [], "warnings": warnings, "officer": "INTERNAL_PAPER_ENGINE",
+                         "notes": "Validated by the internal paper engine (balances, holdings, limits, kill switch)."}}
 
     async def place_order(
         self,
@@ -63,25 +98,10 @@ class TradingService:
     ) -> dict[str, Any]:
         client_order_id = self._client_order_id()
 
-        # Execution-mode resolution. Only INTERNAL_PAPER is diverted here; exchange testnet / live / rejected
-        # requests continue through the existing, risk-gated path below. Live is never simulated.
-        mode = paper_mode.resolve_mode(
-            provider, environment,
-            creds_configured=self._creds_configured(provider),
-            live_enabled=bool(self.settings.live_trading_enabled),
-        )
-        if mode.mode == paper_mode.INTERNAL_PAPER:
-            from app.paper.runtime import place_via_trading_service
-            ot = order_type.lower()
-            if ot not in ("market", "limit"):
-                return {"status": "rejected", "client_order_id": client_order_id, "execution_mode": "INTERNAL_PAPER",
-                        "mode_resolution": mode.to_dict(),
-                        "risk": {"decision": "REJECTED", "reasons": [f"order_type '{order_type}' is not supported here; use /api/paper/orders for stop and take_profit"],
-                                 "notes": "", "officer": "INTERNAL_PAPER_ENGINE"}, "provider_response": None}
-            return await place_via_trading_service(
-                symbol=symbol, side=side, qty=qty, order_type=ot, limit_price=limit_price, thesis=thesis,
-                client_order_id=client_order_id, mode_info=mode.to_dict(),
-            )
+        paper_res = self._paper_resolution(provider, environment)
+        if paper_res is not None:
+            return await self._place_internal_paper(res=paper_res, client_order_id=client_order_id, symbol=symbol, side=side,
+                                                    qty=qty, order_type=order_type, limit_price=limit_price)
 
         proposal = OrderProposal(
             provider=provider.lower(),
@@ -106,7 +126,6 @@ class TradingService:
             result = {
                 "status": "rejected",
                 "client_order_id": client_order_id,
-                "execution_mode": mode.mode,
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
@@ -192,8 +211,7 @@ class TradingService:
                 "status": "submitted",
                 "client_order_id": client_order_id,
                 "environment": environment,
-                "execution_mode": mode.mode,
-                "mode_label": mode.label,
+                "execution_mode": "exchange_testnet" if environment.lower() != "live" else "live",
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
@@ -229,7 +247,6 @@ class TradingService:
             return {
                 "status": "error",
                 "client_order_id": client_order_id,
-                "execution_mode": mode.mode,
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
