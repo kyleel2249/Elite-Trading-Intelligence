@@ -32,6 +32,9 @@ test("historical football result sync is protected by the paper token",async()=>
  assert.equal(r.status,401);assert.equal(j.error,"unauthorized");
 });
 
+test("sports dashboard exposes UEFA Nations League scanning and accessible 3D responsive controls",async()=>{
+ const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/sports"),{} as any);const html=await r.text();
+ assert.match(html,/UEFA Nations League/);assert.match(html,/Scan Nations League matches/);assert.match(html,/perspective:1400px/);assert.match(html,/prefers-reduced-motion/);assert.match(html,/focus-visible/);
 test("sports dashboard exposes a SportyBet-only odds filter",async()=>{
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/sports"),{} as any);const html=await r.text();
  assert.match(html,/SportyBet only/);assert.match(html,/SportyBet odds were not returned/);
