@@ -11,7 +11,7 @@ const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status
 const SPORTS:Record<string,string>={soccer_epl:"Premier League",soccer_uefa_champs_league:"UEFA Champions League",soccer_spain_la_liga:"La Liga",soccer_italy_serie_a:"Serie A",soccer_germany_bundesliga:"Bundesliga",soccer_france_ligue_one:"Ligue 1",basketball_nba:"NBA",basketball_wnba:"WNBA",americanfootball_nfl:"NFL",baseball_mlb:"MLB",icehockey_nhl:"NHL",tennis_atp_french_open:"ATP French Open",tennis_wta_french_open:"WTA French Open",cricket_test_match:"Test Cricket",rugby_union:"Rugby Union"};
 const jsonBody=async(req:Request)=>{try{return await req.json() as Record<string,unknown>}catch{return null}};
 const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-async function oddsPapiGet(apiKey:string,path:string,params:Record<string,string>):Promise<any>{
+export async function oddsPapiGet(apiKey:string,path:string,params:Record<string,string>):Promise<any>{
  const url="https://api.oddspapi.io/v4/"+path+"?"+new URLSearchParams({...params,apiKey}).toString();
  for(let attempt=0;attempt<3;attempt++){
   const response=await fetch(url,{headers:{accept:"application/json"}});
