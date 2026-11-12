@@ -25,7 +25,7 @@ test("unrelated routes are delegated unchanged",async()=>{
 
 test("sports health endpoint reports provider and migration readiness without leaking credentials",async()=>{
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/health"),{} as any);const j=await r.json() as any;
- assert.equal(r.status,200);assert.equal(j.providers.oddspapi.configured,false);assert.equal(j.database.ready,false);assert.equal(JSON.stringify(j).includes("api_key"),false);
+ assert.equal(r.status,200);assert.equal(j.providers.oddspapi.configured,false);assert.equal(j.database.ready,false);assert.equal(j.sports_paper_token_configured,false);assert.equal(JSON.stringify(j).includes("api_key"),false);
 });
 test("historical football result sync is protected by the paper token",async()=>{
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/football/sync-history",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}),{} as any);const j=await r.json() as any;
