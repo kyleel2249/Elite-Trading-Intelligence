@@ -5,22 +5,24 @@
 //   GET  /api/precision/calibration?strategy=intraday                                calibration status and why a model is (not) usable
 //   PUT  /api/precision/admin/{fundamentals|news|expectancy|calibration}/...         token-protected data entry
 //   POST /api/precision/admin/calibration/fit?strategy=intraday                      fit + validate a calibration model from outcomes
+//   GET  /api/precision/ledger?strategy=intraday                                     recorded signal outcomes (win rate, net R, last fit)
+//   POST /api/precision/admin/cycle[?symbol=BTCUSDT&strategy=intraday]               run one record/resolve/refit cycle now
 // Analytical only. Nothing here can place an order.
-import { getMarketData, providerOrder, type Depth, type Kline } from "../market.ts";
-import { DEFAULT_WEIGHTS, EXECUTION_TF, TIMEFRAMES, type Strategy, type Timeframe } from "../algo/timeframes.ts";
+import { EXECUTION_TF, type Strategy } from "../algo/timeframes.ts";
 import { assessCalibration, fitCalibration, parseCalibrationModel, type CalibrationSample } from "./calibration.ts";
 import { DEFAULT_CONFIG, ENGINE_NAME, ENGINE_VERSION, resolveConfig, scoreConfigHash } from "./config.ts";
-import { mergeNews, parseFundamentalContext, parseNewsContext } from "./context.ts";
-import { SUPPORTED_MARKETS, parseInstrument, runPrecisionEngine } from "./engine.ts";
+import { parseFundamentalContext, parseNewsContext } from "./context.ts";
+import { SUPPORTED_MARKETS, parseInstrument } from "./engine.ts";
+import { STRATEGIES, buildSignal, isStrategy } from "./service.ts";
+import { ledgerSummary, runPrecisionCycle } from "./cycle.ts";
 import { SYMBOL_RE, keys, loadContext, parseExpectancy, precisionStore, tokenMatches, type PrecisionEnv } from "./stores.ts";
 import { isFiniteNumber, isRecord } from "./util.ts";
 
-export const STRATEGIES: Strategy[] = ["scalp", "intraday", "swing", "position"];
+export { STRATEGIES };
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...HEADERS, ...extra } });
 const MAX_BODY = 512 * 1024;
 
-const isStrategy = (s: string | null): s is Strategy => !!s && (STRATEGIES as string[]).includes(s);
 
 async function readBody(req: Request): Promise<unknown | { __error: string }> {
   const len = Number(req.headers.get("content-length") ?? "0");
@@ -56,6 +58,12 @@ export async function handlePrecision(req: Request, env: PrecisionEnv): Promise<
       confidenceReported: a.valid ? "calibrated_probability" : "qualitative", requirements: cfg.calibration });
   }
 
+  if (path === "/api/precision/ledger") {
+    const strategy = url.searchParams.get("strategy") || "intraday";
+    if (!isStrategy(strategy)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
+    return reply(await ledgerSummary(env, strategy, Date.now()));
+  }
+
   if (path !== "/api/precision/signal") return reply({ error: "not_found" }, 404);
 
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
@@ -64,32 +72,8 @@ export async function handlePrecision(req: Request, env: PrecisionEnv): Promise<
   const inst = parseInstrument(symbol);
   if (!inst) return reply({ error: "unsupported_market", symbol, detail: "Only crypto spot pairs with a recognised quote currency are supported.", markets: SUPPORTED_MARKETS }, 422);
 
-  const order = providerOrder(env, url.searchParams.get("provider"));
-  const need = TIMEFRAMES.filter(t => DEFAULT_WEIGHTS[strategy][t] > 0 || t === EXECUTION_TF[strategy]);
-  const candles: Partial<Record<Timeframe, Kline[]>> = {};
-  const failures: Record<string, string> = {};
-  let provider = "unknown";
-  const fetchedAt = Date.now();
-  const ctxPromise = loadContext(env, inst.base, strategy, fetchedAt, cfg.context.expectancyMaxAgeDays);
-  await Promise.all(need.map(async tf => {
-    try { const r = await getMarketData("klines", { symbol, interval: tf, limit: 300 }, order); candles[tf] = r.data as Kline[]; if (tf === EXECUTION_TF[strategy]) provider = r.provider; }
-    catch (e) { failures[tf] = e instanceof Error ? e.message : "unknown"; }
-  }));
-  if (!candles[EXECUTION_TF[strategy]]) return reply({ decision: "DATA_UNRELIABLE", direction: "NO TRADE", error: "market_data_unavailable", executionTimeframe: EXECUTION_TF[strategy], failures, liveExecutionAllowed: false }, 503);
-  let depth: { bids: [number, number][]; asks: [number, number][]; timestamp: number } | null = null;
-  try { const d = (await getMarketData("depth", { symbol, interval: "1m", limit: 100 }, order)).data as Depth; depth = { bids: d.bids, asks: d.asks, timestamp: Date.now() }; }
-  catch (e) { failures.depth = e instanceof Error ? e.message : "unknown"; }
-
-  const ctx = await ctxPromise;
-  const now = Date.now();
-  const signal = runPrecisionEngine({
-    symbol, strategy, candles, depth, now, fetchedAt, provider, config: cfg, configStatus: resolved.status,
-    fundamentals: ctx.fundamentals, news: mergeNews(ctx.news, ctx.marketNews), expectancy: ctx.expectancy, calibration: ctx.calibration,
-  });
-  const notes = [...(ctx.expectancyNote ? [ctx.expectancyNote] : []), ...(resolved.status === "override_rejected" ? [`ETI_PRECISION_CONFIG was rejected and defaults are in use: ${resolved.errors.join("; ")}`] : []),
-    ...(!ctx.storeConfigured ? ["No context store (ETI_PRECISION_DATA or ETI_EXECUTION_LOG) is bound: fundamentals, news, expectancy and calibration are unavailable, so the score is capped and confidence is qualitative."] : [])];
-  signal.dataQuality.notes.push(...notes);
-  return reply({ ...signal, dataQuality: { ...signal.dataQuality, failures } });
+  const built = await buildSignal(env, symbol, strategy, url.searchParams.get("provider"));
+  return reply(built.body, built.status);
 }
 
 // ------------------------------------------------------------------ admin
@@ -123,6 +107,14 @@ async function handleAdmin(req: Request, env: PrecisionEnv, path: string, url: U
     // A model that fails validation is still stored so its metrics are inspectable, but the engine will not use it (it re-checks on every read).
     await put(keys.calibration(strategy), fit.model);
     return reply({ stored: true, usable: a.valid, reasons: [...fit.reasons, ...a.reasons], metrics: fit.model.metrics, samples: { total: fit.model.samples, train: fit.model.trainSamples, test: fit.model.testSamples }, blocks: fit.model.blocks.length });
+  }
+
+  if (kind === "cycle") {
+    if (req.method !== "POST") return reply({ error: "method_not_allowed", allow: "POST" }, 405);
+    const sym = url.searchParams.get("symbol")?.toUpperCase() ?? null, strat = url.searchParams.get("strategy") || "intraday";
+    if (sym !== null && (!SYMBOL_RE.test(sym) || !parseInstrument(sym))) return reply({ error: "invalid_symbol" }, 400);
+    if (!isStrategy(strat)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
+    return reply(await runPrecisionCycle(env as any, Date.now(), sym ? { only: { symbol: sym, strategy: strat } } : {}));
   }
 
   if (req.method !== "PUT") return reply({ error: "method_not_allowed", allow: "PUT" }, 405);
