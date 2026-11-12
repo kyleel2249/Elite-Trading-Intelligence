@@ -72,6 +72,12 @@ const MONITOR_CRON = "* * * * *";
 export default {
   fetch: (request: Request, env: any) => app.fetch(request, env),
   async scheduled(event: { cron?: string }, env: any, ctx: { waitUntil(p: Promise<unknown>): void }) {
+    // Autonomous football scan and result-history collection are quota-throttled in D1.
+    if (env.ODDSPAPI_API_KEY && env.ETI_SPORTS_PAPER_TOKEN && env.ETI_PORTFOLIO_DB) {
+      const headers = { "x-eti-sports-token": String(env.ETI_SPORTS_PAPER_TOKEN), "content-type": "application/json" };
+      ctx.waitUntil(app.fetch(new Request("https://eti.internal/api/sports/football/next?limit=1&automatic=1", { headers }), env).then(async r => { if (!r.ok) console.error("sports scan", r.status, (await r.text()).slice(0, 200)); }, e => console.error("sports scan failed", e instanceof Error ? e.message : e)));
+      ctx.waitUntil(app.fetch(new Request("https://eti.internal/api/sports/football/sync-history", { method: "POST", headers, body: JSON.stringify({ automatic: true, limit: 5 }) }), env).then(async r => { if (!r.ok) console.error("sports history sync", r.status, (await r.text()).slice(0, 200)); }, e => console.error("sports history sync failed", e instanceof Error ? e.message : e)));
+    }
     if (event.cron === UNIVERSE_CRON) {
       // Position monitoring for the accounts listed in ETI_MANAGE_ACCOUNTS (comma separated). Closing needs ETI_MANAGE_AUTOCLOSE=true; otherwise report only.
       const accounts = String(env.ETI_MANAGE_ACCOUNTS ?? "").split(",").map((x: string) => x.trim()).filter((x: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(x)).slice(0, 3);
