@@ -29,6 +29,7 @@
     input, select, button.action { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: .4rem .55rem; border-radius: 8px; }
     button.action { cursor: pointer; background: #1e293b; }
     button.action:hover { border-color: var(--accent); }
+    button.action:disabled { opacity: .5; cursor: not-allowed; }
     a.cta { display: inline-block; margin: .5rem 0 1rem; padding: .55rem 1rem; border-radius: 10px; background: linear-gradient(90deg,#0e7490,#1d4ed8); color: #fff; text-decoration: none; font-size: .85rem; }
     .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
     .panel { display: none; } .panel.active { display: block; }
@@ -40,6 +41,17 @@
     .live-chip .st { font-size:.68rem; color:var(--muted); }
     .live-chip.on { border-color:rgba(34,197,94,.5); }
     .live-chip.off { border-color:rgba(239,68,68,.35); }
+    /* execution-mode chips: INTERNAL PAPER / EXCHANGE TESTNET / LIVE are always visually distinct */
+    .pp-chip { display:inline-block; padding:.2rem .6rem; border-radius:999px; font-size:.72rem; font-weight:600; border:1px solid; letter-spacing:.02em; }
+    .pp-chip.internal { background:#0c2a1a; color:#86efac; border-color:#14532d; }
+    .pp-chip.testnet { background:#2a230c; color:#fcd34d; border-color:#854d0e; }
+    .pp-chip.livedis { background:#2a0f0f; color:#fca5a5; border-color:#7f1d1d; }
+    .pp-chip.off { background:#1e293b; color:var(--muted); border-color:var(--border); }
+    .scrollx { overflow-x: auto; }
+    .pp-table { width: 100%; border-collapse: collapse; font-size: .76rem; }
+    .pp-table th, .pp-table td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .pp-table th { color: var(--muted); font-weight: 500; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
+    button.pp-buy { border-color: rgba(34,197,94,.5); }
   </style>
 </head>
 <body>
@@ -47,7 +59,8 @@
     <div>
       <h1>ETI — Elite Trading Intelligence</h1>
       <span class="badge">v{{ version }}</span>
-      {% if live_trading_enabled %}<span class="badge live">LIVE PATH (risk-gated)</span>{% endif %}
+      <span class="pp-chip internal" title="Default execution mode: simulated by ETI, no exchange credentials">INTERNAL PAPER</span>
+      {% if live_trading_enabled %}<span class="badge live">LIVE PATH (in-process risk checks)</span><span class="pp-chip livedis">LIVE FLAG ON IN CONFIG — NOT USED BY PAPER TRADING</span>{% else %}<span class="pp-chip livedis">LIVE TRADING: DISABLED</span>{% endif %}
     </div>
     <nav>
       <button data-panel="overview" class="active">Overview</button>
@@ -58,9 +71,14 @@
       <button data-panel="knowledge">Knowledge</button>
       <button data-panel="dataintel">Data Intel</button>
       <a class="navlink" href="/data-intel">Command Centre ↗</a>
+      <a class="navlink" href="/alpha">Alpha ↗</a>
+      <a class="navlink" href="/command">Trading ↗</a>
+      <a class="navlink" href="/intelligence">Intelligence ↗</a>
       <a class="navlink" href="/alerts">Alerts ↗</a>
+      <a class="navlink" href="/predictions">Predictions ↗</a>
+      <a class="navlink" href="/markets">Markets ↗</a>
       <button data-panel="backtest">Backtest</button>
-      <button data-panel="portfolio">Portfolio</button>
+      <button data-panel="portfolio">Paper Trading</button>
       <button data-panel="traders">Elite Desk</button>
       <button data-panel="risk">Risk</button>
       <button data-panel="providers">Providers</button>
@@ -70,6 +88,7 @@
     <section id="overview" class="panel active">
       <div class="grid">
         <div class="card"><h2>System</h2><p class="ok" id="sys-status">Loading…</p><p class="muted">Helena Frost — Risk veto</p></div>
+        <div class="card"><h2>Execution mode</h2><p class="muted" id="mode-status">—</p><p class="muted">Live trading is disabled</p></div>
         <div class="card"><h2>Alpaca</h2><p id="alpaca-status">—</p></div>
         <div class="card"><h2>Binance</h2><p id="binance-status">—</p></div>
         <div class="card"><h2>Streams</h2><p id="stream-status">—</p></div>
@@ -132,12 +151,45 @@
       <button class="action" id="bt-wf">Walk-Forward</button>
       <button class="action" id="bt-signal">Signal</button>
     </div><pre id="bt-out">—</pre></div></section>
-    <section id="portfolio" class="panel"><div class="card"><div class="row"><button class="action" id="p-refresh">Refresh</button><input id="p-symbol" value="BTCUSDT" /><input id="p-qty" type="number" step="0.001" value="0.01" /><select id="p-side"><option>buy</option><option>sell</option></select><button class="action" id="p-paper">Paper Order</button></div><div class="grid"><div class="card"><h2>Portfolio</h2><pre id="p-summary">—</pre></div><div class="card"><h2>Journal</h2><pre id="p-journal">—</pre></div></div></div></section>
+    <section id="portfolio" class="panel">
+      <div class="card" id="pp-mode" aria-live="polite"><h2>Execution mode</h2><div class="row" id="pp-chips"></div><p class="muted" id="pp-mode-note">Loading…</p></div>
+      <div class="grid" id="pp-cards" style="margin-top:.85rem"></div>
+      <div class="card" style="margin-top:.85rem">
+        <h2>Order ticket <span class="pp-chip internal" id="pp-ticket-mode">INTERNAL PAPER</span></h2>
+        <div class="row">
+          <input id="pp-symbol" value="BTCUSDT" aria-label="Symbol" style="width:8rem" />
+          <select id="pp-side" aria-label="Side"><option value="buy">BUY</option><option value="sell">SELL</option></select>
+          <select id="pp-type" aria-label="Order type">
+            <option value="market">Market</option><option value="limit">Limit</option>
+            <option value="stop_loss">Stop-loss (sell)</option><option value="take_profit">Take-profit (sell)</option>
+            <option value="bracket">Stop-loss + take-profit (sell)</option>
+          </select>
+          <input id="pp-qty" type="number" step="any" min="0" value="0.01" aria-label="Quantity" style="width:7rem" />
+          <input id="pp-limit" type="number" step="any" min="0" placeholder="limit / take-profit price" aria-label="Limit or take-profit price" style="width:11rem" />
+          <input id="pp-stop" type="number" step="any" min="0" placeholder="stop price" aria-label="Stop price" style="width:8rem" />
+          <select id="pp-mode-sel" aria-label="Execution mode">
+            <option value="internal_paper">Internal paper</option><option value="exchange_testnet">Exchange testnet (needs credentials)</option>
+          </select>
+        </div>
+        <div class="row">
+          <button class="action" id="pp-quote">Live quote</button>
+          <button class="action" id="pp-preview-btn">Preview</button>
+          <button class="action pp-buy" id="pp-submit">Submit order</button>
+          <button class="action" id="pp-refresh">Refresh</button>
+        </div>
+        <p class="muted" id="pp-msg" role="status"></p>
+        <pre id="pp-preview" hidden></pre>
+      </div>
+      <div class="card" style="margin-top:.85rem"><h2>Positions</h2><div class="scrollx" id="pp-positions"></div></div>
+      <div class="card" style="margin-top:.85rem"><h2>Open orders</h2><div class="row"><button class="action" id="pp-cancel-all">Cancel all</button></div><div class="scrollx" id="pp-open"></div></div>
+      <div class="card" style="margin-top:.85rem"><h2>Execution history</h2><div class="scrollx" id="pp-history"></div><h2 style="margin-top:.8rem">Fills</h2><div class="scrollx" id="pp-fills"></div></div>
+      <div class="card" style="margin-top:.85rem"><h2>Account controls</h2><div class="row"><button class="action" id="pp-flatten">Emergency flatten</button><button class="action" id="pp-reset">Reset paper account</button></div><p class="muted">Paper money only. Flatten cancels every open order and sells every holding at the simulated market.</p></div>
+    </section>
     <section id="traders" class="panel"><div class="card"><h2>Elite Desk</h2><div id="traders-list" class="muted">Loading…</div></div></section>
     <section id="risk" class="panel"><div class="card"><div class="row"><input id="r-symbol" value="BTCUSDT" /><select id="r-env"><option>paper</option><option>testnet</option><option>live</option></select><input id="r-qty" type="number" value="0.01" /><input id="r-equity" type="number" value="10000" /><button class="action" id="r-eval">Evaluate</button></div><pre id="r-out">—</pre></div></section>
     <section id="providers" class="panel"><div class="card"><h2>Diagnostics</h2><pre id="prov-out">—</pre></div></section>
   </main>
-  <footer>Helena Frost risk-gates live. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a></footer>
+  <footer>Every order, including live, passes the in-process risk engine. Streams are display-only. <a href="/data-intel" style="color:#22d3ee">Command Centre</a> · <a href="/alerts" style="color:#fbbf24">Alerts</a> · <a href="/predictions" style="color:#a78bfa">Predictions</a></footer>
   <script>
     const $ = (id) => document.getElementById(id);
     function escapeHTML(value) {
@@ -149,6 +201,8 @@
       const h = {'Content-Type': 'application/json'};
       const apiKey = sessionStorage.getItem('eti_api_key') || '';
       if (apiKey) h['X-API-Key'] = apiKey;
+    function authHeaders() {
+      const h = {'Content-Type': 'application/json'};
       return h;
     }
     document.querySelectorAll('nav button[data-panel]').forEach(btn => btn.addEventListener('click', () => {
@@ -236,6 +290,162 @@
     $('p-refresh').onclick = () => refreshPortfolio();
     $('p-paper').onclick = async () => { const body={provider:'binance',environment:'paper',symbol:$('p-symbol').value.trim(),side:$('p-side').value,qty:parseFloat($('p-qty').value),equity:10000,data_status:'fresh',data_age_seconds:5}; $('p-summary').textContent=JSON.stringify(await(await fetch('/api/trading/order',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)})).json(),null,2); await refreshPortfolio(); };
     $('r-eval').onclick = async () => { const q=new URLSearchParams({symbol:$('r-symbol').value.trim(),side:'buy',qty:$('r-qty').value,environment:$('r-env').value,equity:$('r-equity').value}); $('r-out').textContent=JSON.stringify(await(await fetch('/api/risk/evaluate?'+q)).json(),null,2); };
+
+    // ---------------- Paper trading (INTERNAL PAPER engine; no exchange credentials) ----------------
+    const PP = { account: 'default' };
+    function ppEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = String(text); return e; }
+    function ppClear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+    function ppErr(j, status) {
+      const d = j && j.detail;
+      if (typeof d === 'string') return d;
+      if (d && d.error) return d.error;
+      if (Array.isArray(d)) return d.map(x => (x && x.msg) || 'invalid value').join('; ');
+      return 'Request failed (HTTP ' + status + ')';
+    }
+    async function ppApi(path, opts) {
+      const r = await fetch(path, opts);
+      let j = {};
+      try { j = await r.json(); } catch (_) {}
+      if (!r.ok) { const e = new Error(ppErr(j, r.status)); e.body = j; throw e; }
+      return j;
+    }
+    const ppNum = (v, d = 2) => (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+    const ppQty = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 8 });
+    const ppCls = (v) => v > 0 ? 'ok' : (v < 0 ? 'bad' : 'muted');
+    function ppTable(host, headers, rows, empty) {
+      ppClear(host);
+      if (!rows.length) { host.appendChild(ppEl('p', 'muted', empty)); return; }
+      const t = ppEl('table', 'pp-table'), thead = ppEl('thead'), hr = ppEl('tr');
+      headers.forEach(h => hr.appendChild(ppEl('th', '', h)));
+      thead.appendChild(hr); t.appendChild(thead);
+      const tb = ppEl('tbody');
+      rows.forEach(r => {
+        const tr = ppEl('tr');
+        r.forEach(c => {
+          const td = ppEl('td');
+          if (c && typeof c === 'object' && c.button) {
+            const b = ppEl('button', 'action', c.button); b.onclick = c.onclick; td.appendChild(b);
+          } else if (c && typeof c === 'object') { td.textContent = c.text; if (c.cls) td.className = c.cls; }
+          else td.textContent = c;
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); host.appendChild(t);
+    }
+    function ppChip(text, cls) { return ppEl('span', 'pp-chip ' + cls, text); }
+    async function ppLoadMode() {
+      try {
+        const m = await ppApi('/api/paper/mode');
+        const chips = $('pp-chips'); ppClear(chips);
+        chips.appendChild(ppChip('INTERNAL PAPER — active (default)', 'internal'));
+        chips.appendChild(ppChip(m.exchange_testnet.available ? 'EXCHANGE TESTNET — available' : 'EXCHANGE TESTNET — not connected', m.exchange_testnet.available ? 'testnet' : 'off'));
+        chips.appendChild(ppChip('LIVE TRADING — DISABLED', 'livedis'));
+        $('pp-mode-note').textContent = 'Simulated by ETI against live Binance public prices. No exchange API key is used and no real order is sent. ' +
+          (m.exchange_testnet.available ? '' : (m.exchange_testnet.how_to_enable || '')) + (m.kill_switch ? ' KILL SWITCH IS ON: new orders are blocked.' : '');
+        if (!m.exchange_testnet.available) { $('pp-mode-sel').value = 'internal_paper'; }
+        const mc = $('mode-status'); if (mc) { mc.textContent = 'INTERNAL PAPER' + (m.exchange_testnet.available ? ' + testnet available' : ''); mc.className = 'ok'; }
+      } catch (e) { $('pp-mode-note').textContent = 'Could not load execution mode: ' + e.message; }
+    }
+    function ppCards(s) {
+      const host = $('pp-cards'); ppClear(host);
+      [['Equity', ppNum(s.equity), ''], ['Cash', ppNum(s.cash), ''], ['Available cash', ppNum(s.available_cash), ''],
+       ['Realized P&L', ppNum(s.realized_pnl), ppCls(s.realized_pnl)], ['Unrealized P&L', ppNum(s.unrealized_pnl), ppCls(s.unrealized_pnl)],
+       ['Total return', ppNum(s.return_pct) + '%', ppCls(s.total_pnl)], ['Fees paid', ppNum(s.fees_paid), '']].forEach(([k, v, c]) => {
+        const card = ppEl('div', 'card'); card.appendChild(ppEl('h2', '', k)); card.appendChild(ppEl('p', c, v)); host.appendChild(card);
+      });
+      if ((s.marks_stale_for || []).length) { const c = ppEl('div', 'card'); c.appendChild(ppEl('h2', '', 'Prices')); c.appendChild(ppEl('p', 'warn', 'Live price unavailable for ' + s.marks_stale_for.join(', ') + '; using last known mark.')); host.appendChild(c); }
+    }
+    async function ppCancel(id) {
+      try { await ppApi('/api/paper/orders/' + encodeURIComponent(id) + '?account_id=' + PP.account, { method: 'DELETE', headers: authHeaders() }); $('pp-msg').textContent = 'Order ' + id + ' cancelled.'; $('pp-msg').className = 'ok'; }
+      catch (e) { $('pp-msg').textContent = e.message; $('pp-msg').className = 'bad'; }
+      ppRefresh();
+    }
+    async function ppRefresh() {
+      try {
+        const [s, open, closed, fills] = await Promise.all([
+          ppApi('/api/paper/account?account_id=' + PP.account),
+          ppApi('/api/paper/orders?status=open&limit=100&account_id=' + PP.account),
+          ppApi('/api/paper/orders?status=closed&limit=50&account_id=' + PP.account),
+          ppApi('/api/paper/fills?limit=50&account_id=' + PP.account)]);
+        ppCards(s);
+        ppTable($('pp-positions'), ['Symbol', 'Qty', 'Available', 'Avg cost', 'Mark', 'Market value', 'Unrealized', 'Realized'],
+          s.positions.map(p => [p.symbol, ppQty(p.qty), ppQty(p.available_qty), ppNum(p.avg_cost, 4), ppNum(p.mark, 4), ppNum(p.market_value), { text: ppNum(p.unrealized_pnl), cls: ppCls(p.unrealized_pnl) }, { text: ppNum(p.realized_pnl), cls: ppCls(p.realized_pnl) }]), 'No holdings.');
+        ppTable($('pp-open'), ['ID', 'Symbol', 'Side', 'Type', 'Qty', 'Filled', 'Limit', 'Stop', 'Status', ''],
+          open.orders.map(o => [o.id, o.symbol, o.side.toUpperCase(), o.type, ppQty(o.qty), ppQty(o.filled_qty), o.limit_price ? ppNum(o.limit_price, 4) : '—', o.stop_price ? ppNum(o.stop_price, 4) : '—', o.status, { button: 'Cancel', onclick: () => ppCancel(o.id) }]), 'No open orders.');
+        ppTable($('pp-history'), ['Time', 'ID', 'Symbol', 'Side', 'Type', 'Qty', 'Filled', 'Avg price', 'Fees', 'Status', 'Note'],
+          closed.orders.map(o => [(o.updated_at || '').replace('T', ' ').slice(0, 19), o.id, o.symbol, o.side.toUpperCase(), o.type, ppQty(o.qty), ppQty(o.filled_qty), o.avg_fill_price ? ppNum(o.avg_fill_price, 4) : '—', ppNum(o.fees, 4), o.status, o.note || '']), 'No completed orders yet.');
+        ppTable($('pp-fills'), ['Time', 'Order', 'Symbol', 'Side', 'Qty', 'Price', 'Fee', 'Liquidity', 'Realized P&L'],
+          fills.fills.map(f => [(f.ts || '').replace('T', ' ').slice(0, 19), f.order_id, f.symbol, f.side.toUpperCase(), ppQty(f.qty), ppNum(f.price, 4), ppNum(f.fee, 4), f.liquidity, { text: ppNum(f.realized_pnl), cls: ppCls(f.realized_pnl) }]), 'No fills yet.');
+      } catch (e) { $('pp-msg').textContent = 'Could not load paper account: ' + e.message; $('pp-msg').className = 'bad'; }
+    }
+    function ppBody() {
+      const num = (id) => { const v = $(id).value.trim(); return v === '' ? undefined : parseFloat(v); };
+      return { account_id: PP.account, symbol: $('pp-symbol').value.trim(), side: $('pp-side').value, type: $('pp-type').value,
+               qty: num('pp-qty'), limit_price: num('pp-limit'), stop_price: num('pp-stop'), mode: $('pp-mode-sel').value };
+    }
+    function ppSetModeChip(res) {
+      const c = $('pp-ticket-mode'), m = (res && res.mode) || 'internal_paper';
+      c.textContent = (res && res.label) ? res.label.split(' (')[0] : 'INTERNAL PAPER';
+      c.className = 'pp-chip ' + (m === 'exchange_testnet' ? 'testnet' : 'internal');
+    }
+    $('pp-quote').onclick = async () => {
+      try { const q = await ppApi('/api/paper/quote?symbol=' + encodeURIComponent($('pp-symbol').value.trim())); $('pp-msg').textContent = q.symbol + ' bid ' + ppNum(q.best_bid, 4) + ' / ask ' + ppNum(q.best_ask, 4) + ' · spread ' + ppNum(q.spread_bps, 2) + ' bps · ' + q.source; $('pp-msg').className = 'muted'; }
+      catch (e) { $('pp-msg').textContent = e.message; $('pp-msg').className = 'bad'; }
+    };
+    $('pp-preview-btn').onclick = async () => {
+      const b = ppBody(), pre = $('pp-preview');
+      if (b.type === 'bracket') { pre.hidden = false; pre.textContent = 'Bracket: places a stop-loss and a take-profit as one OCO pair against your holdings (whichever executes cancels the other).'; return; }
+      try {
+        const r = await ppApi('/api/paper/preview', { method: 'POST', headers: authHeaders(), body: JSON.stringify(b) });
+        const p = r.preview; ppSetModeChip(r);
+        const lines = ['Mode: ' + r.label, 'Market: bid ' + ppNum(p.book.best_bid, 4) + ' / ask ' + ppNum(p.book.best_ask, 4) + ' (spread ' + ppNum(p.book.spread_bps, 2) + ' bps, ' + p.book.source + ')'];
+        if (p.expected_fill_qty > 0) lines.push('Expected fill: ' + ppQty(p.expected_fill_qty) + ' @ ' + ppNum(p.expected_avg_price, 4), 'Expected fee: ' + ppNum(p.expected_fee, 4), 'Expected slippage vs touch: ' + ppNum(p.expected_slippage_bps, 2) + ' bps', 'Visible depth: ' + ppQty(p.visible_depth));
+        if (p.expected_unfilled_qty > 0) lines.push('Unfilled: ' + ppQty(p.expected_unfilled_qty));
+        lines.push(p.note, 'Available cash: ' + ppNum(p.available_cash) + ' · available ' + p.symbol + ': ' + ppQty(p.available_qty));
+        if (r.downgraded) lines.unshift('NOTE: ' + r.reason);
+        if (p.halted) lines.unshift('KILL SWITCH ACTIVE: this order would be rejected.');
+        pre.hidden = false; pre.textContent = lines.join('\n'); $('pp-msg').textContent = '';
+      } catch (e) { pre.hidden = false; pre.textContent = 'Would be rejected: ' + e.message; }
+    };
+    $('pp-submit').onclick = async () => {
+      const b = ppBody(), msg = $('pp-msg'), btn = $('pp-submit');
+      btn.disabled = true;
+      try {
+        let r;
+        if (b.type === 'bracket') {
+          r = await ppApi('/api/paper/orders/bracket', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ account_id: b.account_id, symbol: b.symbol, qty: b.qty, stop_price: b.stop_price, take_profit_price: b.limit_price }) });
+          msg.textContent = 'Bracket placed (' + r.orders.map(o => o.id).join(', ') + '). ' + r.label; msg.className = 'ok';
+        } else {
+          r = await ppApi('/api/paper/orders', { method: 'POST', headers: authHeaders(), body: JSON.stringify(b) });
+          ppSetModeChip(r);
+          if (r.result) { msg.textContent = r.label + ' · ' + r.result.status + (r.result.message ? ': ' + r.result.message : ''); msg.className = r.result.status === 'rejected' ? 'bad' : 'ok'; }
+          else { const o = r.order; msg.textContent = r.label + ' · ' + o.side.toUpperCase() + ' ' + ppQty(o.qty) + ' ' + o.symbol + ' → ' + o.status + (o.filled_qty ? ' (filled ' + ppQty(o.filled_qty) + ' @ ' + ppNum(o.avg_fill_price, 4) + ')' : '') + (o.note ? ' — ' + o.note : '');
+                  msg.className = (o.status === 'rejected') ? 'bad' : 'ok'; }
+          if (r.downgraded) msg.textContent += '  [' + r.reason + ']';
+        }
+      } catch (e) { msg.textContent = 'Rejected: ' + e.message; msg.className = 'bad'; }
+      btn.disabled = false; ppRefresh();
+    };
+    $('pp-refresh').onclick = () => ppRefresh();
+    $('pp-cancel-all').onclick = async () => { try { const r = await ppApi('/api/paper/orders/cancel-all?account_id=' + PP.account, { method: 'POST', headers: authHeaders() }); $('pp-msg').textContent = 'Cancelled ' + r.canceled + ' order(s).'; $('pp-msg').className = 'ok'; } catch (e) { $('pp-msg').textContent = e.message; $('pp-msg').className = 'bad'; } ppRefresh(); };
+    $('pp-flatten').onclick = async () => {
+      if (!window.confirm('Cancel all open paper orders and sell every paper holding at the simulated market?')) return;
+      try { const r = await ppApi('/api/paper/flatten', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ account_id: PP.account, confirm: 'FLATTEN ' + PP.account }) });
+        $('pp-msg').textContent = 'Flatten: cancelled ' + r.canceled.length + ', sold ' + r.sold.length + (r.failed.length ? ', FAILED ' + r.failed.map(f => f.symbol + ' (' + f.reason + ')').join('; ') : '') + '.'; $('pp-msg').className = r.failed.length ? 'warn' : 'ok';
+      } catch (e) { $('pp-msg').textContent = e.message; $('pp-msg').className = 'bad'; }
+      ppRefresh();
+    };
+    $('pp-reset').onclick = async () => {
+      const typed = window.prompt('This wipes the PAPER account back to a fresh balance. Type RESET ' + PP.account + ' to confirm.');
+      if (typed !== 'RESET ' + PP.account) return;
+      try { await ppApi('/api/paper/reset', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ account_id: PP.account, confirm: typed }) }); $('pp-msg').textContent = 'Paper account reset.'; $('pp-msg').className = 'ok'; } catch (e) { $('pp-msg').textContent = e.message; $('pp-msg').className = 'bad'; }
+      ppRefresh();
+    };
+    ['pp-type', 'pp-mode-sel'].forEach(id => $(id).addEventListener('change', () => ppSetModeChip({ mode: $('pp-mode-sel').value })));
+    document.querySelectorAll('nav button[data-panel="portfolio"]').forEach(b => b.addEventListener('click', () => { ppLoadMode(); ppRefresh(); }));
+    setInterval(() => { if ($('portfolio').classList.contains('active')) ppRefresh(); }, 5000);
+    ppLoadMode();
     refreshOverview(); loadTraders(); setInterval(refreshOverview, 15000);
   </script>
 </body>

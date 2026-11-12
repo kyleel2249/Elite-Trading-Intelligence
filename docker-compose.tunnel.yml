@@ -1,0 +1,18 @@
+# Self-hosted, no cloud host needed: runs ETI + a Cloudflare Tunnel on any machine/VPS.
+#   1. Cloudflare Zero Trust -> Networks -> Tunnels -> create tunnel -> copy the token.
+#      Add a public hostname (e.g. eti.example.com) -> service http://eti:8000
+#   2. echo "TUNNEL_TOKEN=..." >> .env ; set APP_ENV=production, API_KEY, SECRET_KEY in .env
+#   3. docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up --build -d
+#   4. Set the Worker's BACKEND_URL to https://eti.example.com (or use that hostname directly).
+services:
+  eti:
+    environment:
+      APP_ENV: production
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on:
+      - eti
+    restart: unless-stopped

@@ -1,0 +1,85 @@
+name: ETI Research (real-data replay and walk-forward optimizer)
+
+# Manual, read-only research run on real public market data. It places no orders, uses no secrets and applies no parameters.
+on:
+  workflow_dispatch:
+    inputs:
+      symbols: { description: "Comma-separated symbols", default: "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT" }
+      strategies: { description: "Comma-separated: scalp, intraday, swing, position", default: "intraday,swing" }
+      days: { description: "History length in days", default: "365" }
+      folds: { description: "Walk-forward folds", default: "4" }
+      elite_ab: { description: "A/B test the Elite Trader gate (off versus on) on the same real data", default: "false" }
+      run_optimizer: { description: "Run the walk-forward optimizer (slow)", default: "false" }
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env: { SYMBOLS: "${{ inputs.symbols }}", STRATEGIES: "${{ inputs.strategies }}" }
+        run: |
+          node -e '
+            const ok=(s,r)=>s.split(",").map(x=>x.trim().toUpperCase()).filter(x=>r.test(x));
+            const sy=ok(process.env.SYMBOLS,/^[A-Z0-9]{5,20}$/).slice(0,8), st=ok(process.env.STRATEGIES,/^(SCALP|INTRADAY|SWING|POSITION)$/).map(x=>x.toLowerCase()).slice(0,4);
+            if(!sy.length||!st.length) throw new Error("no valid symbols or strategies");
+            console.log("matrix="+JSON.stringify({include:sy.flatMap(symbol=>st.map(strategy=>({symbol,strategy})))}));' >> "$GITHUB_OUTPUT"
+  research:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Build the Elite Trader knowledge database (generated, not committed)
+        run: npm run build:knowledge
+      - name: Node version (type stripping needs >= 22.18)
+        run: node --version
+      - name: Market-data reachability
+        run: |
+          for h in data-api.binance.vision api.binance.com; do
+            echo "$h -> $(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://$h/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=1")"
+          done
+      - name: Unit tests
+        if: ${{ matrix.symbol == fromJSON(needs.plan.outputs.matrix).include[0].symbol && matrix.strategy == fromJSON(needs.plan.outputs.matrix).include[0].strategy }}
+        run: npm test
+      - name: Replay (swift_only / gainz_only / combined) on real data
+        env: { SYMBOL: "${{ matrix.symbol }}", STRATEGY: "${{ matrix.strategy }}", DAYS: "${{ inputs.days }}" }
+        run: node scripts/replay.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS" --compare --out replay.json > replay-summary.json
+      - name: Pooled-trade dump (one line, for aggregation across runs)
+        env: { SYMBOL: "${{ matrix.symbol }}", STRATEGY: "${{ matrix.strategy }}" }
+        run: node scripts/pooldump.mjs replay.json "$SYMBOL" "$STRATEGY"
+      - name: Trade-level diagnostics (what costs take versus what signals earn)
+        run: node scripts/diagnose.mjs replay.json combined
+      - name: Elite Trader gate A/B on real data
+        if: ${{ inputs.elite_ab == 'true' }}
+        env: { SYMBOL: "${{ matrix.symbol }}", STRATEGY: "${{ matrix.strategy }}", DAYS: "${{ inputs.days }}" }
+        run: node scripts/elitegate.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS"
+      - name: Walk-forward optimizer on real data
+        if: ${{ inputs.run_optimizer == 'true' }}
+        env: { SYMBOL: "${{ matrix.symbol }}", STRATEGY: "${{ matrix.strategy }}", DAYS: "${{ inputs.days }}", FOLDS: "${{ inputs.folds }}" }
+        run: node scripts/optimize.mjs --symbol "$SYMBOL" --strategy "$STRATEGY" --days "$DAYS" --folds "$FOLDS" --out optimize.json > /dev/null
+      - name: Summary
+        if: ${{ inputs.run_optimizer == 'true' }}
+        run: |
+          node -e '
+            const o=JSON.parse(require("fs").readFileSync("optimize.json","utf8")), r=JSON.parse(require("fs").readFileSync("replay-summary.json","utf8"));
+            const pick=x=>({trades:x.report.trades,status:x.report.status,expectancyR:x.report.expectancyR,profitFactor:x.report.profitFactor,winRate:x.report.winRate,maxDrawdownPct:x.maxDrawdownPct,strategyReturnPct:x.strategyReturnPct,buyAndHoldReturnPct:x.buyAndHoldReturnPct,oosTrades:x.outOfSample.trades,oosExpectancyR:x.outOfSample.expectancyR,bootstrapR:x.bootstrapExpectancyR});
+            const out={replay:Object.fromEntries(Object.entries(r).map(([k,v])=>[k,pick(v)])),replayPeriod:{start:new Date(r.combined.periodStart).toISOString(),end:new Date(r.combined.periodEnd).toISOString(),bars:r.combined.bars},optimizer:{folds:o.folds.map(f=>({fold:f.fold,chosen:f.chosen,oosChosenTrades:f.oosChosenTrades,trainTrades:f.trainTrades})),challenger:o.challenger&&{name:o.challenger.name,stability:o.challenger.selectionStability},oosChallenger:{trades:o.oosChallenger.trades,meanR:o.oosChallenger.meanR,bootstrap:o.oosChallenger.bootstrap},oosChampion:{trades:o.oosChampion.trades,meanR:o.oosChampion.meanR,bootstrap:o.oosChampion.bootstrap},promotion:o.promotion}};
+            const t=JSON.stringify(out,(k,v)=>v===Infinity?"Infinity":v,2); console.log(t);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,"```json\n"+t+"\n```\n");'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eti-research-${{ matrix.symbol }}-${{ matrix.strategy }}
+          path: |
+            replay.json
+            optimize.json

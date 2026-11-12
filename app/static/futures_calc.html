@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ETI | Futures Calculator</title>
+<link rel="stylesheet" href="/static/eti.css">
+<style>
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem}
+.form label{display:block;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.form input,.form select{width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}
+.chips button{min-height:2rem;padding:.2rem .55rem}
+.chips button.on{background:var(--cyan);color:#04222b;border-color:var(--cyan)}
+ul.v{margin:.2rem 0 0 1.1rem;padding:0;font-size:.8rem}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>ETI &middot; Futures Calculator</h1>
+  <div class="sub">Calculator only &middot; places no orders &middot; liquidation figures are estimates</div></div>
+  <nav aria-label="ETI pages"><a class="nav" href="/">Dashboard</a><a class="nav" href="/markets">Markets</a><a class="nav" href="/static/market3d.html">3D view</a></nav>
+</header>
+<main>
+  <div class="banner" id="banner" role="status" aria-live="polite">Enter values to calculate.</div>
+  <section class="panel"><div class="ph"><h2>Position</h2></div><div class="pb">
+    <div class="form">
+      <div><label for="direction">Direction</label><select id="direction"><option value="long">LONG / BUY</option><option value="short">SHORT / SELL</option></select></div>
+      <div><label for="contract_type">Contract</label><select id="contract_type"><option value="linear">Linear (USDT/USDC)</option><option value="inverse">Inverse (coin-margined)</option></select></div>
+      <div><label for="margin_mode">Margin mode</label><select id="margin_mode"><option value="isolated">Isolated</option><option value="cross">Cross</option></select></div>
+      <div><label for="capital">Capital to trade</label><input id="capital" inputmode="decimal" value="1000"></div>
+      <div><label for="entry_price">Entry price</label><input id="entry_price" inputmode="decimal" value="100000"></div>
+      <div><label for="leverage">Leverage (1&ndash;150x)</label><input id="leverage" type="number" min="1" max="150" step="1" value="20"></div>
+      <div><label for="move_pct">Expected movement %</label><input id="move_pct" inputmode="decimal" value="1"></div>
+      <div><label for="stop_price">Stop-loss price</label><input id="stop_price" inputmode="decimal" placeholder="optional"></div>
+      <div><label for="tp">Take-profit price</label><input id="tp" inputmode="decimal" placeholder="optional"></div>
+    </div>
+    <input id="levr" type="range" min="1" max="150" step="1" value="20" aria-label="Leverage slider" style="width:100%;margin-top:.7rem">
+    <div class="chips" id="chips" aria-label="Leverage presets"></div>
+  </div></section>
+
+  <section class="panel"><div class="ph"><h2>Exchange limits &amp; costs (supply real values)</h2></div><div class="pb">
+    <div class="form">
+      <div><label for="exmax">Exchange max leverage</label><input id="exmax" type="number" min="1" step="1" placeholder="from instrument"></div>
+      <div><label for="mmr">Maintenance margin %</label><input id="mmr" inputmode="decimal" placeholder="e.g. 0.5"></div>
+      <div><label for="fee">Taker fee (bps)</label><input id="fee" inputmode="decimal" value="5"></div>
+      <div><label for="slip">Slippage (bps / side)</label><input id="slip" inputmode="decimal" value="5"></div>
+      <div><label for="fr">Funding % / interval</label><input id="fr" inputmode="decimal" value="0"></div>
+      <div><label for="fi">Funding intervals held</label><input id="fi" inputmode="decimal" value="0"></div>
+      <div><label for="bal">Available balance</label><input id="bal" inputmode="decimal" placeholder="optional"></div>
+    </div>
+  </div></section>
+
+  <div class="kpis" id="kpis"></div>
+  <section class="panel"><div class="ph"><h2>Rule check</h2></div><div class="pb" id="checks"><div class="empty">No result yet</div></div></section>
+  <section class="panel"><div class="ph"><h2>Profit / loss scenarios</h2></div><div class="pb">
+    <p class="note">Price move is relative to the position: favourable = in your direction. Net figures include the fee, slippage and funding inputs above. Rows marked liquidated assume isolated margin is lost.</p>
+    <table><thead><tr><th>Move</th><th>Price</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Return on margin</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table>
+  </div></section>
+</main>
+<footer>Research tool. Not investment advice. Leveraged trading can lose more than you expect, quickly. Nothing here is sent to an exchange.</footer>
+<script src="/static/futures_calc.js"></script>
+</body>
+</html>

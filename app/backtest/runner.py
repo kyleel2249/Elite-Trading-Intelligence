@@ -2,6 +2,10 @@
 Wire strategy modules to paper/live execution via TradingService.
 Every order passes RiskEngine (Helena Frost). Live requires LIVE_TRADING_ENABLED + keys.
 Risk inputs (equity, positions, PnL, data freshness) are derived server-side.
+
+Memory integration: every generated signal is recorded (before any order is sent, so the
+resulting fill can be linked to the exact analysis), and execution is blocked for strategies the
+adaptive-edge governance has suspended.
 """
 from __future__ import annotations
 
@@ -63,6 +67,31 @@ class StrategyRunner:
             return "exit_long"
         return "flat"
 
+    def _record_signal(self, module_id: str, symbol: str, provider: str, signal: str, closes: list[float], signal_model: str) -> Optional[str]:
+        """Persist the signal in ETI memory (best effort - never blocks signal generation)."""
+        if self.db is None:
+            return None
+        try:
+            from app.memory.signals import SignalMemoryService
+            from app.memory.versions import StrategyVersionService
+
+            version = StrategyVersionService(self.db, self.settings).ensure_baseline(module_id)
+            sig = SignalMemoryService(self.db, self.settings).record(
+                source="strategy_runner",
+                symbol=symbol,
+                provider=provider,
+                direction={"long": "long", "exit_long": "exit", "flat": "flat"}.get(signal, "unknown"),
+                reference_price=closes[-1] if closes else None,
+                strategy_id=module_id,
+                strategy_version=version.version if version else None,
+                analysis={"signal": signal, "signal_model": signal_model, "reference": "last_1h_close", "bars": len(closes)},
+            )
+            return sig.signal_id
+        except Exception:
+            self.db.rollback()
+            logger.warning("memory signal record failed for %s", module_id, exc_info=True)
+            return None
+
     async def signal_and_maybe_trade(
         self,
         *,
@@ -98,6 +127,7 @@ class StrategyRunner:
             volumes = [float(k.get("volume") or 0) for k in klines]
         signal = self._latest_signal(module_id, closes, volumes)
         bt = run_backtest(klines, BacktestParams(module_id=module_id, symbol=symbol, lookback=20))
+        memory_signal_id = self._record_signal(module_id, symbol, provider, signal, closes, bt.signal_model)
 
         result: dict[str, Any] = {
             "module_id": module_id,
@@ -107,6 +137,7 @@ class StrategyRunner:
             "symbol": symbol,
             "environment": env,
             "live_blocks": live_block,
+            "memory_signal_id": memory_signal_id,
             "backtest_snapshot": {
                 "trades": bt.trades,
                 "total_return_pct": bt.total_return_pct,
@@ -132,6 +163,14 @@ class StrategyRunner:
             result["message"] = "Live execution blocked"
             result["order"] = {"status": "rejected", "reasons": live_block, "officer": "Helena Frost"}
             return result
+
+        if self.db is not None:
+            from app.memory.registry import is_suspended
+
+            if is_suspended(self.db, module_id):
+                result["message"] = "Strategy is suspended by adaptive-edge governance; resume it before executing"
+                result["order"] = {"status": "rejected", "reasons": ["strategy_suspended"], "officer": "Helena Frost"}
+                return result
 
         side = "buy" if signal == "long" else ("sell" if signal == "exit_long" else None)
         if side is None:

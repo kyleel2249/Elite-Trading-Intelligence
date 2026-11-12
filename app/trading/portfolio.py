@@ -362,3 +362,366 @@ class PortfolioService:
             payload=kwargs.get("payload"),
         )
         self.db.add(entry)
+"""Paper portfolio: positions, fills, journal with filters.
+
+Every position-changing fill is also handed to the ETI memory/learning pipeline *after* the
+portfolio transaction has committed. Learning failures are logged and swallowed: they can never
+block, reverse or alter order handling.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models import OrderRecord, Position, JournalEntry
+from app.memory import models as _memory_models  # noqa: F401  (registers memory tables on Base.metadata)
+
+logger = logging.getLogger("eti.portfolio")
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class PortfolioService:
+    """Claire Bennett standards: every event reconstructable."""
+
+    def __init__(self, db: Session):
+        self.db = db
+        self._pending_fills: list[dict[str, Any]] = []
+
+    def record_order_event(
+        self,
+        *,
+        client_order_id: str,
+        provider: str,
+        environment: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        status: str,
+        fill_price: Optional[float] = None,
+        risk_approved: bool = False,
+        risk_notes: str = "",
+        council_action: Optional[str] = None,
+        thesis: Optional[str] = None,
+        provider_order_id: Optional[str] = None,
+    ) -> OrderRecord:
+        self._pending_fills = []
+        row = (
+            self.db.query(OrderRecord)
+            .filter(OrderRecord.client_order_id == client_order_id)
+            .one_or_none()
+        )
+        if row is None:
+            row = OrderRecord(
+                client_order_id=client_order_id,
+                provider=provider,
+                environment=environment,
+                symbol=symbol.upper(),
+                side=side.lower(),
+                order_type="market",
+                qty=qty,
+                status=status,
+                fill_price=fill_price,
+                risk_approved=risk_approved,
+                risk_notes=risk_notes,
+                provider_order_id=provider_order_id,
+            )
+            self.db.add(row)
+        else:
+            row.status = status
+            row.fill_price = fill_price if fill_price is not None else row.fill_price
+            row.risk_approved = risk_approved
+            row.risk_notes = risk_notes or row.risk_notes
+            row.provider_order_id = provider_order_id or row.provider_order_id
+            row.updated_at = _utcnow()
+
+        self._journal(
+            client_order_id=client_order_id,
+            provider=provider,
+            environment=environment,
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=fill_price,
+            event=status,
+            thesis=thesis,
+            council_action=council_action,
+            risk_officer="Helena Frost",
+        )
+
+        if status in ("submitted", "filled") and fill_price is not None and risk_approved:
+            self._apply_fill(
+                provider=provider,
+                environment=environment,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                price=fill_price,
+                ctx={
+                    "client_order_id": client_order_id,
+                    "thesis": thesis,
+                    "council_action": council_action,
+                },
+            )
+
+        self.db.commit()
+        self.db.refresh(row)
+        self._dispatch_learning()
+        return row
+
+    def _dispatch_learning(self) -> None:
+        """Hand committed fills to the post-trade learning pipeline (best effort)."""
+        events, self._pending_fills = self._pending_fills, []
+        if not events:
+            return
+        try:
+            from app.memory.learning import TradeLearningService
+
+            svc = TradeLearningService(self.db)
+            for ev in events:
+                svc.process_fill(ev)
+        except Exception:
+            self.db.rollback()
+            logger.warning("memory learning hook failed; order handling is unaffected", exc_info=True)
+
+    def _apply_fill(
+        self,
+        *,
+        provider: str,
+        environment: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: float,
+        ctx: Optional[dict[str, Any]] = None,
+    ) -> None:
+        symbol = symbol.upper()
+        side = side.lower()
+        ctx = ctx or {}
+        base_event: dict[str, Any] = {
+            "provider": provider,
+            "environment": environment,
+            "symbol": symbol,
+            "side": side,
+            "price": price,
+            "ts": _utcnow(),
+            "client_order_id": ctx.get("client_order_id"),
+            "thesis": ctx.get("thesis"),
+            "council_action": ctx.get("council_action"),
+        }
+        pos = (
+            self.db.query(Position)
+            .filter(
+                Position.provider == provider,
+                Position.environment == environment,
+                Position.symbol == symbol,
+                Position.status == "open",
+            )
+            .one_or_none()
+        )
+
+        if pos is None:
+            pos_side = "long" if side == "buy" else "short"
+            pos = Position(
+                provider=provider,
+                environment=environment,
+                symbol=symbol,
+                side=pos_side,
+                qty=qty,
+                avg_entry=price,
+                mark_price=price,
+                status="open",
+            )
+            self.db.add(pos)
+            self._pending_fills.append({**base_event, "kind": "open", "qty": qty, "position_side": pos_side})
+            return
+
+        if (pos.side == "long" and side == "buy") or (pos.side == "short" and side == "sell"):
+            new_qty = pos.qty + qty
+            pos.avg_entry = ((pos.avg_entry * pos.qty) + (price * qty)) / new_qty if new_qty else price
+            pos.qty = new_qty
+            pos.mark_price = price
+            pos.updated_at = _utcnow()
+            self._pending_fills.append({**base_event, "kind": "add", "qty": qty})
+            return
+
+        if qty < pos.qty:
+            if pos.side == "long":
+                pnl = (price - pos.avg_entry) * qty
+            else:
+                pnl = (pos.avg_entry - price) * qty
+            pos.qty -= qty
+            pos.realized_pnl += pnl
+            pos.mark_price = price
+            pos.updated_at = _utcnow()
+            self._journal(
+                client_order_id=None,
+                provider=provider,
+                environment=environment,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                price=price,
+                event="closed",
+                pnl=pnl,
+                thesis="Partial position reduce",
+            )
+            self._pending_fills.append({**base_event, "kind": "reduce", "qty": qty, "pnl": pnl})
+        elif qty == pos.qty:
+            if pos.side == "long":
+                pnl = (price - pos.avg_entry) * qty
+            else:
+                pnl = (pos.avg_entry - price) * qty
+            pos.qty = 0
+            pos.realized_pnl += pnl
+            pos.status = "closed"
+            pos.mark_price = price
+            pos.updated_at = _utcnow()
+            self._journal(
+                client_order_id=None,
+                provider=provider,
+                environment=environment,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                price=price,
+                event="closed",
+                pnl=pnl,
+                thesis="Full position close",
+            )
+            self._pending_fills.append({**base_event, "kind": "close", "qty": qty, "pnl": pnl})
+        else:
+            close_qty = pos.qty
+            if pos.side == "long":
+                pnl = (price - pos.avg_entry) * close_qty
+            else:
+                pnl = (pos.avg_entry - price) * close_qty
+            remainder = qty - close_qty
+            pos.realized_pnl += pnl
+            pos.side = "short" if pos.side == "long" else "long"
+            pos.qty = remainder
+            pos.avg_entry = price
+            pos.mark_price = price
+            pos.status = "open"
+            pos.updated_at = _utcnow()
+            self._journal(
+                client_order_id=None,
+                provider=provider,
+                environment=environment,
+                symbol=symbol,
+                side=side,
+                qty=close_qty,
+                price=price,
+                event="closed",
+                pnl=pnl,
+                thesis="Position flip — closed leg",
+            )
+            self._pending_fills.append({
+                **base_event, "kind": "flip", "qty": qty, "close_qty": close_qty, "remainder_qty": remainder,
+                "new_side": pos.side, "pnl": pnl,
+            })
+
+    def mark_positions(self, marks: dict[tuple[str, str, str], float]) -> list[Position]:
+        open_pos = self.db.query(Position).filter(Position.status == "open").all()
+        for p in open_pos:
+            key = (p.provider, p.environment, p.symbol)
+            if key in marks:
+                px = marks[key]
+                p.mark_price = px
+                if p.side == "long":
+                    p.unrealized_pnl = (px - p.avg_entry) * p.qty
+                else:
+                    p.unrealized_pnl = (p.avg_entry - px) * p.qty
+                p.updated_at = _utcnow()
+        self.db.commit()
+        try:  # track best/worst marks for the learning loop's stop/target checks
+            from app.memory.learning import TradeLearningService
+
+            TradeLearningService(self.db).update_excursions(marks)
+        except Exception:
+            self.db.rollback()
+            logger.warning("excursion tracking failed", exc_info=True)
+        return open_pos
+
+    def list_positions(self, environment: Optional[str] = None, status: str = "open") -> list[Position]:
+        q = self.db.query(Position)
+        if environment:
+            q = q.filter(Position.environment == environment)
+        if status:
+            q = q.filter(Position.status == status)
+        return q.order_by(Position.updated_at.desc()).all()
+
+    def list_journal(
+        self,
+        limit: int = 50,
+        *,
+        symbol: Optional[str] = None,
+        event: Optional[str] = None,
+        environment: Optional[str] = None,
+        provider: Optional[str] = None,
+        side: Optional[str] = None,
+    ) -> list[JournalEntry]:
+        q = self.db.query(JournalEntry)
+        if symbol:
+            q = q.filter(JournalEntry.symbol == symbol.upper())
+        if event:
+            q = q.filter(JournalEntry.event == event)
+        if environment:
+            q = q.filter(JournalEntry.environment == environment)
+        if provider:
+            q = q.filter(JournalEntry.provider == provider)
+        if side:
+            q = q.filter(JournalEntry.side == side.lower())
+        return q.order_by(JournalEntry.created_at.desc()).limit(min(limit, 500)).all()
+
+    def portfolio_summary(self, environment: str = "paper") -> dict[str, Any]:
+        positions = self.list_positions(environment=environment, status="open")
+        realized = sum(
+            p.realized_pnl
+            for p in self.db.query(Position).filter(Position.environment == environment).all()
+        )
+        unrealized = sum(p.unrealized_pnl for p in positions)
+        return {
+            "environment": environment,
+            "open_positions": len(positions),
+            "realized_pnl": realized,
+            "unrealized_pnl": unrealized,
+            "net_pnl": realized + unrealized,
+            "positions": [
+                {
+                    "symbol": p.symbol,
+                    "side": p.side,
+                    "qty": p.qty,
+                    "avg_entry": p.avg_entry,
+                    "mark_price": p.mark_price,
+                    "unrealized_pnl": p.unrealized_pnl,
+                    "realized_pnl": p.realized_pnl,
+                }
+                for p in positions
+            ],
+            "auditor": "Claire Bennett",
+            "risk_officer": "Helena Frost",
+        }
+
+    def _journal(self, **kwargs: Any) -> None:
+        entry = JournalEntry(
+            client_order_id=kwargs.get("client_order_id"),
+            provider=kwargs.get("provider", ""),
+            environment=kwargs.get("environment", "paper"),
+            symbol=(kwargs.get("symbol") or "").upper(),
+            side=(kwargs.get("side") or "").lower(),
+            qty=float(kwargs.get("qty") or 0),
+            price=kwargs.get("price"),
+            event=kwargs.get("event", "note"),
+            pnl=kwargs.get("pnl"),
+            thesis=kwargs.get("thesis"),
+            council_action=kwargs.get("council_action"),
+            risk_officer=kwargs.get("risk_officer", "Helena Frost"),
+            payload=kwargs.get("payload"),
+        )
+        self.db.add(entry)
