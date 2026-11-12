@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS sports_model_predictions (
   settled_at INTEGER,
   best_selection TEXT,
   best_odds REAL,
+  best_probability REAL,
   best_bookmaker TEXT,
   expected_value REAL,
   recommended_stake_cents INTEGER NOT NULL DEFAULT 0,
@@ -45,3 +46,4 @@ CREATE TABLE IF NOT EXISTS sports_job_state (
   status TEXT NOT NULL,
   detail TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS sports_model_predictions_unique_fixture_version ON sports_model_predictions(fixture_id, model_version);
