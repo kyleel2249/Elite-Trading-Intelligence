@@ -57,7 +57,7 @@ test("football API always returns structured JSON for unexpected route failures"
  const env=new Proxy({}, {get(_target,key){if(key==="ODDSPAPI_API_KEY")throw new Error("forced diagnostic test");return undefined;}});
  const response=await app.fetch(new Request("https://eti.test/api/sports/health"),env as any);
  assert.equal(response.status,500);
- assert.match(response.headers.get("content-type")||"",/application\\/json/);
+ assert.ok((response.headers.get("content-type")||"").includes("application/json"));
  const body=await response.json() as any;
  assert.equal(body.error,"sports_internal_error");
  assert.match(body.message,/forced diagnostic test/);
@@ -66,7 +66,7 @@ test("OddsPapi invalid HTML or proxy responses report endpoint, status and conte
  const original=globalThis.fetch;
  globalThis.fetch=async()=>new Response("<html>upstream gateway error</html>",{status:502,headers:{"content-type":"text/html"}});
  try{
-  await assert.rejects(()=>oddsPapiGet("test-key","fixtures",{sportId:"10"}),/ODDSPAPI_INVALID_JSON: fixtures returned HTTP 502.*text\\/html/);
+  await assert.rejects(()=>oddsPapiGet("test-key","fixtures",{sportId:"10"}),(error:any)=>String(error?.message||error).includes("ODDSPAPI_INVALID_JSON: fixtures returned HTTP 502")&&String(error?.message||error).includes("text/html"));
  }finally{globalThis.fetch=original;}
 });
 test("sports dashboard surfaces the real non-JSON response instead of invalid_response",async()=>{
