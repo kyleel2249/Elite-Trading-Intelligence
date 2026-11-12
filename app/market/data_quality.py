@@ -3,16 +3,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Optional
+from math import isfinite
 
 from app.integrations.base import NormalizedQuote
 
 
 def assess_quote(quote: NormalizedQuote, max_age_seconds: int = 300) -> NormalizedQuote:
     now = datetime.now(timezone.utc)
-    age = (now - quote.ts_utc.replace(tzinfo=timezone.utc)).total_seconds() if quote.ts_utc else None
+    age = (now - (quote.ts_utc.replace(tzinfo=timezone.utc) if quote.ts_utc.tzinfo is None else quote.ts_utc.astimezone(timezone.utc))).total_seconds() if quote.ts_utc else None
     status = quote.data_status or "unknown"
 
-    if quote.price is None or quote.price <= 0:
+    if quote.price is None or not isfinite(quote.price) or quote.price <= 0:
         status = "invalid"
     elif age is not None:
         if age < 0:
@@ -24,6 +25,8 @@ def assess_quote(quote: NormalizedQuote, max_age_seconds: int = 300) -> Normaliz
         else:
             status = "fresh"
 
+    if any(v is not None and (not isfinite(v) or v <= 0) for v in (quote.bid, quote.ask)):
+        status = "invalid"
     if quote.bid is not None and quote.ask is not None:
         if quote.bid > quote.ask:
             status = "invalid"
@@ -34,6 +37,8 @@ def assess_quote(quote: NormalizedQuote, max_age_seconds: int = 300) -> Normaliz
 
 def validate_ohlc(o: float, h: float, l: float, c: float) -> list[str]:
     issues: list[str] = []
+    if not all(isfinite(v) for v in (o, h, l, c)):
+        return ["non_finite_price"]
     if min(o, h, l, c) <= 0:
         issues.append("non_positive_price")
     if h < max(o, c) or l > min(o, c):

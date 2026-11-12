@@ -56,6 +56,7 @@ class EdgarClient:
         dates = recent.get("filingDate") or []
         accessions = recent.get("accessionNumber") or []
         primary = recent.get("primaryDocument") or []
+        periods = recent.get("reportDate") or []
         thirteen_f = []
         for i, form in enumerate(forms):
             if str(form).upper() in ("13F-HR", "13F-HR/A", "13F-NT"):
@@ -65,6 +66,7 @@ class EdgarClient:
                         "filing_date": dates[i] if i < len(dates) else None,
                         "accession": accessions[i] if i < len(accessions) else None,
                         "primary_document": primary[i] if i < len(primary) else None,
+                        "period_of_report": periods[i] if i < len(periods) else None,
                     }
                 )
         return {

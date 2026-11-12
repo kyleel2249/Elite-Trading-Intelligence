@@ -18,9 +18,11 @@ export interface MarketEnv {
   MARKET_PROVIDER_ORDER?: string;
 }
 
-export type ProviderId = "binance" | "bybit" | "okx";
+export type ProviderId = "binance" | "bybit" | "okx" | "binance_usdm";
+export type MarketKind = "spot" | "futures";
 export type Endpoint = "klines" | "depth" | "trades" | "ticker";
-export type Kline = [number, number, number, number, number, number];
+/** [openTime, open, high, low, close, volume, takerBuyBaseVolume?]. The optional 7th field is the exchange-reported aggressive-buy volume (Binance klines only). */
+export type Kline = [number, number, number, number, number, number, number?];
 
 export interface Attempt {
   provider: ProviderId;
@@ -36,6 +38,8 @@ interface Params {
   symbol: string;
   interval: string;
   limit: number;
+  /** "futures" = Binance USDⓈ-M perpetuals only. Never mixed with spot and never failed over to another exchange. */
+  market?: MarketKind;
 }
 
 interface UpstreamRequest {
@@ -73,6 +77,7 @@ function okxSymbol(symbol: string): string {
 }
 
 const REQUEST_TIMEOUT_MS = 6000;
+import { classify } from "./markets.ts";
 const UA = "ETI-MarketProxy/1.0 (Cloudflare Worker; read-only market data)";
 
 // ---------------------------------------------------------------- helpers
@@ -173,7 +178,9 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
       if (endpoint === "klines") {
         return validateKlines(asArray(j, "klines_not_array").map((r) => {
           const a = asArray(r, "kline_row");
-          return [num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), num(a[5])] as Kline;
+          const k: Kline = [num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), num(a[5])], tb = Number(a[9]);
+          if (a[9] !== undefined && Number.isFinite(tb) && tb >= 0 && tb <= k[5] * 1.0001) k.push(tb); // only a plausible exchange-reported value is kept
+          return k;
         }), p.limit);
       }
       if (endpoint === "depth") {
@@ -190,6 +197,18 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
         highPrice: num(j.highPrice), lowPrice: num(j.lowPrice), volume: num(j.volume), quoteVolume: num(j.quoteVolume),
       });
     },
+  },
+
+  // Binance USDⓈ-M futures (perpetual contracts, including equity/commodity/index perpetuals where listed). Same payload shapes as spot.
+  binance_usdm: {
+    hosts: ["https://fapi.binance.com"],
+    request(endpoint, p) {
+      if (endpoint === "klines") return { path: "/fapi/v1/klines", query: { symbol: p.symbol, interval: p.interval, limit: String(p.limit) } };
+      if (endpoint === "depth") return { path: "/fapi/v1/depth", query: { symbol: p.symbol, limit: String(p.limit) } };
+      if (endpoint === "trades") return { path: "/fapi/v1/trades", query: { symbol: p.symbol, limit: String(p.limit) } };
+      return { path: "/fapi/v1/ticker/24hr", query: { symbol: p.symbol } };
+    },
+    parse(endpoint, j, p) { return PROVIDERS.binance.parse(endpoint, j, p); },
   },
 
   bybit: {
@@ -272,7 +291,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
 
 interface ProviderState { lastSuccessAt?: number; lastStatus?: number | null; lastErrorClass?: string | null; lastLatencyMs?: number; lastHost?: string }
 // Per-isolate memory: resets when the isolate is recycled. Diagnostics say so.
-const state: Record<ProviderId, ProviderState> = { binance: {}, bybit: {}, okx: {} };
+const state: Record<ProviderId, ProviderState> = { binance: {}, bybit: {}, okx: {}, binance_usdm: {} };
 
 function record(a: Attempt) {
   const s = state[a.provider];
@@ -318,8 +337,9 @@ export class AllProvidersFailed extends Error {
   constructor(attempts: Attempt[]) { super("all_providers_failed"); this.attempts = attempts; }
 }
 
-export async function getMarketData(endpoint: Endpoint, p: Params, order: ProviderId[]): Promise<MarketResult> {
+export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: ProviderId[]): Promise<MarketResult> {
   const attempts: Attempt[] = [];
+  const order: ProviderId[] = p.market === "futures" ? ["binance_usdm"] : orderIn; // futures never borrow spot data from another exchange
   for (const id of order) {
     const spec = PROVIDERS[id];
     let req: UpstreamRequest;
@@ -422,16 +442,73 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string):
   return body;
 }
 
+export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: string }
+interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
+const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
+/** The pair list is re-read from Binance at most every 10 minutes per isolate (and shared at the edge); browsers re-request it on the same interval. */
+export const SYMBOL_TTL_MS = 10 * 60 * 1000;
+const SYMBOL_SOURCES: Record<MarketKind, { hosts: string[]; path: string }> = {
+  spot: { hosts: PROVIDERS.binance.hosts, path: "/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING" },
+  futures: { hosts: PROVIDERS.binance_usdm.hosts, path: "/fapi/v1/exchangeInfo" },
+};
+const CATEGORY: Record<string, string> = { COIN: "crypto", EQUITY: "stocks", STOCK: "stocks", COMMODITY: "commodities", INDEX: "indices", ETF: "etf", FX: "fx", CURRENCY: "fx" };
+const categoryOf = (x: any) => { const u = String(x?.underlyingType || "COIN").toUpperCase(); return CATEGORY[u] ?? u.toLowerCase().replace(/[^a-z0-9]+/g, "_"); };
+/** Gold, silver, platinum, palladium, copper and gold-backed tokens get their own "metals" category (overrides Binance's COMMODITY/COIN underlyingType), decided by the ETI classifier so chart, dropdown and risk review agree. */
+const METAL_BASES = new Set(["XAU", "XAG", "XPT", "XPD", "XCU", "COPPER", "GOLD", "SILVER", "PLATINUM", "PALLADIUM", "PAXG", "XAUT"]);
+export function isMetalPair(base: string, quote: string): boolean {
+  if (!METAL_BASES.has(base)) return false;
+  const i = classify(base + quote);
+  return i.asset_class === "metal" || i.tier === "gold_token";
+}
+type SymbolAttempt = { host: string; status: number | null; errorClass: string | null };
+/** Every pair Binance currently lists as TRADING for one market: spot pairs, or USDⓈ-M perpetual contracts. Hosts are tried in order; a stale list is served if all fail; nothing is invented. */
+export async function listBinanceSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
+  const hit = symbolCache[market];
+  if (hit && now() - hit.at < SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
+  const attempts: SymbolAttempt[] = [], src = SYMBOL_SOURCES[market];
+  for (const host of src.hosts) {
+    try {
+      const res = await fetchImpl(host + src.path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 540 } } as RequestInit);
+      if (!res.ok) { attempts.push({ host, status: res.status, errorClass: classifyStatus(res.status) }); continue; }
+      const j: any = await res.json(), list = Array.isArray(j?.symbols) ? j.symbols : null;
+      if (!list) { attempts.push({ host, status: res.status, errorClass: "invalid_payload" }); continue; }
+      const rows: SymbolRow[] = list.filter((x: any) => x && x.status === "TRADING" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol)) && (market === "futures" ? /PERPETUAL/.test(String(x.contractType || "")) : x.isSpotTradingAllowed !== false))
+        .map((x: any) => ({ s: String(x.symbol), b: String(x.baseAsset), q: String(x.quoteAsset), m: market, c: isMetalPair(String(x.baseAsset), String(x.quoteAsset)) ? "metals" : market === "futures" ? categoryOf(x) : "crypto" }))
+        .sort((a: SymbolRow, b: SymbolRow) => a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
+      if (rows.length === 0) { attempts.push({ host, status: res.status, errorClass: "empty_symbols" }); continue; }
+      symbolCache[market] = { at: now(), rows, host }; return { rows, host, cached: false, stale: false, fetchedAt: now(), attempts };
+    } catch (e) { attempts.push({ host, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" }); }
+  }
+  if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at, attempts }; // an old list beats no list, and is labelled as old
+  throw new AllProvidersFailed(attempts.map((a) => ({ provider: (market === "futures" ? "binance_usdm" : "binance") as ProviderId, host: a.host, status: a.status, ok: false, errorClass: a.errorClass, latencyMs: 0 })));
+}
+export const _resetSymbolCache = () => { delete symbolCache.spot; delete symbolCache.futures; };
+
 export async function handleMarket(request: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "access-control-allow-methods": "GET,OPTIONS" } });
   if (request.method !== "GET") return jsonResp({ error: "method_not_allowed" }, 405);
   const endpoint = url.pathname.slice("/api/market/".length);
+  if (endpoint === "symbols") {
+    const want = url.searchParams.get("market") || "all";
+    if (!["spot", "futures", "all"].includes(want)) return jsonResp({ error: "invalid_market", allowed: ["spot", "futures", "all"] }, 400);
+    const markets: MarketKind[] = want === "all" ? ["spot", "futures"] : [want as MarketKind];
+    const settled = await Promise.allSettled(markets.map((m) => listBinanceSymbols(m)));
+    const rows: SymbolRow[] = [], sources: Record<string, unknown> = {}, warnings: unknown[] = [];
+    settled.forEach((r, i) => {
+      if (r.status === "fulfilled") { rows.push(...r.value.rows); sources[markets[i]] = { host: r.value.host.replace("https://", ""), count: r.value.rows.length, fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale }; }
+      else warnings.push({ market: markets[i], error: "unavailable", attempts: r.reason instanceof AllProvidersFailed ? r.reason.attempts.map(({ host, status, errorClass }) => ({ host, status, errorClass })) : [] });
+    });
+    if (rows.length === 0) return jsonResp({ error: "symbols_unavailable", detail: "Binance did not return its symbol list.", warnings }, 502);
+    return jsonResp({ provider: "binance", markets, refreshEverySeconds: SYMBOL_TTL_MS / 1000, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings, symbols: rows.map((x) => [x.s, x.b, x.q, x.m, x.c]) }, 200, { "cache-control": "public, max-age=60" });
+  }
 
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) return jsonResp({ error: "invalid_symbol" }, 400);
   if (!INTERVALS.includes(interval)) return jsonResp({ error: "invalid_interval" }, 400);
+  const marketParam = url.searchParams.get("market") || "spot";
+  if (marketParam !== "spot" && marketParam !== "futures") return jsonResp({ error: "invalid_market", allowed: ["spot", "futures"] }, 400);
 
   if (endpoint === "diag") return jsonResp(await runDiagnostics(env, symbol, interval));
   if (endpoint === "providers") {
@@ -453,8 +530,9 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
 
   const order = providerOrder(env, url.searchParams.get("provider"));
   try {
-    const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw) }, order);
-    return jsonResp(r.data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
+    const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw), market: marketParam as MarketKind }, order);
+    const data = endpoint === "klines" && Array.isArray(r.data) ? (r.data as Kline[]).map(k => k.slice(0, 6)) : r.data; // public contract stays 6 columns; taker volume is internal
+    return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
   } catch (e) {
     if (e instanceof AllProvidersFailed) {
       const last = [...e.attempts].reverse().find((a) => a.status !== null);

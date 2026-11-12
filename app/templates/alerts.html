@@ -64,7 +64,9 @@
     <div class="nav">
       <a href="/">Main</a>
       <a href="/data-intel">Command Centre</a>
+      <a href="/alpha">Global Alpha</a>
       <a href="/alerts">Alerts</a>
+      <a href="/markets">Markets</a>
       <button class="btn" id="btn-refresh">Refresh</button>
       <button class="btn primary" id="btn-scan">Scan Now</button>
     </div>
@@ -114,12 +116,18 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
+    function escapeHTML(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[ch]));
+    }
+    // Retire persistent credentials from earlier versions. Keys now last only this tab session.
+    localStorage.removeItem('eti_api_key');
     function apiKey() {
       const v = $('api-key').value.trim();
-      if (v) localStorage.setItem('eti_api_key', v);
-      return v || localStorage.getItem('eti_api_key') || '';
+      if (v) sessionStorage.setItem('eti_api_key', v);
+      else sessionStorage.removeItem('eti_api_key');
+      return v;
     }
-    $('api-key').value = localStorage.getItem('eti_api_key') || '';
+    $('api-key').value = sessionStorage.getItem('eti_api_key') || '';
     function headers() {
       const h = {'Content-Type': 'application/json'};
       const k = apiKey(); if (k) h['X-API-Key'] = k; return h;
@@ -129,7 +137,7 @@
       setTimeout(() => t.classList.remove('show'), 3000);
     }
     async function getJSON(path) {
-      const r = await fetch(path);
+      const r = await fetch(path,{headers:headers()});
       if (!r.ok) throw new Error(path + ' ' + r.status);
       return r.json();
     }
@@ -158,20 +166,20 @@
       el.innerHTML = list.map(a => {
         const sev = a.severity || '';
         const ackedCls = a.acknowledged ? ' acked' : '';
-        return `<article class="card ${sev}${ackedCls}" data-id="${a.alert_id}" data-json='${JSON.stringify(a).replace(/'/g,"&#39;")}'>
+        return `<article class="card ${escapeHTML(sev)}${escapeHTML(ackedCls)}" data-id="${escapeHTML(a.alert_id)}" data-json='${escapeHTML(JSON.stringify(a))}'>
           <div class="row">
             <div>
-              <div class="title">${a.title || a.alert_id}</div>
+              <div class="title">${escapeHTML(a.title || a.alert_id)}</div>
               <div class="meta">
-                <span class="tag gold">${sev || '—'}</span>
-                <span class="tag">${a.ticker || 'n/a'}</span>
-                <span class="tag">${a.category || ''}</span>
-                <span class="tag purple">${a.verification_status || ''}</span>
+                <span class="tag gold">${escapeHTML(sev || '—')}</span>
+                <span class="tag">${escapeHTML(a.ticker || 'n/a')}</span>
+                <span class="tag">${escapeHTML(a.category || '')}</span>
+                <span class="tag purple">${escapeHTML(a.verification_status || '')}</span>
                 ${a.acknowledged ? '<span class="tag muted">acknowledged</span>' : '<span class="tag green">open</span>'}
               </div>
-              <div class="meta">${a.summary || ''}</div>
-              <div class="meta">${a.investor_name || '—'} · ${a.source_provider || ''} · ${a.created_at || ''}</div>
-              <div class="meta"><strong>Action:</strong> ${a.recommended_action || 'RESEARCH'} (not an order)</div>
+              <div class="meta">${escapeHTML(a.summary || '')}</div>
+              <div class="meta">${escapeHTML(a.investor_name || '—')} · ${escapeHTML(a.source_provider || '')} · ${escapeHTML(a.created_at || '')}</div>
+              <div class="meta"><strong>Action:</strong> ${escapeHTML(a.recommended_action || 'RESEARCH')} (not an order)</div>
             </div>
           </div>
           <div class="actions">
@@ -239,7 +247,7 @@
       } catch (e) { toast(String(e.message || e)); }
     };
 
-    load().catch(e => { $('list').innerHTML = '<div class="empty">Failed to load: ' + String(e.message || e) + '</div>'; });
+    load().catch(e => { $('list').textContent = 'Failed to load: ' + String(e.message || e); });
     setInterval(() => load().catch(() => {}), 30000);
   </script>
 </body>

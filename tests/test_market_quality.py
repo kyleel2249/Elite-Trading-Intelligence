@@ -26,3 +26,32 @@ def test_assess_kline_flags_invalid():
     k = {"open": 1, "high": 0.5, "low": 0.4, "close": 0.9, "close_time": 0}
     out = assess_kline(k)
     assert out["data_status"] == "invalid"
+
+
+import pytest
+from datetime import datetime, timezone, timedelta
+from app.market.data_quality import assess_quote
+from app.integrations.base import NormalizedQuote
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_ohlc_invalid(value):
+    assert "non_finite_price" in validate_ohlc(10, 12, 9, value)
+
+
+def _quote(price=100, bid=99, ask=101, ts=None):
+    now = datetime.now(timezone.utc)
+    return NormalizedQuote("binance", "BTCUSDT", "BTCUSDT", "crypto", price, bid, ask, None, now, ts or now, now, "fresh")
+
+
+@pytest.mark.parametrize("field", ["price", "bid", "ask"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), 0, -1])
+def test_invalid_quote_prices(field, value):
+    q = _quote()
+    setattr(q, field, value)
+    assert assess_quote(q).data_status == "invalid"
+
+
+def test_quote_timezone_is_converted_not_relabelled():
+    ts = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=5)))
+    assert assess_quote(_quote(ts=ts)).data_status == "fresh"

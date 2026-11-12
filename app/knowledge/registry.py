@@ -9,8 +9,12 @@ from app.knowledge import profiles_additional as a
 from app.knowledge import profiles_deep as d
 from app.knowledge import profiles_deep2 as d2
 from app.knowledge import profiles_deep3 as d3
+from app.knowledge import profiles_deep4 as d4
+from app.knowledge import profiles_deep5 as d5
 from app.knowledge import profiles_more as m
 from app.knowledge.strategies import STRATEGY_MODULES
+from app.knowledge.research_2026 import apply as apply_research
+from app.knowledge.research_alpha import apply as apply_alpha_research
 
 
 def _all_profiles() -> dict[str, TraderKnowledgeProfile]:
@@ -21,7 +25,12 @@ def _all_profiles() -> dict[str, TraderKnowledgeProfile]:
     out.update(d.DEEP_PROFILES)
     out.update(d2.DEEP_PROFILES)
     out.update(d3.DEEP_PROFILES)
+    # d4 and d5 replace the template-filler profiles with substantive, classified ones; later update wins.
+    out.update(d4.DEEP_PROFILES)
+    out.update(d5.DEEP_PROFILES)
     out.pop("paul_tudor_secondary_note", None)
+    apply_research(out)
+    apply_alpha_research(out)
     return out
 
 

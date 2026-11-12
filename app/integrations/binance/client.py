@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+import math
+from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -173,16 +175,27 @@ class BinanceClient(BaseProvider):
         qty: float,
         order_type: str = "MARKET",
         client_order_id: Optional[str] = None,
+        limit_price: Optional[float] = None,
+        time_in_force: str = "GTC",
     ) -> dict[str, Any]:
         if not self.configured:
             raise RuntimeError("Binance not configured")
+        if not math.isfinite(qty) or qty <= 0:
+            raise ValueError("Quantity must be finite and positive")
         params: dict[str, Any] = {
             "symbol": symbol.upper(),
             "side": side.upper(),
             "type": order_type.upper(),
-            "quantity": f"{qty:.8f}".rstrip("0").rstrip("."),
+            "quantity": format(Decimal(str(qty)), "f"),
             "timestamp": int(time.time() * 1000),
         }
+        if order_type.upper() == "LIMIT":
+            if limit_price is None or not math.isfinite(limit_price) or limit_price <= 0:
+                raise ValueError("LIMIT requires a finite positive price")
+            params["price"] = format(Decimal(str(limit_price)), "f")
+            params["timeInForce"] = time_in_force
+        elif order_type.upper() != "MARKET":
+            raise ValueError("Unsupported Binance order type")
         if client_order_id:
             params["newClientOrderId"] = client_order_id
         params["signature"] = self._sign(params)

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETI — Multi-Market Intelligence</title>
+  <style>
+    :root{--bg:#070b12;--card:rgba(18,28,45,.78);--text:#e8eef8;--muted:#8b9bb4;--cyan:#22d3ee;--blue:#3b82f6;--green:#22c55e;--red:#ef4444;--gold:#fbbf24;--border:rgba(56,189,248,.15)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(900px 480px at 85% -10%,#12304a 0%,transparent 50%),var(--bg);color:var(--text);min-height:100vh}
+    header{position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);background:rgba(7,11,18,.9);border-bottom:1px solid var(--border);padding:.8rem 1.25rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center}
+    h1{margin:0;font-size:1.1rem;background:linear-gradient(90deg,var(--cyan),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .sub{color:var(--muted);font-size:.74rem;margin-top:.15rem}
+    .nav{display:flex;gap:.45rem;flex-wrap:wrap}
+    .nav a,.btn{text-decoration:none;color:var(--text);background:rgba(30,41,59,.85);border:1px solid var(--border);padding:.4rem .7rem;border-radius:8px;font-size:.78rem;cursor:pointer}
+    .nav a:hover,.btn:hover{border-color:var(--cyan)}
+    .btn.primary{border-color:rgba(34,211,238,.45);color:var(--cyan)}
+    main{max-width:1180px;margin:0 auto;padding:1.1rem 1.25rem 2.5rem;display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}
+    .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1rem;min-width:0}
+    .panel h2{margin:0 0 .7rem;font-size:.95rem}
+    .grid{display:grid;gap:.6rem;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+    .tile{background:rgba(10,18,32,.7);border:1px solid var(--border);border-radius:10px;padding:.65rem .75rem;font-size:.78rem;min-width:0;overflow-wrap:anywhere}
+    .tile .t{font-weight:600;margin-bottom:.2rem}
+    .tile .m{color:var(--muted);font-size:.7rem;line-height:1.35}
+    .pill{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.68rem;font-weight:600;border:1px solid}
+    .open,.ready{color:var(--green);border-color:rgba(34,197,94,.5)}
+    .extended,.caution,.wait_for_session{color:var(--gold);border-color:rgba(251,191,36,.5)}
+    .closed,.blocked{color:var(--red);border-color:rgba(239,68,68,.5)}
+    .analysis_only{color:var(--cyan);border-color:rgba(34,211,238,.5)}
+    form{display:grid;gap:.6rem;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));align-items:end}
+    label{font-size:.68rem;color:var(--muted);display:grid;gap:.2rem}
+    input,select{background:#0a1220;border:1px solid var(--border);color:var(--text);padding:.45rem .55rem;border-radius:8px;font-size:.82rem;width:100%}
+    .chips{display:flex;gap:.4rem;flex-wrap:wrap;margin:.6rem 0}
+    .chip{font-size:.72rem;padding:.25rem .6rem;border-radius:999px;border:1px solid var(--border);background:rgba(30,41,59,.7);color:var(--text);cursor:pointer}
+    .chip:hover{border-color:var(--gold)}
+    table{width:100%;border-collapse:collapse;font-size:.76rem}
+    th,td{text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--border);vertical-align:top}
+    th{color:var(--muted);font-weight:500;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em}
+    .scroll{overflow-x:auto}
+    ul.notes{margin:.4rem 0 0;padding-left:1.1rem;color:var(--muted);font-size:.74rem;line-height:1.45}
+    .warn li{color:#fcd98a}
+    .reason{color:#fda4af}
+    .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.15rem .8rem;font-size:.76rem}
+    .kv span{overflow-wrap:anywhere;min-width:0}
+    .sub,.m,ul.notes{overflow-wrap:anywhere}
+    .kv span:nth-child(odd){color:var(--muted)}
+    .err{color:var(--red);font-size:.78rem}
+    footer{text-align:center;color:var(--muted);font-size:.72rem;padding:1rem}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>ETI Multi-Market Intelligence</h1>
+      <div class="sub">Forex · Metals · Crypto · Stocks · Indices · Commodities · Futures · Options &mdash; planning only, never submits orders · v{{ version }}</div>
+    </div>
+    <div class="nav">
+      <a href="/">Main</a><a href="/data-intel">Command Centre</a><a href="/alerts">Alerts</a>
+      <button class="btn" id="btn-refresh">Refresh clocks</button>
+    </div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Market clocks</h2>
+      <div class="grid" id="clocks"><div class="tile"><div class="m">Loading…</div></div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Assess an instrument</h2>
+      <div class="chips" id="chips"></div>
+      <form id="aform">
+        <label>Symbol<input id="f-symbol" required maxlength="40" placeholder="EURUSD, XAUUSD, BTCUSDT, AAPL, NGX:DANGCEM" /></label>
+        <label>Price (optional)<input id="f-price" type="number" step="any" min="0" /></label>
+        <label>Account equity (planning)<input id="f-equity" type="number" step="any" min="1" value="10000" /></label>
+        <label>Risk % per trade<input id="f-risk" type="number" step="any" min="0.01" max="10" value="1" /></label>
+        <label>Side<select id="f-side"><option>buy</option><option>sell</option></select></label>
+        <label>Stop price (optional)<input id="f-stop" type="number" step="any" min="0" /></label>
+        <label>Quote→USD rate (non-USD)<input id="f-q2u" type="number" step="any" min="0" /></label>
+        <label>Avg daily volume USD<input id="f-adv" type="number" step="any" min="0" /></label>
+        <label>Listing age (days)<input id="f-age" type="number" step="any" min="0" /></label>
+        <label>Provider<select id="f-provider"><option value="">any</option><option>binance</option><option>alpaca</option></select></label>
+        <label>Environment<select id="f-env"><option>paper</option><option>testnet</option><option>live</option></select></label>
+        <button class="btn primary" type="submit">Assess</button>
+        <button class="btn" type="button" id="btn-snap">Live quote</button>
+      </form>
+      <div id="aout" style="margin-top:.9rem"></div>
+    </section>
+
+    <section class="panel">
+      <h2>What can ETI execute today?</h2>
+      <div class="scroll"><table id="matrix"><thead><tr><th>Market</th><th>Direct providers</th><th>ETF proxy</th><th>Executable</th><th>Gap</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section class="panel">
+      <h2>Instrument catalog</h2>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem">
+        <select id="c-class"><option value="">all markets</option><option>forex</option><option>metal</option><option>crypto</option><option>stock</option><option>index</option><option>commodity</option></select>
+        <input id="c-q" placeholder="search symbol or name" maxlength="40" style="max-width:260px" />
+      </div>
+      <div class="scroll"><table id="catalog"><thead><tr><th>Symbol</th><th>Market</th><th>Tier</th><th>Region</th><th>Session</th><th>Notes</th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </main>
+  <footer>Planning defaults are static baselines unless live inputs are supplied. Hours and holidays: verify with the venue. Every order, including live, must pass the in-process risk engine.</footer>
+
+<script>
+(function(){
+  function h(tag, cls, text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!==undefined&&text!==null) e.textContent=String(text); return e; }
+  function clear(n){ while(n.firstChild) n.removeChild(n.firstChild); }
+  function detailText(d,status){ if(typeof d==='string') return d; if(Array.isArray(d)&&d.length){ return d.map(function(x){ var f=(x&&x.loc&&x.loc.length)?String(x.loc[x.loc.length-1]):'input'; return f+': '+((x&&x.msg)||'invalid value'); }).join('; '); } return 'Request failed (HTTP '+status+')'; }
+  function api(path){ return fetch(path,{headers:{'Accept':'application/json'}}).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok) throw new Error(detailText(j.detail,r.status)); return j; }); }); }
+  function fmt(v){ return (v===null||v===undefined)?'—':v; }
+  function pill(text, cls){ return h('span','pill '+String(cls||text).replace(/[^a-z_]/g,''),text); }
+  function list(items, cls){ var u=h('ul','notes '+(cls||'')); items.forEach(function(x){ u.appendChild(h('li',cls==='reason'?'reason':'',x)); }); return u; }
+  function when(iso){ return iso? new Date(iso).toLocaleString(): '—'; }
+
+  function loadOverview(){
+    return api('/api/markets/overview').then(function(o){
+      var box=document.getElementById('clocks'); clear(box);
+      Object.keys(o.sessions).forEach(function(id){
+        var s=o.sessions[id], t=h('div','tile');
+        var top=h('div','t',s.name+' '); top.appendChild(pill(s.state,s.state)); t.appendChild(top);
+        t.appendChild(h('div','m', s.state==='closed' ? ('Closed: '+(s.reason||'')+' · opens '+when(s.next_open_utc)) : (s.regime+(s.next_close_utc?(' · closes '+when(s.next_close_utc)):''))));
+        t.appendChild(h('div','m','Calendar: '+s.holiday_calendar+' · schedule: '+s.schedule_confidence));
+        box.appendChild(t);
+      });
+      var body=document.querySelector('#matrix tbody'); clear(body);
+      Object.keys(o.asset_classes).forEach(function(k){
+        var c=o.asset_classes[k], tr=h('tr');
+        tr.appendChild(h('td','',k+(c.execution_scope?' ('+c.execution_scope+')':'')));
+        tr.appendChild(h('td','',c.direct_providers.join(', ')||'—'));
+        tr.appendChild(h('td','',c.etf_proxy_via.join(', ')||'—'));
+        var td=h('td'); td.appendChild(pill(c.execution?'yes':'analysis only', c.execution?'open':'analysis_only')); tr.appendChild(td);
+        tr.appendChild(h('td','',c.gap||''));
+        body.appendChild(tr);
+      });
+    }).catch(function(e){ var b=document.getElementById('clocks'); clear(b); b.appendChild(h('div','err','Could not load market clocks: '+e.message)); });
+  }
+
+  function loadCatalog(){
+    var q=new URLSearchParams(); var c=document.getElementById('c-class').value, s=document.getElementById('c-q').value.trim();
+    if(c) q.set('asset_class',c); if(s) q.set('q',s);
+    api('/api/markets/instruments?'+q.toString()).then(function(r){
+      var body=document.querySelector('#catalog tbody'); clear(body);
+      r.instruments.slice(0,200).forEach(function(i){
+        var tr=h('tr'); tr.style.cursor='pointer';
+        [i.symbol,i.asset_class,i.tier,i.region,i.session_id,(i.name||'')].forEach(function(v){ tr.appendChild(h('td','',v)); });
+        tr.addEventListener('click',function(){ document.getElementById('f-symbol').value=i.symbol; window.scrollTo({top:document.getElementById('aform').offsetTop-80,behavior:'smooth'}); });
+        body.appendChild(tr);
+      });
+    }).catch(function(e){ var body=document.querySelector('#catalog tbody'); clear(body); var tr=h('tr'); tr.appendChild(h('td','err','Catalog failed: '+e.message)); body.appendChild(tr); });
+  }
+
+  function val(id){ var v=document.getElementById(id).value.trim(); return v===''?null:v; }
+  function params(){
+    var q=new URLSearchParams(); q.set('symbol',document.getElementById('f-symbol').value.trim());
+    [['price','f-price'],['account_equity','f-equity'],['risk_pct','f-risk'],['side','f-side'],['stop_price','f-stop'],['quote_to_usd','f-q2u'],
+     ['avg_daily_volume_usd','f-adv'],['listing_age_days','f-age'],['provider','f-provider'],['environment','f-env']].forEach(function(p){ var v=val(p[1]); if(v!==null) q.set(p[0],v); });
+    return q;
+  }
+  function kv(pairs){ var d=h('div','kv'); pairs.forEach(function(p){ d.appendChild(h('span','',p[0])); d.appendChild(h('span','',fmt(p[1]))); }); return d; }
+  function card(title, node){ var t=h('div','tile'); t.appendChild(h('div','t',title)); t.appendChild(node); return t; }
+
+  function render(a){
+    var out=document.getElementById('aout'); clear(out);
+    var head=h('div','t','Verdict: '); head.appendChild(pill(a.verdict,a.verdict)); head.style.marginBottom='.5rem'; out.appendChild(head);
+    if(a.reasons&&a.reasons.length) out.appendChild(list(a.reasons,'reason'));
+    var g=h('div','grid'); g.style.marginTop='.6rem'; out.appendChild(g);
+    var i=a.instrument;
+    g.appendChild(card('Instrument',kv([['Symbol',i.symbol],['Market',i.asset_class+' / '+i.tier],['Region',i.region],['Quote ccy',i.quote],['Confidence',i.classification_confidence]])));
+    if(a.session){ var s=a.session; g.appendChild(card('Session & liquidity',kv([['State',s.state+' ('+s.regime+')'],['Local time',s.local_time],['Next open',when(s.next_open_utc)],['Liquidity factor',s.liquidity_factor],['Spread multiplier',s.spread_multiplier],['Active centres',(s.active_centres||[]).join(', ')]]))); }
+    if(a.profile){ var p=a.profile; g.appendChild(card('Market profile',kv([['Liquidity',p.liquidity],['Typical daily move %',p.daily_vol_pct],['Gap risk',p.gap_risk],['Leverage',p.leverage_hint],['Notional cap ×',p.notional_cap_multiplier],['Risk ×',p.risk_multiplier]]))); }
+    if(a.costs){ var c=a.costs; g.appendChild(card('Costs (bps)',kv([['Spread',c.spread_bps+' ('+c.spread_source+')'],['Commission / side',c.commission_bps_per_side],['Slippage / side',c.slippage_bps_per_side],['Round trip',c.round_trip_bps],['Round trip USD',c.round_trip_usd],['Cost ÷ risk',c.cost_to_risk_ratio]]))); }
+    if(a.sizing){ var z=a.sizing; g.appendChild(card('Position plan',kv([['Quantity',z.quantity],['Notional USD',z.notional_usd],['Risk USD',z.risk_amount_usd],['Binding limit',z.binding_constraint],['Stop',z.stop_price+' ('+z.stop_source+')'],['1R / 2R',fmt(z.target_1r)+' / '+fmt(z.target_2r)],['Status',z.status]]))); }
+    if(a.execution){ var e=a.execution, n=h('div'); n.appendChild(kv([['Executable',e.executable?'yes':'no'],['Quote data',e.data.status+(e.data.provider?(' via '+e.data.provider+(e.data.via==='etf_proxy'?' (proxy '+e.data.symbol+')':'')):'')]]));
+      e.routes.forEach(function(r){ n.appendChild(h('div','m',r.provider+' → '+r.symbol+' ['+r.kind+'] '+r.note)); }); g.appendChild(card('Execution route',n)); }
+    if(a.warnings&&a.warnings.length){ var w=h('div'); w.style.marginTop='.7rem'; w.appendChild(h('div','t','Warnings')); w.appendChild(list(a.warnings,'warn')); out.appendChild(w); }
+    out.appendChild(h('div','m',a.disclaimer));
+  }
+  function showErr(e){ var out=document.getElementById('aout'); clear(out); out.appendChild(h('div','err',e.message)); }
+
+  document.getElementById('aform').addEventListener('submit',function(ev){ ev.preventDefault(); api('/api/markets/assess?'+params().toString()).then(render).catch(showErr); });
+  document.getElementById('btn-snap').addEventListener('click',function(){
+    var q=new URLSearchParams(); q.set('symbol',document.getElementById('f-symbol').value.trim()); var p=val('f-provider'); if(p) q.set('provider',p);
+    api('/api/markets/snapshot?'+q.toString()).then(function(s){
+      var out=document.getElementById('aout'); clear(out);
+      var pairs=[['Requested',s.requested_symbol],['Data status',s.data_status],['Price',s.price],['Bid / Ask',fmt(s.bid)+' / '+fmt(s.ask)],['Timestamp (UTC)',s.ts_utc],['Provider',s.provider]];
+      if(s.reason) pairs.push(['Reason',s.reason]); if(s.proxy_notice) pairs.push(['Proxy',s.proxy_notice]);
+      out.appendChild(card('Live quote',kv(pairs)));
+    }).catch(showErr);
+  });
+  ['EURUSD','GBPUSD','USDJPY','USDZAR','XAUUSD','XAGUSD','BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','1000SATSUSDT','AAPL','SPX','NDX','FTSE100','DAX','N225','WTI','NATGAS','NGX:DANGCEM','JSE:NPN','VOD.L'].forEach(function(s){
+    var c=h('button','chip',s); c.type='button'; c.addEventListener('click',function(){ document.getElementById('f-symbol').value=s; }); document.getElementById('chips').appendChild(c);
+  });
+  document.getElementById('btn-refresh').addEventListener('click',loadOverview);
+  document.getElementById('c-class').addEventListener('change',loadCatalog);
+  document.getElementById('c-q').addEventListener('input',function(){ clearTimeout(window.__cq); window.__cq=setTimeout(loadCatalog,250); });
+  loadOverview(); loadCatalog(); setInterval(loadOverview,60000);
+})();
+</script>
+</body>
+</html>

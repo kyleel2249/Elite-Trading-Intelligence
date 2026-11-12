@@ -1,0 +1,81 @@
+# Copy to .dev.vars for `wrangler dev`; set the same names with `wrangler secret put` in production.
+# Auth for /api/alpha mutating routes (falls back to ETI_EXECUTION_TOKEN when unset)
+ETI_ALPHA_TOKEN=
+ETI_EXECUTION_TOKEN=
+# SEC EDGAR requires a descriptive User-Agent with a contact email. Without it, SEC access stays OFF.
+SEC_USER_AGENT=ETI Research your-name your-email@example.com
+# Optional data sources (each unlocks a stated coverage item; absent = reported as not configured)
+ALPACA_API_KEY=
+ALPACA_SECRET_KEY=
+ALPACA_DATA_FEED=iex
+ALPHA_EQUITY_WATCHLIST=AAPL,MSFT,NVDA
+ETHERSCAN_API_KEY=
+OPENFIGI_API_KEY=
+# Per-run upstream request budget (5-900, default 40, applied to each scheduled job)
+ALPHA_SUBREQUEST_BUDGET=40
+# Paper/testnet brokers used by the execution bridge. NEVER put live keys here: this build has no live order path.
+# ALPACA_API_KEY / ALPACA_SECRET_KEY above must be ALPACA PAPER keys (orders go only to paper-api.alpaca.markets).
+# BINANCE_* must be Binance Spot TESTNET keys (https://testnet.binance.vision); orders go only to testnet.binance.vision.
+BINANCE_API_KEY=
+BINANCE_SECRET_KEY=
+# Optional Binance USD-M futures TESTNET keys (futures also needs ETI_FUTURES_ENABLED=true and caps; see docs/FUTURES.md)
+BINANCE_FUTURES_API_KEY=
+BINANCE_FUTURES_SECRET_KEY=
+# In-process order safeguards (no separately deployed risk service is used or needed).
+# Largest quantity one order may carry (default 100). Also caps simulated /api/paper orders when set.
+ETI_MAX_ORDER_QUANTITY=100
+# Seconds an identical order from the same actor is refused as an accidental duplicate (default 60, 0 disables)
+ETI_DUPLICATE_WINDOW_SECONDS=60
+# Emergency kill switch: "true" refuses every order everywhere
+ETI_KILL_SWITCH=false
+# advisory (default: record the market-readiness verdict, never block) | enforce | off
+ETI_READINESS_GATE=advisory
+
+# --- Execution authorization (see docs/EXECUTION_AUTH.md) ---
+# Signs short-lived execution sessions. Generate with: node scripts/provision-secrets.mjs --session-secret
+# When unset the Worker generates a random key and keeps it in KV (still automatic, but secret storage is preferred).
+ETI_SESSION_SECRET=
+# Only during a rotation: the previous ETI_SESSION_SECRET value
+ETI_SESSION_SECRET_PREVIOUS=
+# off | paper | paper_testnet (default). What the Worker may authorise without a manually typed token.
+ETI_AUTO_SESSIONS=paper_testnet
+# Age after which the KV-held signing key rotates by itself (days)
+ETI_KEY_ROTATION_DAYS=7
+
+# --- Portfolio ledger (internal paper venue) ---
+# ETI_PAPER_START_BALANCE=10000     simulated starting cash (USDT)
+# ETI_PAPER_FEE_BPS=10              fee per fill, basis points
+# ETI_PAPER_SLIPPAGE_BPS=5          market-order slippage, basis points
+
+# --- Accounts, roles, MFA (needs the ETI_PORTFOLIO_DB D1 binding) ---
+# 32+ random characters. Encrypts MFA seeds and backups, peppers password hashes. Generate with: openssl rand -base64 48
+ETI_IDENTITY_KEY=
+# Previous value, kept for one rotation so existing hashes, seeds and backups still open (accounts are re-hashed on next sign-in)
+ETI_IDENTITY_KEY_PREVIOUS=
+# Name shown in authenticator apps
+ETI_IDENTITY_ISSUER=ETI
+# Extra browser connection origins allowed by the Content-Security-Policy (space separated)
+# ETI_CSP_CONNECT=
+
+# Optional: separate Python execution engine for /api/omnisignal/execute (per-account limits, protective OCO orders).
+# Leave both unset to execute Omnisignal BUY plans in-Worker (ETI Internal Paper / Binance testnet). No risk gateway is used.
+ETI_EXECUTION_API_URL=
+ETI_EXECUTION_API_TOKEN=
+
+# --- ETI Daily Intelligence Report (see docs/DAILY_REPORT.md; /daily and /api/daily-report) ---
+# Economic calendar (HTTPS JSON feed and/or inline JSON). Without one, announcements are reported as UNVERIFIED and the verdict is capped.
+# ETI_EVENT_FEED_URL=
+# ETI_EVENT_FEED_TOKEN=
+# EUR/USD and XAU/USD price data: an HTTPS candle endpoint you are licensed to use; {symbol}, {interval}, {limit} are substituted. Without it those assets show N/A.
+# ETI_FX_CANDLES_URL=
+# ETI_FX_QUOTE_URL=
+# ETI_FX_DATA_TOKEN=
+# Stock watchlist for the "selected stock" row (US tickers, max 5; needs the ALPACA_* keys above)
+ETI_DAILY_STOCKS=AAPL,MSFT,NVDA
+# Upstream request budget per generation (10-900, default 44: Workers Free allows 50 per invocation)
+ETI_DAILY_SUBREQUEST_BUDGET=44
+# Planning risk per trade, percent of equity, used only for the portfolio-risk arithmetic (default 0.5)
+ETI_DAILY_RISK_PCT=0.5
+# UTC hour (0-23) after which the cron generates and stores the day's report on weekdays (default 6); ETI_DAILY_ENABLED=false turns it off
+ETI_DAILY_HOUR_UTC=6
+ETI_DAILY_ENABLED=true

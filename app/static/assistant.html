@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ETI voice assistant</title>
+<style>
+  :root { --bg:#0f1318; --fg:#e8edf2; --mut:#9aa7b4; --acc:#4cc2ff; --card:#18202a; --bd:#2a3644; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f8fa; --fg:#14202b; --mut:#53606d; --acc:#0b6bcb; --card:#fff; --bd:#d0d7de; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,sans-serif; max-width:760px; margin-inline:auto; }
+  h1 { font-size:1.25rem; margin:0 0 4px; } p.note { color:var(--mut); margin:0 0 16px; font-size:.9rem; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; } input[type=text] { flex:1 1 240px; padding:10px; border-radius:8px; border:1px solid var(--bd); background:var(--card); color:var(--fg); }
+  button { padding:10px 14px; border-radius:8px; border:1px solid var(--bd); background:var(--card); color:var(--fg); cursor:pointer; }
+  button:focus-visible, input:focus-visible { outline:3px solid var(--acc); outline-offset:2px; } button.primary { background:var(--acc); color:#04111c; border-color:var(--acc); }
+  pre { white-space:pre-wrap; word-break:break-word; background:var(--card); border:1px solid var(--bd); border-radius:8px; padding:12px; max-height:50vh; overflow:auto; }
+  #status { min-height:1.5em; color:var(--mut); }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+</head>
+<body>
+<h1>ETI voice assistant</h1>
+<p class="note">Ask about regime, unusual volume, breakouts, correlation, Monte Carlo or a scan, e.g. “is BTCUSDT trending on the 4h”. Read-only: it never places orders and gives research context, not advice. Speech recognition depends on your browser; typing always works.</p>
+<form id="f" class="row" aria-label="Ask ETI">
+  <input id="q" type="text" autocomplete="off" aria-label="Your question" placeholder="Ask a market question">
+  <button type="button" id="mic" aria-pressed="false">Speak</button>
+  <button type="submit" class="primary">Ask</button>
+  <button type="button" id="mute" aria-pressed="false">Mute voice</button>
+</form>
+<p id="status" role="status" aria-live="polite"></p>
+<pre id="out" aria-label="Result"></pre>
+<script>
+(function () {
+  var q = document.getElementById('q'), out = document.getElementById('out'), st = document.getElementById('status');
+  var mic = document.getElementById('mic'), mute = document.getElementById('mute'), muted = false;
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition, rec = null;
+  function say(t) { if (muted || !('speechSynthesis' in window)) return; var u = new SpeechSynthesisUtterance(t); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); }
+  function sym(s) { s = String(s || '').toUpperCase(); return /^[A-Z]{2,6}$/.test(s) && !/USD$/.test(s) ? s + 'USDT' : s; }
+  function show(o) { out.textContent = typeof o === 'string' ? o : JSON.stringify(o, null, 2); }
+  function summary(intent, d) {
+    if (d.status && d.status !== 'ok' && d.status !== undefined) return 'Not enough data: ' + d.status.replace(/_/g, ' ') + '.';
+    if (intent === 'regime') return d.symbol + ' is ' + String(d.label || '').replace(/[_/]/g, ' ') + '.';
+    if (intent === 'volume') return d.symbol + (d.unusual ? ' shows unusual volume.' : ' volume is normal.');
+    if (intent === 'breakout') return d.symbol + (d.alert ? ' has a volatility breakout ' + d.direction + '.' : ' has no volatility breakout alert.');
+    if (intent === 'scan') { var r = (d.ranked || []).slice(0, 3).map(function (x) { return x.symbol; }); return r.length ? 'Top of the scan: ' + r.join(', ') + '.' : 'Nothing stands out in this scan.'; }
+    if (intent === 'monte_carlo') return 'Probability of loss over the horizon is ' + Math.round((d.probability_of_loss || 0) * 100) + ' percent.';
+    return 'Result shown on screen.';
+  }
+  async function ask(text) {
+    st.textContent = 'Working…'; show('');
+    try {
+      var r = await fetch('/api/analytics/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text }) });
+      var route = await r.json();
+      if (!r.ok) throw new Error('query failed (' + r.status + ')');
+      if (route.status !== 'ok') { st.textContent = 'I could not map that to an ETI function.'; show(route); return; }
+      var s = (route.symbols || []).map(sym), url = route.endpoint, p = new URLSearchParams();
+      if (route.intent === 'research') { st.textContent = 'Research needs evidence you supply; use POST /api/analytics/research.'; show(route); return; }
+      if (route.intent === 'scan') { if (s.length) p.set('symbols', s.join(',')); p.set('interval', route.interval); }
+      else if (route.intent === 'correlation') { if (s.length < 2) { st.textContent = 'Name at least two symbols.'; show(route); return; } p.set('symbols', s.join(',')); }
+      else { if (!s.length) { st.textContent = 'Which symbol?'; show(route); return; } p.set('symbol', s[0]); if (route.intent !== 'monte_carlo') p.set('interval', route.interval); }
+      var res = await fetch(url + '?' + p.toString()), data = await res.json();
+      if (!res.ok) { st.textContent = 'ETI returned an error (' + res.status + ').'; show(data); return; }
+      st.textContent = 'Done.'; show(data); say(summary(route.intent, data));
+    } catch (e) { st.textContent = 'Request failed: ' + e.message; }
+  }
+  document.getElementById('f').addEventListener('submit', function (e) { e.preventDefault(); if (q.value.trim()) ask(q.value.trim()); });
+  mute.addEventListener('click', function () { muted = !muted; mute.setAttribute('aria-pressed', String(muted)); mute.textContent = muted ? 'Unmute voice' : 'Mute voice'; if (muted && 'speechSynthesis' in window) window.speechSynthesis.cancel(); });
+  if (!SR) { mic.disabled = true; mic.title = 'Speech recognition is not supported in this browser'; }
+  else {
+    rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onresult = function (ev) { q.value = ev.results[0][0].transcript; ask(q.value); };
+    rec.onend = function () { mic.setAttribute('aria-pressed', 'false'); mic.textContent = 'Speak'; };
+    rec.onerror = function (ev) { st.textContent = 'Speech error: ' + ev.error; };
+    mic.addEventListener('click', function () { try { rec.start(); mic.setAttribute('aria-pressed', 'true'); mic.textContent = 'Listening…'; } catch (e) { /* already started */ } });
+  }
+})();
+</script>
+</body>
+</html>

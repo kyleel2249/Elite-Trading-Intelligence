@@ -1,5 +1,7 @@
 """ETI FastAPI application entrypoint."""
+import asyncio
 import logging
+import math
 from contextlib import asynccontextmanager
 from typing import Literal, Optional
 
@@ -20,12 +22,14 @@ from app.schemas import HealthResponse
 from app.risk.engine import RiskEngine, OrderProposal
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.oanda import OandaClient
 from app.integrations.quiver.client import QuiverClient
 from app.integrations.liquid.client import LiquidClient
 from app.trading.service import TradingService
 from app.trading.portfolio import PortfolioService
 from app.trading.reconciliation import OrderReconciler
 from app.trading.risk_context import build_risk_context
+from app.trading.sizing import SizingError, quote_to_qty
 from app.market.service import MarketService
 from app.intelligence.council import TradingCouncil
 from app.intelligence.traders import list_trader_profiles
@@ -37,13 +41,24 @@ from app.streaming.manager import stream_hub
 from app.jobs.mark_to_market import mtm_job
 from app.jobs.reconcile import reconcile_job
 from app.jobs.investor_monitor import investor_monitor_job
+from app.jobs.execution_supervisor import execution_supervisor_job
+from app.jobs.paper_autopilot import paper_job
 from app.services.persistence import save_snapshot, save_council_decision, save_forecast
 from app.models import CouncilDecisionRecord
 from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
-from app.api.risk_gateway import router as risk_gateway_router
+from app.security.auth import require_api_key, require_persistence_auth
+from app.api.pretrade import router as pretrade_router
+from app.api.execution import router as execution_router
+from app.api.paper import router as paper_router
+from app.api.markets import router as markets_router
+from app.api.analytics import router as analytics_router
+from app.api.strategies import router as strategies_router
+from app.prediction_ledger.api import router as predictions_router
+from app.prediction_ledger.job import prediction_resolver_job
+from app.prediction_ledger.service import record_from_forecast
 from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
@@ -73,21 +88,117 @@ def _warn_insecure_config(settings: Settings) -> None:
         logger.warning("API_KEY is not set; protected routes will return 503 in this environment")
 
 
+def _seed_memory(settings: Settings) -> None:
+    """Snapshot documented profiles/methodologies/risk limits into versioned memory (idempotent)."""
+    from app.database import SessionLocal
+    from app.memory.store import MemoryStore
+
+    db = SessionLocal()
+    try:
+        store = MemoryStore(db)
+        store.seed_static_knowledge()
+        store.snapshot_risk_limits(settings)
+    except Exception:
+        db.rollback()
+        logger.warning("startup: memory seeding failed; continuing", exc_info=True)
+    finally:
+        db.close()
+
+
+def _record_council_signal(db: Session, settings: Settings, symbol: str, provider: str, payload: dict, snap: dict, klines) -> None:
+    """Remember the council's call exactly as made, with a point-in-time regime label."""
+    from app.memory.regimes import RegimeMemoryService
+    from app.memory.signals import SignalMemoryService
+
+    regime = None
+    regimes = RegimeMemoryService(db, settings)
+    recent = regimes.latest_as_of(symbol, provider, max_age_seconds=300)
+    if recent is not None:
+        regime = recent.primary_regime
+    else:
+        closes = [float(k["close"]) for k in (klines or []) if k.get("close") is not None]
+        if len(closes) >= 20:
+            obs = regimes.classify_from_closes(symbol, provider, closes, source="council")
+            regime = obs.primary_regime if obs else None
+    SignalMemoryService(db, settings).record(
+        source="council",
+        symbol=symbol,
+        provider=provider,
+        action=payload.get("action"),
+        confidence=payload.get("confidence"),
+        reference_price=snap.get("price"),
+        regime=regime,
+        analysis={
+            "summary": payload.get("summary"),
+            "risk_veto": payload.get("risk_veto"),
+            "data_quality": payload.get("data_quality"),
+            "contradictory_signals": payload.get("contradictory_signals"),
+            "specialists": [
+                {"trader_id": s.get("trader_id"), "bias": s.get("bias"), "confidence": s.get("confidence")}
+                for s in payload.get("specialists", [])
+            ],
+        },
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     settings = get_settings()
     _warn_insecure_config(settings)
+    await asyncio.to_thread(_seed_memory, settings)
     mtm_job.interval_seconds = settings.mtm_interval_seconds
     reconcile_job.interval_seconds = settings.reconcile_interval_seconds
     investor_monitor_job.interval_seconds = settings.investor_monitor_interval_seconds
+    execution_supervisor_job.interval_seconds = settings.execution_supervisor_interval_seconds
+    paper_job.configure(settings)
+    adaptive_job = None
+    try:
+        from app.jobs.adaptive_edge_job import adaptive_edge_job as adaptive_job
+
+        adaptive_job.interval_seconds = settings.adaptive_edge_interval_seconds
+    except Exception:
+        logger.exception("startup: adaptive_edge_job could not be imported")
+    alpha_job = None
+    try:
+        from app.alpha.research_job import alpha_research_job as alpha_job
+
+        alpha_job.interval_seconds = getattr(settings, "alpha_research_interval_seconds", alpha_job.interval_seconds)
+    except Exception:
+        logger.warning("startup: alpha_research_job unavailable", exc_info=True)
     await _start_component("stream_hub", lambda: stream_hub.start(["btcusdt", "ethusdt"]))
     await _start_component("mtm_job", mtm_job.start)
     await _start_component("reconcile_job", reconcile_job.start)
+    await _start_component("paper_job", paper_job.start)
+    await _start_component("prediction_resolver_job", prediction_resolver_job.start)
+    if adaptive_job is not None:
+        await _start_component("adaptive_edge_job", adaptive_job.start)
     if settings.quiver_configured:
         await _start_component("investor_monitor_job", investor_monitor_job.start)
+    try:
+        yield
+    finally:
+        # Keep cleaning up even if one component fails during shutdown.
+        results = await asyncio.gather(
+            investor_monitor_job.stop(), reconcile_job.stop(), mtm_job.stop(), stream_hub.stop(),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.warning("shutdown component failed: %s", type(result).__name__)
+    if settings.execution_enabled:
+        await _start_component("execution_supervisor_job", execution_supervisor_job.start)
+    if alpha_job is not None and getattr(settings, "alpha_research_enabled", False):
+        await _start_component("alpha_research_job", alpha_job.start)
     yield
+    if alpha_job is not None:
+        await alpha_job.stop()
+    await execution_supervisor_job.stop()
+    await paper_job.stop()
     await investor_monitor_job.stop()
+    if adaptive_job is not None:
+        await adaptive_job.stop()
+    await prediction_resolver_job.stop()
     await reconcile_job.stop()
     await mtm_job.stop()
     await stream_hub.stop()
@@ -104,7 +215,34 @@ app.include_router(knowledge_router)
 app.include_router(backtest_router)
 app.include_router(intelligence_data_router)
 app.include_router(stream_router)
-app.include_router(risk_gateway_router)
+app.include_router(pretrade_router)
+app.include_router(execution_router)
+app.include_router(paper_router)
+app.include_router(markets_router)
+app.include_router(analytics_router)
+app.include_router(strategies_router)
+app.include_router(predictions_router)
+
+# Optional/feature routers are imported defensively so an unexpected import problem is logged
+# loudly instead of taking the whole service down. Add new routers to this list (do not rewrite
+# the file from an older copy: several sessions edit this module).
+for _module_path, _label in (
+    ("app.api.memory", "memory"),
+    ("app.api.adaptive_edge", "adaptive_edge"),
+    ("app.api.alpha", "alpha"),
+    ("app.api.auth_session", "auth_session"),
+    ("app.api.command_centre", "command_centre"),
+):
+    try:
+        _mod = __import__(_module_path, fromlist=["router"])
+        app.include_router(_mod.router)
+    except ModuleNotFoundError as exc:
+        if exc.name == _module_path:
+            logger.info("router %s not present; skipped", _label)
+        else:
+            logger.exception("router %s failed to load; its endpoints are unavailable", _label)
+    except Exception:
+        logger.exception("router %s failed to load; its endpoints are unavailable", _label)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -115,11 +253,15 @@ except RuntimeError:
 
 
 class OrderRequest(BaseModel):
-    provider: Literal["binance", "alpaca"] = Field(..., examples=["binance", "alpaca"])
+    provider: Literal["binance", "alpaca", "oanda"] = Field(..., examples=["binance", "alpaca", "oanda"])
     environment: Literal["paper", "testnet", "live"] = Field(..., examples=["paper", "testnet", "live"])
     symbol: str = Field(..., min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
     side: Literal["buy", "sell"]
-    qty: float = Field(..., gt=0, allow_inf_nan=False)
+    qty: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False,
+                                 description="Quantity in base units. Send this OR quote_amount, not both.")
+    quote_amount: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False,
+                                          description="Amount to buy or sell in USDT (USDT-quoted symbols only). "
+                                                      "Converted to a quantity server-side. Send this OR qty.")
     order_type: str = Field("market", pattern=r"^[a-z_]{1,24}$")
     limit_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
     thesis: Optional[str] = Field(default=None, max_length=2000)
@@ -145,11 +287,17 @@ class OrderRequest(BaseModel):
             raise ValueError("limit_price is required for limit orders")
         return self
 
+    @model_validator(mode="after")
+    def _qty_xor_quote_amount(self):
+        if (self.qty is None) == (self.quote_amount is None):
+            raise ValueError("send exactly one of qty (base units) or quote_amount (USDT)")
+        return self
+
 
 class ForecastScoreRequest(BaseModel):
-    symbol: str = "BTCUSDT"
-    provider: str = "binance"
-    realized_price: Optional[float] = None
+    symbol: str = Field("BTCUSDT", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
+    provider: Literal["binance", "alpaca"] = "binance"
+    realized_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -175,11 +323,25 @@ async def data_intel_dashboard(request: Request):
     )
 
 
+@app.get("/alpha", response_class=HTMLResponse)
+async def alpha_dashboard(request: Request):
+    return templates.TemplateResponse(request, "alpha.html", {"version": __version__})
+
+
 @app.get("/alerts", response_class=HTMLResponse)
 async def alerts_page(request: Request):
     return templates.TemplateResponse(
         request,
         "alerts.html",
+        {"version": __version__},
+    )
+
+
+@app.get("/predictions", response_class=HTMLResponse)
+async def predictions_page(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "predictions.html",
         {"version": __version__},
     )
 
@@ -222,9 +384,16 @@ async def providers_status(settings: Settings = Depends(get_settings)):
     binance = BinanceClient(settings)
     quiver = QuiverClient(settings)
     liquid = LiquidClient(settings)
+    try:
+        from app.jobs.adaptive_edge_job import adaptive_edge_job
+
+        adaptive_status = adaptive_edge_job.status()
+    except Exception:
+        adaptive_status = {"running": False, "error": "unavailable"}
     return {
         "alpaca": await alpaca.health(),
         "binance": await binance.health(),
+        "oanda": await OandaClient(settings).health(),
         "quiver": await quiver.health(),
         "liquid": await liquid.health(),
         "live_trading_enabled": settings.live_trading_enabled,
@@ -232,6 +401,10 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "mtm": mtm_job.status(),
         "reconcile": reconcile_job.status(),
         "investor_monitor": investor_monitor_job.status(),
+        "execution_supervisor": execution_supervisor_job.status(),
+        "paper_engine": paper_job.status(),
+        "prediction_resolver": prediction_resolver_job.status(),
+        "adaptive_edge": adaptive_status,
         "fred_configured": settings.fred_configured,
         "news_configured": settings.news_configured,
         "quiver_configured": settings.quiver_configured,
@@ -259,11 +432,11 @@ async def feeds_news(q: str = "markets OR bitcoin OR federal reserve", settings:
     return await fetch_news_headlines(query=q, settings=settings)
 
 
-@app.get("/api/market/snapshot")
+@app.get("/api/market/snapshot", dependencies=[Depends(require_persistence_auth)])
 async def market_snapshot(
     provider: str = "binance",
     symbol: str = "BTCUSDT",
-    persist: bool = True,
+    persist: bool = False,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
@@ -280,6 +453,7 @@ async def market_snapshot(
 @app.get("/api/market/order-book")
 async def market_order_book(
     symbol: str = "BTCUSDT",
+    depth: int = Query(20, ge=1, le=1000),
     depth: int = Query(20, ge=1, le=100),
     settings: Settings = Depends(get_settings),
 ):
@@ -294,6 +468,7 @@ async def market_order_book(
 async def market_history(
     provider: str = "binance",
     symbol: str = "BTCUSDT",
+    interval: str = "1h",
     interval: str = Query("1h", pattern=r"^[0-9]{1,2}[smhdwM]$"),
     limit: int = Query(100, ge=1, le=1000),
     settings: Settings = Depends(get_settings),
@@ -310,11 +485,11 @@ async def intelligence_traders():
     return {"traders": list_trader_profiles()}
 
 
-@app.get("/api/intelligence/council")
+@app.get("/api/intelligence/council", dependencies=[Depends(require_persistence_auth)])
 async def run_council(
     symbol: str = "BTCUSDT",
     provider: str = "binance",
-    persist: bool = True,
+    persist: bool = False,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ):
@@ -326,6 +501,8 @@ async def run_council(
         if provider == "binance":
             book = await mkt.get_order_book(symbol, depth=20)
             klines = await mkt.get_history("binance", symbol, interval="1h", limit=48)
+        elif provider == "oanda":
+            klines = await mkt.get_history("oanda", symbol, interval="1h", limit=48)
         fred = await fetch_fred_series(settings=settings)
         news = await fetch_news_headlines(query=f"{symbol} OR markets", settings=settings)
         context = {"fred": fred, "news": news}
@@ -380,6 +557,11 @@ async def run_council(
             save_council_decision(db, symbol, provider, payload)
             if snap.get("price") is not None:
                 save_snapshot(db, snap)
+            try:
+                _record_council_signal(db, settings, symbol, provider, payload, snap, klines)
+            except Exception:
+                db.rollback()
+                logger.warning("memory: council signal record failed for %s", symbol, exc_info=True)
         return payload
     except Exception as e:
         raise _upstream_error(e, "Council analysis")
@@ -394,10 +576,10 @@ async def list_decisions(limit: int = Query(20, ge=1, le=100), db: Session = Dep
              "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
-@app.get("/api/intelligence/forecast")
+@app.get("/api/intelligence/forecast", dependencies=[Depends(require_persistence_auth)])
 async def intelligence_forecast(
     symbol: str = "BTCUSDT", provider: str = "binance", horizon: str = "intraday",
-    persist: bool = True, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
+    persist: bool = False, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
 ):
     mkt = MarketService(settings)
     try:
@@ -408,7 +590,15 @@ async def intelligence_forecast(
             raise HTTPException(status_code=422, detail="Insufficient history for forecast scaffold")
         payload = fc.to_dict()
         if persist:
-            save_forecast(db, payload)
+            saved = save_forecast(db, payload)
+            # Every persisted forecast is also written to the append-only prediction ledger.
+            try:
+                closes = [float(k["close"]) for k in klines if k.get("close") and k.get("data_status") != "invalid"]
+                payload["ledger"] = record_from_forecast(db, payload, closes=closes, forecast_id=saved.id)
+            except Exception:
+                db.rollback()
+                logger.warning("prediction ledger write failed for %s", symbol, exc_info=True)
+                payload["ledger"] = {"error": "ledger_write_failed"}
         return payload
     except HTTPException:
         raise
@@ -417,13 +607,20 @@ async def intelligence_forecast(
 
 
 @app.post("/api/intelligence/forecast/score")
-async def forecast_score(body: ForecastScoreRequest, settings: Settings = Depends(get_settings), db: Session = Depends(get_db)):
+async def forecast_score(body: ForecastScoreRequest, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
+                         _auth=Depends(require_api_key)):
     price = body.realized_price
     if price is None:
         snap = await MarketService(settings).get_snapshot(body.provider, body.symbol)
         price = snap.get("price")
         if price is None:
             raise HTTPException(status_code=422, detail="No realized price available")
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Realized price must be positive and finite")
+    if not math.isfinite(price) or price <= 0:
+        raise HTTPException(status_code=422, detail="Realized price must be positive and finite")
     svc = ForecastAccuracyService(db)
     scored = svc.score_pending(body.symbol, float(price), provider=body.provider)
     return {"symbol": body.symbol.upper(), "realized_price": price, "scored": scored,
@@ -438,10 +635,14 @@ async def forecast_accuracy(symbol: Optional[str] = None, db: Session = Depends(
 @app.get("/api/risk/evaluate")
 async def evaluate_risk_demo(symbol: str = "BTCUSDT", side: str = "buy", qty: float = 0.01,
                              environment: str = "paper", equity: float = 10000.0):
-    engine = RiskEngine()
+    settings = get_settings()
+    snapshot = await MarketService(settings).get_snapshot("binance", symbol)
+    ctx = build_risk_context(None, settings, environment=environment, snapshot=snapshot)
+    engine = RiskEngine(settings)
     proposal = OrderProposal(provider="binance", environment=environment, symbol=symbol, side=side,
                              qty=qty, equity=equity, current_open_positions=0, daily_realized_pnl_pct=0.0,
-                             current_drawdown_pct=0.0, data_age_seconds=10.0, data_status="fresh")
+                             current_drawdown_pct=0.0, data_age_seconds=ctx.data_age_seconds,
+                             data_status=ctx.data_status, reference_price=snapshot.get("price") if snapshot else None)
     decision = engine.evaluate(proposal)
     return {"decision": decision.decision.value, "approved": decision.approved, "reasons": decision.reasons,
             "risk_per_trade_pct": decision.risk_per_trade_pct, "notes": decision.notes, "officer": "Helena Frost"}
@@ -461,24 +662,41 @@ async def place_order(req: OrderRequest, settings: Settings = Depends(get_settin
     except Exception:
         logger.warning("snapshot failed for %s %s", req.provider, req.symbol, exc_info=True)
 
+    # Amount in USDT -> quantity, computed here from a server-side price (never trusted from the client).
+    qty = req.qty
+    sizing = None
+    if req.quote_amount is not None:
+        ref_price = req.limit_price if req.order_type == "limit" else (snapshot.get("price") if snapshot else None)
+        try:
+            sizing = quote_to_qty(req.quote_amount, ref_price, req.symbol)
+        except SizingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        sizing["price_source"] = "limit_price" if req.order_type == "limit" else "live_quote"
+        sizing["note"] = ("Quantity is rounded down from the USDT amount at the reference price. Market-order fills can "
+                          "differ from it, and exchange lot-size/minimum-notional rules still apply.")
+        qty = sizing["qty"]
+
     # Risk inputs are derived from the database/market data, never from the request body.
     ctx = build_risk_context(db, settings, environment=req.environment, snapshot=snapshot)
 
     fill_hint = None
     if req.environment in ("paper", "testnet"):
         price = snapshot.get("price") if snapshot else None
-        fill_hint = price if price is not None else req.limit_price
+        fill_hint = price
 
     service = TradingService(settings, db=db)
     result = await service.place_order(
         provider=req.provider, environment=req.environment, symbol=req.symbol, side=req.side,
-        qty=req.qty, order_type=req.order_type, limit_price=req.limit_price, equity=ctx.equity,
+        qty=qty, order_type=req.order_type, limit_price=req.limit_price, equity=ctx.equity,
         current_open_positions=ctx.current_open_positions, daily_realized_pnl_pct=ctx.daily_realized_pnl_pct,
         current_drawdown_pct=ctx.current_drawdown_pct, data_age_seconds=ctx.data_age_seconds,
-        data_status=ctx.data_status, fill_price_hint=fill_hint, thesis=req.thesis,
+        data_status=ctx.data_status, fill_price_hint=fill_hint,
+        reference_price=snapshot.get("price") if snapshot else None, thesis=req.thesis,
         council_action=req.council_action,
     )
     result["risk_inputs"] = {"source": "server", **ctx.to_dict()}
+    if sizing is not None:
+        result["sizing"] = sizing
     return result
 
 
@@ -488,7 +706,7 @@ async def trading_reconcile(limit: int = Query(50, ge=1, le=200), settings: Sett
     return await OrderReconciler(db, settings).reconcile_open(limit=limit)
 
 
-@app.get("/api/paper-trading/positions")
+@app.get("/api/paper-trading/positions", dependencies=[Depends(require_api_key)])
 async def paper_positions(environment: str = "paper", status: str = "open", db: Session = Depends(get_db)):
     rows = PortfolioService(db).list_positions(environment=environment, status=status)
     return [{"symbol": p.symbol, "side": p.side, "qty": p.qty, "avg_entry": p.avg_entry,
@@ -496,11 +714,13 @@ async def paper_positions(environment: str = "paper", status: str = "open", db: 
              "status": p.status, "provider": p.provider, "environment": p.environment} for p in rows]
 
 
-@app.get("/api/paper-trading/portfolio")
+@app.get("/api/paper-trading/portfolio", dependencies=[Depends(require_api_key)])
 async def paper_portfolio(environment: str = "paper", db: Session = Depends(get_db)):
     return PortfolioService(db).portfolio_summary(environment)
 
 
+@app.get("/api/paper-trading/journal", dependencies=[Depends(require_api_key)])
+async def paper_journal(limit: int = Query(50, ge=1, le=200), symbol: Optional[str] = None, event: Optional[str] = None,
 @app.get("/api/paper-trading/journal")
 async def paper_journal(limit: int = Query(50, ge=1, le=500), symbol: Optional[str] = None, event: Optional[str] = None,
                         environment: Optional[str] = None, provider: Optional[str] = None,
@@ -514,6 +734,7 @@ async def paper_journal(limit: int = Query(50, ge=1, le=500), symbol: Optional[s
              "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
+@app.get("/api/paper-trading/history", dependencies=[Depends(require_api_key)])
 @app.get("/api/paper-trading/history")
 async def paper_history(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
     from app.models import OrderRecord

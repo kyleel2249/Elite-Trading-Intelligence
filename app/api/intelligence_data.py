@@ -48,7 +48,7 @@ async def data_intelligence_status(settings: Settings = Depends(get_settings)):
 @router.get("/search")
 async def search_intelligence(
     q: str = Query(..., min_length=1, description="Ticker or investor/institution name"),
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
     """Search stored activities and alerts by ticker or name."""
@@ -109,7 +109,7 @@ async def monitor_pause(_auth=Depends(require_api_key)):
 
 @router.get("/activities")
 async def list_activities(
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
     ticker: Optional[str] = None,
     category: Optional[str] = None,
     significance: Optional[str] = None,
@@ -129,7 +129,7 @@ async def list_activities(
 
 @router.get("/alerts")
 async def list_alerts(
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
     unacked_only: bool = False,
     q: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -150,7 +150,7 @@ async def ack_alert(alert_id: str, db: Session = Depends(get_db), _auth=Depends(
 
 
 @router.get("/consensus")
-async def consensus(limit: int = 100, db: Session = Depends(get_db)):
+async def consensus(limit: int = Query(100, ge=1, le=200), db: Session = Depends(get_db)):
     acts = ActivityStore(db).list_activities(limit=limit)
     return consensus_report(acts)
 

@@ -12,6 +12,27 @@ BACKEND_URL is required for this build.**
 4. Deploy command: `npx wrangler deploy`
 5. Ensure the Worker has Workers Free plan access and Workers Dev subdomain enabled.
 
+### 1. Run the FastAPI app (origin)
+
+```bash
+git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
+cd Elite-Trading-Intelligence
+cp .env.example .env
+# edit .env: set API_KEY and DATABASE_URL (Postgres in production); keep APP_ENV=production
+docker compose up --build -d
+curl -s http://localhost:8000/api/system/health
+```
+
+Compose binds the origin to 127.0.0.1:8000 and forces APP_ENV=production. Expose it through a local HTTPS reverse proxy or Cloudflare Tunnel. A containerized proxy can use the Compose network.
+
+### 2. Deploy the edge Worker (no Containers)
+
+Workers Builds / local:
+
+| Setting | Value |
+|---------|--------|
+| Build command | `npm install` |
+| Deploy command | `npx wrangler deploy` |
 Manual deployment:
 
 ```bash
@@ -42,6 +63,13 @@ proxies requests to a separate origin.
 
 ## Live market data
 
+| Variable | Notes |
+|----------|--------|
+| `APP_ENV` | Defaults to production; Compose forces production |
+| `API_KEY` | Required for mutations and private portfolio/history reads (`X-API-Key`) |
+| `DATABASE_URL` | Prefer Postgres in production (see `docs/POSTGRES.md`) |
+| Provider keys | Alpaca, Binance, FRED, NewsAPI, Quiver, Liquid as needed |
+| `LIVE_TRADING_ENABLED` | Keep `false` until intentional |
 The dashboard consumes Binance's public REST endpoints for initial candle and order-book
 snapshots, then subscribes to Binance public WebSocket streams for trades, partial depth,
 and kline updates. No exchange API key is required for these public market-data endpoints.
@@ -88,6 +116,22 @@ implemented, authenticated, risk-gated execution service is deployed and tested.
 
 ## Deployment architecture
 
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Set API_KEY in .env, or explicitly choose APP_ENV=development for local-only unauthenticated work.
+uvicorn app.main:app --reload --port 8000
+```
+
+## Security
+
+- Set `API_KEY` on the origin; send `X-API-Key` on POST routes.
+- Keep `LIVE_TRADING_ENABLED=false` until keys and risk limits are verified.
+- Quiver is research-only; never used for order placement.
+- Worker only proxies HTTP; it does not hold trading secrets.
+
+## Post-deploy checks
 ```text
 Browser
   |-- HTTPS --> Cloudflare Worker (ETI dashboard + health APIs)

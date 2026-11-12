@@ -1,0 +1,33 @@
+# Copy to .github/workflows/live-provider-check.yml (the push integration used by the author cannot create workflow files).
+# Manual only: real, read-only requests against FMP and Tokenomist using repository secrets FMP_API_KEY and TOKENOMIST_API_KEY.
+# It spends provider quota (Tokenomist: ~1 credit). Never places orders.
+name: Live provider check (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Offline provider and analytics unit tests
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q tests/test_providers.py tests/test_analytics.py
+      - name: Live provider probe
+        env:
+          PYTHONPATH: .
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          TOKENOMIST_API_KEY: ${{ secrets.TOKENOMIST_API_KEY }}
+        run: python scripts/live_provider_check.py

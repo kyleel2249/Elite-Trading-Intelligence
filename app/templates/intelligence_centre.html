@@ -1,0 +1,207 @@
+{% extends "eti_base.html" %}
+{% block title %}Intelligence Command Centre{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js" defer></script>
+<script src="/static/scenes.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js" defer></script>
+{% endblock %}
+{% block content %}
+<h1>Intelligence Command Centre</h1>
+<div class="sub">DISCOVER OPPORTUNITIES. DETECT THREATS. PROTECT CAPITAL. · Only real agent state, stored records and configured providers are shown. A panel without a configured data source says so.</div>
+
+<div class="grid" style="margin-top:12px">
+  <section id="crawler" class="panel s8" aria-labelledby="h-cr">
+    <h2 id="h-cr">ETI intelligence crawler <span id="cr-state"></span></h2>
+    <div class="stage"><canvas id="crawler-canvas" aria-label="3D intelligence crawler. Its pose reflects the real state of ETI's background agents." role="img"></canvas>
+      <div class="over" id="cr-over"></div></div>
+    <div class="unavail" id="crawler-fallback" hidden>3D rendering is unavailable (WebGL or the Three.js CDN could not load). Crawler status below is unaffected.</div>
+  </section>
+  <section class="panel s4" aria-labelledby="h-act">
+    <h2 id="h-act">Crawler activity</h2>
+    <div id="cr-activity"></div>
+    <p class="sub" style="margin-top:10px">Agent health (healthy ÷ available agents)</p>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="cr-bar"><i style="width:0%"></i></div>
+    <p class="sub" id="cr-bar-t"></p>
+  </section>
+</div>
+
+<div class="grid">
+  <section id="globe" class="panel s4" aria-labelledby="h-gl">
+    <h2 id="h-gl">Global intelligence network <span class="row" style="display:flex;gap:4px"><button class="btn sm" id="gz-in" type="button" aria-label="Zoom in">+</button><button class="btn sm" id="gz-out" type="button" aria-label="Zoom out">−</button></span></h2>
+    <div class="stage sq"><canvas id="globe-canvas" role="img" aria-label="Interactive globe of configured data-provider endpoints. Drag to rotate, tap a node for details."></canvas></div>
+    <div class="unavail" id="globe-fallback" hidden>3D globe unavailable (WebGL or the Three.js CDN could not load).</div>
+    <div class="legend" style="margin-top:6px"><span><span class="dot ok"></span> connected</span><span><span class="dot warn"></span> status unknown</span><span><span class="dot bad"></span> error</span><span><span class="dot"></span> not configured</span></div>
+    <p class="sub">Nodes are configured data providers at indicative locations. No geolocated intelligence events are available, so none are drawn.</p>
+    <div id="node-info"></div>
+  </section>
+  <div class="s8" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px">
+    <section id="institutional" class="panel"><h2>Institutional intelligence</h2><div id="inst-body"></div></section>
+    <section id="academic" class="panel purple"><h2>Academic research</h2><div class="unavail"><b>No source configured.</b> ETI has no academic-paper feed, so nothing is collected or counted here. Documented strategy research lives in the knowledge base (<a href="/#knowledge">Classic dashboard → Knowledge</a>).</div></section>
+    <section id="market-intel" class="panel gold"><h2>Market intelligence</h2><div id="mi-body"></div></section>
+    <section id="blockchain" class="panel"><h2>Blockchain intelligence</h2><div class="unavail"><b>No on-chain provider configured.</b> Wallet tracking, whale transfers, token creation, liquidity-pool and exchange-flow monitoring need a blockchain data provider (for example an RPC or indexer API key). Until one is connected, ETI shows no wallet or token figures rather than inventing them. Elite-trader wallet analytics and Polymarket tracking are in the same position.</div></section>
+  </div>
+</div>
+
+<div class="grid">
+  <section id="market-overview" class="panel s8"><h2>Market overview <span class="tabs" id="ov-range" role="group" aria-label="Overview period"></span></h2>
+    <div id="ov-chart" class="chart sm" role="img" aria-label="Relative performance of BTC, ETH and SOL"></div>
+    <div class="legend" id="ov-legend"></div><div id="ov-note"></div>
+    <p class="sub">Percentage change from the start of the period (Binance spot closes). Total-market indicators need a market-cap provider and are not shown.</p></section>
+  <section id="opportunities" class="panel green s4"><h2>Opportunity intelligence</h2><div id="opp-body"></div><div style="margin-top:8px"><button class="btn ok" id="opp-view" type="button">View opportunities</button></div></section>
+</div>
+
+<div class="grid">
+  <section id="security" class="panel red s5" aria-labelledby="h-sec">
+    <h2 id="h-sec">Rug-pull defence &amp; security centre</h2>
+    <div class="row" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><div style="width:150px"></div><div id="sec-gauge" style="width:150px"></div></div>
+    <div class="unavail"><b>Not monitoring.</b> Honeypot, malicious-contract, liquidity-removal, ownership-privilege and holder-concentration checks need contract and on-chain data from a configured security provider. None is connected, so there is no risk score and no threat count. ETI will not label an asset malicious without verifiable evidence.</div>
+  </section>
+  <section id="alerts" class="panel s7"><h2>Recent intelligence alerts (institutional disclosures)</h2><div id="alerts-body"></div></section>
+</div>
+
+<section id="agents" class="panel" style="margin-bottom:14px"><h2>Agent management <button class="btn sm" id="ag-refresh" type="button">Refresh</button></h2><div id="agents-body"></div>
+  <p class="sub">Controls call the real job endpoints and need the API key when the server enforces one. Agents that report "unavailable" are not wired in this deployment.</p></section>
+
+<section id="log" class="panel" style="margin-bottom:14px"><h2>Crawler activity log <input id="log-q" type="search" placeholder="Filter log…" aria-label="Filter activity log"></h2><div id="log-body"></div></section>
+
+<section id="banner" class="panel green"><div class="signal" id="banner-t">ETI CRAWLER</div><div class="sub" id="banner-s"></div></section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const { $, el, fmt, api, toast, busy, modal, kv, table, autoTable, unavailable, gauge, poll, enc } = ETI;
+  let cr = null, gl = null, chart = null; const series = {}; let ovRange = '1M';
+  const STATE = { idle: ['IDLE', 'muted'], initialising: ['INITIALISING', 'warn'], scanning: ['SCANNING', 'pos'], error: ['ERROR', 'neg'] };
+  const HEALTH = { healthy: 'good', error: 'bad', stale: 'warn', starting: 'warn', stopped: '', unavailable: '' };
+  let logRows = [], scanCache = null;
+
+  function scenes() {
+    if (!window.THREE || !window.ETIScenes) { $('#crawler-fallback').hidden = false; $('#globe-fallback').hidden = false; $('#crawler-canvas').parentElement.hidden = true; $('#globe-canvas').parentElement.hidden = true; return; }
+    cr = ETIScenes.crawler($('#crawler-canvas'));
+    gl = ETIScenes.globe($('#globe-canvas'), { onSelect: showNode });
+    $('#gz-in').onclick = () => gl && gl.zoom(-0.25); $('#gz-out').onclick = () => gl && gl.zoom(0.25);
+  }
+
+  // ------------------------------------------------------------------ crawler + agents + log
+  const CTRL = {
+    investor_monitor: [['Scan now', '/api/data-intelligence/monitor/scan'], ['Start', '/api/data-intelligence/monitor/start'], ['Pause', '/api/data-intelligence/monitor/pause']],
+    prediction_resolver: [['Run now', '/api/predictions/job/run']], mark_to_market: [['Run now', '/api/system/mtm-run']], reconcile: [['Run now', '/api/system/reconcile-run']],
+  };
+  async function loadCrawler() {
+    const d = await api('/api/command/crawler');
+    if (cr) cr.setState(d.state);
+    const [label, cls] = STATE[d.state] || STATE.idle;
+    $('#cr-state').replaceChildren(el('span', { class: 'signal ' + cls, style: 'font-size:14px', text: label }));
+    $('#cr-over').replaceChildren(el('div', { class: 'chip' }, el('span', { class: 'dot ' + (d.state === 'error' ? 'bad' : d.state === 'scanning' ? 'ok' : 'warn') }), 'State derived from ' + d.totals.available + ' reporting agent(s)'));
+    const t = d.totals, c = d.counts;
+    $('#cr-activity').replaceChildren(kv({ 'Agents running': t.running + ' / ' + t.available, 'Agents with errors': t.errored, 'Stale agents': t.stale, 'Last successful cycle': d.last_successful_run ? fmt.time(d.last_successful_run) : 'none yet',
+      'Disclosures stored': c.investor_activities, 'Alerts awaiting review': c.alerts_unacknowledged, 'Predictions pending': c.predictions_pending,
+      'Markets / wallets / contracts': 'not tracked (no provider)' }));
+    const healthy = d.agents.filter((a) => a.health === 'healthy').length, pct = t.available ? Math.round(healthy / t.available * 100) : 0;
+    $('#cr-bar').firstElementChild.style.width = pct + '%'; $('#cr-bar').setAttribute('aria-valuenow', pct);
+    $('#cr-bar-t').textContent = healthy + ' of ' + t.available + ' agents healthy';
+    const fresh = d.last_successful_run && (Date.now() - new Date(d.last_successful_run).getTime()) < 15 * 60 * 1000;
+    $('#banner').className = 'panel ' + (d.state === 'error' ? 'red' : fresh ? 'green' : 'gold');
+    $('#banner-t').textContent = 'ETI CRAWLER: ' + label;
+    $('#banner-s').textContent = (fresh ? 'Intelligence fresh' : 'No successful agent cycle in the last 15 minutes') + ' \u00b7 ' + c.alerts_unacknowledged + ' alert(s) awaiting review \u00b7 ' + fmt.time(d.generated_at);
+    renderAgents(d.agents); logRows = d.activity_log; renderLog();
+  }
+  function renderAgents(agents) {
+    $('#agents-body').replaceChildren(table([
+      { k: 'label', label: 'Agent' }, { k: 'responsibility', label: 'Responsibility', wrap: true },
+      { k: 'health', label: 'Health', fmt: (v) => el('span', { class: 'badge ' + (HEALTH[v] || ''), text: v }) },
+      { k: 'last_run', label: 'Last run', fmt: (v) => (v ? fmt.time(v) : 'never') }, { k: 'interval_seconds', label: 'Interval', fmt: (v) => (v ? fmt.dur(v) : '\u2014') },
+      { k: (a) => a.last_error || a.last_result || '', label: 'Last result / error', wrap: true },
+      { k: 'id', label: 'Controls', fmt: (id) => el('span', { class: 'row', style: 'display:flex;gap:4px' }, (CTRL[id] || []).map(([l, path]) => el('button', { class: 'btn sm', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { const r = await api(path, { method: 'POST', timeout: 120000 }); await modal(l + ': ' + id, kv(r)); await loadCrawler(); }) }, l))) }], agents));
+  }
+  function renderLog() {
+    const q = ($('#log-q').value || '').toLowerCase();
+    const rows = logRows.filter((r) => !q || JSON.stringify(r).toLowerCase().includes(q));
+    $('#log-body').replaceChildren(table([{ k: 'ts', label: 'Time', fmt: (v) => (v ? fmt.time(v) : '\u2014') }, { k: 'agent', label: 'Agent' }, { k: 'activity', label: 'Activity' }, { k: 'target', label: 'Target' },
+      { k: 'result', label: 'Result', wrap: true }, { k: 'status', label: 'Status', fmt: (v) => el('span', { class: 'badge ' + (HEALTH[v] || ''), text: v }) }], rows, 'No agent activity recorded yet.'));
+  }
+
+  // ------------------------------------------------------------------ institutional, alerts, globe
+  const nodeStatus = (o) => { const s = String((o && (o.status || o.state)) || '').toLowerCase(); if (['ok', 'connected', 'healthy', 'ready'].includes(s)) return 'ok'; if (['error', 'disconnected', 'down', 'failed'].includes(s)) return 'bad'; if (!o || ['not_configured', 'disabled', 'unconfigured', 'missing'].includes(s)) return 'off'; return 'warn'; };
+  function showNode(n) { $('#node-info').replaceChildren(el('b', { text: n.name + ' ' }), el('span', { class: 'badge ' + (n.status === 'ok' ? 'good' : n.status === 'bad' ? 'bad' : ''), text: n.status }), kv(n.info || {}), el('p', { class: 'sub', text: 'Indicative provider location; not an intelligence event.' })); }
+  async function loadIntel() {
+    const [st, acts, al, pv] = await Promise.allSettled([api('/api/data-intelligence/status', { timeout: 60000 }), api('/api/data-intelligence/activities?limit=5'), api('/api/data-intelligence/alerts?limit=10'), api('/api/providers/status', { timeout: 60000 })]);
+    const di = st.status === 'fulfilled' ? st.value : null, p = pv.status === 'fulfilled' ? pv.value : null;
+    $('#inst-body').replaceChildren(
+      di ? el('div', { class: 'legend', style: 'margin-bottom:6px' }, ['sec_edgar', 'quiver'].map((k) => el('span', { class: 'chip' }, el('span', { class: 'dot ' + ({ ok: 'ok', bad: 'bad', warn: 'warn', off: '' }[nodeStatus(di[k])]) }), k.replace('_', ' ') + ': ' + ((di[k] && di[k].status) || 'unknown')))) : unavailable(st.reason ? st.reason.message : 'unavailable', 'Sources'),
+      acts.status === 'fulfilled' ? table([{ k: 'category', label: 'Type' }, { k: (r) => r.ticker || r.institution || r.investor_name, label: 'Subject' }, { k: 'direction', label: 'Dir' }, { k: 'significance', label: 'Significance', fmt: (v) => el('span', { class: 'badge ' + (v || ''), text: v || '\u2014' }) }, { k: 'verification_status', label: 'Verified' }], acts.value.activities, 'No disclosures stored yet. The institutional agent stores filings (SEC EDGAR, Quiver) as it scans.') : unavailable(acts.reason.message, 'Activities'),
+      el('p', { class: 'sub', text: '13F filings are delayed snapshots, not live holdings. Full history: Data Intelligence page.' }));
+    $('#alerts-body').replaceChildren(al.status === 'fulfilled' ? table([
+      { k: 'severity', label: 'Severity', fmt: (v) => el('span', { class: 'badge ' + v, text: v }) }, { k: 'title', label: 'Alert', wrap: true }, { k: 'verification_status', label: 'Verified' },
+      { k: 'recommended_action', label: 'Action' }, { k: 'created_at', label: 'Time', fmt: fmt.time },
+      { k: (r) => r, label: 'Review', fmt: (a) => (a.acknowledged ? el('span', { class: 'muted', text: 'acknowledged' }) : el('button', { class: 'btn sm', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { await api('/api/data-intelligence/alerts/' + enc(a.alert_id) + '/ack', { method: 'POST' }); toast('Alert acknowledged', 'good'); await loadIntel(); }) }, 'Acknowledge')) }], al.value.alerts, 'No intelligence alerts yet.') : unavailable(al.reason.message, 'Alerts'));
+    if (gl) {
+      const nodes = [];
+      if (di) { nodes.push({ name: 'SEC EDGAR', lat: 38.9, lon: -77.04, status: nodeStatus(di.sec_edgar), info: di.sec_edgar }, { name: 'Quiver Quant (US endpoint)', lat: 39, lon: -98, status: nodeStatus(di.quiver), info: di.quiver }); }
+      if (p) { nodes.push({ name: 'Alpaca (US endpoint)', lat: 40.7, lon: -74, status: nodeStatus(p.alpaca), info: p.alpaca }, { name: 'FRED (St. Louis)', lat: 38.63, lon: -90.2, status: p.fred_configured ? 'warn' : 'off', info: { configured: p.fred_configured } }); }
+      gl.setNodes(nodes);
+    }
+  }
+
+  // ------------------------------------------------------------------ market + opportunities
+  async function loadScan() {
+    const r = await api('/api/analytics/scan?symbols=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT&interval=1h', { timeout: 90000 });
+    scanCache = r; const top = (r.ranked || []).slice(0, 5);
+    $('#opp-body').replaceChildren(el('p', { class: 'signal', style: 'font-size:34px', text: String((r.ranked || []).length) }), el('div', { class: 'sub', text: 'ranked candidates (not validated; scores are not probabilities)' }), autoTable(top, 5),
+      r.failed && Object.keys(r.failed).length ? el('p', { class: 'warn', text: 'Failed: ' + Object.keys(r.failed).join(', ') }) : null);
+  }
+  async function loadMarketIntel() {
+    const [news, scan] = await Promise.allSettled([api('/api/feeds/news'), scanCache ? Promise.resolve(scanCache) : api('/api/analytics/scan?symbols=BTCUSDT,ETHUSDT,SOLUSDT&interval=1h', { timeout: 90000 })]);
+    const body = $('#mi-body'); const kids = [];
+    if (scan.status === 'fulfilled') kids.push(el('h3', { class: 'sub', text: 'Strongest ranked movers' }), autoTable((scan.value.ranked || []).slice(0, 3), 4)); else kids.push(unavailable(scan.reason.message, 'Scan'));
+    if (news.status === 'fulfilled') {
+      const n = news.value, items = n.headlines || n.articles || [];
+      kids.push(el('h3', { class: 'sub', text: 'News feed: ' + (n.status || 'unknown') }));
+      if (n.status !== 'ok') kids.push(unavailable('No news provider configured or reachable (set NEWSAPI_KEY).', 'News'));
+      else kids.push(el('ul', { class: 'list' }, items.slice(0, 4).map((h) => el('li', {}, el('span', { text: String(h.title || h.headline || h) })))), n.sentiment_score != null ? el('p', { class: 'sub', text: 'Headline sentiment score: ' + n.sentiment_score }) : null);
+    } else kids.push(unavailable(news.reason.message, 'News'));
+    body.replaceChildren(...kids);
+  }
+  const OVR = { '1D': ['1h', 24], '1W': ['4h', 42], '1M': ['1d', 30], '3M': ['1d', 90], '1Y': ['1d', 365] };
+  const OVS = [['BTCUSDT', '#ffc247'], ['ETHUSDT', '#00e5ff'], ['SOLUSDT', '#a970ff']];
+  function drawRangeTabs() { $('#ov-range').replaceChildren(...Object.keys(OVR).map((r) => el('button', { class: 'btn sm', type: 'button', 'aria-pressed': String(r === ovRange), onclick: () => { ovRange = r; drawRangeTabs(); loadOverview(); } }, r))); }
+  async function loadOverview() {
+    const note = $('#ov-note'); note.replaceChildren();
+    if (!window.LightweightCharts) { note.append(unavailable('The charting library could not be loaded.', 'Chart')); return; }
+    if (!chart) {
+      const box = $('#ov-chart');
+      chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.06)' }, horzLines: { color: 'rgba(0,168,255,.06)' } }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
+      OVS.forEach(([s, c]) => { series[s] = chart.addLineSeries({ color: c, lineWidth: 2, priceFormat: { type: 'custom', formatter: (v) => v.toFixed(1) + '%' } }); });
+      new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight })).observe(box);
+    }
+    const [iv, n] = OVR[ovRange]; const leg = [];
+    await Promise.all(OVS.map(async ([s, c]) => {
+      try {
+        const rows = (await api(`/api/market/history?provider=binance&symbol=${s}&interval=${iv}&limit=${n}`)).filter((k) => k.data_status !== 'invalid' && Number.isFinite(Number(k.close)));
+        const f = Number(rows[0].close);
+        series[s].setData(rows.map((k) => ({ time: Math.floor(Number(k.open_time) / 1000), value: (Number(k.close) / f - 1) * 100 })).sort((a, b) => a.time - b.time));
+        const last = (Number(rows[rows.length - 1].close) / f - 1) * 100;
+        leg.push(el('span', {}, el('span', { class: 'dot', style: 'background:' + c }), ' ' + s.replace('USDT', '') + ' ', el('b', { class: fmt.cls(last), text: (last >= 0 ? '+' : '') + last.toFixed(2) + '%' })));
+      } catch (e) { series[s].setData([]); leg.push(el('span', { class: 'warn', text: s.replace('USDT', '') + ': unavailable' })); }
+    }));
+    $('#ov-legend').replaceChildren(...leg); chart.timeScale().fitContent();
+  }
+
+  // ------------------------------------------------------------------ boot
+  function main() {
+    scenes();
+    $('#sec-gauge').replaceChildren(gauge(null, { label: 'security risk (not evaluated)', color: '#ff304f' }));
+    $('#log-q').addEventListener('input', renderLog);
+    $('#ag-refresh').addEventListener('click', (e) => busy(e.currentTarget, loadCrawler));
+    $('#opp-view').addEventListener('click', (e) => busy(e.currentTarget, async () => { const r = scanCache || (await api('/api/analytics/scan?symbols=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT&interval=1h', { timeout: 90000 })); await modal('Opportunity intelligence (ranked, not validated)', el('div', {}, autoTable(r.ranked || [], 10), el('p', { class: 'sub', text: 'Validated / researching / rejected / expired statuses need a persisted opportunity workflow, which is not part of this build. Scores rank where to look first; they are not probabilities.' }), el('p', { class: 'sub', text: (r.notes || []).join(' ') }))); }));
+    drawRangeTabs();
+    poll(() => loadCrawler().catch((e) => toast('Crawler: ' + e.message, 'bad')), 15000);
+    poll(() => loadIntel().catch((e) => toast('Intelligence: ' + e.message, 'bad')), 60000);
+    poll(() => loadScan().then(loadMarketIntel).catch((e) => { $('#opp-body').replaceChildren(unavailable(e.message, 'Scan')); }), 120000);
+    poll(() => loadOverview().catch(() => {}), 120000);
+  }
+  document.addEventListener('DOMContentLoaded', main);
+})();
+</script>
+{% endblock %}
