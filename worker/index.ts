@@ -4,6 +4,10 @@
  * The dashboard and lightweight read-only market APIs run directly on Workers.
  * No FastAPI origin / BACKEND_URL is required. Brokerage credentials are never
  * accepted by these public market-data routes.
+ *
+ * Optional: when BACKEND_URL is set to an HTTP(S) origin, any route this Worker does not
+ * handle itself is forwarded to that origin (see proxyToBackend). When it is unset the
+ * Worker answers unknown routes with a JSON 404, exactly as before.
  */
 import { withMotion } from "./ui/motion.ts";
 import { handleExecution } from "./execution.ts";
@@ -32,6 +36,7 @@ import { handleAuth } from "./auth/routes.ts";
 export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
   ETI_EDGE?: string;
   MARKET_CACHE?: KVNamespace;
+  BACKEND_URL?: string;
 }
 
 const JSON_HEADERS = {
@@ -41,6 +46,48 @@ const JSON_HEADERS = {
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
+}
+
+const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length"]);
+
+/** Optional reverse proxy for routes this Worker does not implement. Only used when BACKEND_URL is configured. */
+async function proxyToBackend(request: Request, backend: string): Promise<Response> {
+  let targetBase: URL;
+  try {
+    targetBase = new URL(backend);
+  } catch {
+    return new Response(JSON.stringify({ error: "BACKEND_URL is not a valid absolute URL" }), { status: 500, headers: { "content-type": "application/json" } });
+  }
+  if (!["http:", "https:"].includes(targetBase.protocol) || targetBase.username || targetBase.password || targetBase.pathname !== "/" || targetBase.search || targetBase.hash) {
+    return new Response(JSON.stringify({ error: "BACKEND_URL must be an HTTP(S) origin without credentials, path, query or fragment" }), { status: 500, headers: { "content-type": "application/json" } });
+  }
+  const incoming = new URL(request.url);
+  // Component assignment keeps even network-path references on the configured host.
+  const target = new URL(targetBase);
+  target.pathname = incoming.pathname;
+  target.search = incoming.search;
+  if (target.origin !== targetBase.origin) {
+    return new Response("Invalid proxy target", { status: 400 });
+  }
+  const headers = new Headers();
+  request.headers.forEach((value, key) => {
+    if (!HOP_BY_HOP.has(key.toLowerCase())) headers.set(key, value);
+  });
+  headers.set("x-forwarded-host", incoming.host);
+  headers.set("x-forwarded-proto", incoming.protocol.replace(":", ""));
+  const init: RequestInit = { method: request.method, headers, redirect: "manual" };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = request.body;
+    (init as any).duplex = "half"; // required for streaming bodies in some runtimes
+  }
+  try {
+    const upstream = await fetch(target.toString(), init);
+    const outHeaders = new Headers(upstream.headers);
+    outHeaders.set("x-eti-proxy", "cloudflare-worker");
+    return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: outHeaders });
+  } catch {
+    return new Response(JSON.stringify({ error: "backend_unreachable", message: "upstream fetch failed", backend: targetBase.origin }), { status: 502, headers: { "content-type": "application/json; charset=utf-8" } });
+  }
 }
 
 const html = `<!doctype html>
@@ -393,31 +440,9 @@ function renderTrades(){$('trades').innerHTML='<table><tr><th>Time</th><th>Side<
 let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='';
 function setConn(t,c){$('connection').textContent=t;$('connection').style.color=c;}
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
-async function getJson(url){const r=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}if(j===null)throw Error('Invalid JSON from '+url.split('?')[0]);return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
-function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
-async function load(){
- const seq=++reqSeq,s=$('symbol').value,i=$('interval').value,key=s+'|'+i,q='symbol='+encodeURIComponent(s);
- const urls={
-  candles:'/api/market/klines?'+q+'&interval='+encodeURIComponent(i)+'&limit=120',
-  depth:'/api/market/depth?'+q+'&limit=20',
-  trades:'/api/market/trades?'+q+'&limit=50',
-  ticker:'/api/market/ticker?'+q
- };
- const settled=await Promise.allSettled(Object.entries(urls).map(async ([name,url])=>[name,await getJson(url)]));
- if(seq!==reqSeq)return;
- const results={},problems=[];
- for(const item of settled){if(item.status==='fulfilled'){const [name,value]=item.value;results[name]=value;}else problems.push(item.reason&&item.reason.message?item.reason.message:'Market request failed');}
- let candleOk=false, providers=[];
- if(results.candles&&Array.isArray(results.candles.data)&&results.candles.data.length){
-  candles=results.candles.data.map(v=>v.map(Number));provider=results.candles.provider||'unknown';lastGoodAt=Date.now();lastGoodKey=key;candleOk=true;providers.push(provider);
-  $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent=provider+(results.candles.failover?' (failover)':'');drawChart();
- }else{
-  problems.unshift(results.candles?'Candles returned an empty or invalid response':'Candles: '+(settled[0].status==='rejected'?settled[0].reason.message:'unavailable'));
-  if(!(candles.length&&lastGoodKey===key)){candles=[];drawChart();}
-  setStale('Candles unavailable — '+problems[0].slice(0,150));
 function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
 function mkt(){return symMkt()==='futures'?'&market=futures':'';}
-async function getJson(url){const r=await fetch(url,{cache:'no-store'}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
+async function getJson(url){const r=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}if(j===null)throw Error('Invalid JSON from '+url.split('?')[0]);return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
 function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
 async function load(){
  const seq=++reqSeq,s=$('symbol').value,i=$('interval').value,key=s+'|'+i+'|'+mkt(),q='symbol='+encodeURIComponent(s)+mkt();
@@ -449,23 +474,6 @@ async function load(){
   setConn('Market data unavailable · retry in '+Math.round(wait/1000)+'s','#ff637d');
   $('stamp').textContent=e.message;schedule(wait);
  }
- if(results.depth&&results.depth.data&&Array.isArray(results.depth.data.bids)&&Array.isArray(results.depth.data.asks)){
-  book=results.depth.data;providers.push(results.depth.provider||'');
-  renderBook();
- }else{problems.push('Order book unavailable');$('book').textContent='Order book unavailable — '+(settled[1].status==='rejected'?settled[1].reason.message:'invalid response');}
- if(results.trades&&Array.isArray(results.trades.data)){
-  trades=results.trades.data.map(v=>({T:Number(v.time),m:!!v.isBuyerMaker,p:String(v.price),q:String(v.qty)}));providers.push(results.trades.provider||'');renderTrades();
- }else{problems.push('Trade tape unavailable');$('trades').textContent='Trade tape unavailable — '+(settled[2].status==='rejected'?settled[2].reason.message:'invalid response');}
- if(results.ticker&&results.ticker.data&&Number.isFinite(Number(results.ticker.data.volume))&&Number.isFinite(Number(results.ticker.data.priceChangePercent))){
-  const x=results.ticker.data;$('volume').textContent=fmt(x.volume);const change=Number(x.priceChangePercent);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';providers.push(results.ticker.provider||'');
- }else{$('volume').textContent=candles.length?fmt(candles.at(-1)[5])+' (last candle)':'—';$('change').textContent='—';problems.push('Ticker unavailable');}
- if(problems.length){setStale('Partial market data · '+problems.slice(0,3).join(' · ').slice(0,220));}else setStale('');
- const unique=[...new Set(providers.filter(Boolean))];
- $('stamp').textContent=(candleOk?'Updated ':'Last update ')+new Date().toLocaleTimeString()+(unique.length?' · '+unique.join(', '):'');
- if(candleOk){failCount=0;setConn(problems.length?'Partially connected · '+unique.join(', '):'Market data connected · '+unique.join(', '),problems.length?'#f59e0b':'#21d69a');}
- else{failCount++;setConn('Market data degraded · retrying','#ffb08c');}
- if(provider==='binance'){if(!socket||socket.readyState>1)connectWs();}else if(socket){socket.onclose=null;socket.close();socket=null;}
- schedule(5000);
 }
 function connectWs(){
  if(provider!=='binance')return;
@@ -600,7 +608,7 @@ async function submitOrder(side){
   await refreshExecutionHistory();refreshExecutionStatus();pfKick();
  }catch(e){$('orderOutput').textContent='Order submission failed before a response was received: '+e.message+' | Check the audit history before retrying.';pfKick();}
 }
-$('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').value==='limit'?'flex':'none';};
+$('orderType').onchange=()=>{const t=$('orderType').value;$('limitPriceWrap').style.display=t==='limit'?'flex':'none';$('stopPriceWrap').style.display=t==='stop'?'flex':'none';};
 $('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();};
 /* ===== Chart trading + profit & leverage calculator ===== */
 function drawChartLines(x,g,py,labels){chartLines.forEach(l=>{if(!(l.price>0))return;const y=py(l.price);x.lineWidth=1.2;x.strokeStyle=l.color;x.setLineDash(l.dash||[4,3]);x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.setLineDash([]);labels.push({y:y,t:l.label,c:l.color});});}
@@ -886,73 +894,6 @@ export default {
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
     }
-
-    let targetBase: URL;
-    try {
-      targetBase = new URL(backend);
-    } catch {
-      return new Response(
-        JSON.stringify({
-          error: "BACKEND_URL is not a valid absolute URL",
-        }),
-        { status: 500, headers: { "content-type": "application/json" } },
-      );
-    }
-
-    if (!['http:', 'https:'].includes(targetBase.protocol) || targetBase.username || targetBase.password || targetBase.pathname !== '/' || targetBase.search || targetBase.hash) {
-      return new Response(JSON.stringify({ error: 'BACKEND_URL must be an HTTP(S) origin without credentials, path, query or fragment' }), { status: 500, headers: { 'content-type': 'application/json' } });
-    }
-    const incoming = new URL(request.url);
-    // Component assignment keeps even network-path references on the configured host.
-    const target = new URL(targetBase);
-    target.pathname = incoming.pathname;
-    target.search = incoming.search;
-    if (target.origin !== targetBase.origin) {
-      return new Response('Invalid proxy target', { status: 400 });
-    }
-
-    const headers = new Headers();
-    request.headers.forEach((value, key) => {
-      if (!HOP_BY_HOP.has(key.toLowerCase())) {
-        headers.set(key, value);
-      }
-    });
-    headers.set("x-forwarded-host", incoming.host);
-    headers.set("x-forwarded-proto", incoming.protocol.replace(":", ""));
-
-    const init: RequestInit = {
-      method: request.method,
-      headers,
-      redirect: "manual",
-    };
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      init.body = request.body;
-      // @ts-expect-error duplex required for streaming bodies in some runtimes
-      init.duplex = "half";
-    }
-
-    try {
-      const upstream = await fetch(target.toString(), init);
-      const outHeaders = new Headers(upstream.headers);
-      outHeaders.set("x-eti-proxy", "cloudflare-worker");
-      return new Response(upstream.body, {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        headers: outHeaders,
-      });
-    } catch (err) {
-      const message = "upstream fetch failed";
-      return new Response(
-        JSON.stringify({
-          error: "backend_unreachable",
-          message,
-          backend: targetBase.origin,
-        }),
-        {
-          status: 502,
-          headers: { "content-type": "application/json; charset=utf-8" },
-        },
-      );
     if (url.pathname.startsWith("/api/portfolio/")) return handlePortfolio(request, _env as any);
     if (url.pathname.startsWith("/api/auth/")) return handleAuth(request, _env as any);
     if (url.pathname === "/alpha" || url.pathname.startsWith("/api/alpha")) {
@@ -977,9 +918,9 @@ export default {
     if (url.pathname.startsWith("/api/paper")) {
       return handlePaper(request, _env);
     }
-    if (url.pathname === "/api/omnisignal/execute") return handleTestnetExecute(request, env as any);
-    if (url.pathname === "/api/omnisignal/manage") return handleManage(request, env as any);
-    if (url.pathname === "/api/omnisignal/alerts" || url.pathname === "/api/omnisignal/alerts/test") return handleAlerts(request, env as any);
+    if (url.pathname === "/api/omnisignal/execute") return handleTestnetExecute(request, _env as any);
+    if (url.pathname === "/api/omnisignal/manage") return handleManage(request, _env as any);
+    if (url.pathname === "/api/omnisignal/alerts" || url.pathname === "/api/omnisignal/alerts/test") return handleAlerts(request, _env as any);
     if (url.pathname === "/omnisignal" || url.pathname === "/omnisignal.js") {
       return handleOmniUi(request) as Response;
     }
@@ -998,6 +939,8 @@ export default {
     if (url.pathname === "/") {
       return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
+    // Optional: forward everything else to a configured origin (BACKEND_URL). Unset by default.
+    if (typeof _env.BACKEND_URL === "string" && _env.BACKEND_URL.trim()) return proxyToBackend(request, _env.BACKEND_URL.trim());
     return json({ error: "not_found", path: url.pathname, message: "This Cloudflare-native build currently exposes the live market dashboard and health endpoints. Existing FastAPI research/trading modules have not yet been ported." }, 404);
   },
 };
