@@ -26,8 +26,9 @@ A key committed to a repository, browser bundle, log or source file must be revo
 The Worker scheduled handler invokes the sports scan and history sync. D1 job locks prevent duplicate execution when multiple cron schedules fire:
 - ETI_SPORTS_SCAN_INTERVAL_MINUTES defaults to 360 (six hours), minimum 60.
 - ETI_SPORTS_HISTORY_SYNC_MINUTES defaults to 1440 (24 hours), minimum 360.
-- The scheduled scan retrieves one upcoming fixture per cycle; manual dashboard scans can request up to 12.
-- History sync imports up to five unseen finished fixtures per scheduled cycle. A manual sync can import up to 30.
+- ETI_SPORTS_AUTO_SCAN_LIMIT defaults to 1 fixture per scheduled cycle; maximum 12.
+- ETI_SPORTS_HISTORY_BATCH_SIZE defaults to 5 unseen finished fixtures per scheduled cycle; maximum 30.
+- Manual dashboard scans can request up to 12 fixtures and manual history sync can import up to 30.
 - Provider calls are sequential and respect the OddsPapi fixture/odds/scores endpoint cooldowns. Adjust intervals only after checking your account request allowance.
 
 The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0005.
