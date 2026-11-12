@@ -16,15 +16,15 @@ A key committed to a repository, browser bundle, log or source file must be revo
 
 - GET /api/sports/status — reports whether credentials and the D1 binding are configured (not whether the provider is reachable).
 - GET /api/sports/health — performs live, key-safe provider probes and checks whether all sports D1 tables exist. It never returns the provider API key.
-- GET /api/sports/football/next?limit=8 — retrieves upcoming football fixtures in the next eight days, scans available bookmaker boards, and attaches model predictions, best available price, expected value, decision and recommended stake when the model is qualified.
-- POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous eight days and stores unseen results for model training. Manual request body may include limit (1–30).
+- GET /api/sports/football/next?limit=8 — retrieves upcoming football fixtures in the next 47 hours, scans available bookmaker boards, and attaches model predictions, best available price, expected value, decision and recommended stake when the model is qualified.
+- POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous 47 hours and stores unseen results for model training. Manual request body may include limit (1–30).
 - POST /api/sports/bets — paper-token protected; accepts an event_id only for a persisted ETI model VALUE_CANDIDATE. It uses the stored best market, selection, bookmaker, odds, model probability and stake recommendation. Manual arbitrary probabilities and stakes are rejected; optional stake_cents cannot exceed the model recommendation.
 - GET /api/sports/bets — paper-token protected; returns the separate sports bankroll and paper ledger.
 - POST /api/sports/bets/{id}/settle — manual settlement remains available for supported paper entries. The history sync automatically settles model-backed Full Time Result paper bets from the provider 90-minute `fulltime` score. It does not substitute the `result` score (which may include extra time) or a half-time score; if a regulation-time score is absent, settlement is deferred. Other market bets are not auto-created by this model version.
 
 ## Autonomous schedule and quota protection
 
-The Worker scheduled handler invokes the sports scan and history sync. D1 job locks prevent duplicate execution when multiple cron schedules fire:
+The Worker scheduled handler invokes the sports scan and history sync. OddsPapi requires sport-wide fixture date ranges to be shorter than 48 hours, so both queries use a 47-hour window. History results are processed oldest-first within that window. D1 job locks prevent duplicate execution when multiple cron schedules fire:
 - ETI_SPORTS_SCAN_INTERVAL_MINUTES defaults to 360 (six hours), minimum 60.
 - ETI_SPORTS_HISTORY_SYNC_MINUTES defaults to 1440 (24 hours), minimum 360.
 - ETI_SPORTS_AUTO_SCAN_LIMIT defaults to 1 fixture per scheduled cycle; maximum 12.
