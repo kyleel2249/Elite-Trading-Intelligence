@@ -30,7 +30,7 @@ The Worker scheduled handler invokes the sports scan and history sync. OddsPapi 
 - ETI_SPORTS_AUTO_SCAN_LIMIT defaults to 1 fixture per scheduled cycle; maximum 12.
 - ETI_SPORTS_HISTORY_BATCH_SIZE defaults to 5 unseen finished fixtures per scheduled cycle; maximum 30.
 - Manual dashboard scans can request up to 12 fixtures and manual history sync can import up to 30.
-- Provider calls are sequential and respect the OddsPapi fixture/odds/scores endpoint cooldowns. Adjust intervals only after checking your account request allowance.
+- Provider calls are sequential, respect the documented fixtures/odds/scores cooldowns, and retry transient `429 RATE_LIMITED` responses using the provider's `retryMs`. Quota-exhaustion errors are not retried. Adjust intervals only after checking your account request allowance.
 
 The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0006.
 
