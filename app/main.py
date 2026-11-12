@@ -453,7 +453,6 @@ async def market_snapshot(
 @app.get("/api/market/order-book")
 async def market_order_book(
     symbol: str = "BTCUSDT",
-    depth: int = Query(20, ge=1, le=1000),
     depth: int = Query(20, ge=1, le=100),
     settings: Settings = Depends(get_settings),
 ):
@@ -468,7 +467,6 @@ async def market_order_book(
 async def market_history(
     provider: str = "binance",
     symbol: str = "BTCUSDT",
-    interval: str = "1h",
     interval: str = Query("1h", pattern=r"^[0-9]{1,2}[smhdwM]$"),
     limit: int = Query(100, ge=1, le=1000),
     settings: Settings = Depends(get_settings),
@@ -720,8 +718,6 @@ async def paper_portfolio(environment: str = "paper", db: Session = Depends(get_
 
 
 @app.get("/api/paper-trading/journal", dependencies=[Depends(require_api_key)])
-async def paper_journal(limit: int = Query(50, ge=1, le=200), symbol: Optional[str] = None, event: Optional[str] = None,
-@app.get("/api/paper-trading/journal")
 async def paper_journal(limit: int = Query(50, ge=1, le=500), symbol: Optional[str] = None, event: Optional[str] = None,
                         environment: Optional[str] = None, provider: Optional[str] = None,
                         side: Optional[str] = None, db: Session = Depends(get_db)):
@@ -735,7 +731,6 @@ async def paper_journal(limit: int = Query(50, ge=1, le=500), symbol: Optional[s
 
 
 @app.get("/api/paper-trading/history", dependencies=[Depends(require_api_key)])
-@app.get("/api/paper-trading/history")
 async def paper_history(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
     from app.models import OrderRecord
     rows = db.query(OrderRecord).order_by(OrderRecord.created_at.desc()).limit(min(limit, 200)).all()
