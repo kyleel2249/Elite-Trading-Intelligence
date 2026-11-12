@@ -95,7 +95,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
        saved++;
      }
      if(automatic)await finishJob(db(env)!,"football-history-sync","OK","Saved "+saved+" results; skipped "+skipped);return reply({ok:true,provider:"OddsPapi",fixtures_found:finished.length,results_saved:saved,skipped,history_total:await db(env)!.prepare("SELECT COUNT(*) AS n FROM sports_match_results").first()});
-   }catch(e){if(u.searchParams.get("automatic")==="1"&&db(env)){try{await finishJob(db(env)!,"football-history-sync","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}return reply({error:"football_history_sync_failed",message:e instanceof Error?e.message:"History provider unavailable"},502);}
+   }catch(e){if(automatic&&db(env)){try{await finishJob(db(env)!,"football-history-sync","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}return reply({error:"football_history_sync_failed",message:e instanceof Error?e.message:"History provider unavailable"},502);}
  }
  if(p==="/api/sports/events"&&req.method==="GET"){
    if(!env.ODDS_API_KEY)return reply({error:"odds_provider_not_configured",message:"Set the ODDS_API_KEY Worker secret to retrieve live bookmaker odds. No fixtures or odds are fabricated."},503);
@@ -114,15 +114,19 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
  if(p==="/api/sports/bets"&&req.method==="POST"){
    if(!authorized(req,env))return reply({error:"unauthorized"},401);if(!db(env))return reply({error:"database_not_configured"},503);
    const b=await jsonBody(req);if(!b)return reply({error:"invalid_json"},400);
-   const sport=String(b.sport||"").slice(0,40),event=String(b.event_name||"").trim().slice(0,180),market=String(b.market||"").trim().slice(0,80),selection=String(b.selection||"").trim().slice(0,100),odds=Number(b.odds),prob=Number(b.model_probability),stake=Math.round(Number(b.stake)*100),eventId=String(b.event_id||"").slice(0,100),bookmaker=String(b.bookmaker||"").slice(0,100),oddsProvider=String(b.odds_provider||"manual").slice(0,40),modelVersion=String(b.model_version||"manual-unverified").slice(0,80);
-   if(!sport||!event||!market||!selection||!Number.isFinite(odds)||odds<1.01||odds>1000||!Number.isFinite(prob)||prob<=0||prob>=1||!Number.isSafeInteger(stake)||stake<1||stake>100000000)return reply({error:"invalid_bet",message:"Provide an event, market, selection, decimal odds, model probability between 0 and 1, and stake of at least $0.01."},400);
-   const ev=prob*odds-1;if(ev<=0)return reply({error:"negative_expected_value",expected_value:ev,message:"Paper bet rejected: model probability does not show positive expected value. Do not force a bet."},422);
-   await init(db(env)!);const account=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<{balance_cents:number}>();if(!account||stake>account.balance_cents)return reply({error:"insufficient_bankroll",balance_cents:account?.balance_cents??0},409);
-   const id=crypto.randomUUID();const now=Date.now();const r=await db(env)!.batch([
-    db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents-?,updated_at=? WHERE id=1 AND balance_cents>=?").bind(stake,now,stake),
-    db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,event_id,bookmaker,odds_provider,implied_probability,expected_value,model_version) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0,?,?,?,?,?,? WHERE changes()=1").bind(id,now,sport,event,market,selection,odds,prob,stake,eventId||null,bookmaker||null,oddsProvider,1/odds,ev,modelVersion)
+   const eventId=String(b.event_id||"").trim().slice(0,100);if(!eventId)return reply({error:"model_event_required",message:"Select a fixture with an ETI model recommendation. Manual probabilities and arbitrary stakes are not accepted."},400);
+   const pred=await db(env)!.prepare("SELECT kickoff_at,competition,home_team,away_team,best_selection,best_odds,best_probability,best_bookmaker,expected_value,recommended_stake_cents,decision,model_version FROM sports_model_predictions WHERE fixture_id=? ORDER BY created_at DESC LIMIT 1").bind(eventId).first<any>();
+   if(!pred||pred.decision!=="VALUE_CANDIDATE"||Number(pred.recommended_stake_cents)<=0||!pred.best_selection||!pred.best_bookmaker)return reply({error:"no_validated_value_candidate",message:"ETI has not produced a calibrated, positive-value recommendation for this fixture. No bet was recorded."},422);
+   if(Number(pred.kickoff_at)<=Date.now())return reply({error:"event_not_upcoming",message:"Paper entries are only accepted before kickoff."},422);
+   const sport="Football",event=String(pred.home_team+" vs "+pred.away_team).slice(0,180),market="Full Time Result",selection=String(pred.best_selection).slice(0,100),odds=Number(pred.best_odds),prob=Number(pred.best_probability),stake=Number(pred.recommended_stake_cents),requested=Number(b.stake_cents||stake);
+   if(!Number.isFinite(odds)||odds<=1||!Number.isFinite(prob)||prob<=0||prob>=1||!Number.isSafeInteger(stake)||stake<1||!Number.isSafeInteger(requested)||requested<1||requested>stake)return reply({error:"invalid_model_recommendation",message:"Stake must not exceed ETI's model-calculated recommendation."},422);
+   const ev=Number(pred.expected_value);if(!Number.isFinite(ev)||ev<0.03)return reply({error:"value_gate_failed"},422);
+   await init(db(env)!);const account=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<{balance_cents:number}>();if(!account||requested>account.balance_cents)return reply({error:"insufficient_bankroll",balance_cents:account?.balance_cents??0},409);
+   const id=crypto.randomUUID(),now=Date.now();const r=await db(env)!.batch([
+    db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents-?,updated_at=? WHERE id=1 AND balance_cents>=?").bind(requested,now,requested),
+    db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,event_id,bookmaker,odds_provider,implied_probability,expected_value,model_version) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0,?,?,?,?,?,? WHERE changes()=1").bind(id,now,sport,event,market,selection,odds,prob,requested,eventId,pred.best_bookmaker,"OddsPapi",1/odds,ev,pred.model_version)
    ]);if(!r[1]?.meta?.changes)return reply({error:"stake_reservation_failed"},409);
-   return reply({ok:true,id,expected_value:ev,stake_cents:stake,message:"Paper bet recorded. No bookmaker was contacted."},201);
+   return reply({ok:true,id,event_id:eventId,selection,bookmaker:pred.best_bookmaker,decimal_odds:odds,model_probability:prob,expected_value:ev,stake_cents:requested,message:"ETI model recommendation recorded in the isolated paper ledger."},201);
  }
  const settle=p.match(/^\/api\/sports\/bets\/([0-9a-f-]+)\/settle$/i);
  if(settle&&req.method==="POST"){
