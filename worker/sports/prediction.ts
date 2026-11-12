@@ -38,8 +38,8 @@ export function estimateFootballMatch(history: MatchResult[], homeTeam: string, 
   // National-team competitions have sparse league-only history. For Nations League
   // fixtures, use verified international competition results as the fallback pool;
   // never blend club fixtures into country-v-country estimates.
-  if(competition&&/nations\\s+league/i.test(competition)&&relevant.length<20){
-    const international=/nations\\s+league|world\\s+cup|euro|european championship|international|qualif|copa america|africa cup|asian cup/i;
+  if(competition&&/nations\s+league/i.test(competition)&&relevant.length<20){
+    const international=/nations\s+league|world\s+cup|euro|european championship|international|qualif|copa america|africa cup|asian cup/i;
     relevant=history.filter(m=>Number.isFinite(m.homeGoals)&&Number.isFinite(m.awayGoals)&&m.homeGoals>=0&&m.awayGoals>=0&&m.homeTeam&&m.awayTeam&&international.test(String(m.competition||""))).sort((a,b)=>b.playedAt-a.playedAt);
   }
   const home=clean(homeTeam), away=clean(awayTeam);

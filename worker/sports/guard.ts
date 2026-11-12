@@ -6,9 +6,10 @@
  *     A missing token is delegated unchanged, so the route keeps answering with its existing 401/503 bodies.
  *  2. The public football scan (GET /api/sports/football/next, non-automatic) calls the paid OddsPapi API
  *     and writes to D1. Identical requests are coalesced and cached per isolate for a short time so
- *     anonymous callers cannot burn the provider quota. Only 200 responses are cached; the cache is
- *     cleared after any successful history sync, paper bet or settlement so the dashboard never shows
- *     data older than its own last action.
+ *     anonymous callers cannot burn the provider quota. The cache key is the effective scan limit AND the
+ *     competition filter, so switching between UEFA Nations League and all football never serves the wrong
+ *     feed. Only 200 responses are cached; the cache is cleared after any successful history sync, paper bet
+ *     or settlement so the dashboard never shows data older than its own last action.
  */
 interface GuardEnv { ETI_SPORTS_PAPER_TOKEN?: string }
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
@@ -32,6 +33,14 @@ export function constantTimeEqual(a: string, b: string): boolean {
   const n = Math.max(x.length, y.length);
   for (let i = 0; i < n; i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
   return diff === 0;
+}
+
+/** Cache key for a public scan: mirrors the route's own defaults so two different feeds can never share an entry. */
+export function scanCacheKey(params: URLSearchParams): string {
+  const competition = (params.get("competition") || "all").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 64) || "all";
+  const fallback = competition === "uefa_nations_league" ? 12 : 8;
+  const limit = Math.max(1, Math.min(12, Number(params.get("limit") || fallback) || fallback));
+  return limit + ":" + competition;
 }
 
 function toEntry(res: Response, body: string): Entry {
@@ -75,8 +84,7 @@ export function withSportsGuard<E extends GuardEnv>(next: App<E>): App<E> {
       }
 
       if (isScan && req.method === "GET" && !automatic) {
-        const limit = Math.max(1, Math.min(12, Number(u.searchParams.get("limit") || 8) || 8));
-        const key = String(limit);
+        const key = scanCacheKey(u.searchParams);
         const hit = cache.get(key);
         if (hit && Date.now() - hit.at < SCAN_CACHE_TTL_MS) return fromEntry(hit, "hit");
         let pending = inflight.get(key);

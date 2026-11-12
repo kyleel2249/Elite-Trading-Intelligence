@@ -21,7 +21,6 @@
     "APP_ENV": "production",
     "DATABASE_URL": "sqlite:///./eti.db",
     "ETI_EDGE": "native",
-    "MARKET_PROVIDER_ORDER": "bybit,binance,okx"
     "ETI_KILL_SWITCH": "false",
     "PAPER_AUTOPILOT": "true",
     "MARKET_PROVIDER_ORDER": "binance,bybit,okx,bitget",
