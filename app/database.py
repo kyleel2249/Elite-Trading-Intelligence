@@ -30,6 +30,5 @@ def init_db() -> None:
     from app.prediction_ledger import models as _ledger_models  # noqa: F401  (append-only prediction ledger + triggers)
     from app.strategies import store as _strategy_store  # noqa: F401  (strategy_validation_runs)
     from app.execution import models as _execution_models  # noqa: F401  (execution engine tables)
-    from app.paper import models as _paper_models  # noqa: F401  (internal paper engine tables)
-    from app.security import auth_models as _auth_models  # noqa: F401  (execution sessions + auth audit)
+    from app.paper import sql_store as _paper_tables  # noqa: F401  (internal paper exchange tables: paper_accounts, paper_audit_log)
     Base.metadata.create_all(bind=engine)

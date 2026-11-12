@@ -1,1 +1,1 @@
-"""Internal paper-trading engine: simulated accounts, fills, fees and P&L with no exchange credentials."""
+"""ETI internal paper exchange: key-free, persistent, realistic simulated trading. Never touches real money."""
