@@ -581,3 +581,22 @@ def test_six_ghana_kenya_calendars_are_partial_and_year_limited():
     for sid in ("six", "gse", "nse_ke"):                                                    # 2027 is not covered: say so
         assert session_status(sid, at(2027, 6, 8, 10)).holiday_calendar == "not_applied", sid
     assert classify("SIX:NESN").session_id == "six" and classify("MIL:ENI").session_id == "eu_cet"
+
+
+def test_metals_classification_routing_and_profiles():
+    from app.markets.oanda_map import resolve_oanda_name
+    from app.markets.profiles import PROFILES
+    from app.markets.registry import classify, execution_proxy
+
+    for sym, base, quote in [("XAUUSD", "XAU", "USD"), ("XAGUSD", "XAG", "USD"), ("XPTUSD", "XPT", "USD"), ("XPDUSD", "XPD", "USD"),
+                             ("XCUUSD", "XCU", "USD"), ("XAUUSDT", "XAU", "USDT"), ("COPPERUSDT", "XCU", "USDT")]:
+        i = classify(sym)
+        assert (i.asset_class.value, i.base, i.quote, i.session_id) == ("metal", base, quote, "metals_otc"), sym
+        assert i.profile_key in PROFILES
+        assert resolve_oanda_name(sym) == f"{base}_USD"
+    assert classify("XCUUSD").profile_key == "metal.copper" and execution_proxy(classify("XCUUSD")) == ("CPER", "futures_based")
+    assert execution_proxy(classify("XAUUSDT")) == ("GLD", "close")
+    for t in ("PAXGUSDT", "XAUTUSDT"):
+        i = classify(t)
+        assert i.asset_class.value == "crypto" and i.tier == "gold_token" and i.profile_key in PROFILES and "gold_backed" in i.tags
+    assert classify("XAUSUSDT").asset_class.value != "metal"

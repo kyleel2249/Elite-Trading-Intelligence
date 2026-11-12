@@ -35,7 +35,9 @@ def oanda_instrument(inst: Instrument, available: Optional[set[str]] = None) -> 
     name: Optional[str] = None
     ac = inst.asset_class
     if ac in (AssetClass.FOREX, AssetClass.METAL) and inst.base and inst.quote:
-        name = f"{inst.base}_{inst.quote}"
+        # A stablecoin-quoted exchange contract (XAUUSDT) is the same metal as OANDA's USD spot instrument.
+        quote = "USD" if "stablecoin_quoted" in inst.tags else inst.quote
+        name = f"{inst.base}_{quote}"
     elif ac == AssetClass.INDEX:
         name = OANDA_INDICES.get(inst.symbol)
     elif ac == AssetClass.COMMODITY:

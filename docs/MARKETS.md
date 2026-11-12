@@ -155,3 +155,18 @@ Verdicts: `ready`, `caution`, `wait_for_session`, `analysis_only`, `blocked`. No
 Verdicts: `ready`, `caution`, `wait_for_session`, `needs_setup`, `analysis_only`, `blocked`. Nothing here submits an order.
 `POST /api/risk-gateway/preflight` additionally returns `market_context` and `warnings`.
 >>>>>>> 053ecb9 (Add live calibration, Alpaca bars/options quote, and Cloudflare Worker market intelligence)
+
+
+## Metals on the live chart and in ETI
+
+* **Chart:** the Worker dashboard's top dropdown has a **Metals (gold, silver, copper)** option. It lists, from Binance's live exchange info, every
+  TRADING gold/silver/platinum/palladium/copper perpetual (e.g. `XAUUSDT`) plus the gold-backed spot tokens `PAXGUSDT` and `XAUTUSDT`, each labelled
+  spot or perpetual. The list is whatever Binance currently lists; nothing is invented. Perpetuals are chart-only (orders stay spot); a one-line
+  ETI market review (session state, profile, verdict) appears under the toolbar.
+* **Classifier (Python and Worker, kept in parity by golden vectors):** `XAUUSD/XAGUSD/XPTUSD/XPDUSD/XCUUSD`, stablecoin-quoted contracts such as
+  `XAUUSDT` and `COPPERUSDT` are `metal` (previously `XAUUSDT` was misread as an emerging crypto token). `PAXG`/`XAUT` are `crypto` tier `gold_token`
+  with their own profile (`crypto.gold_token`, 24/7, premium/discount and issuer risk). Copper is `metal.copper` (industrial metal, quoted per pound).
+* **Routing:** stablecoin-quoted metal contracts route to OANDA's USD instrument (`XAU_USD`) and to the ETF proxy (GLD/SLV/PPLT/PALL; copper CPER,
+  flagged `futures_based`). Profile numbers are planning defaults, not measurements.
+* **Not verified live:** the sandbox cannot reach Binance, so the dropdown was checked in a real browser with a mocked symbol list. Which metal
+  contracts exist depends on Binance at the time.

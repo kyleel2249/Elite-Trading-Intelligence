@@ -328,6 +328,7 @@ function cryptoInstrument(base: string, quote: string, confidence: string, raw: 
   let stripped = base, tier: string, name = "";
   if (base.startsWith("1000") && base.length > 4) { tags.push("x1000_denominated"); stripped = base.slice(4); }
   if (STABLECOINS.has(base)) { tier = "stablecoin"; name = base; tags.push("stablecoin"); }
+  else if (base in REG.gold_tokens) { tier = "gold_token"; name = REG.gold_tokens[base]; tags.push("gold_backed", "commodity_linked"); }
   else if (stripped in REG.crypto_major) { tier = "major"; name = REG.crypto_major[stripped]; }
   else if (stripped in REG.crypto_meme) { tier = "meme"; name = REG.crypto_meme[stripped]; tags.push("meme", "micro_cap"); }
   else if (stripped in REG.crypto_defi) { tier = "defi"; name = REG.crypto_defi[stripped]; tags.push("defi"); }
@@ -336,10 +337,35 @@ function cryptoInstrument(base: string, quote: string, confidence: string, raw: 
     if (stripped === "DOGE") tags.push("meme");
     if (stripped === "BNB") tags.push("exchange_token");
   } else { tier = "emerging"; name = base; tags.push("unclassified_token"); if (confidence !== "catalog") confidence = "heuristic"; }
-  const notes = tier === "emerging" ? ["Token is not in ETI's catalog: treated as emerging/high risk. Pass listing_age_days to flag new listings."] : [];
-  const step = tier === "major" ? 1e-6 : tier === "large" || tier === "stablecoin" ? 1e-4 : tags.includes("x1000_denominated") ? 1.0 : 1e-2;
+  const notes = tier === "gold_token" ? [`${name} is a token redeemable for physical gold (1 token = 1 troy oz). It trades 24/7, so it can move while OTC spot gold is closed, and can trade at a premium or discount to spot; issuer and custody risk apply.`]
+    : tier === "emerging" ? ["Token is not in ETI's catalog: treated as emerging/high risk. Pass listing_age_days to flag new listings."] : [];
+  const step = tier === "major" ? 1e-6 : tier === "large" || tier === "stablecoin" || tier === "gold_token" ? 1e-4 : tags.includes("x1000_denominated") ? 1.0 : 1e-2;
   return inst({ symbol: raw, asset_class: "crypto", tier, profile_key: `crypto.${tier}`, region: "global", session_id: "crypto_24x7", name, base, quote,
                 tags, classification_confidence: confidence, qty_step: step, min_qty: step, notes });
+}
+function metalLookup(s: string): Instrument | null {
+  let code = "", quote = "", contract = false;
+  if (s.length === 6 && s.slice(0, 3) in REG.metals && FX_ALL_CCY.has(s.slice(3))) { code = s.slice(0, 3); quote = s.slice(3); }
+  else {
+    contract = true;
+    for (const q of [...STABLE_QUOTES].sort((a, b) => b.length - a.length || (a < b ? -1 : 1))) {
+      if (s.endsWith(q) && s.length > q.length) {
+        const raw = s.slice(0, -q.length), c = REG.metal_code_aliases[raw] ?? raw;
+        if (c in REG.metals) { code = c; quote = q; break; }
+      }
+    }
+    if (!code) return null;
+  }
+  const [name, tier, pkey] = REG.metals[code], unit = REG.metal_units[code] ?? "troy ounce", proxy = REG.metal_proxies[code];
+  let notes = [`Spot ${name.toLowerCase()} quoted per ${unit}.`];
+  if (contract) notes = [`${name} contract quoted in ${quote} per ${unit} (e.g. an exchange perpetual): it follows the metal through the exchange, can quote while OTC spot is closed, and is chart/analysis-only in ETI (orders go to OANDA or an ETF proxy).`];
+  if (proxy) {
+    const q = REG.metal_proxy_quality[code] ?? "close";
+    notes.push(`ETF proxy ${proxy} (${q === "close" ? "tracks spot closely but carries fund fees" : "futures-based: roll yield diverges from spot"}; hours follow US equities).`);
+  }
+  const tags = [REG.industrial_metals.includes(code) ? "industrial_metal" : "precious_metal", ...(contract ? ["stablecoin_quoted"] : [])];
+  return inst({ symbol: s, asset_class: "metal", tier, profile_key: pkey, region: "global", session_id: "metals_otc", name: `${name} (${code}/${quote})`,
+                base: code, quote, tags, classification_confidence: "pattern", qty_step: 0.01, min_qty: 0.01, notes });
 }
 export function classify(symbol: string, providerHint?: string | null): Instrument {
   let s = normalizeSymbol(symbol);
@@ -356,13 +382,7 @@ export function classify(symbol: string, providerHint?: string | null): Instrume
   let r: Instrument | null;
   if ((r = optionLookup(s))) return r;
   if ((r = futureLookup(s))) return r;
-  if (s.length === 6 && s.slice(0, 3) in REG.metals && FX_ALL_CCY.has(s.slice(3))) {
-    const [name, tier, pkey] = REG.metals[s.slice(0, 3)], proxy = REG.metal_proxies[s.slice(0, 3)];
-    const notes = [`Spot ${name.toLowerCase()} quoted per troy ounce.`];
-    if (proxy) notes.push(`ETF proxy ${proxy} (tracks spot closely but carries fund fees; hours follow US equities).`);
-    return inst({ symbol: s, asset_class: "metal", tier, profile_key: pkey, region: "global", session_id: "metals_otc", name: `${name} (${s.slice(0, 3)}/${s.slice(3)})`,
-                  base: s.slice(0, 3), quote: s.slice(3), tags: ["precious_metal"], classification_confidence: "pattern", qty_step: 0.01, min_qty: 0.01, notes });
-  }
+  if ((r = metalLookup(s))) return r;
   if (s.length === 6 && FX_ALL_CCY.has(s.slice(0, 3)) && FX_ALL_CCY.has(s.slice(3)) && s.slice(0, 3) !== s.slice(3)) return fxInstrument(s.slice(0, 3), s.slice(3));
   if ((r = indexLookup(s, aliasesOk))) return r;
   if ((r = commodityLookup(s, aliasesOk))) return r;
@@ -423,7 +443,7 @@ export const NOT_INTEGRATED: Record<string, string> = {
 const CFD_NOTE = "OANDA CFD: tracks the underlying with financing costs and OANDA's own hours/spreads; it is not the cash index or the exchange future, and CFDs are not offered in every jurisdiction (e.g. US accounts).";
 export function oandaInstrument(i: Instrument): string | null {
   const ac = i.asset_class;
-  if ((ac === "forex" || ac === "metal") && i.base && i.quote) return `${i.base}_${i.quote}`;
+  if ((ac === "forex" || ac === "metal") && i.base && i.quote) return `${i.base}_${i.tags.includes("stablecoin_quoted") ? "USD" : i.quote}`;
   if (ac === "index") return G.oanda.indices[i.symbol] ?? null;
   if (ac === "commodity") return G.oanda.commodities[i.symbol] ?? null;
   return null;
@@ -448,7 +468,7 @@ export function setupStatus(provider: string, s: MarketsSettings = {}): Json {
 }
 function executionProxy(i: Instrument): [string, string] | null {
   const root = i.underlying || i.symbol;
-  if (i.asset_class === "metal" && i.base in REG.metal_proxies && i.quote === "USD") return [REG.metal_proxies[i.base], "close"];
+  if (i.asset_class === "metal" && i.base in REG.metal_proxies && (i.quote === "USD" || i.tags.includes("stablecoin_quoted"))) return [REG.metal_proxies[i.base], REG.metal_proxy_quality[i.base] ?? "close"];
   for (const r of REG.index_rows) if (r[6] && r[0] === root) return [r[6], r[7] || "approximate"];
   for (const r of REG.commodity_rows) if (r[6] && r[0] === root) return [r[6], "futures_based"];
   return null;

@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import golden from "./markets.golden.json" with { type: "json" };
-import { classify, sessionStatus, assess, marketRiskReview, listInstruments, routesFor, calendarInfo, calendarKeys, normalizeSymbol } from "./markets.ts";
+import { classify, sessionStatus, assess, marketRiskReview, listInstruments, routesFor, calendarInfo, calendarKeys, normalizeSymbol, oandaInstrument } from "./markets.ts";
 
 const G: any = golden;
 const SETTINGS: Record<string, any> = {
@@ -72,4 +72,18 @@ test("catalog, calendars and routing expose what the Python layer does", () => {
   assert.equal(normalizeSymbol(" eur/usd "), "EURUSD");
   assert.deepEqual(routesFor(classify("ESZ6")), []);                                              // futures: analysis only
   assert.equal(routesFor(classify("SPX"), { oanda_api_token: "x", oanda_account_id: "y" })[0].kind, "cfd");
+});
+
+test("metals: gold, silver, platinum, palladium, copper, stablecoin-quoted contracts and gold tokens classify and route consistently", () => {
+  for (const [sym, base, quote] of [["XAUUSD", "XAU", "USD"], ["XAGUSD", "XAG", "USD"], ["XPTUSD", "XPT", "USD"], ["XPDUSD", "XPD", "USD"], ["XCUUSD", "XCU", "USD"], ["XAUUSDT", "XAU", "USDT"], ["COPPERUSDT", "XCU", "USDT"]] as const) {
+    const i = classify(sym);
+    assert.equal(i.asset_class, "metal", sym); assert.equal(i.base, base, sym); assert.equal(i.quote, quote, sym); assert.equal(i.session_id, "metals_otc", sym);
+  }
+  assert.equal(classify("XCUUSD").profile_key, "metal.copper");
+  assert.ok(classify("XAUUSDT").tags.includes("stablecoin_quoted"));
+  assert.equal(oandaInstrument(classify("XAUUSDT")), "XAU_USD");
+  for (const t of ["PAXGUSDT", "XAUTUSDT"]) { const i = classify(t); assert.equal(i.asset_class, "crypto"); assert.equal(i.tier, "gold_token"); assert.equal(i.profile_key, "crypto.gold_token"); assert.ok(i.tags.includes("gold_backed")); }
+  assert.notEqual(classify("XAUSUSDT").asset_class, "metal"); // not a metal code
+  const a = assess("XCUUSD", { now: Date.UTC(2026, 10, 12, 15), price: 4.5 });
+  assert.equal(a.profile.key, "metal.copper"); assert.equal(a.session.state, "open");
 });

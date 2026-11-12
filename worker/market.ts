@@ -77,6 +77,7 @@ function okxSymbol(symbol: string): string {
 }
 
 const REQUEST_TIMEOUT_MS = 6000;
+import { classify } from "./markets.ts";
 const UA = "ETI-MarketProxy/1.0 (Cloudflare Worker; read-only market data)";
 
 // ---------------------------------------------------------------- helpers
@@ -452,6 +453,13 @@ const SYMBOL_SOURCES: Record<MarketKind, { hosts: string[]; path: string }> = {
 };
 const CATEGORY: Record<string, string> = { COIN: "crypto", EQUITY: "stocks", STOCK: "stocks", COMMODITY: "commodities", INDEX: "indices", ETF: "etf", FX: "fx", CURRENCY: "fx" };
 const categoryOf = (x: any) => { const u = String(x?.underlyingType || "COIN").toUpperCase(); return CATEGORY[u] ?? u.toLowerCase().replace(/[^a-z0-9]+/g, "_"); };
+/** Gold, silver, platinum, palladium, copper and gold-backed tokens get their own "metals" category (overrides Binance's COMMODITY/COIN underlyingType), decided by the ETI classifier so chart, dropdown and risk review agree. */
+const METAL_BASES = new Set(["XAU", "XAG", "XPT", "XPD", "XCU", "COPPER", "GOLD", "SILVER", "PLATINUM", "PALLADIUM", "PAXG", "XAUT"]);
+export function isMetalPair(base: string, quote: string): boolean {
+  if (!METAL_BASES.has(base)) return false;
+  const i = classify(base + quote);
+  return i.asset_class === "metal" || i.tier === "gold_token";
+}
 type SymbolAttempt = { host: string; status: number | null; errorClass: string | null };
 /** Every pair Binance currently lists as TRADING for one market: spot pairs, or USDⓈ-M perpetual contracts. Hosts are tried in order; a stale list is served if all fail; nothing is invented. */
 export async function listBinanceSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
@@ -465,7 +473,7 @@ export async function listBinanceSymbols(market: MarketKind = "spot", fetchImpl:
       const j: any = await res.json(), list = Array.isArray(j?.symbols) ? j.symbols : null;
       if (!list) { attempts.push({ host, status: res.status, errorClass: "invalid_payload" }); continue; }
       const rows: SymbolRow[] = list.filter((x: any) => x && x.status === "TRADING" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol)) && (market === "futures" ? /PERPETUAL/.test(String(x.contractType || "")) : x.isSpotTradingAllowed !== false))
-        .map((x: any) => ({ s: String(x.symbol), b: String(x.baseAsset), q: String(x.quoteAsset), m: market, c: market === "futures" ? categoryOf(x) : "crypto" }))
+        .map((x: any) => ({ s: String(x.symbol), b: String(x.baseAsset), q: String(x.quoteAsset), m: market, c: isMetalPair(String(x.baseAsset), String(x.quoteAsset)) ? "metals" : market === "futures" ? categoryOf(x) : "crypto" }))
         .sort((a: SymbolRow, b: SymbolRow) => a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
       if (rows.length === 0) { attempts.push({ host, status: res.status, errorClass: "empty_symbols" }); continue; }
       symbolCache[market] = { at: now(), rows, host }; return { rows, host, cached: false, stale: false, fetchedAt: now(), attempts };

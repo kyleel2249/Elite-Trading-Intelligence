@@ -51,7 +51,18 @@ test("futures list: perpetuals only, categorised (stocks, commodities), dated an
   _resetSymbolCache(); const urls: string[] = [];
   const r = await listBinanceSymbols("futures", (async (u: string) => { urls.push(u); return info(FUT); }) as any);
   assert.ok(urls[0].startsWith("https://fapi.binance.com/fapi/v1/exchangeInfo"));
-  assert.deepEqual(r.rows.map(x => [x.s, x.m, x.c]), [["BTCUSDT", "futures", "crypto"], ["TSLAUSDT", "futures", "stocks"], ["XAUUSDT", "futures", "commodities"]]);
+  assert.deepEqual(r.rows.map(x => [x.s, x.m, x.c]), [["BTCUSDT", "futures", "crypto"], ["TSLAUSDT", "futures", "stocks"], ["XAUUSDT", "futures", "metals"]]);
+});
+test("metals: gold, silver, copper perpetuals and gold-backed spot tokens are categorised 'metals'; lookalikes are not", async () => {
+  _resetSymbolCache();
+  const perp = (b: string, u = "COMMODITY") => ({ symbol: b + "USDT", status: "TRADING", contractType: "TRADIFI_PERPETUAL", baseAsset: b, quoteAsset: "USDT", underlyingType: u });
+  const fut = await listBinanceSymbols("futures", (async () => info([perp("XAU"), perp("XAG"), perp("XPT"), perp("XPD"), perp("COPPER"), perp("CL"), perp("XAUT", "COIN")])) as any);
+  assert.deepEqual(fut.rows.map(x => [x.b, x.c]), [["CL", "commodities"], ["COPPER", "metals"], ["XAG", "metals"], ["XAUT", "metals"], ["XAU", "metals"], ["XPD", "metals"], ["XPT", "metals"]]);
+  _resetSymbolCache();
+  const spot = (b: string) => ({ symbol: b + "USDT", status: "TRADING", isSpotTradingAllowed: true, baseAsset: b, quoteAsset: "USDT" });
+  const sp = await listBinanceSymbols("spot", (async () => info([spot("PAXG"), spot("XAUT"), spot("BTC"), spot("XAUS")])) as any);
+  assert.deepEqual(sp.rows.map(x => [x.b, x.c]), [["BTC", "crypto"], ["PAXG", "metals"], ["XAUS", "crypto"], ["XAUT", "metals"]]);
+  _resetSymbolCache();
 });
 test("cache is per market and refreshes after 10 minutes", async () => {
   _resetSymbolCache(); let calls = 0, t = 0; const f: any = async (u: string) => { calls++; return info(u.includes("fapi") ? FUT : SYMS); };

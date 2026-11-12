@@ -73,6 +73,9 @@ PROFILES: dict[str, MarketProfile] = {p.key: p for p in (
        ("Reacts to real yields, USD strength, geopolitical risk and central-bank buying.", "Most liquid in the London/New York overlap.")),
     _p("metal.silver", "Silver (XAG)", "high", 8.0, 0.0, 2.5, 1.9, 0.8, 0.75, 0.8, "lower than gold", "weekend",
        ("Roughly 1.5-2x gold's volatility; industrial demand adds growth sensitivity.",)),
+    _p("metal.copper", "Copper (XCU)", "medium", 12.0, 0.0, 4.0, 1.6, 0.8, 0.6, 0.7, "lower than gold", "event",
+       ("Industrial metal: tracks global growth, China demand and tariff news; inventories and supply disruptions move it.",
+        "Spot copper is OTC at few brokers; futures-based ETFs (e.g. CPER) lag spot through roll yield.")),
     _p("metal.other", "Platinum / palladium", "low", 25.0, 0.0, 8.0, 2.2, 0.8, 0.5, 0.6, "lower than gold", "event",
        ("Thin markets; supply shocks and auto-sector demand drive sharp moves.",)),
     # ---- Crypto
@@ -86,6 +89,9 @@ PROFILES: dict[str, MarketProfile] = {p.key: p for p in (
        _CRYPTO_VOL + ("Unvetted token: rug-pull, delisting and manipulation risk is materially higher.",), _CRYPTO_COST),
     _p("crypto.new_listing", "Newly listed token", "very_low", 60.0, 10.0, 60.0, 14.0, 1.0, 0.2, 0.25, "spot only in ETI", "event",
        _CRYPTO_VOL + ("First days after listing: price discovery, extreme volatility, spreads that can be 1%+.",), _CRYPTO_COST),
+    _p("crypto.gold_token", "Tokenised gold (PAXG, XAUT)", "medium", 12.0, 10.0, 1.5, 1.3, 1.0, 0.7, 0.8, "spot only in ETI", "event",
+       ("Tracks spot gold (1 token = 1 troy oz) but can trade at a premium/discount, especially when OTC gold is closed.",
+        "Issuer, custody and redemption-minimum risk apply on top of gold's own risk."), _CRYPTO_COST),
     _p("crypto.stablecoin", "Stablecoin pair", "high", 0.5, 10.0, 0.5, 0.1, 1.0, 1.0, 1.0, "spot only in ETI", "event",
        ("Depeg risk is the real risk; day-to-day volatility is tiny.",), _CRYPTO_COST),
     # ---- Stocks

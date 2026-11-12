@@ -73,7 +73,7 @@ ${PORTFOLIO_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
-<div class="toolbar"><select id="symMarket" aria-label="Market type" title="Spot pairs, or USDT/USDC-margined perpetual futures (includes stock, commodity and index perpetuals where Binance lists them)"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
+<div class="toolbar"><select id="symMarket" aria-label="Market type" title="Spot pairs, USDT/USDC-margined perpetual futures, or Metals: gold, silver, platinum, palladium, copper and gold-backed tokens from both Binance markets"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option><option value="metals">Metals (gold, silver, copper)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symEti" class="muted" aria-live="polite" style="font-size:12px;display:none"></span><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="refresh" class="active">Refresh market</button><span class="muted" id="stamp">Waiting for market data…</span></div>
 <div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
@@ -364,7 +364,8 @@ function renderTrades(){$('trades').innerHTML='<table><tr><th>Time</th><th>Side<
 let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='';
 function setConn(t,c){$('connection').textContent=t;$('connection').style.color=c;}
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
-function mkt(){const e=$('symMarket');return e&&e.value==='futures'?'&market=futures':'';}
+function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
+function mkt(){return symMkt()==='futures'?'&market=futures':'';}
 async function getJson(url){const r=await fetch(url,{cache:'no-store'}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
 function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
 async function load(){
@@ -451,7 +452,7 @@ function selectedOrder(){
  return order;
 }
 function orderValidation(o,requireCredentials=true){
- if($('symMarket').value==='futures')return 'Futures pairs are chart-only here. Switch Market to Spot to place an order.';
+ if(symMkt()==='futures')return 'Futures pairs are chart-only here. Switch Market to Spot to place an order.';
  if(!/^[A-Z0-9._-]{2,24}$/.test(o.symbol))return 'Enter a valid symbol.';
  if(!Number.isFinite(o.quantity)||o.quantity<=0)return 'Enter a quantity greater than zero.';
  if(o.type==='limit'&&(!Number.isFinite(o.limitPrice)||o.limitPrice<=0))return 'Enter a valid limit price.';
@@ -690,8 +691,23 @@ setInterval(loadSignal,60000);
 ${PORTFOLIO_JS}
 pfInit();
 const SYM={all:[],market:'spot',quote:'',cat:'',q:'',at:0,warn:''};
-function symRows(){return SYM.all.filter(r=>r[3]===SYM.market);}
+function symRows(){if(SYM.market!=='metals')return SYM.all.filter(r=>r[3]===SYM.market);const seen={};return SYM.all.filter(r=>r[4]==='metals').sort((a,b)=>(a[3]===b[3]?0:a[3]==='spot'?-1:1)).filter(r=>seen[r[0]]?false:(seen[r[0]]=1));}
 function symFill(sel,first,values,label){sel.textContent='';const a=document.createElement('option');a.value='';a.textContent=first;sel.appendChild(a);values.forEach(v=>{const o=document.createElement('option');o.value=v[0];o.textContent=label(v);sel.appendChild(o);});}
+const METAL_NAMES={XAU:'Gold',XAG:'Silver',XPT:'Platinum',XPD:'Palladium',XCU:'Copper',COPPER:'Copper',GOLD:'Gold',SILVER:'Silver',PLATINUM:'Platinum',PALLADIUM:'Palladium',PAXG:'Gold token PAXG',XAUT:'Gold token XAUT'};
+function symMetalLabel(r){return (METAL_NAMES[r[1]]||r[1])+' · '+r[1]+'/'+r[2]+' · '+(r[3]==='futures'?'perpetual':'spot');}
+let etiNoteSeq=0;
+async function etiMarketNote(){
+ const el=$('symEti');if(!el)return;
+ if($('symMarket').value!=='metals'){el.style.display='none';el.textContent='';return;}
+ const sym=$('symbol').value,seq=++etiNoteSeq;
+ try{
+  const r=await fetch('/api/markets/assess?symbol='+encodeURIComponent(sym),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);
+  const a=await r.json();if(seq!==etiNoteSeq)return;
+  const ss=a.session||{},why=(a.reasons||[])[0]||(a.warnings||[])[0]||'';
+  el.textContent='ETI: '+((a.instrument&&a.instrument.name)||sym)+' · '+(a.profile&&a.profile.label?a.profile.label+' · ':'')+'session '+(ss.state||'unknown')+(ss.next_close_utc&&ss.is_open?' (closes '+ss.next_close_utc.slice(11,16)+' UTC)':ss.next_open_utc?' (opens '+ss.next_open_utc.slice(0,16).replace('T',' ')+' UTC)':'')+' · verdict '+String(a.verdict||'').replace(/_/g,' ')+(why?' — '+why:'');
+  el.style.display='';
+ }catch(e){if(seq===etiNoteSeq){el.textContent='ETI market review unavailable ('+(e&&e.message?e.message:'error')+')';el.style.display='';}}
+}
 function symFilters(){
  const rows=symRows(),cnt={},cats={};rows.forEach(r=>{cnt[r[2]]=(cnt[r[2]]||0)+1;cats[r[4]]=(cats[r[4]]||0)+1;});
  const qs=Object.keys(cnt).sort((a,b)=>(a==='USDT'?-1:b==='USDT'?1:cnt[b]-cnt[a]||(a<b?-1:1)));
@@ -700,16 +716,16 @@ function symFilters(){
  symFill($('symCat'),'All types',cs.map(c=>[c]),v=>v[0]+' ('+cats[v[0]]+')');$('symCat').value=cats[SYM.cat]?SYM.cat:'';SYM.cat=$('symCat').value;
  $('symCat').style.display=SYM.market==='futures'&&cs.length>1?'':'none';
 }
-function symRebuild(){
- const sel=$('symbol'),cur=sel.value,t=SYM.q.trim().toUpperCase(),all=symRows();
+function symRebuild(want){
+ const sel=$('symbol'),cur=want||sel.value,t=SYM.q.trim().toUpperCase(),all=symRows();
  const rows=all.filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));
  const frag=document.createDocumentFragment();let hasCur=false;
- rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=r[1]+'/'+r[2]+(r[4]&&r[4]!=='crypto'?' · '+r[4]:'');if(r[0]===cur)hasCur=true;frag.appendChild(o);});
+ rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=SYM.market==='metals'?symMetalLabel(r):r[1]+'/'+r[2]+(r[4]&&r[4]!=='crypto'?' · '+r[4]:'');if(r[0]===cur)hasCur=true;frag.appendChild(o);});
  sel.textContent='';
  if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
  sel.appendChild(frag);sel.value=cur;
  const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', refreshes every 10 min':'';
- $('symCount').textContent=rows.length+' of '+all.length+' Binance '+(SYM.market==='futures'?'perpetual futures':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'');
+ $('symCount').textContent=rows.length+' of '+all.length+' Binance '+(SYM.market==='futures'?'perpetual futures':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'');
  const dl=$('symbolList');if(dl&&dl.dataset.n!==String(SYM.at)){dl.textContent='';SYM.all.filter(r=>r[3]==='spot').forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});dl.dataset.n=String(SYM.at);}
 }
 async function loadSymbols(){
@@ -723,10 +739,12 @@ async function loadSymbols(){
 }
 function symMarketChanged(){
  SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';symFilters();
- const rows=symRows(),cur=$('symbol').value;
- if(rows.length&&!rows.some(r=>r[0]===cur)){const d=rows.find(r=>r[0]==='BTCUSDT')||rows[0];$('symbol').value=d[0];}
- symRebuild();$('orderSymbol').value=$('symbol').value;resetAndLoad();syncOrderMarket();
- if(SYM.market==='futures')$('orderOutput').textContent='Futures are chart-only here. Orders are placed on spot pairs.';
+ const rows=symRows(),cur=$('symbol').value;let want='';
+ if(rows.length&&!rows.some(r=>r[0]===cur)){const d=SYM.market==='metals'?(rows.find(r=>r[1]==='XAU')||rows.find(r=>r[1]==='PAXG')||rows[0]):(rows.find(r=>r[0]==='BTCUSDT')||rows[0]);$('symbol').value=d[0];want=d[0];}
+ symRebuild(want);$('orderSymbol').value=$('symbol').value;resetAndLoad();syncOrderMarket();
+ if(symMkt()==='futures')$('orderOutput').textContent='Futures are chart-only here. Orders are placed on spot pairs.';
+ if(SYM.market==='metals'&&!rows.length)$('symCount').textContent='No metals pairs in the Binance list yet (list unavailable or none listed). Try again shortly.';
+ etiMarketNote();
 }
 $('symMarket').addEventListener('change',symMarketChanged);
 $('symSearch').addEventListener('input',()=>{SYM.q=$('symSearch').value;symRebuild();});
@@ -734,7 +752,7 @@ $('symSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const t=
 $('symQuote').addEventListener('change',()=>{SYM.quote=$('symQuote').value;symRebuild();});
 $('symCat').addEventListener('change',()=>{SYM.cat=$('symCat').value;symRebuild();});
 loadSymbols();setInterval(loadSymbols,600000);
-$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
+$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();etiMarketNote();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
 </script></body></html>`;
 const page = withMotion(html);
 

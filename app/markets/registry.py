@@ -32,9 +32,16 @@ METALS = {
     "XAG": ("Silver", "silver", "metal.silver"),
     "XPT": ("Platinum", "other", "metal.other"),
     "XPD": ("Palladium", "other", "metal.other"),
+    "XCU": ("Copper", "industrial", "metal.copper"),
 }
+METAL_UNITS = {"XCU": "pound"}                               # everything else is quoted per troy ounce
+METAL_CODE_ALIASES = {"COPPER": "XCU"}                       # exchange tickers that differ from the ISO-style code
+METAL_PROXY_QUALITY = {"XCU": "futures_based"}               # default is "close" (spot-tracking physical-backed fund)
+INDUSTRIAL_METALS = {"XCU"}
+# Tokenised gold: spot tokens redeemable for physical gold (1 token = 1 troy oz). Trade 24/7 on crypto venues.
+GOLD_TOKENS = {"PAXG": "PAX Gold", "XAUT": "Tether Gold"}
 # Execution / data proxies reachable through Alpaca (US-listed ETFs). Tracking differs from spot.
-METAL_PROXIES = {"XAU": "GLD", "XAG": "SLV", "XPT": "PPLT", "XPD": "PALL"}
+METAL_PROXIES = {"XAU": "GLD", "XAG": "SLV", "XPT": "PPLT", "XPD": "PALL", "XCU": "CPER"}
 
 # --------------------------------------------------------------------------- crypto
 CRYPTO_QUOTES = ("USDT", "USDC", "FDUSD", "BUSD", "TUSD", "USD", "EUR", "BTC", "ETH", "BNB")
@@ -150,7 +157,7 @@ _OPT_RE = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
 # --------------------------------------------------------------------------- helpers
 _NAME_ALIASES = {
     "BITCOIN": "BTCUSDT", "ETHEREUM": "ETHUSDT", "SOLANA": "SOLUSDT", "RIPPLE": "XRPUSDT", "DOGECOIN": "DOGEUSDT",
-    "GOLD": "XAUUSD", "SILVER": "XAGUSD", "PLATINUM": "XPTUSD", "PALLADIUM": "XPDUSD",
+    "GOLD": "XAUUSD", "SILVER": "XAGUSD", "PLATINUM": "XPTUSD", "PALLADIUM": "XPDUSD", "COPPER": "XCUUSD",
 }
 _BARE_CRYPTO = {"BTC", "ETH", "SOL", "XRP", "BNB", "DOGE"}
 _CLEAN_RE = re.compile(r"[\s_\-]")
@@ -204,6 +211,9 @@ def _crypto_instrument(base: str, quote: str, confidence: str, raw_symbol: str) 
     elif stripped in CRYPTO_DEFI:
         tier, name = "defi", CRYPTO_DEFI[stripped]
         tags.append("defi")
+    elif base in GOLD_TOKENS:
+        tier, name = "gold_token", GOLD_TOKENS[base]
+        tags += ["gold_backed", "commodity_linked"]
     elif stripped in CRYPTO_LARGE:
         tier, name = "large", CRYPTO_LARGE[stripped]
         if stripped == "DOGE":
@@ -215,12 +225,45 @@ def _crypto_instrument(base: str, quote: str, confidence: str, raw_symbol: str) 
         tags.append("unclassified_token")
         confidence = "heuristic" if confidence != "catalog" else confidence
     notes: tuple[str, ...] = ()
+    if tier == "gold_token":
+        notes = (f"{name} is a token redeemable for physical gold (1 token = 1 troy oz). It trades 24/7, so it can move while OTC spot gold is closed, "
+                 "and can trade at a premium or discount to spot; issuer and custody risk apply.",)
     if tier == "emerging":
         notes = ("Token is not in ETI's catalog: treated as emerging/high risk. Pass listing_age_days to flag new listings.",)
-    step = 1e-6 if tier in ("major",) else 1e-4 if tier in ("large", "stablecoin") else 1.0 if "x1000_denominated" in tags else 1e-2
+    step = 1e-6 if tier in ("major",) else 1e-4 if tier in ("large", "stablecoin", "gold_token") else 1.0 if "x1000_denominated" in tags else 1e-2
     return Instrument(symbol=raw_symbol, asset_class=AssetClass.CRYPTO, tier=tier, profile_key=f"crypto.{tier}", region="global",
                       session_id="crypto_24x7", name=name, base=base, quote=quote, tags=tuple(tags), confidence=confidence,
                       qty_step=step, min_qty=step, notes=notes)
+
+
+def _metal_lookup(s: str) -> Optional[Instrument]:
+    if len(s) == 6 and s[:3] in METALS and s[3:] in FX_ALL_CCY:
+        code, quote, contract = s[:3], s[3:], False
+    else:
+        code = quote = ""
+        contract = True
+        for q in sorted(_STABLE_QUOTES, key=len, reverse=True):
+            if s.endswith(q) and len(s) > len(q):
+                c = METAL_CODE_ALIASES.get(s[: -len(q)], s[: -len(q)])
+                if c in METALS:
+                    code, quote = c, q
+                    break
+        if not code:
+            return None
+    name, tier, pkey = METALS[code]
+    unit = METAL_UNITS.get(code, "troy ounce")
+    proxy = METAL_PROXIES.get(code)
+    notes = [f"Spot {name.lower()} quoted per {unit}."]
+    if contract:
+        notes = [f"{name} contract quoted in {quote} per {unit} (e.g. an exchange perpetual): it follows the metal through the exchange, can quote while OTC spot is closed, "
+                 "and is chart/analysis-only in ETI (orders go to OANDA or an ETF proxy)."]
+    if proxy:
+        quality = METAL_PROXY_QUALITY.get(code, "close")
+        notes.append(f"ETF proxy {proxy} ({'tracks spot closely but carries fund fees' if quality == 'close' else 'futures-based: roll yield diverges from spot'}; hours follow US equities).")
+    tags = ["industrial_metal" if code in INDUSTRIAL_METALS else "precious_metal"] + (["stablecoin_quoted"] if contract else [])
+    return Instrument(symbol=s, asset_class=AssetClass.METAL, tier=tier, profile_key=pkey, region="global", session_id="metals_otc",
+                      name=f"{name} ({code}/{quote})", base=code, quote=quote, tags=tuple(tags), confidence="pattern",
+                      qty_step=0.01, min_qty=0.01, notes=tuple(notes))
 
 
 def _split_crypto(s: str) -> Optional[tuple[str, str]]:
@@ -332,16 +375,9 @@ def classify(symbol: str, *, provider_hint: Optional[str] = None) -> Instrument:
     if (inst := _future_lookup(s)):
         return inst
 
-    # Metals: XAUUSD, XAGUSD, XAUEUR ...
-    if len(s) == 6 and s[:3] in METALS and s[3:] in FX_ALL_CCY:
-        name, tier, pkey = METALS[s[:3]]
-        proxy = METAL_PROXIES.get(s[:3])
-        notes = [f"Spot {name.lower()} quoted per troy ounce."]
-        if proxy:
-            notes.append(f"ETF proxy {proxy} (tracks spot closely but carries fund fees; hours follow US equities).")
-        return Instrument(symbol=s, asset_class=AssetClass.METAL, tier=tier, profile_key=pkey, region="global",
-                          session_id="metals_otc", name=f"{name} ({s[:3]}/{s[3:]})", base=s[:3], quote=s[3:],
-                          tags=("precious_metal",), confidence="pattern", qty_step=0.01, min_qty=0.01, notes=tuple(notes))
+    # Metals: XAUUSD, XAGUSD, XAUEUR ... and stablecoin-quoted contracts (XAUUSDT, COPPERUSDT: e.g. Binance perpetuals).
+    if (metal := _metal_lookup(s)):
+        return metal
 
     # Forex: both halves must be ISO currencies we know.
     if len(s) == 6 and s[:3] in FX_ALL_CCY and s[3:] in FX_ALL_CCY and s[:3] != s[3:]:
@@ -412,8 +448,8 @@ def list_instruments(asset_class: Optional[str] = None, q: Optional[str] = None,
 def execution_proxy(inst: Instrument) -> Optional[tuple[str, str]]:
     """(ETF symbol, quality) for instruments that have a US-listed ETF stand-in, else None."""
     root = inst.underlying or inst.symbol
-    if inst.asset_class == AssetClass.METAL and inst.base in METAL_PROXIES and inst.quote == "USD":
-        return METAL_PROXIES[inst.base], "close"
+    if inst.asset_class == AssetClass.METAL and inst.base in METAL_PROXIES and (inst.quote == "USD" or "stablecoin_quoted" in inst.tags):
+        return METAL_PROXIES[inst.base], METAL_PROXY_QUALITY.get(inst.base, "close")
     for canon, _n, _r, _s, _p, _a, proxy, pq in _INDEX_ROWS:
         if proxy and canon == root:
             return proxy, pq or "approximate"
