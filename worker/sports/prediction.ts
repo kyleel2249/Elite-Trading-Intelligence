@@ -13,6 +13,7 @@ export interface PredictionRow {
   pDraw: number;
   pAway: number;
   outcome: Outcome;
+  settledAt?: number;
 }
 export interface FootballPrediction {
   modelVersion: string;
@@ -33,7 +34,7 @@ function poisson(lambda: number, max = 10): number[] {
   return p.map(x=>x/sum);
 }
 export function estimateFootballMatch(history: MatchResult[], homeTeam: string, awayTeam: string, competition?: string): FootballPrediction {
-  const relevant=history.filter(m=>Number.isFinite(m.homeGoals)&&Number.isFinite(m.awayGoals)&&m.homeGoals>=0&&m.awayGoals>=0&&m.homeTeam&&m.awayTeam&&(!competition||!m.competition||clean(m.competition)===clean(competition))).sort((a,b)=>b.playedAt-a.playedAt);
+  const relevant=history.filter(m=>Number.isFinite(m.homeGoals)&&Number.isFinite(m.awayGoals)&&m.homeGoals>=0&&m.awayGoals>=0&&m.homeTeam&&m.awayTeam&&(!competition||(!!m.competition&&clean(m.competition)===clean(competition)))).sort((a,b)=>b.playedAt-a.playedAt);
   const home=clean(homeTeam), away=clean(awayTeam);
   const homeMatches=relevant.filter(m=>clean(m.homeTeam)===home||clean(m.awayTeam)===home).slice(0,20);
   const awayMatches=relevant.filter(m=>clean(m.homeTeam)===away||clean(m.awayTeam)===away).slice(0,20);
@@ -72,17 +73,42 @@ export function estimateFootballMatch(history: MatchResult[], homeTeam: string, 
     calibration:{calibrated:false,sampleSize:0,brierScore:null,logLoss:null}
   };
 }
-export function fitTemperature(rows: PredictionRow[]): {temperature:number;sampleSize:number;brierScore:number|null;logLoss:number|null;calibrated:boolean} {
-  if(rows.length<100)return {temperature:1,sampleSize:rows.length,brierScore:null,logLoss:null,calibrated:false};
-  const valid=rows.filter(r=>[r.pHome,r.pDraw,r.pAway].every(x=>Number.isFinite(x)&&x>0)&&["H","D","A"].includes(r.outcome));
-  if(valid.length<100)return {temperature:1,sampleSize:valid.length,brierScore:null,logLoss:null,calibrated:false};
-  const scale=(r:PredictionRow,t:number)=>{const xs=[r.pHome,r.pDraw,r.pAway].map(x=>Math.pow(Math.max(1e-8,x),1/t));const s=xs[0]+xs[1]+xs[2];return xs.map(x=>x/s)};
+export interface TemperatureCalibration {
+  temperature:number;
+  sampleSize:number;
+  trainingSize:number;
+  validationSize:number;
+  brierScore:number|null;
+  logLoss:number|null;
+  baselineBrierScore:number|null;
+  baselineLogLoss:number|null;
+  calibrated:boolean;
+}
+export function fitTemperature(rows: PredictionRow[]): TemperatureCalibration {
+  const valid=rows.filter(r=>[r.pHome,r.pDraw,r.pAway].every(x=>Number.isFinite(x)&&x>0&&x<1)&&Math.abs(r.pHome+r.pDraw+r.pAway-1)<0.001&&["H","D","A"].includes(r.outcome));
+  if(valid.length<100)return {temperature:1,sampleSize:valid.length,trainingSize:0,validationSize:0,brierScore:null,logLoss:null,baselineBrierScore:null,baselineLogLoss:null,calibrated:false};
+  const ordered=valid.every(r=>Number.isFinite(r.settledAt))?[...valid].sort((a,b)=>(a.settledAt||0)-(b.settledAt||0)):valid;
+  const split=Math.floor(ordered.length*0.7);
+  const training=ordered.slice(0,split),validation=ordered.slice(split);
+  if(training.length<70||validation.length<30)return {temperature:1,sampleSize:valid.length,trainingSize:training.length,validationSize:validation.length,brierScore:null,logLoss:null,baselineBrierScore:null,baselineLogLoss:null,calibrated:false};
+  const scale=(r:PredictionRow,t:number)=>{const xs=[r.pHome,r.pDraw,r.pAway].map(x=>Math.pow(Math.max(1e-8,x),1/t));const s=xs[0]+xs[1]+xs[2];return xs.map(x=>x/s);};
+  const score=(set:PredictionRow[],temperature:number)=>{let brier=0,logLoss=0;for(const r of set){const p=scale(r,temperature),idx=r.outcome==="H"?0:r.outcome==="D"?1:2;logLoss-=Math.log(Math.max(1e-9,p[idx]));for(let i=0;i<3;i++)brier+=(p[i]-(i===idx?1:0))**2;}return {brier:brier/set.length,logLoss:logLoss/set.length};};
   let bestT=1,best=Infinity;
-  for(let t=0.65;t<=1.8001;t+=0.01){const loss=mean(valid.map(r=>{const p=scale(r,t);const idx=r.outcome==="H"?0:r.outcome==="D"?1:2;return -Math.log(Math.max(1e-9,p[idx]));}));if(loss<best){best=loss;bestT=t;}}
-  let brier=0;
-  for(const r of valid){const p=scale(r,bestT);const y=[r.outcome==="H"?1:0,r.outcome==="D"?1:0,r.outcome==="A"?1:0];brier+=p.reduce((s,v,i)=>s+(v-y[i])**2,0);}
-  brier/=valid.length;
-  return {temperature:Number(bestT.toFixed(2)),sampleSize:valid.length,brierScore:Number(brier.toFixed(5)),logLoss:Number(best.toFixed(5)),calibrated:true};
+  for(let step=65;step<=180;step++){const t=step/100;const loss=score(training,t).logLoss;if(loss<best){best=loss;bestT=t;}}
+  const baseline=score(validation,1),calibratedScore=score(validation,bestT);
+  const brier=Number(calibratedScore.brier.toFixed(5)),logLoss=Number(calibratedScore.logLoss.toFixed(5));
+  const baselineBrier=Number(baseline.brier.toFixed(5)),baselineLogLoss=Number(baseline.logLoss.toFixed(5));
+  // Calibration is accepted only on a chronological holdout, and only if it is
+  // not worse than the raw model and beats conservative multiclass quality gates.
+  const quality=brier<=0.62&&logLoss<=1.08&&brier<=baselineBrier+0.005&&logLoss<=baselineLogLoss+0.005;
+  return {temperature:Number(bestT.toFixed(2)),sampleSize:valid.length,trainingSize:training.length,validationSize:validation.length,brierScore:brier,logLoss,baselineBrierScore:baselineBrier,baselineLogLoss,calibrated:quality};
+}
+export function extractFootballFullTimeScore(payload:any):{homeGoals:number;awayGoals:number}|null {
+  const periods=payload?.scores?.periods;
+  const fulltime=periods?.fulltime;
+  const homeGoals=Number(fulltime?.participant1Score),awayGoals=Number(fulltime?.participant2Score);
+  if(!Number.isInteger(homeGoals)||!Number.isInteger(awayGoals)||homeGoals<0||awayGoals<0)return null;
+  return {homeGoals,awayGoals};
 }
 export function applyTemperature(probabilities:{home:number;draw:number;away:number},temperature:number) {
   const t=Math.max(0.5,Math.min(2,temperature||1));

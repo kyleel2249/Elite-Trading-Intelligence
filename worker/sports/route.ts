@@ -1,4 +1,4 @@
-import { estimateFootballMatch, fitTemperature, applyTemperature, fractionalKellyStake, type MatchResult } from "./prediction.ts";
+import { estimateFootballMatch, fitTemperature, applyTemperature, fractionalKellyStake, extractFootballFullTimeScore, type MatchResult } from "./prediction.ts";
 export interface SportsEnv {
   ETI_PORTFOLIO_DB?: D1Database;
   ETI_SPORTS_PAPER_TOKEN?: string;
@@ -10,6 +10,22 @@ const headers={"content-type":"application/json; charset=utf-8","cache-control":
 const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers});
 const SPORTS:Record<string,string>={soccer_epl:"Premier League",soccer_uefa_champs_league:"UEFA Champions League",soccer_spain_la_liga:"La Liga",soccer_italy_serie_a:"Serie A",soccer_germany_bundesliga:"Bundesliga",soccer_france_ligue_one:"Ligue 1",basketball_nba:"NBA",basketball_wnba:"WNBA",americanfootball_nfl:"NFL",baseball_mlb:"MLB",icehockey_nhl:"NHL",tennis_atp_french_open:"ATP French Open",tennis_wta_french_open:"WTA French Open",cricket_test_match:"Test Cricket",rugby_union:"Rugby Union"};
 const jsonBody=async(req:Request)=>{try{return await req.json() as Record<string,unknown>}catch{return null}};
+const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+async function oddsPapiGet(apiKey:string,path:string,params:Record<string,string>):Promise<any>{
+ const url="https://api.oddspapi.io/v4/"+path+"?"+new URLSearchParams({...params,apiKey}).toString();
+ for(let attempt=0;attempt<3;attempt++){
+  const response=await fetch(url,{headers:{accept:"application/json"}});
+  if(response.status===429){
+   const payload=await response.json().catch(()=>({})) as any;
+   const error=payload?.error||payload;
+   if(error?.code==="RATE_LIMITED"&&attempt<2){const retryMs=Math.max(500,Math.min(15000,Number(error.retryMs)||1000));await pause(retryMs+100);continue;}
+   throw new Error("OddsPapi "+path+" "+(error?.code||"HTTP 429")+": "+(error?.message||"rate or request quota limit"));
+  }
+  if(!response.ok){const payload=await response.json().catch(()=>({})) as any;throw new Error("OddsPapi "+path+" HTTP "+response.status+": "+(payload?.error?.message||payload?.message||"provider request failed"));}
+  return await response.json();
+ }
+ throw new Error("OddsPapi "+path+" rate limit retry exhausted");
+}
 function authorized(req:Request,env:SportsEnv){const expected=env.ETI_SPORTS_PAPER_TOKEN;return !!expected&&req.headers.get("x-eti-sports-token")===expected;}
 function db(env:SportsEnv){return env.ETI_PORTFOLIO_DB;}
 async function init(d:D1Database){await d.prepare("INSERT OR IGNORE INTO sports_bankroll (id,balance_cents,created_at,updated_at) VALUES (1,100,strftime('%s','now')*1000,strftime('%s','now')*1000)").run();}
@@ -22,11 +38,11 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
  if(!p.startsWith("/api/sports"))return base.fetch(req,env);
  if(p==="/api/sports/health"&&req.method==="GET"){
    const providers:any={oddspapi:{configured:!!env.ODDSPAPI_API_KEY,reachable:false},the_odds_api:{configured:!!env.ODDS_API_KEY,reachable:false}};
-   if(env.ODDSPAPI_API_KEY){try{const q=new URLSearchParams({apiKey:env.ODDSPAPI_API_KEY});const r=await fetch("https://api.oddspapi.io/v4/account?"+q.toString(),{headers:{accept:"application/json"}});if(r.ok){const a=await r.json() as any;const active=(a.subscriptions||[]).filter((s:any)=>s.is_active);providers.oddspapi={configured:true,reachable:true,active_subscription_count:active.length,request_limit:active.reduce((n:number,s:any)=>n+Number(s.request_limit||0),0),request_count:active.reduce((n:number,s:any)=>n+Number(s.request_count||0),0),sports:active.flatMap((s:any)=>s.sport_ids||[])};}else providers.oddspapi={configured:true,reachable:false,http_status:r.status};}catch{providers.oddspapi={configured:true,reachable:false,error:"connection_failed"};}}
+   if(env.ODDSPAPI_API_KEY){try{const q=new URLSearchParams({apiKey:env.ODDSPAPI_API_KEY});const r=await fetch("https://api.oddspapi.io/v4/account?"+q.toString(),{headers:{accept:"application/json"}});if(r.ok){const a=await r.json() as any;const active=(a.subscriptions||[]).filter((s:any)=>s.is_active);const subscribedBookmakers=[...new Set(active.flatMap((s:any)=>Object.keys(s.bookmakers||{})))].sort();providers.oddspapi={configured:true,reachable:true,active_subscription_count:active.length,request_limit:active.reduce((n:number,s:any)=>n+Number(s.request_limit||0),0),request_count:active.reduce((n:number,s:any)=>n+Number(s.request_count||0),0),sports:[...new Set(active.flatMap((s:any)=>s.sport_ids||[]).map(Number))],bookmaker_count:subscribedBookmakers.length,bookmakers:subscribedBookmakers};}else providers.oddspapi={configured:true,reachable:false,http_status:r.status};}catch{providers.oddspapi={configured:true,reachable:false,error:"connection_failed"};}}
    if(env.ODDS_API_KEY){try{const q=new URLSearchParams({apiKey:env.ODDS_API_KEY});const r=await fetch("https://api.the-odds-api.com/v4/sports/?"+q.toString(),{headers:{accept:"application/json"}});providers.the_odds_api={configured:true,reachable:r.ok,http_status:r.status,requests_remaining:r.headers.get("x-requests-remaining")};}catch{providers.the_odds_api={configured:true,reachable:false,error:"connection_failed"};}}
-   let database:any={configured:!!db(env),ready:false,missing_tables:[]};
-   if(db(env)){try{const r=await db(env)!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sports_bankroll','sports_bets','sports_event_scans','sports_match_results','sports_model_predictions','sports_job_state')").all<any>();const found=new Set((r.results||[]).map((x:any)=>x.name));const required=["sports_bankroll","sports_bets","sports_event_scans","sports_match_results","sports_model_predictions","sports_job_state"];database.missing_tables=required.filter(x=>!found.has(x));database.ready=database.missing_tables.length===0;}catch{database.error="database_query_failed";}}
-   return reply({ok:true,providers,database,checked_at:new Date().toISOString()});
+   let database:any={configured:!!db(env),ready:false,missing_tables:[],missing_indexes:[]};
+   if(db(env)){try{const r=await db(env)!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sports_bankroll','sports_bets','sports_event_scans','sports_match_results','sports_model_predictions','sports_job_state')").all<any>();const found=new Set((r.results||[]).map((x:any)=>x.name));const required=["sports_bankroll","sports_bets","sports_event_scans","sports_match_results","sports_model_predictions","sports_job_state"];database.missing_tables=required.filter(x=>!found.has(x));const ix=await db(env)!.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='sports_bets_one_open_model_bet_per_fixture'").all<any>();const indexes=new Set((ix.results||[]).map((x:any)=>x.name));database.missing_indexes=["sports_bets_one_open_model_bet_per_fixture"].filter(x=>!indexes.has(x));database.ready=database.missing_tables.length===0&&database.missing_indexes.length===0;}catch{database.error="database_query_failed";}}
+   return reply({ok:true,providers,database,sports_paper_token_configured:!!env.ETI_SPORTS_PAPER_TOKEN,checked_at:new Date().toISOString()});
  }
  if(p==="/api/sports/status"&&req.method==="GET")return reply({ok:true,module:"sports_betting_intelligence",mode:"paper_only",real_money_execution:false,odds_providers:{the_odds_api:env.ODDS_API_KEY?"configured":"not_configured",oddspapi:env.ODDSPAPI_API_KEY?"configured":"not_configured"},global_football_scan:!!env.ODDSPAPI_API_KEY,database:db(env)?"d1_configured":"not_configured",sports:Object.entries(SPORTS).map(([key,name])=>({key,name}))});
  if(p==="/api/sports/football/next"&&req.method==="GET"){
@@ -35,9 +51,10 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    if(automatic&&(!authorized(req,env)||!db(env)))return reply({error:"unauthorized"},401);
    if(automatic){try{const minutes=Math.max(60,Math.min(10080,Number((env as any).ETI_SPORTS_SCAN_INTERVAL_MINUTES||360)));if(!await claimJob(db(env)!,"football-global-scan",Date.now(),minutes*60000))return reply({ok:true,skipped:true,reason:"scan_interval_not_elapsed"});}catch{return reply({error:"sports_job_state_not_ready",message:"Apply migration 0005 before enabling scheduled sports scans."},503);}}
    const limit=Math.max(1,Math.min(12,Number(u.searchParams.get("limit")||8)));
-   const from=new Date(),to=new Date(from.getTime()+8*24*60*60*1000);
+   // OddsPapi requires a sport-wide fixtures date range shorter than 48 hours.
+   const from=new Date(),to=new Date(from.getTime()+47*60*60*1000);
    const baseUrl="https://api.oddspapi.io/v4/";
-   const call=async(path:string,params:Record<string,string>)=>{const q=new URLSearchParams({...params,apiKey:env.ODDSPAPI_API_KEY!});const r=await fetch(baseUrl+path+"?"+q.toString(),{headers:{accept:"application/json"}});if(!r.ok)throw new Error("OddsPapi "+path+" HTTP "+r.status);return await r.json() as any;};
+   const call=(path:string,params:Record<string,string>)=>oddsPapiGet(env.ODDSPAPI_API_KEY!,path,params);
    try{
      const raw=await call("fixtures",{sportId:"10",from:from.toISOString(),to:to.toISOString(),statusId:"0",hasOdds:"true",language:"en"});
      const candidates=(Array.isArray(raw)?raw:[]).filter((x:any)=>x?.fixtureId&&x.hasOdds&&Number.isFinite(Date.parse(x.startTime))&&Date.parse(x.startTime)>Date.now()).sort((a:any,b:any)=>Date.parse(a.startTime)-Date.parse(b.startTime));
@@ -55,11 +72,11 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      if(db(env)){
        const h=await db(env)!.prepare("SELECT fixture_id,played_at,competition,home_team,away_team,home_goals,away_goals FROM sports_match_results ORDER BY played_at DESC LIMIT 600").all<any>();
        history=(h.results||[]).map((x:any)=>({fixtureId:x.fixture_id,playedAt:Number(x.played_at),competition:x.competition||undefined,homeTeam:x.home_team,awayTeam:x.away_team,homeGoals:Number(x.home_goals),awayGoals:Number(x.away_goals)}));
-       const p=await db(env)!.prepare("SELECT p_home,p_draw,p_away,actual_outcome FROM sports_model_predictions WHERE actual_outcome IS NOT NULL ORDER BY settled_at DESC LIMIT 600").all<any>();
-       calibration=fitTemperature((p.results||[]).map((x:any)=>({pHome:Number(x.p_home),pDraw:Number(x.p_draw),pAway:Number(x.p_away),outcome:x.actual_outcome})));
+       const p=await db(env)!.prepare("SELECT p_home,p_draw,p_away,actual_outcome,settled_at FROM sports_model_predictions WHERE actual_outcome IS NOT NULL ORDER BY settled_at DESC LIMIT 600").all<any>();
+       calibration=fitTemperature((p.results||[]).map((x:any)=>({pHome:Number(x.p_home),pDraw:Number(x.p_draw),pAway:Number(x.p_away),outcome:x.actual_outcome,settledAt:Number(x.settled_at)})));
        try{await init(db(env)!);const a=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<any>();bankrollCents=Number(a?.balance_cents||0);}catch{bankrollCents=0;}
      }
-     const calibrated=calibration.calibrated&&Number(calibration.brierScore)<=0.62&&Number(calibration.logLoss)<=1.15;
+     const calibrated=calibration.calibrated&&Number(calibration.brierScore)<=0.62&&Number(calibration.logLoss)<=1.08;
      for(const e of events){
        const pred=estimateFootballMatch(history,e.home_team,e.away_team,e.league);
        const probs=calibration.calibrated?applyTemperature(pred.probabilities,calibration.temperature):{home:pred.probabilities.home,draw:pred.probabilities.draw,away:pred.probabilities.away};
@@ -86,20 +103,20 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    const body=await jsonBody(req);const automatic=body?.automatic===true;
    if(automatic){try{const minutes=Math.max(360,Math.min(10080,Number((env as any).ETI_SPORTS_HISTORY_SYNC_MINUTES||1440)));if(!await claimJob(db(env)!,"football-history-sync",Date.now(),minutes*60000))return reply({ok:true,skipped:true,reason:"history_sync_interval_not_elapsed"});}catch{return reply({error:"sports_job_state_not_ready",message:"Apply migration 0005 before enabling scheduled history sync."},503);}}
    const limit=Math.max(1,Math.min(30,Number(body?.limit||10)));
-   const now=Date.now(),from=new Date(now-8*24*60*60*1000),to=new Date(now);
+   // Keep the sport-wide fixtures date range below OddsPapi's 48-hour limit.
+   const now=Date.now(),from=new Date(now-47*60*60*1000),to=new Date(now);
    const baseUrl="https://api.oddspapi.io/v4/";
-   const call=async(path:string,params:Record<string,string>)=>{const q=new URLSearchParams({...params,apiKey:env.ODDSPAPI_API_KEY!});const r=await fetch(baseUrl+path+"?"+q.toString(),{headers:{accept:"application/json"}});if(!r.ok)throw new Error("OddsPapi "+path+" HTTP "+r.status);return await r.json() as any;};
+   const call=(path:string,params:Record<string,string>)=>oddsPapiGet(env.ODDSPAPI_API_KEY!,path,params);
    try{
      const fixtures=await call("fixtures",{sportId:"10",from:from.toISOString(),to:to.toISOString(),statusId:"2",language:"en"});
-     const existing=await db(env)!.prepare("SELECT fixture_id FROM sports_match_results").all<any>();const seen=new Set((existing.results||[]).map((x:any)=>String(x.fixture_id)));const finished=(Array.isArray(fixtures)?fixtures:[]).filter((x:any)=>x?.fixtureId&&!seen.has(String(x.fixtureId))&&x.participant1Name&&x.participant2Name&&Date.parse(x.startTime)<=now).sort((a:any,b:any)=>Date.parse(b.startTime)-Date.parse(a.startTime)).slice(0,limit);
+     const existing=await db(env)!.prepare("SELECT fixture_id FROM sports_match_results").all<any>();const seen=new Set((existing.results||[]).map((x:any)=>String(x.fixture_id)));const finished=(Array.isArray(fixtures)?fixtures:[]).filter((x:any)=>x?.fixtureId&&!seen.has(String(x.fixtureId))&&x.participant1Name&&x.participant2Name&&Date.parse(x.startTime)<=now).sort((a:any,b:any)=>Date.parse(a.startTime)-Date.parse(b.startTime)).slice(0,limit);
      let saved=0,skipped=0;
      for(let i=0;i<finished.length;i++){
        if(i>0)await new Promise(resolve=>setTimeout(resolve,1050));
        const f=finished[i];const score=await call("scores",{fixtureId:String(f.fixtureId)});
-       const periods=score?.scores?.periods||score?.periods||score?.scores||{};
-       const result=periods.result||periods.fulltime||periods["0"];
-       const hg=Number(result?.participant1Score),ag=Number(result?.participant2Score);
-       if(!Number.isInteger(hg)||!Number.isInteger(ag)||hg<0||ag<0){skipped++;continue;}
+       const fullTime=extractFootballFullTimeScore(score);
+       if(!fullTime){skipped++;continue;}
+       const hg=fullTime.homeGoals,ag=fullTime.awayGoals;
        await db(env)!.prepare("INSERT INTO sports_match_results (fixture_id,played_at,competition,country,home_team,away_team,home_goals,away_goals,source,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fixture_id) DO UPDATE SET played_at=excluded.played_at,home_goals=excluded.home_goals,away_goals=excluded.away_goals,updated_at=excluded.updated_at").bind(f.fixtureId,Date.parse(f.startTime),f.tournamentName||null,f.categoryName||null,f.participant1Name,f.participant2Name,hg,ag,"OddsPapi",now).run();
        const outcome=hg>ag?"H":hg<ag?"A":"D";
        await db(env)!.prepare("UPDATE sports_model_predictions SET actual_outcome=?,settled_at=? WHERE fixture_id=? AND actual_outcome IS NULL").bind(outcome,now,f.fixtureId).run();
@@ -123,7 +140,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
  if(p==="/api/sports/events"&&req.method==="GET"){
    if(!env.ODDS_API_KEY)return reply({error:"odds_provider_not_configured",message:"Set the ODDS_API_KEY Worker secret to retrieve live bookmaker odds. No fixtures or odds are fabricated."},503);
    const sport=u.searchParams.get("sport")||"soccer_epl";if(!SPORTS[sport])return reply({error:"unsupported_sport"},400);
-   const regions=(u.searchParams.get("regions")||"us,us2,uk,eu,au,ca,fr,se,fi").split(",").filter(x=>["us","us2","uk","eu","au","ca","fr","se","fi"].includes(x)).join(",")||"us,uk,eu";
+   const regions=(u.searchParams.get("regions")||"us,us2,uk,eu,au").split(",").filter(x=>["us","us2","uk","eu","au"].includes(x)).join(",")||"us,uk,eu";
    const markets=(u.searchParams.get("markets")||"h2h").split(",").filter(x=>["h2h","spreads","totals"].includes(x)).join(",")||"h2h";
    const endpoint="https://api.the-odds-api.com/v4/sports/"+encodeURIComponent(sport)+"/odds?regions="+encodeURIComponent(regions)+"&markets="+encodeURIComponent(markets)+"&oddsFormat=decimal&dateFormat=iso&apiKey="+encodeURIComponent(env.ODDS_API_KEY);
    try{const upstream=await fetch(endpoint,{headers:{accept:"application/json"}});const quota={remaining:upstream.headers.get("x-requests-remaining"),used:upstream.headers.get("x-requests-used"),last:upstream.headers.get("x-requests-last")};if(!upstream.ok)return reply({error:"odds_provider_error",status:upstream.status,quota,message:"Odds provider did not return data."},502);const data=await upstream.json();return reply({sport,sport_name:SPORTS[sport],provider:"The Odds API",fetched_at:new Date().toISOString(),quota,events:data});}catch{return reply({error:"odds_provider_unavailable",message:"Could not reach the odds provider."},502);}
@@ -145,10 +162,12 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    if(!Number.isFinite(odds)||odds<=1||!Number.isFinite(prob)||prob<=0||prob>=1||!Number.isSafeInteger(stake)||stake<1||!Number.isSafeInteger(requested)||requested<1||requested>stake)return reply({error:"invalid_model_recommendation",message:"Stake must not exceed ETI's model-calculated recommendation."},422);
    const ev=Number(pred.expected_value);if(!Number.isFinite(ev)||ev<0.03)return reply({error:"value_gate_failed"},422);
    await init(db(env)!);const account=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<{balance_cents:number}>();if(!account||requested>account.balance_cents)return reply({error:"insufficient_bankroll",balance_cents:account?.balance_cents??0},409);
-   const id=crypto.randomUUID(),now=Date.now();const r=await db(env)!.batch([
+   const id=crypto.randomUUID(),now=Date.now();let r:any[];
+   try{r=await db(env)!.batch([
     db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents-?,updated_at=? WHERE id=1 AND balance_cents>=?").bind(requested,now,requested),
     db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,event_id,bookmaker,odds_provider,implied_probability,expected_value,model_version) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0,?,?,?,?,?,? WHERE changes()=1").bind(id,now,sport,event,market,selection,odds,prob,requested,eventId,pred.best_bookmaker,"OddsPapi",1/odds,ev,pred.model_version)
-   ]);if(!r[1]?.meta?.changes)return reply({error:"stake_reservation_failed"},409);
+   ]);}catch(error){const message=error instanceof Error?error.message:String(error);if(/UNIQUE constraint failed.*sports_bets/i.test(message))return reply({error:"duplicate_open_model_bet",message:"ETI already has an open model-backed paper bet for this fixture."},409);throw error;}
+   if(!r[1]?.meta?.changes)return reply({error:"stake_reservation_failed"},409);
    return reply({ok:true,id,event_id:eventId,selection,bookmaker:pred.best_bookmaker,decimal_odds:odds,model_probability:prob,expected_value:ev,stake_cents:requested,message:"ETI model recommendation recorded in the isolated paper ledger."},201);
  }
  const settle=p.match(/^\/api\/sports\/bets\/([0-9a-f-]+)\/settle$/i);
@@ -156,7 +175,8 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    if(!authorized(req,env))return reply({error:"unauthorized"},401);if(!db(env))return reply({error:"database_not_configured"},503);const b=await jsonBody(req);const result=String(b?.result||"");if(!["WON","LOST","VOID"].includes(result))return reply({error:"invalid_result"},400);
    const id=settle[1],bet=await db(env)!.prepare("SELECT stake_cents,odds,status FROM sports_bets WHERE id=?").bind(id).first<any>();if(!bet||bet.status!=="OPEN")return reply({error:"bet_not_open"},409);
    const stake=Number(bet.stake_cents),gross=result==="WON"?Math.round(stake*Number(bet.odds)):result==="VOID"?stake:0,profit=gross-stake,now=Date.now();
-   await db(env)!.batch([db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(result,profit,now,id),db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1 AND changes()=1").bind(gross,now)]);
+   const settled=await db(env)!.batch([db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(result,profit,now,id),db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1 AND changes()=1").bind(gross,now)]);
+   if(!settled[0]?.meta?.changes)return reply({error:"bet_already_settled"},409);
    return reply({ok:true,id,result,gross_return_cents:gross,profit_cents:profit});
  }
  return reply({error:"not_found"},404);
@@ -168,21 +188,24 @@ function sportsPage(){return `<!doctype html><html lang="en"><head><meta charset
 <div class="grid">
 <section class="card c12"><h2>Sports Intelligence Overview</h2><div class="kpis"><div class="kpi"><small>Mode</small><b>Paper only</b></div><div class="kpi"><small>Prediction status</small><b id="preds">Awaiting scan</b></div><div class="kpi"><small>Odds provider</small><b id="oddsState">Checking</b></div><div class="kpi"><small>Bankroll</small><b id="bankroll">—</b></div><div class="kpi"><small>Open bets</small><b id="openBets">—</b></div></div><div class="note">The Poisson team-strength model only enables 1X2 stakes after at least 100 resolved out-of-sample predictions and successful Brier/log-loss quality gates. Until then it reports insufficient history or zero stake.</div></section>
 <section class="card c7"><h2>Upcoming Football Fixtures &amp; Global Odds</h2><div class="scroll" id="events"><div class="empty">Select Scan to retrieve upcoming football fixtures and bookmaker odds.</div></div><div class="foot" id="quota"></div></section>
-<section class="card c5"><h2>ETI Model Paper Ticket</h2><div class="formgrid"><input id="eventId" type="hidden"><label>Event<input id="eventName" placeholder="Select an event from the scan" readonly></label><label>Market<input id="market" placeholder="Model-selected market" readonly></label><label>Selection<input id="selection" placeholder="Model-selected outcome" readonly></label><label>Bookmaker<input id="bookmaker" placeholder="Best available bookmaker" readonly></label><label>Decimal odds<input id="odds" type="number" readonly></label><label>Model probability<input id="prob" type="text" readonly placeholder="Calculated by ETI"></label><label>Recommended stake USD<input id="stake" type="text" readonly placeholder="Calculated by ETI"></label></div><div class="row" style="margin-top:10px"><button class="primary" id="place">Record ETI model recommendation</button><span id="betMsg" class="muted"></span></div><div class="note">Only a fresh, calibrated ETI value candidate can be recorded. The server independently checks the recommendation and stake cap.</div></section>
+<section class="card c5"><h2>ETI Model Paper Ticket</h2><div class="formgrid"><input id="eventId" type="hidden"><label>Event<input id="eventName" placeholder="Select an event from the scan" readonly></label><label>Market<input id="market" placeholder="Model-selected market" readonly></label><label>Selection<input id="selection" placeholder="Model-selected outcome" readonly></label><label>Bookmaker<input id="bookmaker" placeholder="Best available bookmaker" readonly></label><label>Decimal odds<input id="odds" type="number" readonly></label><label>Model probability<input id="prob" type="text" readonly placeholder="Calculated by ETI"></label><label>Recommended stake USD<input id="stake" type="text" readonly placeholder="Calculated by ETI"></label></div><div class="row" style="margin-top:10px"><button class="primary" id="place" disabled>Record ETI model recommendation</button><span id="betMsg" class="muted"></span></div><div class="note">Only a fresh, calibrated ETI value candidate can be recorded. The server independently checks the recommendation and stake cap.</div></section>
 <section class="card c12"><div class="row" style="justify-content:space-between"><h2>Paper Bets &amp; Settlement Journal</h2><div class="row"><input id="token" type="password" placeholder="ETI Sports Paper Token" autocomplete="off"><button id="load">Load ledger</button></div></div><div class="scroll" id="bets"><div class="empty">Enter the configured paper token to load your private simulated ledger.</div></div></section>
 <section class="card c12"><h2>Model &amp; Risk Controls</h2><div class="grid"><div class="card c5"><b>Probability integrity</b><p class="note">Rolling venue-specific team attack/defence form, competition goal baselines, Poisson scoreline probabilities and out-of-sample temperature calibration.</p></div><div class="card c5"><b>Value and capital gates</b><p class="note">Minimum 3% expected value; 25% Kelly fraction; maximum 1% of the separate sports paper bankroll per event. No stake when data or calibration is inadequate.</p></div><div class="card c12"><b>Execution boundary</b><p class="note">Paper-only ledger. No bookmaker was contacted to place a real-money wager. No bookmaker login, deposits, withdrawals or live wagers are implemented. Automatic result settlement applies to model-backed Full Time Result paper bets only.</p></div></div></section>
 </div></main><script>
 const $=id=>document.getElementById(id);
 async function api(path,opts={}){const h=Object.assign({"content-type":"application/json"},opts.headers||{});if($("token").value)h["x-eti-sports-token"]=$("token").value;const r=await fetch(path,{...opts,headers:h});const j=await r.json().catch(()=>({error:"invalid_response"}));if(!r.ok)throw new Error(j.message||j.error||("HTTP "+r.status));return j}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-async function status(){try{const s=await api("/api/sports/status");let h=null;try{h=await api("/api/sports/health")}catch{}const odd=h?.providers?.oddspapi;const dbReady=h?.database?.ready;$("oddsState").textContent=odd?.reachable?"Connected":odd?.configured?"Key configured / connection failed":s.odds_providers?.the_odds_api==="configured"?"Fallback configured":"Not configured";$("provider").textContent="OddsPapi: "+(odd?.reachable?"reachable":odd?.configured?"unreachable":"key missing")+" • D1: "+(dbReady?"migrations ready":h?.database?.configured?"migration missing":"not configured");}catch(e){$("provider").textContent=e.message}}
+async function status(){try{const s=await api("/api/sports/status");let h=null;try{h=await api("/api/sports/health")}catch{}const odd=h?.providers?.oddspapi;const dbReady=h?.database?.ready;const bookieNames=(odd?.bookmakers||[]).slice(0,12).join(", ");$("oddsState").textContent=odd?.reachable?"Connected":odd?.configured?"Key configured / connection failed":s.odds_providers?.the_odds_api==="configured"?"Fallback configured":"Not configured";$("provider").textContent="OddsPapi: "+(odd?.reachable?"reachable":odd?.configured?"unreachable":"key missing")+" • subscribed bookmakers: "+(odd?.bookmaker_count??"—")+(bookieNames?" ("+bookieNames+")":"")+" • D1: "+(dbReady?"migrations ready":h?.database?.configured?"migration missing":"not configured");}catch(e){$("provider").textContent=e.message}}
 function eventRow(x){
  const p=x.event.prediction?.probabilities,best=x.event.prediction?.best_value;
  const summary=p?(p.home*100).toFixed(1)+"% H / "+(p.draw*100).toFixed(1)+"% D / "+(p.away*100).toFixed(1)+"% A":"Insufficient history";
  const bestText=best?"Best: "+best.market+" / "+best.selection+" @ "+best.decimal_odds+" • "+best.bookmaker+" • EV "+(best.expected_value*100).toFixed(1)+"%":"No calibrated value candidate";
- const stake=(x.event.prediction?.recommended_stake_cents||0)/100;
+ const code=String(x.market.market_id)+":"+String(x.outcome.outcome_code);
+ const modelP=code==="101:101"?p?.home:code==="101:102"?p?.draw:code==="101:103"?p?.away:null;
+ const selectionLine=modelP===null?"No market-specific probability":"Selection P: "+(modelP*100).toFixed(2)+"% • EV: "+((modelP*Number(x.outcome.price)-1)*100).toFixed(2)+"%";
  const canBet=x.event.prediction?.decision==="VALUE_CANDIDATE"&&best?.market===x.market.key&&best?.bookmaker===x.book.key&&best?.selection===x.outcome.name;
- return '<tr><td>'+esc(x.event.home_team+" vs "+x.event.away_team)+'<br><small>'+esc(x.event.league||"")+' • '+esc(x.event.commence_time||"")+'</small></td><td>'+esc(x.book.title)+'</td><td>'+esc(x.market.key)+'</td><td>'+esc(x.outcome.name)+'</td><td>'+Number(x.outcome.price).toFixed(2)+'</td><td>'+summary+'<br><small>'+esc(x.event.prediction?.decision||"NO MODEL")+'</small><br><small>'+esc(bestText)+'</small></td><td>$'+stake.toFixed(2)+'</td><td><button data-use="1" data-event-id="'+esc(x.event.id)+'" data-bookmaker="'+esc(x.book.key)+'" data-name="'+esc(x.event.home_team+" vs "+x.event.away_team)+'" data-market="'+esc(x.market.key)+'" data-selection="'+esc(x.outcome.name)+'" data-odds-value="'+x.outcome.price+'">Use</button>'+(canBet?'<button data-auto-bet="'+esc(x.event.id)+'">Paper bet</button>':"")+'</td></tr>';
+ const stake=canBet?(x.event.prediction?.recommended_stake_cents||0)/100:0;
+ return '<tr><td>'+esc(x.event.home_team+" vs "+x.event.away_team)+'<br><small>'+esc(x.event.league||"")+' • '+esc(x.event.commence_time||"")+'</small></td><td>'+esc(x.book.title)+'</td><td>'+esc(x.market.key)+'</td><td>'+esc(x.outcome.name)+'</td><td>'+Number(x.outcome.price).toFixed(2)+'</td><td>'+summary+'<br><small>'+esc(selectionLine)+'</small><br><small>'+esc(x.event.prediction?.decision||"NO MODEL")+'</small><br><small>'+esc(bestText)+'</small></td><td>$'+stake.toFixed(2)+'</td><td><button data-use="1" data-can-bet="'+canBet+'" data-probability="'+(modelP??"")+'" data-stake-cents="'+(canBet?(x.event.prediction?.recommended_stake_cents||0):0)+'" data-event-id="'+esc(x.event.id)+'" data-bookmaker="'+esc(x.book.key)+'" data-name="'+esc(x.event.home_team+" vs "+x.event.away_team)+'" data-market="'+esc(x.market.key)+'" data-selection="'+esc(x.outcome.name)+'" data-odds-value="'+x.outcome.price+'">Use</button>'+(canBet?'<button data-auto-bet="'+esc(x.event.id)+'">Paper bet</button>':"")+'</td></tr>';
 }
 async function scan(){
  $("events").innerHTML='<div class="empty">Retrieving upcoming fixtures and bookmaker odds…</div>';
@@ -207,7 +230,7 @@ $("events").addEventListener("click",async e=>{
  const auto=e.target.closest("button[data-auto-bet]");
  if(auto){try{const j=await api("/api/sports/bets",{method:"POST",body:JSON.stringify({event_id:auto.dataset.autoBet})});$("betMsg").textContent="Paper bet recorded • "+j.selection+" • EV "+(j.expected_value*100).toFixed(1)+"%";await load();}catch(err){$("betMsg").textContent=err.message;}return;}
  const b=e.target.closest("button[data-use]");if(!b)return;
- $("eventId").value=b.dataset.eventId;$("eventName").value=b.dataset.name;$("market").value=b.dataset.market;$("selection").value=b.dataset.selection;$("bookmaker").value=b.dataset.bookmaker;$("odds").value=b.dataset.oddsValue;
+ $("eventId").value=b.dataset.eventId;$("eventName").value=b.dataset.name;$("market").value=b.dataset.market;$("selection").value=b.dataset.selection;$("bookmaker").value=b.dataset.bookmaker;$("odds").value=b.dataset.oddsValue;$("prob").value=b.dataset.probability?((Number(b.dataset.probability)*100).toFixed(2)+"%"):"Not model-eligible";$("stake").value="$"+(Number(b.dataset.stakeCents||0)/100).toFixed(2);$("place").disabled=b.dataset.canBet!=="true";$("betMsg").textContent=b.dataset.canBet==="true"?"Validated ETI value candidate selected.":"This selection is not the model's approved value candidate.";
 });
 $("place").onclick=async()=>{try{const j=await api("/api/sports/bets",{method:"POST",body:JSON.stringify({event_id:$("eventId").value})});$("betMsg").textContent="Paper bet recorded • "+j.selection+" • EV "+(j.expected_value*100).toFixed(1)+"%";await load();}catch(e){$("betMsg").textContent=e.message;}};
 $("bets").addEventListener("click",async e=>{const b=e.target.closest("button[data-confirm]");if(!b)return;const s=$("bets").querySelector('select[data-settle="'+b.dataset.confirm+'"]');if(!s||!s.value)return;try{await api("/api/sports/bets/"+b.dataset.confirm+"/settle",{method:"POST",body:JSON.stringify({result:s.value})});await load();}catch(err){alert(err.message);}});

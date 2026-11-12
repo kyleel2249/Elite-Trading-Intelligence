@@ -2,7 +2,7 @@
 
 ## Global bookmaker and fixture ingestion
 
-ETI uses OddsPapi v4 as its primary football fixture and odds source. The provider advertises 300+ bookmakers and 60+ sports; ETI displays only bookmakers and markets actually returned for each fixture. Coverage is dependent on the account subscription and live provider feed. The Odds API remains an optional fallback for its supported US and international regions.
+ETI uses OddsPapi v4 as its primary football fixture and odds source. The provider advertises 300+ bookmakers and 60+ sports; ETI requests odds without a bookmaker filter so the response can include every bookmaker available for each fixture under the active subscription. The dashboard and `/api/sports/health` expose the active subscription's bookmaker names. Coverage is dependent on the account subscription and live provider feed. The provider's regional coverage map is still being completed, so Ghanaian and other African operator availability must be confirmed from the actual subscribed bookmaker list and event responses; ETI does not claim every local operator is covered. The Odds API remains an optional fallback for its documented `us`, `us2`, `uk`, `eu` and `au` regions; the fallback route rejects unknown region codes.
 
 Worker secrets (never commit these to Git):
 - ODDSPAPI_API_KEY — global football fixtures, odds, results and account diagnostics.
@@ -16,23 +16,23 @@ A key committed to a repository, browser bundle, log or source file must be revo
 
 - GET /api/sports/status — reports whether credentials and the D1 binding are configured (not whether the provider is reachable).
 - GET /api/sports/health — performs live, key-safe provider probes and checks whether all sports D1 tables exist. It never returns the provider API key.
-- GET /api/sports/football/next?limit=8 — retrieves upcoming football fixtures in the next eight days, scans available bookmaker boards, and attaches model predictions, best available price, expected value, decision and recommended stake when the model is qualified.
-- POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous eight days and stores unseen results for model training. Manual request body may include limit (1–30).
+- GET /api/sports/football/next?limit=8 — retrieves upcoming football fixtures in the next 47 hours, scans available bookmaker boards, and attaches model predictions, best available price, expected value, decision and recommended stake when the model is qualified.
+- POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous 47 hours and stores unseen results for model training. Manual request body may include limit (1–30).
 - POST /api/sports/bets — paper-token protected; accepts an event_id only for a persisted ETI model VALUE_CANDIDATE. It uses the stored best market, selection, bookmaker, odds, model probability and stake recommendation. Manual arbitrary probabilities and stakes are rejected; optional stake_cents cannot exceed the model recommendation.
 - GET /api/sports/bets — paper-token protected; returns the separate sports bankroll and paper ledger.
-- POST /api/sports/bets/{id}/settle — manual settlement remains available for supported paper entries. The history sync automatically settles model-backed Full Time Result paper bets when final scores arrive. Other market bets are not auto-created by this model version.
+- POST /api/sports/bets/{id}/settle — manual settlement remains available for supported paper entries. The history sync automatically settles model-backed Full Time Result paper bets from the provider 90-minute `fulltime` score. It does not substitute the `result` score (which may include extra time) or a half-time score; if a regulation-time score is absent, settlement is deferred. Other market bets are not auto-created by this model version.
 
 ## Autonomous schedule and quota protection
 
-The Worker scheduled handler invokes the sports scan and history sync. D1 job locks prevent duplicate execution when multiple cron schedules fire:
+The Worker scheduled handler invokes the sports scan and history sync. OddsPapi requires sport-wide fixture date ranges to be shorter than 48 hours, so both queries use a 47-hour window. History results are processed oldest-first within that window. D1 job locks prevent duplicate execution when multiple cron schedules fire:
 - ETI_SPORTS_SCAN_INTERVAL_MINUTES defaults to 360 (six hours), minimum 60.
 - ETI_SPORTS_HISTORY_SYNC_MINUTES defaults to 1440 (24 hours), minimum 360.
 - ETI_SPORTS_AUTO_SCAN_LIMIT defaults to 1 fixture per scheduled cycle; maximum 12.
 - ETI_SPORTS_HISTORY_BATCH_SIZE defaults to 5 unseen finished fixtures per scheduled cycle; maximum 30.
 - Manual dashboard scans can request up to 12 fixtures and manual history sync can import up to 30.
-- Provider calls are sequential and respect the OddsPapi fixture/odds/scores endpoint cooldowns. Adjust intervals only after checking your account request allowance.
+- Provider calls are sequential, respect the documented fixtures/odds/scores cooldowns, and retry transient `429 RATE_LIMITED` responses using the provider's `retryMs`. Quota-exhaustion errors are not retried. Adjust intervals only after checking your account request allowance.
 
-The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0005.
+The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0007.
 
 ## Autonomous Football Prediction Engine
 
@@ -49,9 +49,9 @@ The model refuses to publish team-specific probabilities when it has fewer than 
 
 ### Calibration and value gate
 
-Predictions are stored before kickoff and later labelled from final scores. After at least 100 resolved predictions, ETI fits a temperature-scaling calibration parameter using past out-of-sample predictions and reports Brier score and log loss. Stakes remain disabled unless the sample is at least 100 and the current model-quality gates pass (Brier <= 0.62 and log loss <= 1.15). These are conservative operational gates, not a guarantee of future performance.
+Predictions are stored before kickoff and later labelled from final scores. After at least 100 resolved predictions, ETI sorts labelled predictions chronologically, fits temperature scaling on the oldest 70%, and evaluates only on the newest 30% (at least 30 holdout matches). It reports holdout Brier score and log loss alongside the uncalibrated baseline. Calibration is rejected if it worsens either metric by more than 0.005, if Brier exceeds 0.62, or if log loss exceeds 1.08. The route independently enforces these gates before any stake can be recommended. These are conservative operational gates, not a guarantee of future performance.
 
-A value candidate requires at least 3% expected value at the best available price. The suggested stake uses 25% Kelly and is capped at 1% of the separate sports paper bankroll per event. If the model is uncalibrated, data is stale or insufficient, or there is no positive edge, stake is zero.
+A value candidate requires at least 3% expected value at the best available price. The paper ledger enforces one open model-backed stake per fixture, including across model-version upgrades and rejects concurrent duplicate entries. Migration 0006 removes duplicate open stakes within a model version, and migration 0007 enforces one open model-backed stake per fixture across model versions. Both migrations keep the earliest open entry, mark later duplicates VOID and refund those duplicate stakes to the sports paper bankroll before creating the unique index. The suggested stake uses 25% Kelly and is capped at 1% of the separate sports paper bankroll per event. If the model is uncalibrated, data is stale or insufficient, or there is no positive edge, stake is zero.
 
 ### Stakeable market in this model version
 
