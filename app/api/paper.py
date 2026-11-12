@@ -1,16 +1,22 @@
-"""Internal paper exchange API. No exchange credentials, no real money; every reply states INTERNAL_PAPER."""
+"""Internal paper exchange API. No exchange credentials, no real money; every reply states INTERNAL_PAPER.
+
+Authorization (see app/security/execution_auth.py): order-changing routes accept an automatically issued
+INTERNAL PAPER session (HttpOnly cookie, no manual token) or the operator X-API-Key, and are re-validated at the
+engine boundary. Destructive account reset stays operator-only. Live is never reachable from here.
+"""
 from __future__ import annotations
 
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
 from app.paper import mode as M
 from app.paper.runtime import get_exchange, get_tick_job, shape_result
 from app.security.auth import require_api_key
+from app.security.execution_auth import INTERNAL_PAPER as ENV_PAPER, authorize, execution_gate
 
 logger = logging.getLogger("eti.api.paper")
 router = APIRouter(prefix="/api/paper", tags=["internal-paper"])
@@ -52,6 +58,10 @@ class ResetIn(BaseModel):
     starting_cash: Optional[float] = Field(default=None, gt=0, le=1e9, allow_inf_nan=False)
 
 
+class FlattenIn(BaseModel):
+    confirm: Literal["FLATTEN"]
+
+
 @router.get("/status")
 async def status(settings: Settings = Depends(get_settings)):
     ex = get_exchange(); cfg = ex.cfg
@@ -75,6 +85,16 @@ async def status(settings: Settings = Depends(get_settings)):
 @router.get("/account")
 async def account(tick: bool = True):
     return await get_exchange().account(tick=tick)
+
+
+@router.get("/quote")
+async def quote(symbol: str = Query(..., pattern=_SYM)):
+    """Verified live quote the paper engine would trade against (public market data, no keys)."""
+    snap = await get_exchange().quotes.get(symbol.upper())
+    if snap is None:
+        raise HTTPException(status_code=422, detail="no verified live quote is available for this symbol right now")
+    return {"execution_mode": "INTERNAL_PAPER", "symbol": snap.symbol, "bid": snap.bid, "ask": snap.ask, "mid": snap.mid,
+            "spread_bps": snap.spread_bps, "ts": snap.ts.isoformat(), "verified": snap.verified}
 
 
 @router.get("/positions")
@@ -105,7 +125,9 @@ async def preview(body: PaperOrderIn):
 
 
 @router.post("/orders")
-async def submit(body: PaperOrderIn, _auth=Depends(require_api_key)):
+async def submit(body: PaperOrderIn, request: Request, response: Response):
+    principal = await authorize(request, response, ENV_PAPER)
+    execution_gate(principal, ENV_PAPER, {**body.engine_kwargs(), "op": "submit"})
     try:
         res = await get_exchange().submit(**body.engine_kwargs())
     except RuntimeError as e:
@@ -114,16 +136,20 @@ async def submit(body: PaperOrderIn, _auth=Depends(require_api_key)):
 
 
 @router.post("/orders/oco")
-async def submit_oco(body: OcoIn, _auth=Depends(require_api_key)):
+async def submit_oco(body: OcoIn, request: Request, response: Response):
+    principal = await authorize(request, response, ENV_PAPER)
+    execution_gate(principal, ENV_PAPER, {**body.model_dump(), "op": "oco"})
     res = await get_exchange().submit_oco(symbol=body.symbol, qty=body.qty, stop_price=body.stop_price, take_profit_price=body.take_profit_price,
                                            client_order_id=body.client_order_id, thesis=body.thesis)
     return {"execution_mode": "INTERNAL_PAPER", "mode_label": _LABEL, **res}
 
 
 @router.post("/orders/{order_id}/cancel")
-async def cancel(order_id: str, _auth=Depends(require_api_key)):
+async def cancel(order_id: str, request: Request, response: Response):
     if not order_id.startswith("ord-") or len(order_id) > 20:
         raise HTTPException(status_code=422, detail="invalid order id")
+    principal = await authorize(request, response, ENV_PAPER)
+    execution_gate(principal, ENV_PAPER, {"op": "cancel", "order_id": order_id})
     res = await get_exchange().cancel(order_id)
     if not res["ok"] and res["reason"] == "unknown_order":
         raise HTTPException(status_code=404, detail="unknown order")
@@ -131,15 +157,39 @@ async def cancel(order_id: str, _auth=Depends(require_api_key)):
 
 
 @router.post("/orders/cancel-all")
-async def cancel_all(symbol: Optional[str] = Query(default=None, pattern=_SYM), _auth=Depends(require_api_key)):
+async def cancel_all(request: Request, response: Response, symbol: Optional[str] = Query(default=None, pattern=_SYM)):
+    principal = await authorize(request, response, ENV_PAPER)
+    execution_gate(principal, ENV_PAPER, {"op": "cancel_all", "symbol": symbol})
     return {"execution_mode": "INTERNAL_PAPER", **await get_exchange().cancel_all(symbol)}
+
+
+@router.post("/flatten")
+async def flatten(body: FlattenIn, request: Request, response: Response):
+    """Safety control: cancel every working order and sell every available holding at the simulated market.
+    It only reduces exposure, so a paper session may use it."""
+    principal = await authorize(request, response, ENV_PAPER)
+    execution_gate(principal, ENV_PAPER, {"op": "flatten"})
+    ex = get_exchange()
+    canceled = (await ex.cancel_all())["canceled"]
+    acct = await ex.account(tick=False)
+    sold, failed = [], []
+    for p in acct["positions"]:
+        if p["open"] and p["available_qty"] > 0:
+            r = await ex.submit(symbol=p["symbol"], side="sell", qty=p["available_qty"], order_type="market",
+                                strategy="flatten", thesis="emergency flatten")
+            (sold if r["accepted"] else failed).append({"symbol": p["symbol"], "qty": p["available_qty"],
+                                                       "reason": (r.get("reasons") or [""])[0], "status": r["order"]["status"]})
+    return {"execution_mode": "INTERNAL_PAPER", "canceled": canceled, "sold": sold, "failed": failed}
 
 
 @router.post("/account/reset")
 async def reset(body: ResetIn, _auth=Depends(require_api_key)):
+    """Destructive (wipes history): stays operator-only; it is not a paper-session action."""
     return {"execution_mode": "INTERNAL_PAPER", **await get_exchange().reset(body.starting_cash)}
 
 
 @router.post("/tick")
-async def tick(_auth=Depends(require_api_key)):
+async def tick(request: Request, response: Response):
+    principal = await authorize(request, response, ENV_PAPER)
+    execution_gate(principal, ENV_PAPER, {"op": "tick"})
     return {"execution_mode": "INTERNAL_PAPER", **await get_exchange().tick()}

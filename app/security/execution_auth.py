@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.memory.util import as_utc, naive_utc, utcnow
-from app.security.auth import PROTECTED_ENVS
+from app.security.auth import LOCAL_ENVS
 from app.security.auth_models import ExecAuthEvent, ExecAuthToken
 
 logger = logging.getLogger("eti.auth")
@@ -154,8 +154,8 @@ def load_keyring() -> AuthKeyring:
         if len(env_secret) >= 32:
             _keyring = AuthKeyring(env_secret.encode(), prev, "env")
             return _keyring
-        path = Path(os.environ.get("EXEC_AUTH_KEY_FILE") or (Path.home() / ".eti" / "auth.key"))
         try:
+            path = Path(os.environ.get("EXEC_AUTH_KEY_FILE") or (Path.home() / ".eti" / "auth.key"))
             if path.exists():
                 key = path.read_text().strip().encode()
                 if len(key) >= 32:
@@ -437,18 +437,19 @@ def execution_gate(principal: Principal, environment: str, payload: dict[str, An
 
 
 # -------------------------------------------------------------------------------- request layer
-def is_protected_env() -> bool:
-    return (get_settings().app_env or "").strip().lower() in PROTECTED_ENVS
+def is_non_local_env() -> bool:
+    """Same rule as require_api_key: anything that is not local development fails closed."""
+    return (get_settings().app_env or "").strip().lower() not in LOCAL_ENVS
 
 
 def enforcement_active() -> bool:
     """Open access exists only for local development without an API_KEY (unchanged behaviour)."""
-    return bool((get_settings().api_key or "").strip()) or is_protected_env()
+    return bool((get_settings().api_key or "").strip()) or is_non_local_env()
 
 
 def _secure_cookie(request: Request) -> bool:
     xfp = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
-    return request.url.scheme == "https" or xfp == "https" or is_protected_env()
+    return request.url.scheme == "https" or xfp == "https" or is_non_local_env()
 
 
 def set_session_cookie(response: Response, request: Request, environment: str, raw: str, max_age: int) -> None:
@@ -490,7 +491,7 @@ def client_key(request: Request) -> str:
 
 async def authorize(request: Request, response: Response, environment: str) -> Principal:
     """Authenticate a request for one execution environment. Order of acceptance:
-    operator key -> environment session cookie -> open local development (no API_KEY, not production)."""
+    operator key -> environment session cookie -> open local development (no API_KEY, local env)."""
     from app.database import SessionLocal
 
     path = request.url.path

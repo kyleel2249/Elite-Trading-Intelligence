@@ -18,7 +18,7 @@ from app.security.auth_models import ExecAuthEvent
 from app.security.exchange_credentials import ensure_env_testnet_account, get_credential_state
 from app.security.execution_auth import (
     COOKIE_NAMES, EXCHANGE_TESTNET, INTERNAL_PAPER, LIVE, AuthError, TokenService, audit, clear_session_cookie,
-    client_key, csrf_ok, enforcement_active, is_protected_env, load_keyring, load_policy, operator_ok,
+    client_key, csrf_ok, enforcement_active, is_non_local_env, load_keyring, load_policy, operator_ok,
     session_limiter, set_session_cookie,
 )
 
@@ -59,11 +59,11 @@ async def start_session(body: SessionBody, request: Request, response: Response)
     op = operator_ok(request)
     if op is False:
         raise HTTPException(401, {"error": "Invalid X-API-Key", "code": "invalid_api_key"})
-    operator_ok_here = op is True or not enforcement_active()
+    operator_here = op is True or not enforcement_active()
     policy = load_policy()
-    if env == EXCHANGE_TESTNET and not operator_ok_here:
+    if env == EXCHANGE_TESTNET and not operator_here:
         raise HTTPException(401, {"error": "Exchange testnet sessions require the operator key", "code": "operator_required"})
-    if env == INTERNAL_PAPER and not policy.auto_sessions and not operator_ok_here:
+    if env == INTERNAL_PAPER and not policy.auto_sessions and not operator_here:
         raise HTTPException(403, {"error": "Automatic paper sessions are disabled on this server", "code": "auto_sessions_disabled"})
 
     db = SessionLocal()
@@ -178,21 +178,33 @@ _REASONS = {
 }
 
 
+def _testnet_ready(settings: Settings) -> bool:
+    """A registered execution account on the exchange sandbox with an approved (non intelligence-only) policy."""
+    if not settings.execution_enabled:
+        return False
+    try:
+        from app.execution.domain import Mode
+        from app.execution.service import get_store
+
+        return any(a.provider == "binance" and a.environment == "paper" and a.credentials_ciphertext
+                   and a.policy.mode != Mode.INTELLIGENCE_ONLY for a in get_store().list_accounts())
+    except Exception:
+        return False
+
+
 @router.get("/status")
 async def status(request: Request, environment: Optional[str] = Query(default=None, max_length=32),
                  settings: Settings = Depends(get_settings)):
     """Environment detection + auth state + notices for the dashboard. Contains no secrets."""
     selected = (environment or INTERNAL_PAPER).strip().lower()
-    if selected == "testnet":
-        selected = EXCHANGE_TESTNET
+    if selected in ("testnet", "internal", "paper"):
+        selected = EXCHANGE_TESTNET if selected == "testnet" else INTERNAL_PAPER
     if selected not in (INTERNAL_PAPER, EXCHANGE_TESTNET, LIVE):
         raise HTTPException(422, "environment must be internal_paper, exchange_testnet or live")
 
-    from app.api.paper import _testnet_account  # reuse the exact availability rule orders use
-
     cred = await get_credential_state(settings)
     provisioned = ensure_env_testnet_account(settings) if cred.status == "valid" else {"registered": False}
-    testnet_ready = _testnet_account("binance", settings) is not None
+    testnet_ready = _testnet_ready(settings)
 
     sessions: dict = {}
     db = SessionLocal()
@@ -224,9 +236,10 @@ async def status(request: Request, environment: Optional[str] = Query(default=No
                                    "Orders use INTERNAL PAPER; nothing is sent to an exchange."})
     elif selected == EXCHANGE_TESTNET:
         notices.append({"level": "info", "code": "TESTNET_ACTIVE",
-                        "message": "EXCHANGE TESTNET is connected. Orders are sandbox orders, subject to the account policy."})
+                        "message": "EXCHANGE TESTNET is connected (sandbox, operator-approved policy). Orders on this page "
+                                   "are still INTERNAL PAPER; testnet orders go through the Execution Engine."})
     keyring = load_keyring()
-    if is_protected_env() and keyring.source != "env":
+    if is_non_local_env() and keyring.source != "env":
         notices.append({"level": "info", "code": "AUTH_KEY_LOCAL",
                         "message": "Session signing key is generated locally. Set EXEC_AUTH_SECRET from your secret store "
                                    "so sessions survive restarts and redeploys."})
