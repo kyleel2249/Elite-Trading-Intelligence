@@ -34,8 +34,17 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
        const bookmakers=Object.entries((odds as any)?.bookmakerOdds||{}).map(([key,value]:[string,any])=>({key,title:key,markets:Object.entries(value?.markets||{}).map(([marketKey,market]:[string,any])=>({key:"market_"+marketKey,outcomes:Object.entries(market?.outcomes||{}).flatMap(([outcomeKey,outcome]:[string,any])=>Object.entries(outcome?.players||{}).filter(([,player]:[string,any])=>player?.active&&Number(player?.price)>1).map(([playerKey,player]:[string,any])=>({name:String(player?.bookmakerOutcomeId||outcomeKey)+(player?.playerName?" / "+player.playerName:""),price:Number(player.price),last_update:player.changedAt||player.bookmakerChangedAt||null}))) }))}));
        events.push({id:f.fixtureId,sport_key:"soccer",sport_title:"Football",home_team:f.participant1Name,away_team:f.participant2Name,commence_time:f.startTime,league:f.tournamentName,country:f.categoryName,bookmakers});
      }
+     let journalSaved=0;
+     if(db(env)&&events.length){
+       try{
+         const now=Date.now();
+         const statements=events.map(e=>db(env)!.prepare("INSERT INTO sports_event_scans (id,scanned_at,provider,fixture_id,sport,event_name,competition,country,commence_time,bookmaker_count,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),now,"OddsPapi",e.id,"football",e.home_team+" vs "+e.away_team,e.league,e.country,e.commence_time,e.bookmakers.length,JSON.stringify(e)));
+         const saved=await db(env)!.batch(statements);
+         journalSaved=saved.reduce((n,x)=>n+(x.meta?.changes||0),0);
+       }catch{journalSaved=0;}
+     }
      const first=events[0]||null;
-     return reply({provider:"OddsPapi",sport:"football",coverage:"global_bookmakers_including_regional_feeds_as_available",fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_count:upcoming.length,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map(b=>b.key)))].length,next_event:first,events,model_status:"market_data_only",model_probability:null,recommended_stake:0,decision:"NO_BET_UNTIL_VALIDATED_MODEL_AVAILABLE",note:"Bookmaker prices and market consensus are not independent model predictions. ETI will not fabricate a probability or recommend a stake without a validated team-statistics model."});
+     return reply({provider:"OddsPapi",sport:"football",coverage:"global_bookmakers_including_regional_feeds_as_available",fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_count:upcoming.length,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map(b=>b.key)))].length,event_journal_saved:journalSaved,next_event:first,events,model_status:"market_data_only",model_probability:null,recommended_stake:0,decision:"NO_BET_UNTIL_VALIDATED_MODEL_AVAILABLE",note:"Bookmaker prices and market consensus are not independent model predictions. ETI will not fabricate a probability or recommend a stake without a validated team-statistics model."});
    }catch(e){return reply({error:"global_football_scan_failed",message:e instanceof Error?e.message:"Odds provider unavailable"},502);}
  }
  if(p==="/api/sports/events"&&req.method==="GET"){
