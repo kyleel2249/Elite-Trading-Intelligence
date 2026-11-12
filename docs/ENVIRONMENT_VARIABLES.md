@@ -72,6 +72,9 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_PRECISION_ADMIN_TOKEN` | secret | Admin token for precision-engine configuration. |
 | `ETI_PRECISION_CONFIG` | config | Precision-engine configuration JSON. |
 | `ETI_PRECISION_DATA` | binding | KV namespace for precision-engine context (falls back to ETI_EXECUTION_LOG). |
+| `ETI_PRECISION_SYMBOLS` | config | Comma separated crypto symbols (max 10) for the scheduled outcome ledger; empty disables it. |
+| `ETI_PRECISION_STRATEGIES` | config | Strategies the ledger records (default `intraday`). |
+| `ETI_PRECISION_BATCH` | config | Pairs evaluated per cron tick, 1 to 4 (default 1). |
 | `ETI_READINESS_GATE` | config | `enforce`/`off`: whether a failing readiness check blocks orders. |
 | `ETI_RISK_GATE_TOKEN` | legacy | Removed. Ignored; reported as unused legacy config. |
 | `ETI_RISK_GATE_URL` | legacy | Removed. Ignored; if present the dashboard reports it as unused legacy config. |
