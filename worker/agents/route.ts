@@ -6,6 +6,7 @@
  *   GET|POST /api/agents/analyze      read-only analysis (providers auto-fetched unless providers=0 / providers:false)
  *   POST /api/agents/execute          bearer-authenticated; reaches /api/orders only if Commander AND Risk Manager approve and exchange filters pass
  *   GET  /api/agents/audit            bearer-authenticated; Performance Auditor over recorded decisions
+ *   POST /api/agents/brief            bearer-authenticated; advisory LLM review of an analysis (see llm-route.ts)
  */
 import { AllProvidersFailed, INTERVALS, getMarketData, providerOrder } from "../market.ts";
 import type { MarketEnv, Ticker } from "../market.ts";
@@ -24,6 +25,7 @@ import { loadBinanceTestnetAccount } from "./account.ts";
 import { applyFilters, loadBinanceFilters } from "./filters.ts";
 import type { SymbolFilters } from "./filters.ts";
 import { DASHBOARD_HTML } from "./dashboard.ts";
+import { withLlmBrief } from "./llm-route.ts";
 
 export type AgentsEnv = MarketEnv & ExecutionEnv & ProviderEnv;
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
@@ -99,7 +101,7 @@ async function record(env: AgentsEnv, r: AnalysisResult, executed: boolean) {
   return true;
 }
 
-export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
+function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
   const load = deps.loadMarket ?? loadMarket, clock = deps.now ?? Date.now;
   const loadProv: ProviderLoader = deps.loadProviders ?? ((env, symbol, now) => fetchProviderData(env, symbol, now));
   const loadAcct: AccountLoader = deps.loadAccount ?? ((env, symbol, price) => loadBinanceTestnetAccount(env, symbol, price));
@@ -116,7 +118,7 @@ export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps =
 
       if (path === "/api/agents") {
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
-        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, endpoints: ["GET /agents (dashboard)", "GET|POST /api/agents/analyze", "GET /api/agents/providers", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)"], integrity, fredConfigured: !!env.FRED_API_KEY, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: await stored() });
+        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, endpoints: ["GET /agents (dashboard)", "GET|POST /api/agents/analyze", "GET /api/agents/providers", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)", "POST /api/agents/brief (bearer, advisory LLM review)"], integrity, fredConfigured: !!env.FRED_API_KEY, llmConfigured: !!(env as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: await stored() });
       }
 
       const symbolOf = (v: unknown) => (typeof v === "string" ? v.toUpperCase() : "BTCUSDT");
@@ -214,4 +216,9 @@ export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps =
       return reply({ ok: res.status === 201, status: res.status, broker: brokerBody, decision: result.decision, risk: result.risk, ticket, adjustments, accountNote }, res.status);
     },
   };
+}
+
+/** Public entry point. The advisory LLM review route sits in front of the agent routes; everything else is handled by the core above. */
+export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
+  return withLlmBrief(withAgentsCore(base, deps) as App<any>, { loadMarket: deps.loadMarket, loadProviders: deps.loadProviders, now: deps.now }) as App<E>;
 }

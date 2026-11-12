@@ -14,11 +14,12 @@ A plain order against an open position is rejected (`opposing_order_must_be_redu
 
 ## Endpoints
 * `GET /api/futures/status` – configuration flags (public).
-* `GET /api/futures/positions` (bearer) – live positions with mark, exchange liquidation price, **liquidation distance %** and level (`warning` < 15 %, `critical` < 8 %). This is a point-in-time snapshot; no background monitor runs, so poll it.
+* `GET /api/futures/positions` (bearer) – live positions with mark, exchange liquidation price, **liquidation distance %** and level (`warning` < 15 %, `critical` < 8 %). Point-in-time snapshot; the protective-stop monitor (below) also checks liquidation distance every minute.
 * `GET /api/futures/reconcile` (bearer) – exchange positions and open orders compared with the ETI audit log; lists positions with no audited ETI futures order.
 * `POST /api/futures/orders` (bearer) – gateway. Body: `symbol, side, quantity, limitPrice, leverage, reduceOnly, stopPrice, clientOrderId, riskConfirmed:true, executionSource, intent?`.
 * `GET|POST /api/agents/futures/analyze` (bearer) – Commander analysis plus a `futuresPlan` (action, costs, liquidation estimate, blockers).
 * `POST /api/agents/futures/execute` (bearer) – forwards the plan's ticket to the gateway only if the plan is eligible. Body adds `execution: { clientOrderId, riskConfirmed: true }`.
+* `GET /api/futures/monitor` and `POST /api/futures/monitor/run` (bearer) – last protective-stop monitor result / run it now. `GET /agents/futures` is the read-only control page.
 
 ## Enabling (all required)
 Worker secrets `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_SECRET_KEY` (testnet keys, **trade permission only, never withdrawal**), `ETI_EXECUTION_TOKEN`, the `ETI_EXECUTION_LOG` KV, optional `ETI_DUPLICATE_WINDOW_SECONDS` (default 60), `ETI_FUTURES_MAX_NOTIONAL_USD`, optional `ETI_FUTURES_MAX_LEVERAGE` (default 3, hard cap 5), and finally `ETI_FUTURES_ENABLED=true`. Without the flag every futures order returns 423.
@@ -30,10 +31,12 @@ Kill switch; bearer token; audit log required; duplicate-order protection (a `cl
 
 **Costs.** Assumed 0.05 % taker fee per side, 5 bps slippage per side, 24 h hold; funding counted only when it is a cost. These are assumptions, not account-specific rates.
 
+## Protective stops
+The entry order does not carry a stop. The monitor (`worker/futures-monitor.ts`, every-minute cron, or on demand) places a `STOP_MARKET` (`closePosition`) for a position **ETI itself opened**, using the `stopPrice` stored with its audited entry order, and raises alerts instead of acting when no such record exists, the stop is already breached, open orders can't be read, or the kill switch is on. It never opens, increases or closes positions. See `docs/FUTURES_MONITOR.md`. There can be up to a minute between a fill and its stop, and a fast move can pass the stop level first.
+
 ## Known limits
-* **No protective stop is placed automatically.** `stopPrice` is used for the liquidation-buffer and risk maths only; manage the stop yourself and watch `/api/futures/positions`.
 * No external risk service is involved: every futures-specific limit (leverage, notional, margin, liquidation distance, funding) is enforced in-process in the Worker, together with duplicate protection and the kill switch. Refused orders never reach the exchange and are recorded under `reject:` in the audit log; executed orders under `order:`.
 * Liquidation estimate uses a flat 0.5 % maintenance-margin rate; real tiers differ.
 * Analysis uses spot candles/order book; funding and mark come from the futures venue.
 * Equity is the futures wallet balance; daily PnL and drawdown are not derived.
-* Binance testnet quirks (endpoint versions, rate limits) were not verified against a live testnet account.
+* Binance testnet quirks (endpoint versions, rate limits, `closePosition` handling) were not verified against a live testnet account.

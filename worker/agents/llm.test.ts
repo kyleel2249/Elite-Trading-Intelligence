@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildBriefInput, parseBrief, requestBrief, SYSTEM_PROMPT } from "./llm.ts";
 import { withLlmBrief } from "./llm-route.ts";
+import { withAgents } from "./route.ts";
 import { analyze } from "./orchestrator.ts";
 import type { Depth, Integrity, Kline, MarketInput } from "./types.ts";
 
@@ -12,7 +13,8 @@ const depthAround = (p: number): Depth => ({ bids: Array.from({ length: 30 }, (_
 const cs = candles(300);
 const market: MarketInput = { symbol: "BTCUSDT", interval: "1h", candles: cs, depth: depthAround(cs[cs.length - 1][4]), provider: "test", fetchedAt: NOW, crossCheck: null, benchmark: null, failures: {} };
 const integrity: Integrity = { killSwitch: false, liveFlagSet: false, executionTokenConfigured: true, auditLogConfigured: true };
-const analysis = () => analyze({ market, integrity, account: { equityUsd: 100_000, dailyPnlPct: 0, drawdownPct: 1, openRiskPct: 0 }, now: NOW, id: "llm-1" });
+// The route runs the analysis without account state, so compare against the same inputs.
+const analysis = () => analyze({ market, integrity, now: NOW, id: "llm-1" });
 
 const goodBrief = { summary: "Evidence is thin outside price data.", agentNotes: [{ agent: "technical", assessment: "Trend aligned.", concern: "No volume confirmation." }, { agent: "not_an_agent", assessment: "x" }], contradictions: ["quant vs technical"], weakEvidence: ["no news"], verifyNext: ["check calendar"], evidenceStrength: "low", extra: "dropped" };
 const modelReply = (text: string, status = 200) => new Response(JSON.stringify(status === 200 ? { content: [{ type: "text", text }], model: "claude-sonnet-5-5", usage: { input_tokens: 111, output_tokens: 22 } } : { error: { message: "secret detail" } }), { status });
@@ -46,19 +48,27 @@ test("failures are reported without leaking provider detail, and nothing is sent
 
 test("route: bearer, key, KV and hourly cap are enforced before any spend; success leaves the decision untouched", async () => {
   const kv = new Map<string, string>(); let llmCalls = 0;
-  const mk = (env: any) => withLlmBrief({ fetch: () => new Response("base") } as any, { loadMarket: async () => market, loadProviders: async () => ({ supplied: {}, status: [] }), now: () => NOW, fetchImpl: (async () => { llmCalls++; return modelReply(JSON.stringify(goodBrief)); }) as any }).fetch.bind(null) as any;
   const app = withLlmBrief({ fetch: () => new Response("base") } as any, { loadMarket: async () => market, loadProviders: async () => ({ supplied: {}, status: [] }), now: () => NOW, fetchImpl: (async () => { llmCalls++; return modelReply(JSON.stringify(goodBrief)); }) as any });
   const env: any = { ETI_EXECUTION_TOKEN: "x".repeat(32), ANTHROPIC_API_KEY: "sk-secret-123", ETI_LLM_MAX_PER_HOUR: "1", ETI_EXECUTION_LOG: { get: async (k: string) => kv.get(k) ?? null, put: async (k: string, v: string) => { kv.set(k, v); } } };
   const req = (token: string | null = env.ETI_EXECUTION_TOKEN, method = "POST") => new Request("https://e.test/api/agents/brief", { method, headers: token ? { authorization: "Bearer " + token } : {}, body: method === "POST" ? JSON.stringify({ symbol: "BTCUSDT" }) : undefined });
-  void mk;
   assert.equal(await (await app.fetch(new Request("https://e.test/other"), env)).text(), "base");
   assert.equal((await app.fetch(req(null), env)).status, 401); assert.equal((await app.fetch(req("y".repeat(32)), env)).status, 401); assert.equal((await app.fetch(req(env.ETI_EXECUTION_TOKEN, "GET"), env)).status, 405);
   assert.equal((await app.fetch(req(), { ...env, ANTHROPIC_API_KEY: undefined })).status, 503); assert.equal((await app.fetch(req(), { ...env, ETI_EXECUTION_LOG: undefined })).status, 503);
   assert.equal(llmCalls, 0, "nothing was spent on refused requests");
   const ok = await app.fetch(req(), env), j: any = await ok.json();
-  assert.equal(ok.status, 200, JSON.stringify(j)); assert.equal(j.advisory, true); assert.equal(j.brief.evidenceStrength, "low"); // the route has no account state, so the Risk Manager cannot approve a position: compare with the same inputs, not the account-supplied helper
-  const same = analyze({ market, integrity: { killSwitch: false, liveFlagSet: false, executionTokenConfigured: true, auditLogConfigured: true }, now: NOW });
-  assert.equal(j.decision.action, same.decision.action); assert.equal(j.decision.confidence, same.decision.confidence);
+  assert.equal(ok.status, 200, JSON.stringify(j)); assert.equal(j.advisory, true); assert.equal(j.brief.evidenceStrength, "low"); assert.equal(j.decision.action, analysis().decision.action); assert.equal(j.decision.confidence, analysis().decision.confidence);
   assert.ok(!JSON.stringify(j).includes("sk-secret-123")); assert.equal(llmCalls, 1);
   const capped = await app.fetch(req(), env); assert.equal(capped.status, 429); assert.equal(((await capped.json()) as any).error, "llm_hourly_cap_reached"); assert.equal(llmCalls, 1);
+});
+
+test("the brief route is reachable through withAgents and unauthenticated calls spend nothing", async () => {
+  const app = withAgents({ fetch: () => new Response("base") } as any, { loadMarket: async () => market, loadProviders: async () => ({ supplied: {}, status: [] }), now: () => NOW });
+  const env: any = { ETI_EXECUTION_TOKEN: "x".repeat(32), ANTHROPIC_API_KEY: "sk-secret-123" };
+  const real = globalThis.fetch; let outbound = 0; globalThis.fetch = (async () => { outbound++; return new Response("{}"); }) as any;
+  try {
+    assert.equal((await app.fetch(new Request("https://e.test/api/agents/brief", { method: "POST", body: "{}" }), env)).status, 401);
+    const roster: any = await (await app.fetch(new Request("https://e.test/api/agents"), env)).json();
+    assert.equal(roster.llmConfigured, true); assert.ok(roster.endpoints.some((e: string) => e.includes("/api/agents/brief"))); assert.equal(roster.agents.length, 12);
+    assert.equal(outbound, 0);
+  } finally { globalThis.fetch = real; }
 });
