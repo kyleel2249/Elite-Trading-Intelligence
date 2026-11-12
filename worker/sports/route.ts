@@ -23,6 +23,9 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
  if(p==="/api/sports/status"&&req.method==="GET")return reply({ok:true,module:"sports_betting_intelligence",mode:"paper_only",real_money_execution:false,odds_providers:{the_odds_api:env.ODDS_API_KEY?"configured":"not_configured",oddspapi:env.ODDSPAPI_API_KEY?"configured":"not_configured"},global_football_scan:!!env.ODDSPAPI_API_KEY,database:db(env)?"d1_configured":"not_configured",sports:Object.entries(SPORTS).map(([key,name])=>({key,name}))});
  if(p==="/api/sports/football/next"&&req.method==="GET"){
    if(!env.ODDSPAPI_API_KEY)return reply({error:"global_odds_provider_not_configured",message:"Set ODDSPAPI_API_KEY as a Cloudflare Worker secret."},503);
+   const automatic=u.searchParams.get("automatic")==="1";
+   if(automatic&&(!authorized(req,env)||!db(env)))return reply({error:"unauthorized"},401);
+   if(automatic){try{const minutes=Math.max(60,Math.min(10080,Number((env as any).ETI_SPORTS_SCAN_INTERVAL_MINUTES||360)));if(!await claimJob(db(env)!,"football-global-scan",Date.now(),minutes*60000))return reply({ok:true,skipped:true,reason:"scan_interval_not_elapsed"});}catch{return reply({error:"sports_job_state_not_ready",message:"Apply migration 0005 before enabling scheduled sports scans."},503);}}
    const limit=Math.max(1,Math.min(12,Number(u.searchParams.get("limit")||8)));
    const from=new Date(),to=new Date(from.getTime()+8*24*60*60*1000);
    const baseUrl="https://api.oddspapi.io/v4/";
@@ -63,8 +66,8 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      }
      let journalSaved=0;
      if(db(env)&&events.length){try{const now=Date.now();const statements=events.map(e=>db(env)!.prepare("INSERT INTO sports_event_scans (id,scanned_at,provider,fixture_id,sport,event_name,competition,country,commence_time,bookmaker_count,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),now,"OddsPapi",e.id,"football",e.home_team+" vs "+e.away_team,e.league,e.country,e.commence_time,e.bookmakers.length,JSON.stringify(e)));const saved=await db(env)!.batch(statements);journalSaved=saved.reduce((n,x)=>n+(x.meta?.changes||0),0);}catch{journalSaved=0;}}
-     return reply({provider:"OddsPapi",sport:"football",coverage:"bookmakers_returned_by_provider",fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_count:upcoming.length,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map(b=>b.key)))].length,event_journal_saved:journalSaved,history_matches:history.length,model_calibration:{...calibration,stake_enabled:calibrated},next_event:events[0]||null,events});
-   }catch(e){return reply({error:"global_football_scan_failed",message:e instanceof Error?e.message:"Odds provider unavailable"},502);}
+     if(automatic&&db(env))await finishJob(db(env)!,"football-global-scan","OK","Fixtures "+events.length);return reply({provider:"OddsPapi",sport:"football",coverage:"bookmakers_returned_by_provider",fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_count:upcoming.length,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map(b=>b.key)))].length,event_journal_saved:journalSaved,history_matches:history.length,model_calibration:{...calibration,stake_enabled:calibrated},next_event:events[0]||null,events});
+   }catch(e){if(u.searchParams.get("automatic")==="1"&&db(env)){try{await finishJob(db(env)!,"football-global-scan","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}return reply({error:"global_football_scan_failed",message:e instanceof Error?e.message:"Odds provider unavailable"},502);}
  }
  if(p==="/api/sports/football/sync-history"&&req.method==="POST"){
    if(!authorized(req,env))return reply({error:"unauthorized"},401);
