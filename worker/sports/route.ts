@@ -76,7 +76,8 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      if(db(env)){
        const h=await db(env)!.prepare("SELECT fixture_id,played_at,competition,home_team,away_team,home_goals,away_goals FROM sports_match_results ORDER BY played_at DESC LIMIT 600").all<any>();
        history=(h.results||[]).map((x:any)=>({fixtureId:x.fixture_id,playedAt:Number(x.played_at),competition:x.competition||undefined,homeTeam:x.home_team,awayTeam:x.away_team,homeGoals:Number(x.home_goals),awayGoals:Number(x.away_goals)}));
-       const p=await db(env)!.prepare("SELECT p_home,p_draw,p_away,actual_outcome,settled_at FROM sports_model_predictions WHERE actual_outcome IS NOT NULL ORDER BY settled_at DESC LIMIT 600").all<any>();
+       const calibrationSql=competitionFilter==="uefa_nations_league"?"SELECT p_home,p_draw,p_away,actual_outcome,settled_at FROM sports_model_predictions WHERE actual_outcome IS NOT NULL AND (competition LIKE '%Nations League%' OR competition LIKE '%World Cup%' OR competition LIKE '%Euro%' OR competition LIKE '%International%' OR competition LIKE '%Qualif%') ORDER BY settled_at DESC LIMIT 600":"SELECT p_home,p_draw,p_away,actual_outcome,settled_at FROM sports_model_predictions WHERE actual_outcome IS NOT NULL ORDER BY settled_at DESC LIMIT 600";
+       const p=await db(env)!.prepare(calibrationSql).all<any>();
        calibration=fitTemperature((p.results||[]).map((x:any)=>({pHome:Number(x.p_home),pDraw:Number(x.p_draw),pAway:Number(x.p_away),outcome:x.actual_outcome,settledAt:Number(x.settled_at)})));
        try{await init(db(env)!);const a=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<any>();bankrollCents=Number(a?.balance_cents||0);}catch{bankrollCents=0;}
      }
