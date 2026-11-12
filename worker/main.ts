@@ -22,6 +22,7 @@ import { withAgents } from "./agents/route.ts";
 import { withFutures } from "./agents/futures-route.ts";
 import { withCommand } from "./command/route.ts";
 import { withSports } from "./sports/route.ts";
+import { withSportsGuard } from "./sports/guard.ts";
 import { withPrecision } from "./precision/route.ts";
 import { runPrecisionCycle } from "./precision/cycle.ts";
 import { withDailyReport } from "./daily/route.ts";
@@ -59,7 +60,8 @@ const coreLayers: Array<(next: any) => any> = [
   withDailyReport,
   withPro,
   withJournal,
-  withSports,
+  // The guard sits directly outside the sports route: constant-time token check and a short scan cache (see sports/guard.ts).
+  (next: any) => withSportsGuard(withSports(next)),
 ];
 const core: any = coreLayers.reduce((next: any, layer) => layer(next), base as any);
 
@@ -72,8 +74,9 @@ const MONITOR_CRON = "* * * * *";
 export default {
   fetch: (request: Request, env: any) => app.fetch(request, env),
   async scheduled(event: { cron?: string }, env: any, ctx: { waitUntil(p: Promise<unknown>): void }) {
-    // Autonomous football scan and result-history collection are quota-throttled in D1.
-    if (env.ODDSPAPI_API_KEY && env.ETI_SPORTS_PAPER_TOKEN && env.ETI_PORTFOLIO_DB) {
+    // Autonomous football scan and result-history collection are quota-throttled in D1 (scan >= 60 min, history >= 360 min),
+    // so they are skipped on the every-minute monitor cron instead of costing two D1 writes and a 2s wait every minute.
+    if (event.cron !== MONITOR_CRON && env.ODDSPAPI_API_KEY && env.ETI_SPORTS_PAPER_TOKEN && env.ETI_PORTFOLIO_DB) {
       const headers = { "x-eti-sports-token": String(env.ETI_SPORTS_PAPER_TOKEN), "content-type": "application/json" };
       ctx.waitUntil((async () => {
         const scan = await app.fetch(new Request(`https://eti.internal/api/sports/football/next?limit=${Math.max(1, Math.min(12, Number(env.ETI_SPORTS_AUTO_SCAN_LIMIT || 1)))}&automatic=1`, { headers }), env);

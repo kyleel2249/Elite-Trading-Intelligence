@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { withSports } from "./route.ts";
+import { withSports, ensureSportsMatchResultsTable, bookmakerTitle } from "./route.ts";
 
 const base={fetch:()=>new Response("base")};
 test("sports dashboard is served as a separate paper-only workspace",async()=>{
@@ -35,4 +35,22 @@ test("historical football result sync is protected by the paper token",async()=>
 test("sports dashboard exposes UEFA Nations League scanning and accessible 3D responsive controls",async()=>{
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/sports"),{} as any);const html=await r.text();
  assert.match(html,/UEFA Nations League/);assert.match(html,/Scan Nations League matches/);assert.match(html,/perspective:1400px/);assert.match(html,/prefers-reduced-motion/);assert.match(html,/focus-visible/);
+test("sports dashboard exposes a SportyBet-only odds filter",async()=>{
+ const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/sports"),{} as any);const html=await r.text();
+ assert.match(html,/SportyBet only/);assert.match(html,/SportyBet odds were not returned/);
+});
+test("D1 self-heal creates the missing match-results table and both lookup indexes idempotently",async()=>{
+ const statements:string[]=[];
+ const fakeDb={prepare(sql:string){return{run:async()=>{statements.push(sql);return{success:true};}};}} as any;
+ await ensureSportsMatchResultsTable(fakeDb);
+ assert.equal(statements.length,3);
+ assert.match(statements[0],/CREATE TABLE IF NOT EXISTS sports_match_results/i);
+ for(const column of ["fixture_id","played_at","competition","country","home_team","away_team","home_goals","away_goals","source","updated_at"])assert.match(statements[0],new RegExp("\\b"+column+"\\b","i"));
+ assert.match(statements[1],/sports_match_results_played_at_idx/i);
+ assert.match(statements[2],/sports_match_results_competition_played_at_idx/i);
+});
+test("SportyBet bookmaker slug is displayed with its canonical name",()=>{
+ assert.equal(bookmakerTitle("sportybet"),"SportyBet");
+ assert.equal(bookmakerTitle("SPORTYBET"),"SportyBet");
+ assert.equal(bookmakerTitle("pinnacle"),"pinnacle");
 });
