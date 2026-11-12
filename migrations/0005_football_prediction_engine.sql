@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS sports_model_predictions (
   sample_size INTEGER NOT NULL,
   actual_outcome TEXT CHECK(actual_outcome IN ('H','D','A') OR actual_outcome IS NULL),
   settled_at INTEGER,
+  best_market TEXT,
   best_selection TEXT,
   best_odds REAL,
   best_probability REAL,
