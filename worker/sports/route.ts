@@ -92,6 +92,17 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
        await db(env)!.prepare("INSERT INTO sports_match_results (fixture_id,played_at,competition,country,home_team,away_team,home_goals,away_goals,source,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fixture_id) DO UPDATE SET played_at=excluded.played_at,home_goals=excluded.home_goals,away_goals=excluded.away_goals,updated_at=excluded.updated_at").bind(f.fixtureId,Date.parse(f.startTime),f.tournamentName||null,f.categoryName||null,f.participant1Name,f.participant2Name,hg,ag,"OddsPapi",now).run();
        const outcome=hg>ag?"H":hg<ag?"A":"D";
        await db(env)!.prepare("UPDATE sports_model_predictions SET actual_outcome=?,settled_at=? WHERE fixture_id=? AND actual_outcome IS NULL").bind(outcome,now,f.fixtureId).run();
+       const openBets=await db(env)!.prepare("SELECT id,selection,odds,stake_cents FROM sports_bets WHERE event_id=? AND status='OPEN'").bind(f.fixtureId).all<any>();
+       for(const bet of openBets.results||[]){
+         const selected=String(bet.selection||"").toLowerCase();
+         const won=(selected==="home"&&outcome==="H")||(selected==="draw"&&outcome==="D")||(selected==="away"&&outcome==="A");
+         const valid=["home","draw","away"].includes(selected);if(!valid)continue;
+         const stake=Number(bet.stake_cents),gross=won?Math.round(stake*Number(bet.odds)):0,profit=gross-stake;
+         await db(env)!.batch([
+           db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(won?"WON":"LOST",profit,now,bet.id),
+           db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1 AND changes()=1").bind(gross,now)
+         ]);
+       }
        saved++;
      }
      if(automatic)await finishJob(db(env)!,"football-history-sync","OK","Saved "+saved+" results; skipped "+skipped);return reply({ok:true,provider:"OddsPapi",fixtures_found:finished.length,results_saved:saved,skipped,history_total:await db(env)!.prepare("SELECT COUNT(*) AS n FROM sports_match_results").first()});
