@@ -64,6 +64,7 @@ const BODY = `
  <a class="item" data-view="agents" href="#agents">AI Agents</a>
  <a class="item" data-view="elite" href="#elite">Elite Trader Research</a>
  <h4>Intelligence</h4>
+ <a class="item" href="/sports">Sports Betting Intelligence</a>
  <a class="item" data-view="intel" href="#intel">Global Intelligence</a>
  <a class="item" data-view="intel" data-anchor="p-sec" href="#intel">Institutional Intelligence</a>
  <a class="item" data-view="security" href="#security">Security Centre</a>
