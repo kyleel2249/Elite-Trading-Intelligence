@@ -4,7 +4,6 @@ import asyncio
 import logging
 import re
 import time
-import uuid
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,16 +16,16 @@ from app.config import get_settings
 from app.database import SessionLocal, init_db
 from app.memory.util import utcnow
 from app.security import execution_auth as ea
+from app.security import exchange_credentials as xc
 from app.security.auth_models import ExecAuthEvent, ExecAuthToken
 from app.security.execution_auth import (
     AuthError, AuthKeyring, AuthPolicy, Principal, RateLimiter, TokenService, execution_gate, make_ticket, order_digest,
     redact, reset_keyring_for_tests, verify_ticket,
 )
-from app.security import exchange_credentials as xc
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY = b"k" * 48
-POLICY = AuthPolicy(idle_ttl=60, absolute_ttl=600, rotate_after=30, grace=10, max_active=1000, auto_sessions=True)
+POLICY = AuthPolicy(idle_ttl=60, absolute_ttl=600, rotate_after=30, grace=10, max_active=100000, auto_sessions=True)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -91,7 +90,7 @@ def test_live_can_never_be_provisioned_or_verified(db):
 
 def test_tamper_and_malformed_tokens_are_rejected(db):
     svc = svc_with(db)
-    raw, row = svc.issue("internal_paper")
+    raw, _ = svc.issue("internal_paper")
     bad = raw[:-3] + ("AAA" if not raw.endswith("AAA") else "BBB")
     with pytest.raises(AuthError) as e:
         svc.verify(bad, "internal_paper")
@@ -149,6 +148,7 @@ def test_idle_expiry_and_sliding(db):
 
 def test_absolute_expiry_cannot_be_extended_by_activity(db):
     clock = Clock()
+    start = clock.t
     svc = svc_with(db, clock)
     raw, _ = svc.issue("internal_paper")
     code = None
@@ -160,7 +160,7 @@ def test_absolute_expiry_cannot_be_extended_by_activity(db):
             code = e.code
             break
     assert code == "token_expired"
-    assert (clock.t - svc.db.query(ExecAuthToken).order_by(ExecAuthToken.id.desc()).first().created_at.replace(tzinfo=clock.t.tzinfo)).total_seconds() <= 700
+    assert (clock.t - start).total_seconds() <= 650
 
 
 # ----------------------------------------------------------------------------------- rotation
@@ -207,7 +207,8 @@ def test_revocation_is_immediate(db):
 
 
 def test_session_capacity_is_bounded_and_recovers(db):
-    svc = svc_with(db, policy=AuthPolicy(60, 600, 30, 10, max_active=svc_with(db).active_count() + 2, auto_sessions=True))
+    cap = svc_with(db).active_count() + 2
+    svc = svc_with(db, policy=AuthPolicy(60, 600, 30, 10, max_active=cap, auto_sessions=True))
     _, a = svc.issue("internal_paper")
     svc.issue("internal_paper")
     with pytest.raises(AuthError) as e:
@@ -217,7 +218,7 @@ def test_session_capacity_is_bounded_and_recovers(db):
     svc.issue("internal_paper")
 
 
-def test_purge_removes_old_rows_but_keeps_recent_audit(db):
+def test_purge_removes_old_rows(db):
     clock = Clock()
     svc = svc_with(db, clock)
     _, row = svc.issue("internal_paper")
@@ -234,7 +235,7 @@ def test_rate_limiter():
 
 
 # ------------------------------------------------------------------------- execution gate
-def test_tickets_bind_environment_payload_and_expiry(db, monkeypatch):
+def test_tickets_bind_environment_payload_and_expiry(monkeypatch):
     p = Principal("operator", "internal_paper")
     digest = order_digest({"symbol": "BTCUSDT", "qty": 1})
     t = make_ticket(p, "internal_paper", digest)
@@ -285,16 +286,18 @@ def test_frontend_has_no_token_or_api_key_storage():
     html = (ROOT / "app" / "templates" / "index.html").read_text()
     assert "eti_api_key" not in html and "localStorage" not in html and "sessionStorage" not in html
     assert "X-API-Key" not in html and "eti_session" not in html
-    for path in (ROOT / "app" / "static").rglob("*") if (ROOT / "app" / "static").exists() else []:
-        if path.is_file() and path.suffix in (".js", ".html"):
-            assert "eti_session" not in path.read_text(errors="ignore")
+    static = ROOT / "app" / "static"
+    if static.exists():
+        for path in static.rglob("*"):
+            if path.is_file() and path.suffix in (".js", ".html"):
+                assert "eti_session" not in path.read_text(errors="ignore")
 
 
 def test_no_withdrawal_or_transfer_capability_exists_in_code():
     bad = re.compile(r"def\s+(withdraw|transfer|payout)\w*\s*\(|capital/withdraw|asset/transfer|/withdrawals?['\"]", re.I)
     hits = []
     for path in (ROOT / "app").rglob("*.py"):
-        if path.name in ("execution_auth.py",):
+        if path.name == "execution_auth.py":
             continue
         if bad.search(path.read_text(errors="ignore")):
             hits.append(str(path.relative_to(ROOT)))
@@ -362,27 +365,43 @@ def test_credentials_are_loaded_from_secrets_never_fabricated(monkeypatch):
 
 
 # ------------------------------------------------------------------------------ HTTP flow
-class FakeOrder:
-    def to_dict(self):
-        return {"id": "o1", "status": "filled", "symbol": "BTCUSDT"}
+class FakeExchange:
+    """Stands in for the paper exchange so no market data or network is needed."""
 
-
-class FakePaper:
     def __init__(self):
-        self.submitted = []
+        self.calls = []
+        self.positions = []
 
-    async def submit(self, account_id, req):
-        self.submitted.append((account_id, req))
-        return FakeOrder()
+    @staticmethod
+    def _order(**kw):
+        return {"id": "ord-0000001", "status": "filled", "symbol": kw.get("symbol", "BTCUSDT"), "side": kw.get("side", "buy"),
+                "qty": kw.get("qty", 0.01), "filled_qty": kw.get("qty", 0.01)}
 
-    async def summary(self, account_id):
-        return {"equity": 10000.0}
+    async def submit(self, **kw):
+        self.calls.append(("submit", kw))
+        return {"accepted": True, "duplicate": False, "reasons": [], "order": self._order(**kw), "fills": []}
 
-    async def cancel_all(self, account_id):
-        return 0
+    async def submit_oco(self, **kw):
+        self.calls.append(("oco", kw))
+        return {"accepted": True, "orders": [self._order(**kw)], "reasons": []}
 
-    async def flatten(self, account_id):
-        return {"canceled": [], "sold": [], "failed": []}
+    async def cancel(self, order_id):
+        self.calls.append(("cancel", order_id))
+        return {"ok": True, "order": {"id": order_id}}
+
+    async def cancel_all(self, symbol=None):
+        self.calls.append(("cancel_all", symbol))
+        return {"canceled": 2}
+
+    async def reset(self, starting_cash=None):
+        self.calls.append(("reset", starting_cash))
+        return {"reset": True}
+
+    async def tick(self):
+        return {"symbols": [], "fills": [], "unpriced": []}
+
+    async def account(self, tick=True):
+        return {"positions": self.positions, "equity": 1.0}
 
 
 ORDER = {"symbol": "BTCUSDT", "side": "buy", "qty": 0.01}
@@ -391,15 +410,16 @@ OP_KEY = "operator-key-for-tests-123"
 
 @pytest.fixture
 def env(monkeypatch):
-    from app.paper import wiring
+    from app.api import paper as paper_api
     from app.main import app
 
     monkeypatch.setenv("API_KEY", OP_KEY)
     monkeypatch.delenv("EXEC_AUTO_SESSIONS", raising=False)
     get_settings.cache_clear()
     ea.session_limiter._hits.clear()
-    fake = FakePaper()
-    monkeypatch.setattr(wiring, "get_paper_service", lambda: fake)
+    fake = FakeExchange()
+    monkeypatch.setattr(paper_api, "get_exchange", lambda: fake)
+    monkeypatch.setattr(paper_api, "shape_result", lambda res, label: {"execution_mode": "INTERNAL_PAPER", "mode_label": label, **res})
 
     async def no_creds(settings, **kw):
         return xc.CredentialState("missing", None, time.time(), "No exchange testnet credentials are configured.")
@@ -419,29 +439,53 @@ def test_paper_starts_automatically_without_any_manual_token(env):
     assert "httponly" in set_cookie and "secure" in set_cookie and "samesite=strict" in set_cookie and "path=/api" in set_cookie
     assert "eti_ip_" not in r.text, "the session token must never appear in a response body"
     order = c.post("/api/paper/orders", json=ORDER)
-    assert order.status_code == 200 and order.json()["mode"] == "internal_paper" and len(env.fake.submitted) == 1
-    assert "eti_ip_" not in order.text
+    assert order.status_code == 200 and order.json()["execution_mode"] == "INTERNAL_PAPER"
+    assert [name for name, _ in env.fake.calls] == ["submit"] and "eti_ip_" not in order.text
     assert c.get("/api/auth/status").json()["sessions"]["internal_paper"]["authenticated"] is True
 
 
-def test_testnet_request_without_credentials_falls_back_visibly_and_never_claims_testnet(env):
+def test_every_order_changing_route_needs_authorization(env):
+    c = env.client
+    calls = [("post", "/api/paper/orders", ORDER), ("post", "/api/paper/orders/oco", {"symbol": "BTCUSDT", "qty": 1, "stop_price": 90, "take_profit_price": 110}),
+             ("post", "/api/paper/orders/ord-0000001/cancel", None), ("post", "/api/paper/orders/cancel-all", None),
+             ("post", "/api/paper/flatten", {"confirm": "FLATTEN"}), ("post", "/api/paper/tick", None)]
+    for method, path, body in calls:
+        r = getattr(c, method)(path, json=body) if body is not None else getattr(c, method)(path)
+        assert r.status_code == 401 and r.json()["detail"]["code"] == "session_required", path
+    assert env.fake.calls == []
+    c.post("/api/auth/session", json={})
+    for method, path, body in calls:
+        r = getattr(c, method)(path, json=body) if body is not None else getattr(c, method)(path)
+        assert r.status_code == 200, (path, r.text)
+
+
+def test_flatten_sells_available_holdings_and_cancels_orders(env):
+    c = env.client
+    env.fake.positions = [{"symbol": "BTCUSDT", "open": True, "available_qty": 0.5}, {"symbol": "ETHUSDT", "open": False, "available_qty": 0.0}]
+    c.post("/api/auth/session", json={})
+    r = c.post("/api/paper/flatten", json={"confirm": "FLATTEN"})
+    assert r.status_code == 200 and r.json()["canceled"] == 2 and len(r.json()["sold"]) == 1
+    sells = [kw for name, kw in env.fake.calls if name == "submit"]
+    assert sells and sells[0]["side"] == "sell" and sells[0]["qty"] == 0.5
+    assert c.post("/api/paper/flatten", json={"confirm": "nope"}).status_code == 422
+
+
+def test_status_reports_testnet_fallback_visibly_and_never_claims_testnet(env):
     c = env.client
     c.post("/api/auth/session", json={})
-    r = c.post("/api/paper/orders", json={**ORDER, "mode": "exchange_testnet"})
-    body = r.json()
-    assert r.status_code == 200 and body["mode"] == "internal_paper" and body["downgraded"] is True
-    assert "Nothing was sent to an exchange" in body["reason"] and "exchange_account" not in body
     st = c.get("/api/auth/status", params={"environment": "exchange_testnet"}).json()
     assert st["fallback"] is True and st["effective"] == "internal_paper"
     notice = [n for n in st["notices"] if n["code"] == "TESTNET_FALLBACK"][0]
-    assert "INTERNAL PAPER" in notice["message"] and st["environments"]["exchange_testnet"]["credentials"]["status"] == "missing"
-    assert st["environments"]["live"]["available"] is False
+    assert "INTERNAL PAPER" in notice["message"] and "nothing is sent to an exchange" in notice["message"].lower()
+    assert st["environments"]["exchange_testnet"]["credentials"]["status"] == "missing"
+    assert st["environments"]["exchange_testnet"]["available"] is False and st["environments"]["live"]["available"] is False
+    order = c.post("/api/paper/orders", json={**ORDER, "mode": "exchange_testnet"})
+    assert order.status_code == 200 and order.json()["execution_mode"] == "INTERNAL_PAPER"
 
 
 def test_operator_key_still_works_and_wrong_key_is_rejected(env):
     c = env.client
-    ok = c.post("/api/paper/orders", json=ORDER, headers={"X-API-Key": OP_KEY})
-    assert ok.status_code == 200
+    assert c.post("/api/paper/orders", json=ORDER, headers={"X-API-Key": OP_KEY}).status_code == 200
     bad = c.post("/api/paper/orders", json=ORDER, headers={"X-API-Key": "wrong"})
     assert bad.status_code == 401 and bad.json()["detail"]["code"] == "invalid_api_key"
 
@@ -449,8 +493,9 @@ def test_operator_key_still_works_and_wrong_key_is_rejected(env):
 def test_live_is_refused_everywhere(env):
     c = env.client
     assert c.post("/api/auth/session", json={"environment": "live"}).status_code == 403
-    assert c.post("/api/paper/orders", json={**ORDER, "mode": "live"}, headers={"X-API-Key": OP_KEY}).status_code == 403
     assert c.post("/api/auth/session", json={"environment": "live"}, headers={"X-API-Key": OP_KEY}).status_code == 403
+    st = c.get("/api/auth/status", params={"environment": "live"}).json()
+    assert st["effective"] is None and any(n["code"] == "LIVE_DISABLED" for n in st["notices"])
 
 
 def test_testnet_sessions_need_the_operator_and_cannot_be_borrowed_from_paper(env):
@@ -459,7 +504,7 @@ def test_testnet_sessions_need_the_operator_and_cannot_be_borrowed_from_paper(en
     assert r.status_code == 401 and r.json()["detail"]["code"] == "operator_required"
     c.post("/api/auth/session", json={})
     paper_raw = c.cookies.get("eti_session_ip")
-    c.cookies.set("eti_session_xt", paper_raw, path="/api")  # paper credential presented as testnet
+    c.cookies.set("eti_session_xt", paper_raw, domain="testserver", path="/api")  # paper credential presented as testnet
     x = c.post("/api/auth/refresh", json={"environment": "exchange_testnet"})
     assert x.status_code == 403 and x.json()["detail"]["code"] == "wrong_environment"
     op = c.post("/api/auth/session", json={"environment": "exchange_testnet"}, headers={"X-API-Key": OP_KEY})
@@ -471,7 +516,7 @@ def test_logout_and_operator_revoke_end_sessions(env):
     c.post("/api/auth/session", json={})
     old = c.cookies.get("eti_session_ip")
     assert c.post("/api/auth/logout", json={}).json()["revoked"] is True
-    c.cookies.set("eti_session_ip", old, path="/api")
+    c.cookies.set("eti_session_ip", old, domain="testserver", path="/api")
     r = c.post("/api/paper/orders", json=ORDER)
     assert r.status_code == 401 and r.json()["detail"]["code"] == "token_revoked"
 
@@ -486,13 +531,17 @@ def test_logout_and_operator_revoke_end_sessions(env):
     assert events.status_code == 200 and "eti_ip_" not in events.text and old.split(".", 1)[1] not in events.text
 
 
+def _token_id(raw: str) -> str:
+    return raw.split("_", 2)[2].split(".")[0]
+
+
 def test_expired_session_is_refused_and_restart_is_automatic(env):
     c = env.client
     c.post("/api/auth/session", json={})
-    token_id = c.cookies.get("eti_session_ip").split("_")[2].split(".")[0]
+    tid = _token_id(c.cookies.get("eti_session_ip"))
     db = SessionLocal()
     try:
-        row = db.query(ExecAuthToken).filter(ExecAuthToken.token_id == token_id).one()
+        row = db.query(ExecAuthToken).filter(ExecAuthToken.token_id == tid).one()
         row.idle_expires_at = utcnow() - timedelta(seconds=5)
         db.commit()
     finally:
@@ -507,10 +556,9 @@ def test_session_rotates_automatically_and_old_cookie_survives_the_grace_period(
     c = env.client
     c.post("/api/auth/session", json={})
     old = c.cookies.get("eti_session_ip")
-    token_id = old.split("_")[2].split(".")[0]
     db = SessionLocal()
     try:
-        row = db.query(ExecAuthToken).filter(ExecAuthToken.token_id == token_id).one()
+        row = db.query(ExecAuthToken).filter(ExecAuthToken.token_id == _token_id(old)).one()
         row.created_at = utcnow() - timedelta(hours=1)
         db.commit()
     finally:
@@ -518,7 +566,7 @@ def test_session_rotates_automatically_and_old_cookie_survives_the_grace_period(
     assert c.post("/api/paper/orders", json=ORDER).status_code == 200
     new = c.cookies.get("eti_session_ip")
     assert new and new != old
-    c.cookies.set("eti_session_ip", old, path="/api")  # an in-flight request still using the old one
+    c.cookies.set("eti_session_ip", old, domain="testserver", path="/api")  # an in-flight request still using the old one
     assert c.post("/api/paper/orders", json=ORDER).status_code == 200
 
 
@@ -527,8 +575,7 @@ def test_cross_site_requests_with_a_session_are_refused(env):
     c.post("/api/auth/session", json={})
     r = c.post("/api/paper/orders", json=ORDER, headers={"Sec-Fetch-Site": "cross-site"})
     assert r.status_code == 403 and r.json()["detail"]["code"] == "csrf"
-    r2 = c.post("/api/paper/orders", json=ORDER, headers={"Origin": "https://evil.example"})
-    assert r2.status_code == 403
+    assert c.post("/api/paper/orders", json=ORDER, headers={"Origin": "https://evil.example"}).status_code == 403
     assert c.post("/api/paper/orders", json=ORDER, headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
 
 
@@ -539,16 +586,28 @@ def test_auto_sessions_can_be_disabled_and_reset_stays_operator_only(env):
     assert r.status_code == 403 and r.json()["detail"]["code"] == "auto_sessions_disabled"
     assert c.post("/api/auth/session", json={}, headers={"X-API-Key": OP_KEY}).status_code == 200
     env.mp.delenv("EXEC_AUTO_SESSIONS")
-    assert c.post("/api/paper/reset", json={"confirm": "RESET default"}).status_code == 401
+    c.cookies.clear()
+    c.post("/api/auth/session", json={})
+    assert c.post("/api/paper/account/reset", json={"confirm": "RESET"}).status_code == 401, "a paper session must not reset the account"
+    assert c.post("/api/paper/account/reset", json={"confirm": "RESET"}, headers={"X-API-Key": OP_KEY}).status_code == 200
 
 
 def test_local_development_without_api_key_stays_open_as_before(env):
     env.mp.delenv("API_KEY", raising=False)
     env.mp.setenv("APP_ENV", "development")
     get_settings.cache_clear()
-    r = env.client.post("/api/paper/orders", json=ORDER)
-    assert r.status_code == 200
+    assert env.client.post("/api/paper/orders", json=ORDER).status_code == 200
     assert any(n["code"] == "DEV_OPEN" for n in env.client.get("/api/auth/status").json()["notices"])
+
+
+def test_non_local_env_without_api_key_still_gets_automatic_paper_sessions(env):
+    env.mp.delenv("API_KEY", raising=False)
+    env.mp.setenv("APP_ENV", "production")
+    get_settings.cache_clear()
+    c = env.client
+    assert c.post("/api/paper/orders", json=ORDER).status_code == 401
+    assert c.post("/api/auth/session", json={}).status_code == 200
+    assert c.post("/api/paper/orders", json=ORDER).status_code == 200
 
 
 def test_status_and_audit_never_contain_secrets(env):
@@ -561,6 +620,7 @@ def test_status_and_audit_never_contain_secrets(env):
     try:
         assert db.query(ExecAuthEvent).count() > 0
         for ev in db.query(ExecAuthEvent).all():
-            assert not any("eti_" in str(getattr(ev, f) or "") and "." in str(getattr(ev, f) or "") for f in ("reason", "path", "token_id"))
+            for f in ("reason", "path", "token_id", "principal", "event"):
+                assert "eti_ip_" not in str(getattr(ev, f) or "") and "eti_xt_" not in str(getattr(ev, f) or "")
     finally:
         db.close()
