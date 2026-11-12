@@ -79,3 +79,14 @@ ETI_DAILY_RISK_PCT=0.5
 # UTC hour (0-23) after which the cron generates and stores the day's report on weekdays (default 6); ETI_DAILY_ENABLED=false turns it off
 ETI_DAILY_HOUR_UTC=6
 ETI_DAILY_ENABLED=true
+
+# Binance USDT-M futures testnet (keys from testnet.binancefuture.com; never the live exchange)
+BINANCE_FUTURES_API_KEY=
+BINANCE_FUTURES_SECRET_KEY=
+# Futures paper simulation (optional; defaults shown)
+ETI_PERP_FEE_TAKER_BPS=5
+ETI_PERP_FEE_MAKER_BPS=2
+ETI_PERP_SLIPPAGE_BPS=5
+ETI_PERP_MMR=0.005
+ETI_PERP_MAX_LEVERAGE=50
+ETI_PERP_MIN_NOTIONAL=5

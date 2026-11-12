@@ -14,6 +14,7 @@ import { handleExecution } from "./execution.ts";
 import { handlePortfolio } from "./portfolio/routes.ts";
 import { CALC_CSS, CALC_HTML, CALC_JS } from "./calculator/ui.ts";
 import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
+import { PERP_CSS, PERP_HTML, PERP_JS, PERP_ORDER_HTML } from "./perp/ui.ts";
 import type { ExecutionEnv } from "./execution.ts";
 import { handleMarket } from "./market.ts";
 import { handleSignals } from "./signals.ts";
@@ -120,6 +121,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 @media(max-width:700px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
 ${PORTFOLIO_CSS}
 ${CALC_CSS}
+${PERP_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
@@ -150,9 +152,10 @@ ${CALC_CSS}
 <label>Amount (<span id="orderQuote">USDT</span>)<input id="orderAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter amount to trade"><small id="orderAmountNote" class="mut" aria-live="polite">Type an amount and the quantity is filled in at the reference price.</small></label>
 <label id="limitPriceWrap" style="display:none">Limit price<input id="orderLimitPrice" type="number" min="0" step="any" placeholder="Enter limit price"></label>
 <label id="stopPriceWrap" style="display:none">Stop price<input id="orderStopPrice" type="number" min="0" step="any" placeholder="Trigger price"></label>
-<label>Time in force<select id="orderTif"><option value="gtc">GTC</option><option value="day">DAY (Alpaca)</option><option value="ioc">IOC (Binance)</option></select></label>
+<label class="spotonly">Time in force<select id="orderTif"><option value="gtc">GTC</option><option value="day">DAY (Alpaca)</option><option value="ioc">IOC (Binance)</option></select></label>
 <label>Operator ID<input id="operatorId" value="dashboard-operator" maxlength="80"></label>
-${PLAN_HTML}
+${PERP_ORDER_HTML}
+<div class="spotonly" style="display:contents">${PLAN_HTML}</div>
 </div>
 <div id="authBanner" class="authbanner" role="status" aria-live="polite">Starting authenticated sessions…</div>
 <div id="authEnvs" class="authenvs" aria-label="Execution environments"></div>
@@ -190,6 +193,7 @@ ${PLAN_HTML}
 </section>
 ${PORTFOLIO_HTML}
 ${CALC_HTML}
+${PERP_HTML}
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
 
@@ -534,7 +538,6 @@ function selectedOrder(){
  return order;
 }
 function orderValidation(o,requireCredentials=true){
- if(symMkt()==='futures')return 'Futures pairs are chart-only here. Switch Market to Spot to place an order.';
  if(!/^[A-Z0-9._-]{2,24}$/.test(o.symbol))return 'Enter a valid symbol.';
  if(!Number.isFinite(o.quantity)||o.quantity<=0)return 'Enter a quantity greater than zero.';
  if(o.type==='limit'&&(!Number.isFinite(o.limitPrice)||o.limitPrice<=0))return 'Enter a valid limit price.';
@@ -615,7 +618,7 @@ async function submitOrder(side){
  }catch(e){$('orderOutput').textContent='Order submission failed before a response was received: '+e.message+' | Check the audit history before retrying.';pfKick();}
 }
 $('orderType').onchange=()=>{const t=$('orderType').value;$('limitPriceWrap').style.display=t==='limit'?'flex':'none';$('stopPriceWrap').style.display=t==='stop'?'flex':'none';};
-$('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();};
+$('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();if(perpOn())perpLoad();};
 /* ===== Chart trading + profit & leverage calculator ===== */
 function drawChartLines(x,g,py,labels){chartLines.forEach(l=>{if(!(l.price>0))return;const y=py(l.price);x.lineWidth=1.2;x.strokeStyle=l.color;x.setLineDash(l.dash||[4,3]);x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.setLineDash([]);labels.push({y:y,t:l.label,c:l.color});});}
 function setChartLines(src,lines){chartLines=chartLines.filter(l=>l.src!==src).concat(lines.map(l=>Object.assign({src:src},l)));drawChart();}
@@ -692,16 +695,16 @@ syncAmount();
 $('useMarketPrice').onclick=()=>{const v=Number(String($('last').textContent).replace(/,/g,''));if(!Number.isFinite(v)||v<=0){$('orderOutput').textContent='No live market price is available yet.';return;}$('orderType').value='limit';$('orderType').onchange();$('orderLimitPrice').value=String(v);};
 $('orderSymbol').onchange=()=>{const v=$('orderSymbol').value.trim().toUpperCase();$('orderSymbol').value=v;const opt=Array.prototype.find.call($('symbol').options,o=>o.value===v);if(opt&&$('symbol').value!==v){$('symbol').value=v;resetAndLoad();}syncOrderMarket();};
 $('symbol').addEventListener('change',syncOrderMarket);
-$('previewOrder').onclick=()=>{const o=selectedOrder();const problem=orderValidation(o,false);if(problem){$('orderOutput').textContent=problem;return;}renderPreview(o);};
-$('buyOrder').onclick=()=>submitOrder('buy');
-$('sellOrder').onclick=()=>submitOrder('sell');
+$('previewOrder').onclick=()=>{if(perpOn()){perpPreview(window.etiSelectedSide||'buy');return;}const o=selectedOrder();const problem=orderValidation(o,false);if(problem){$('orderOutput').textContent=problem;return;}renderPreview(o);};
+$('buyOrder').onclick=()=>{window.etiSelectedSide='buy';perpOn()?perpSubmit('buy'):submitOrder('buy');};
+$('sellOrder').onclick=()=>{window.etiSelectedSide='sell';perpOn()?perpSubmit('sell'):submitOrder('sell');};
 $('clearExecutionSecrets').onclick=()=>{$('executionToken').value='';$('orderOutput').textContent='Typed credentials cleared; sessions are being replaced with fresh tokens.';Promise.all(['paper','testnet'].map(e=>fetch('/api/auth/revoke',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({environment:e})}).catch(()=>null))).then(startSessions);$('executionHistory').textContent='Enter your execution token, then refresh.';};
 $('refreshExecutionHistory').onclick=refreshExecutionHistory;
 async function loadSignal(){
  const sym=$('symbol').value, iv=$('interval').value, seq=++sigSeq;
  $('signalAction').textContent='ANALYSING…';$('signalAction').style.color='#8fa3bd';
  try{
-  const r=await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
+  const r=await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider&&!mkt()?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
   const d=await r.json();
   if(seq!==sigSeq)return;
   if(!r.ok)throw Error(d.error||('HTTP '+r.status));
@@ -829,6 +832,7 @@ setInterval(loadSignal,60000);
 ${PORTFOLIO_JS}
 ${CALC_JS}
 pfInit();
+${PERP_JS}
 const SYM={all:[],market:'spot',venue:'',quote:'',cat:'',q:'',at:0,warn:''};
 function symRows(){let rows=SYM.market==='metals'?SYM.all.filter(r=>r[4]==='metals'):SYM.all.filter(r=>r[3]===SYM.market);if(SYM.venue)rows=rows.filter(r=>symV(r)===SYM.venue);const seen={};return rows.map((r,i)=>[r,(SYM.market==='metals'&&r[3]!=='spot'?2:0)+(symV(r)==='binance'?0:1),i]).sort((a,b)=>a[1]-b[1]||a[2]-b[2]).map(x=>x[0]).filter(r=>seen[r[0]]?false:(seen[r[0]]=1));}
 function symVisible(){const t=SYM.q.trim().toUpperCase();return symRows().filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));}
@@ -881,7 +885,8 @@ function symMarketChanged(){
  const rows=symRows(),cur=$('symbol').value;let want='';
  if(rows.length&&!rows.some(r=>r[0]===cur)){const d=SYM.market==='metals'?(rows.find(r=>r[1]==='XAU')||rows.find(r=>r[1]==='PAXG')||rows[0]):(rows.find(r=>r[0]==='BTCUSDT')||rows[0]);$('symbol').value=d[0];want=d[0];}
  symRebuild(want);$('orderSymbol').value=$('symbol').value;resetAndLoad();syncOrderMarket();
- if(symMkt()==='futures')$('orderOutput').textContent='Futures are chart-only here. Orders are placed on spot pairs.';
+ perpApplyMode();
+ if(symMkt()==='futures')$('orderOutput').textContent='Futures mode: set leverage, then Buy / Long or Sell / Short. Preview shows margin and liquidation price.';
  if(SYM.market==='metals'&&!rows.length)$('symCount').textContent='No metals pairs in the Binance list yet (list unavailable or none listed). Try again shortly.';
  etiMarketNote();
 }

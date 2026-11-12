@@ -103,6 +103,12 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `OPENFIGI_API_KEY` | secret | Optional OpenFIGI key for instrument lookup. |
 | `RESEND_API_KEY` | secret | Resend key for alert email. Absent = alerts recorded as 'not delivered'. |
 | `SEC_USER_AGENT` | config | User-Agent string SEC EDGAR requires (name and contact email). |
+| `ETI_PERP_FEE_TAKER_BPS` | config | Futures paper taker fee in basis points (default 5). |
+| `ETI_PERP_FEE_MAKER_BPS` | config | Futures paper maker fee in basis points (default 2). |
+| `ETI_PERP_SLIPPAGE_BPS` | config | Futures paper market/stop slippage in basis points (default 5). |
+| `ETI_PERP_MMR` | config | Futures paper maintenance margin rate used for liquidation price (default 0.005). |
+| `ETI_PERP_MAX_LEVERAGE` | config | Highest leverage the futures order routes accept (default 50). |
+| `ETI_PERP_MIN_NOTIONAL` | config | Smallest futures order notional in USDT (default 5). |
 
 Kinds: **secret** = private, never exposed to the browser or logs; **config** = non-sensitive setting; **binding** = Cloudflare KV/D1 resource; **legacy** = removed, ignored.
 

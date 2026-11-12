@@ -41,3 +41,14 @@ The dashboard polls (4 s with activity, 15 s idle, 60 s hidden tab, exponential 
 
 ## Verified / not verified
 Automated: ledger math, lifecycle, matching, auth isolation, broker parsers and sync against stubbed broker responses, UI script validity. Browser-verified against a harness using the real engine. Not verified: real Binance/Alpaca testnet traffic (no outbound network or credentials in the build environment), and deployed Cloudflare KV behaviour.
+
+## Futures (Binance USDT-M perpetuals)
+
+Futures orders use a separate event-sourced ledger (`worker/perp/`), stored under the environments `perp_paper` and `perp_testnet`; the spot ledger is untouched.
+
+- **Model:** one-way mode, isolated margin, USDT-margined. The wallet changes only through realized P&L and fees; margin is reserved, not spent. Available = wallet - position margin - resting-order margin.
+- **Liquidation price:** long `entry * (1 - margin/notional + mmr)`, short `entry * (1 + margin/notional - mmr)`, with one configurable maintenance rate (`ETI_PERP_MMR`, default 0.5%). Real Binance uses tiered rates, so the real liquidation price can differ.
+- **Paper (`perp_paper`):** fills on live Binance futures prices with taker 5 bps / maker 2 bps fees and 5 bps slippage. Resting orders and liquidations are matched against each closed 1m bar (liquidation, then stops, then limits). Funding is **not** simulated.
+- **Testnet (`perp_testnet`):** needs `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_SECRET_KEY`. Isolated margin and leverage are set before each order; fills and fees are recorded only from `userTrades`. Stop orders are not supported there. `/api/perp/sync` reconciles positions against the exchange. Tested with a mocked exchange only, not against the live testnet.
+- **Routes:** `/api/perp/{config,state,preview,order,close,cancel,sync}`; sessions are scoped paper to `perp_paper`, testnet to `perp_testnet`. The kill switch blocks new exposure but never reduce-only orders or cancels.
+- Not supported: COIN-M contracts, hedge mode, cross margin, funding payments.

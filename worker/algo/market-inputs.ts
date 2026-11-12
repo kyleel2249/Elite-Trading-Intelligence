@@ -20,8 +20,8 @@ export async function loadSignalInputs(env: MarketEnv, symbol: string, strategy:
   return { candles, depth, provider, failures };
 }
 /** Closed 1-minute bars (used for position management) and the latest fresh 1m close as a live reference price. */
-export async function loadMinuteBars(env: MarketEnv, symbol: string, providerParam: string | null, now: number): Promise<{ bars: Kline[]; price: number | null; provider: string }> {
-  const r = await getMarketData("klines", { symbol, interval: "1m", limit: 300 }, providerOrder(env, providerParam)), rows = r.data as Kline[], ms = TF_SECONDS["1m"] * 1000;
+export async function loadMinuteBars(env: MarketEnv, symbol: string, providerParam: string | null, now: number, market: "spot" | "futures" = "spot"): Promise<{ bars: Kline[]; price: number | null; provider: string }> {
+  const r = await getMarketData("klines", { symbol, interval: "1m", limit: 300, market }, providerOrder(env, providerParam)), rows = r.data as Kline[], ms = TF_SECONDS["1m"] * 1000;
   const closed = rows.filter(k => k[0] + ms <= now), last = rows.at(-1);
   const fresh = last && now - last[0] <= 3 * ms && now - last[0] >= -60_000;
   return { bars: closed, price: fresh && last![4] > 0 ? last![4] : null, provider: r.provider };

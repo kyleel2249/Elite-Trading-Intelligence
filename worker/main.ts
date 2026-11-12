@@ -44,6 +44,7 @@ import { runJournalCycle } from "./journal/sync.ts";
 import { withIdentity } from "./identity/routes.ts";
 import { withProviders, runProviderProbe } from "./providers/routes.ts";
 import { withBackup } from "./backup/routes.ts";
+import { withPerp, runPerpCycle } from "./perp/routes.ts";
 import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
 
@@ -68,7 +69,7 @@ const coreLayers: Array<(next: any) => any> = [
 const core: any = coreLayers.reduce((next: any, layer) => layer(next), base as any);
 
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
-const outerLayers: Array<(next: any) => any> = [withBackup, withProviders, withIdentity, withSecurityHeaders];
+const outerLayers: Array<(next: any) => any> = [withPerp, withBackup, withProviders, withIdentity, withSecurityHeaders];
 const app: any = outerLayers.reduce((next: any, layer) => layer(next), core);
 const inner: any = base;
 const MONITOR_CRON = "* * * * *";
@@ -100,6 +101,7 @@ export default {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
       ctx.waitUntil(runJournalCycle(env).then(() => undefined, () => undefined)); // journal backfill (throttled inside) and prediction evaluation
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills
+      ctx.waitUntil(runPerpCycle(env).then(() => undefined, e => console.error("futures cycle failed", e instanceof Error ? e.message : e))); // match resting futures paper orders and liquidations; sync futures testnet fills
       return;
     }
     ctx.waitUntil(runProviderProbe(env).then(() => undefined, () => undefined)); // refresh provider status and data freshness
