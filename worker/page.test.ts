@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { CALC_CSS, CALC_HTML, CALC_JS } from "./calculator/ui.ts";
 import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
 
 // Regression: the dashboard HTML lives in a template literal, so escapes like \n are
@@ -12,14 +13,14 @@ test("embedded dashboard script is valid JavaScript after template cooking", () 
   const start = src.indexOf("const html = `") + "const html = `".length;
   const end = src.indexOf("</script></body></html>`;") + "</script></body></html>".length;
   assert.ok(start > 13 && end > start, "html template not found");
-  const cooked = vm.runInNewContext("`" + src.slice(start, end) + "`", { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML }) as string;
+  const cooked = vm.runInNewContext("`" + src.slice(start, end) + "`", { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML, CALC_CSS, CALC_HTML, CALC_JS }) as string;
   const m = cooked.match(/<script>([\s\S]*)<\/script>/);
   assert.ok(m, "inline script missing");
   assert.doesNotThrow(() => new vm.Script(m![1]), "inline dashboard script has a syntax error");
 });
 
 test("portfolio fragments are safe to embed in the dashboard template (no backticks, template holes or backslashes)", () => {
-  for (const [name, frag] of Object.entries({ PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML })) {
+  for (const [name, frag] of Object.entries({ PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML, CALC_CSS, CALC_HTML, CALC_JS })) {
     assert.ok(!frag.includes("`") && !frag.includes("${") && !frag.includes("\\"), name + " contains an unsafe character");
   }
 });

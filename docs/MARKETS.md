@@ -170,3 +170,15 @@ Verdicts: `ready`, `caution`, `wait_for_session`, `needs_setup`, `analysis_only`
   flagged `futures_based`). Profile numbers are planning defaults, not measurements.
 * **Not verified live:** the sandbox cannot reach Binance, so the dropdown was checked in a real browser with a mocked symbol list. Which metal
   contracts exist depends on Binance at the time.
+
+
+## Profit and leverage calculator (dashboard)
+
+A planning panel under the portfolio section of the Worker dashboard. It places no orders and stores nothing (no browser storage, no server writes).
+Inputs: direction, entry, exit, stop, size by quantity or by margin, leverage (1-150x, slider to 125x), fee and slippage per side, funding/financing,
+maintenance margin, contract size (presets for crypto units, forex lots, gold and silver lots, shares), quote-to-account rate, optional target profit.
+Outputs: notional, margin, estimated liquidation price and distance, break-even price, gross/net P&L and ROI on margin at the exit and at the stop,
+risk:reward, the exit price needed for a target net profit, warnings (stop beyond liquidation, wrong-side stop, thin liquidation distance), and a
+1x-125x leverage ladder. The instrument preset follows the chart symbol through `/api/markets/classify`. Arithmetic: `worker/calculator/core.ts`
+(unit-tested against hand calculations and embedded verbatim in the page). Liquidation is a standard isolated-margin estimate, not the venue's figure;
+fee, slippage and maintenance defaults are assumptions; linear contracts only.

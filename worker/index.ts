@@ -12,6 +12,7 @@
 import { withMotion } from "./ui/motion.ts";
 import { handleExecution } from "./execution.ts";
 import { handlePortfolio } from "./portfolio/routes.ts";
+import { CALC_CSS, CALC_HTML, CALC_JS } from "./calculator/ui.ts";
 import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
 import type { ExecutionEnv } from "./execution.ts";
 import { handleMarket } from "./market.ts";
@@ -118,6 +119,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 .ev{margin:6px 0 0;padding-left:18px}.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 3px 3px 0;background:#4a5d78;vertical-align:middle}.dot.win{background:#21d69a}.dot.loss{background:#ff637d}.dot.hc{outline:2px solid #f0c674}
 @media(max-width:700px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
 ${PORTFOLIO_CSS}
+${CALC_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:12px;align-items:center"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
@@ -187,6 +189,7 @@ ${PLAN_HTML}
 <div id="calcOut" role="status" aria-live="polite"><span class="muted">Enter an entry price and press Calculate.</span></div>
 </section>
 ${PORTFOLIO_HTML}
+${CALC_HTML}
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
 
@@ -821,6 +824,7 @@ loadSignal();
 setInterval(loadSignal,60000);
 
 ${PORTFOLIO_JS}
+${CALC_JS}
 pfInit();
 const SYM={all:[],market:'spot',quote:'',cat:'',q:'',at:0,warn:''};
 function symRows(){if(SYM.market!=='metals')return SYM.all.filter(r=>r[3]===SYM.market);const seen={};return SYM.all.filter(r=>r[4]==='metals').sort((a,b)=>(a[3]===b[3]?0:a[3]==='spot'?-1:1)).filter(r=>seen[r[0]]?false:(seen[r[0]]=1));}
