@@ -86,6 +86,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_SPORTS_SCAN_INTERVAL_MINUTES` | config | Minimum minutes between scheduled global football odds scans (360 default, min 60). |
 | `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
 | `ETI_SESSION_SECRET_PREVIOUS` | secret | Previous signing secret, accepted during rotation. |
+| `ETI_SPORTS_PAPER_BANKROLL_CENTS` | config | Paper bankroll (in cents) for the sports paper-betting module. |
 | `ETI_UNIVERSE_BATCH` | config | Symbols scanned per scheduled universe run. |
 | `ETI_UNIVERSE_ENABLED` | config | Enables the scheduled universe scan. |
 | `ETI_UNIVERSE_MAX_SPREAD_BPS` | config | Skip symbols with a wider spread. |

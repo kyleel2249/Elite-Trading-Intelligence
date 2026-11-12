@@ -70,7 +70,7 @@ test("the cycle is off without a store, and without symbols or open signals", as
 
 test("a tradeable signal is recorded once, and a pair with an open signal is not re-recorded", async () => {
   liveExchange();
-  const kv = memoryKv(), env = { ETI_PRECISION_DATA: kv, ETI_PRECISION_SYMBOLS: "BTCUSDT" } as any;
+  const kv = memoryKv(), env = { ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx", ETI_PRECISION_SYMBOLS: "BTCUSDT" } as any;
   const first = await runPrecisionCycle(env, Date.now());
   assert.equal(first.status, "ok");
   assert.equal(first.recorded.length, 1);
@@ -85,14 +85,14 @@ test("a tradeable signal is recorded once, and a pair with an open signal is not
 test("one tick stays well inside the 50-subrequest limit", async () => {
   liveExchange();
   const kv = memoryKv();
-  await runPrecisionCycle({ ETI_PRECISION_DATA: kv, ETI_PRECISION_SYMBOLS: "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT", ETI_PRECISION_BATCH: "9" } as any, Date.now());
+  await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx", ETI_PRECISION_SYMBOLS: "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT", ETI_PRECISION_BATCH: "9" } as any, Date.now());
   assert.ok(fetchCount <= 4 * 9 + 4, `used ${fetchCount} fetches`);
   assert.ok(fetchCount <= 50);
 });
 
 test("pairs rotate across ticks", async () => {
   liveExchange();
-  const env = { ETI_PRECISION_DATA: memoryKv(), ETI_PRECISION_SYMBOLS: "BTCUSDT,ETHUSDT,SOLUSDT" } as any;
+  const env = { ETI_PRECISION_DATA: memoryKv(), ETI_PRECISION_SYMBOLS: "BTCUSDT,ETHUSDT,SOLUSDT", MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any;
   const a = await runPrecisionCycle(env, 0), b = await runPrecisionCycle(env, 300_000);
   assert.notEqual(a.evaluated[0].symbol, b.evaluated[0].symbol);
 });
@@ -101,7 +101,7 @@ test("an open signal is resolved from closed candles and stored as an outcome", 
   const kv = memoryKv();
   kv.data.set(ledgerKeys.open(), JSON.stringify([entry()]));
   fixedExchange(NOW, FILL_THEN_STOP);
-  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   assert.equal(r.status, "ok");
   assert.deepEqual(r.resolved.map(x => [x.id, x.status, x.netR]), [["seed1", "resolved", -1.05]]);
   assert.equal(json(kv, ledgerKeys.open()).length, 0);
@@ -115,7 +115,7 @@ test("a fetch failure leaves the signal open instead of guessing an outcome", as
   const kv = memoryKv();
   kv.data.set(ledgerKeys.open(), JSON.stringify([entry()]));
   globalThis.fetch = (async () => new Response("down", { status: 500 })) as typeof fetch;
-  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   assert.equal(r.resolved.length, 0);
   assert.ok(r.notes.some(n => /Could not fetch/.test(n)));
   assert.equal(json(kv, ledgerKeys.open()).length, 1);
@@ -126,7 +126,7 @@ test("resolution fetches are bounded", async () => {
   const syms = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT"];
   kv.data.set(ledgerKeys.open(), JSON.stringify(syms.map((s, i) => entry({ id: `s${i}`, symbol: s }))));
   fixedExchange(NOW, FILL_THEN_STOP);
-  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   assert.ok(fetchCount <= 4, `used ${fetchCount}`);
   assert.equal(r.resolved.length, 4);
   assert.equal(json(kv, ledgerKeys.open()).length, 2, "the rest wait for the next tick");
@@ -138,7 +138,7 @@ test("enough informative outcomes produce a usable calibration model and a prove
   kv.data.set(ledgerKeys.outcomes("intraday"), JSON.stringify(outcomes(samples, w => (w ? 1.4 : -1.05))));
   kv.data.set(ledgerKeys.open(), JSON.stringify([entry()]));
   fixedExchange(NOW, FILL_THEN_STOP);
-  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   assert.equal(r.refit.length, 1);
   assert.match(r.refit[0].calibration, /usable/);
   const model = json(kv, keys.calibration("intraday"));
@@ -153,7 +153,7 @@ test("an expectancy whose interval includes zero is stored as unproven (zero sam
   kv.data.set(ledgerKeys.outcomes("intraday"), JSON.stringify(outcomes(noiseSamples(120), (_w, i) => (i % 2 ? 0.9 : -0.8))));
   kv.data.set(ledgerKeys.open(), JSON.stringify([entry()]));
   fixedExchange(NOW, FILL_THEN_STOP);
-  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   assert.equal(r.refit.length, 1);
   assert.match(r.refit[0].expectancy, /unproven/);
   const ex = json(kv, keys.expectancy("intraday"));
@@ -165,7 +165,7 @@ test("negative expectancy is stored with its samples so the gate can block", asy
   kv.data.set(ledgerKeys.outcomes("intraday"), JSON.stringify(outcomes(noiseSamples(120), () => -0.6)));
   kv.data.set(ledgerKeys.open(), JSON.stringify([entry()]));
   fixedExchange(NOW, FILL_THEN_STOP);
-  await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   const ex = json(kv, keys.expectancy("intraday"));
   assert.ok(ex.expectancyR < 0 && ex.samples > 0);
 });
@@ -176,7 +176,7 @@ test("outcomes scored under a different configuration never feed calibration", a
   kv.data.set(ledgerKeys.outcomes("intraday"), JSON.stringify(old));
   kv.data.set(ledgerKeys.open(), JSON.stringify([entry()]));
   fixedExchange(NOW, FILL_THEN_STOP);
-  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   assert.match(r.refit[0].calibration, /not fitted/);
   assert.equal(kv.data.has(keys.calibration("intraday")), false);
 });
@@ -186,7 +186,7 @@ test("no refit below the minimum number of resolved outcomes", async () => {
   kv.data.set(ledgerKeys.outcomes("intraday"), JSON.stringify(outcomes(informativeSamples(MIN_FIT_OUTCOMES - 10), () => 1)));
   kv.data.set(ledgerKeys.open(), JSON.stringify([entry()]));
   fixedExchange(NOW, FILL_THEN_STOP);
-  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv } as any, NOW + 20 * BAR);
+  const r = await runPrecisionCycle({ ETI_PRECISION_DATA: kv, MARKET_PROVIDER_ORDER: "binance,bybit,okx" } as any, NOW + 20 * BAR);
   assert.equal(r.resolved.length, 1);
   assert.equal(r.refit.length, 0);
   assert.equal(kv.data.has(keys.expectancy("intraday")), false);

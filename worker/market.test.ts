@@ -122,7 +122,7 @@ test("parameter validation and provider order", async () => {
 
 test("diagnostics report per-host status/latency without secrets", async () => {
   mock((u) => u.host.includes("binance") ? { status: 403, body: "Forbidden" } : u.host === "api.bybit.com" ? { status: 200, body: bybitK(2) } : { status: 500, body: "" });
-  const res = await handleMarket(req("/api/market/diag?symbol=BTCUSDT&interval=1m"), {});
+  const res = await handleMarket(req("/api/market/diag?symbol=BTCUSDT&interval=1m"), { MARKET_PROVIDER_ORDER: "binance,bybit,okx" }); // binance first so the failover path under test is exercised
   assert.equal(res.status, 200);
   const d = await res.json() as any;
   const binance = d.providers.find((p: any) => p.provider === "binance");
