@@ -20,7 +20,7 @@ A key committed to a repository, browser bundle, log or source file must be revo
 - POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous eight days and stores unseen results for model training. Manual request body may include limit (1–30).
 - POST /api/sports/bets — paper-token protected; accepts an event_id only for a persisted ETI model VALUE_CANDIDATE. It uses the stored best market, selection, bookmaker, odds, model probability and stake recommendation. Manual arbitrary probabilities and stakes are rejected; optional stake_cents cannot exceed the model recommendation.
 - GET /api/sports/bets — paper-token protected; returns the separate sports bankroll and paper ledger.
-- POST /api/sports/bets/{id}/settle — manual settlement remains available for supported paper entries. The history sync automatically settles model-backed Full Time Result paper bets when final scores arrive. Other market bets are not auto-created by this model version.
+- POST /api/sports/bets/{id}/settle — manual settlement remains available for supported paper entries. The history sync automatically settles model-backed Full Time Result paper bets from the provider 90-minute `fulltime` score. It does not substitute the `result` score (which may include extra time) or a half-time score; if a regulation-time score is absent, settlement is deferred. Other market bets are not auto-created by this model version.
 
 ## Autonomous schedule and quota protection
 
@@ -49,7 +49,7 @@ The model refuses to publish team-specific probabilities when it has fewer than 
 
 ### Calibration and value gate
 
-Predictions are stored before kickoff and later labelled from final scores. After at least 100 resolved predictions, ETI fits a temperature-scaling calibration parameter using past out-of-sample predictions and reports Brier score and log loss. Stakes remain disabled unless the sample is at least 100 and the current model-quality gates pass (Brier <= 0.62 and log loss <= 1.15). These are conservative operational gates, not a guarantee of future performance.
+Predictions are stored before kickoff and later labelled from final scores. After at least 100 resolved predictions, ETI sorts labelled predictions chronologically, fits temperature scaling on the oldest 70%, and evaluates only on the newest 30% (at least 30 holdout matches). It reports holdout Brier score and log loss alongside the uncalibrated baseline. Calibration is rejected if it worsens either metric by more than 0.005, if Brier exceeds 0.62, or if log loss exceeds 1.08. The route independently enforces these gates before any stake can be recommended. These are conservative operational gates, not a guarantee of future performance.
 
 A value candidate requires at least 3% expected value at the best available price. The suggested stake uses 25% Kelly and is capped at 1% of the separate sports paper bankroll per event. If the model is uncalibrated, data is stale or insufficient, or there is no positive edge, stake is zero.
 
