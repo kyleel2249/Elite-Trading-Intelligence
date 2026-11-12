@@ -13,3 +13,6 @@
 | Markets covered | [MARKETS.md](MARKETS.md) |
 | Trade / no-trade logic | [READINESS.md](READINESS.md), [PRECISION_ENGINE.md](PRECISION_ENGINE.md) |
 | Prediction accountability | [PREDICTION_LEDGER.md](PREDICTION_LEDGER.md) |
+| Analytics endpoints (`/api/analytics/*`), status per route | [ANALYTICS.md](ANALYTICS.md) |
+| Which of the 31 analytics capabilities already exist, and gaps | [CAPABILITY_MAP.md](CAPABILITY_MAP.md) |
+| Calendar / token-unlock providers, pricing, keys, failover | [PROVIDERS.md](PROVIDERS.md) |
