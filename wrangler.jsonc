@@ -19,8 +19,10 @@
   },
   "vars": {
     "APP_ENV": "production",
-    "DATABASE_URL": "sqlite:///./eti.db",
+    "DATABASE_URL": "postgresql+psycopg2://user:pass@host:5432/eti",
     "ETI_EDGE": "native",
+    "ETI_EVENT_FEED_URL": "https://finnhub.io/api/v1/calendar/economic",
+    "ETI_FX_CANDLES_URL": "https://api.twelvedata.com/time_series",
     "ETI_KILL_SWITCH": "false",
     "PAPER_AUTOPILOT": "true",
     "MARKET_PROVIDER_ORDER": "binance,bybit,okx,bitget",
