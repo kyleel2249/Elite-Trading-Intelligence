@@ -72,7 +72,9 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
  if(p==="/api/sports/football/sync-history"&&req.method==="POST"){
    if(!authorized(req,env))return reply({error:"unauthorized"},401);
    if(!env.ODDSPAPI_API_KEY||!db(env))return reply({error:"history_sync_not_configured"},503);
-   const limit=Math.max(1,Math.min(30,Number((await jsonBody(req))?.limit||10)));
+   const body=await jsonBody(req);const automatic=body?.automatic===true;
+   if(automatic){try{const minutes=Math.max(360,Math.min(10080,Number((env as any).ETI_SPORTS_HISTORY_SYNC_MINUTES||720)));if(!await claimJob(db(env)!,"football-history-sync",Date.now(),minutes*60000))return reply({ok:true,skipped:true,reason:"history_sync_interval_not_elapsed"});}catch{return reply({error:"sports_job_state_not_ready",message:"Apply migration 0005 before enabling scheduled history sync."},503);}}
+   const limit=Math.max(1,Math.min(30,Number(body?.limit||10)));
    const now=Date.now(),from=new Date(now-8*24*60*60*1000),to=new Date(now);
    const baseUrl="https://api.oddspapi.io/v4/";
    const call=async(path:string,params:Record<string,string>)=>{const q=new URLSearchParams({...params,apiKey:env.ODDSPAPI_API_KEY!});const r=await fetch(baseUrl+path+"?"+q.toString(),{headers:{accept:"application/json"}});if(!r.ok)throw new Error("OddsPapi "+path+" HTTP "+r.status);return await r.json() as any;};
@@ -92,8 +94,8 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
        await db(env)!.prepare("UPDATE sports_model_predictions SET actual_outcome=?,settled_at=? WHERE fixture_id=? AND actual_outcome IS NULL").bind(outcome,now,f.fixtureId).run();
        saved++;
      }
-     return reply({ok:true,provider:"OddsPapi",fixtures_found:finished.length,results_saved:saved,skipped,history_total:await db(env)!.prepare("SELECT COUNT(*) AS n FROM sports_match_results").first()});
-   }catch(e){return reply({error:"football_history_sync_failed",message:e instanceof Error?e.message:"History provider unavailable"},502);}
+     if(automatic)await finishJob(db(env)!,"football-history-sync","OK","Saved "+saved+" results; skipped "+skipped);return reply({ok:true,provider:"OddsPapi",fixtures_found:finished.length,results_saved:saved,skipped,history_total:await db(env)!.prepare("SELECT COUNT(*) AS n FROM sports_match_results").first()});
+   }catch(e){if(u.searchParams.get("automatic")==="1"&&db(env)){try{await finishJob(db(env)!,"football-history-sync","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}return reply({error:"football_history_sync_failed",message:e instanceof Error?e.message:"History provider unavailable"},502);}
  }
  if(p==="/api/sports/events"&&req.method==="GET"){
    if(!env.ODDS_API_KEY)return reply({error:"odds_provider_not_configured",message:"Set the ODDS_API_KEY Worker secret to retrieve live bookmaker odds. No fixtures or odds are fabricated."},503);
