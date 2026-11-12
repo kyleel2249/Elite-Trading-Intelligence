@@ -46,9 +46,26 @@ import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
-const core = withSports(withJournal(withPro(withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any) as any) as any);
+
+// Layers are applied innermost first. Each step wraps the previous one, so the last entry is the outermost core layer.
+// Written as a sequential chain (instead of one deeply nested expression) so that bracket balance can never break the build again.
+const coreLayers: Array<(next: any) => any> = [
+  withAgents,
+  withFutures,
+  withAlgo,
+  withMarkets,
+  withCommand,
+  withPrecision,
+  withDailyReport,
+  withPro,
+  withJournal,
+  withSports,
+];
+const core: any = coreLayers.reduce((next: any, layer) => layer(next), base as any);
+
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
-const app = withSecurityHeaders(withIdentity(withProviders(withBackup(core as any) as any) as any) as any);
+const outerLayers: Array<(next: any) => any> = [withBackup, withProviders, withIdentity, withSecurityHeaders];
+const app: any = outerLayers.reduce((next: any, layer) => layer(next), core);
 const inner: any = base;
 const MONITOR_CRON = "* * * * *";
 
