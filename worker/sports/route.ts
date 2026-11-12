@@ -50,7 +50,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    const automatic=u.searchParams.get("automatic")==="1";
    if(automatic&&(!authorized(req,env)||!db(env)))return reply({error:"unauthorized"},401);
    if(automatic){try{const minutes=Math.max(60,Math.min(10080,Number((env as any).ETI_SPORTS_SCAN_INTERVAL_MINUTES||360)));if(!await claimJob(db(env)!,"football-global-scan",Date.now(),minutes*60000))return reply({ok:true,skipped:true,reason:"scan_interval_not_elapsed"});}catch{return reply({error:"sports_job_state_not_ready",message:"Apply migration 0005 before enabling scheduled sports scans."},503);}}
-   const competitionFilter=(u.searchParams.get("competition")||"all").toLowerCase();
+   const competitionFilter=(u.searchParams.get("competition")||(automatic?"uefa_nations_league":"all")).toLowerCase();
    const isNationsLeague=(x:any)=>/uefa\s+nations\s+league|nations\s+league/i.test(String(x?.tournamentName||""));
    const requestedLimit=Math.max(1,Math.min(12,Number(u.searchParams.get("limit")||(competitionFilter==="uefa_nations_league"?12:8))));
    const limit=automatic?Math.max(requestedLimit,Math.min(12,Number((env as any).ETI_SPORTS_AUTO_SCAN_LIMIT||12))):requestedLimit;
