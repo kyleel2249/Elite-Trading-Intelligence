@@ -144,10 +144,12 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    if(!Number.isFinite(odds)||odds<=1||!Number.isFinite(prob)||prob<=0||prob>=1||!Number.isSafeInteger(stake)||stake<1||!Number.isSafeInteger(requested)||requested<1||requested>stake)return reply({error:"invalid_model_recommendation",message:"Stake must not exceed ETI's model-calculated recommendation."},422);
    const ev=Number(pred.expected_value);if(!Number.isFinite(ev)||ev<0.03)return reply({error:"value_gate_failed"},422);
    await init(db(env)!);const account=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<{balance_cents:number}>();if(!account||requested>account.balance_cents)return reply({error:"insufficient_bankroll",balance_cents:account?.balance_cents??0},409);
-   const id=crypto.randomUUID(),now=Date.now();const r=await db(env)!.batch([
+   const id=crypto.randomUUID(),now=Date.now();let r:any[];
+   try{r=await db(env)!.batch([
     db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents-?,updated_at=? WHERE id=1 AND balance_cents>=?").bind(requested,now,requested),
     db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,event_id,bookmaker,odds_provider,implied_probability,expected_value,model_version) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0,?,?,?,?,?,? WHERE changes()=1").bind(id,now,sport,event,market,selection,odds,prob,requested,eventId,pred.best_bookmaker,"OddsPapi",1/odds,ev,pred.model_version)
-   ]);if(!r[1]?.meta?.changes)return reply({error:"stake_reservation_failed"},409);
+   ]);}catch(error){const message=error instanceof Error?error.message:String(error);if(/UNIQUE constraint failed.*sports_bets/i.test(message))return reply({error:"duplicate_open_model_bet",message:"ETI already has an open paper bet for this fixture and model version."},409);throw error;}
+   if(!r[1]?.meta?.changes)return reply({error:"stake_reservation_failed"},409);
    return reply({ok:true,id,event_id:eventId,selection,bookmaker:pred.best_bookmaker,decimal_odds:odds,model_probability:prob,expected_value:ev,stake_cents:requested,message:"ETI model recommendation recorded in the isolated paper ledger."},201);
  }
  const settle=p.match(/^\/api\/sports\/bets\/([0-9a-f-]+)\/settle$/i);
@@ -155,7 +157,8 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    if(!authorized(req,env))return reply({error:"unauthorized"},401);if(!db(env))return reply({error:"database_not_configured"},503);const b=await jsonBody(req);const result=String(b?.result||"");if(!["WON","LOST","VOID"].includes(result))return reply({error:"invalid_result"},400);
    const id=settle[1],bet=await db(env)!.prepare("SELECT stake_cents,odds,status FROM sports_bets WHERE id=?").bind(id).first<any>();if(!bet||bet.status!=="OPEN")return reply({error:"bet_not_open"},409);
    const stake=Number(bet.stake_cents),gross=result==="WON"?Math.round(stake*Number(bet.odds)):result==="VOID"?stake:0,profit=gross-stake,now=Date.now();
-   await db(env)!.batch([db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(result,profit,now,id),db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1 AND changes()=1").bind(gross,now)]);
+   const settled=await db(env)!.batch([db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(result,profit,now,id),db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1 AND changes()=1").bind(gross,now)]);
+   if(!settled[0]?.meta?.changes)return reply({error:"bet_already_settled"},409);
    return reply({ok:true,id,result,gross_return_cents:gross,profit_cents:profit});
  }
  return reply({error:"not_found"},404);
