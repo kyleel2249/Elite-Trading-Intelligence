@@ -48,7 +48,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    if(!authorized(req,env))return reply({error:"unauthorized"},401);if(!db(env))return reply({error:"database_not_configured"},503);const b=await jsonBody(req);const result=String(b?.result||"");if(!["WON","LOST","VOID"].includes(result))return reply({error:"invalid_result"},400);
    const id=settle[1],bet=await db(env)!.prepare("SELECT stake_cents,odds,status FROM sports_bets WHERE id=?").bind(id).first<any>();if(!bet||bet.status!=="OPEN")return reply({error:"bet_not_open"},409);
    const stake=Number(bet.stake_cents),gross=result==="WON"?Math.round(stake*Number(bet.odds)):result==="VOID"?stake:0,profit=gross-stake,now=Date.now();
-   await db(env)!.batch([db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(result,profit,now,id),db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1").bind(gross,now)]);
+   await db(env)!.batch([db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(result,profit,now,id),db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1 AND changes()=1").bind(gross,now)]);
    return reply({ok:true,id,result,gross_return_cents:gross,profit_cents:profit});
  }
  return reply({error:"not_found"},404);
