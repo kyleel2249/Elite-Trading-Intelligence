@@ -40,7 +40,9 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    const call=async(path:string,params:Record<string,string>)=>{const q=new URLSearchParams({...params,apiKey:env.ODDSPAPI_API_KEY!});const r=await fetch(baseUrl+path+"?"+q.toString(),{headers:{accept:"application/json"}});if(!r.ok)throw new Error("OddsPapi "+path+" HTTP "+r.status);return await r.json() as any;};
    try{
      const raw=await call("fixtures",{sportId:"10",from:from.toISOString(),to:to.toISOString(),statusId:"0",hasOdds:"true",language:"en"});
-     const upcoming=(Array.isArray(raw)?raw:[]).filter((x:any)=>x?.fixtureId&&x.hasOdds&&Number.isFinite(Date.parse(x.startTime))&&Date.parse(x.startTime)>Date.now()).sort((a:any,b:any)=>Date.parse(a.startTime)-Date.parse(b.startTime)).slice(0,limit);
+     const candidates=(Array.isArray(raw)?raw:[]).filter((x:any)=>x?.fixtureId&&x.hasOdds&&Number.isFinite(Date.parse(x.startTime))&&Date.parse(x.startTime)>Date.now()).sort((a:any,b:any)=>Date.parse(a.startTime)-Date.parse(b.startTime));
+     let upcoming=candidates;
+     if(automatic&&db(env)){const recent=await db(env)!.prepare("SELECT DISTINCT fixture_id FROM sports_event_scans WHERE scanned_at>=?").bind(Date.now()-24*60*60*1000).all<any>();const seen=new Set((recent.results||[]).map((x:any)=>String(x.fixture_id)));const fresh=candidates.filter((x:any)=>!seen.has(String(x.fixtureId)));upcoming=(fresh.length?fresh:candidates).slice(0,limit);}else upcoming=candidates.slice(0,limit);
      const events:any[]=[];
      for(let i=0;i<upcoming.length;i++){
        const f=upcoming[i];if(i>0)await new Promise(resolve=>setTimeout(resolve,550));
@@ -75,7 +77,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      }
      let journalSaved=0;
      if(db(env)&&events.length){try{const now=Date.now();const statements=events.map(e=>db(env)!.prepare("INSERT INTO sports_event_scans (id,scanned_at,provider,fixture_id,sport,event_name,competition,country,commence_time,bookmaker_count,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),now,"OddsPapi",e.id,"football",e.home_team+" vs "+e.away_team,e.league,e.country,e.commence_time,e.bookmakers.length,JSON.stringify(e)));const saved=await db(env)!.batch(statements);journalSaved=saved.reduce((n,x)=>n+(x.meta?.changes||0),0);}catch{journalSaved=0;}}
-     if(automatic&&db(env))await finishJob(db(env)!,"football-global-scan","OK","Fixtures "+events.length);return reply({provider:"OddsPapi",sport:"football",coverage:"bookmakers_returned_by_provider",fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_count:upcoming.length,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map(b=>b.key)))].length,event_journal_saved:journalSaved,history_matches:history.length,model_calibration:{...calibration,stake_enabled:calibrated},next_event:events[0]||null,events});
+     if(automatic&&db(env))await finishJob(db(env)!,"football-global-scan","OK","Fixtures "+events.length);return reply({provider:"OddsPapi",sport:"football",coverage:"bookmakers_returned_by_provider",fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_candidates:candidates.length,fixture_count:upcoming.length,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map(b=>b.key)))].length,event_journal_saved:journalSaved,history_matches:history.length,model_calibration:{...calibration,stake_enabled:calibrated},next_event:events[0]||null,events});
    }catch(e){if(u.searchParams.get("automatic")==="1"&&db(env)){try{await finishJob(db(env)!,"football-global-scan","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}return reply({error:"global_football_scan_failed",message:e instanceof Error?e.message:"Odds provider unavailable"},502);}
  }
  if(p==="/api/sports/football/sync-history"&&req.method==="POST"){
