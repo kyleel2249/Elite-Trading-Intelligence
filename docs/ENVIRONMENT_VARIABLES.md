@@ -79,6 +79,11 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_RISK_GATE_TOKEN` | legacy | Removed. Ignored; reported as unused legacy config. |
 | `ETI_RISK_GATE_URL` | legacy | Removed. Ignored; if present the dashboard reports it as unused legacy config. |
 | `ETI_ROUND_TRIP_COST_BPS` | config | Assumed round-trip trading cost (bps) in signal maths. |
+| `ETI_SPORTS_AUTO_SCAN_LIMIT` | config | Upcoming football fixtures retrieved per scheduled scan (1 default, max 12). |
+| `ETI_SPORTS_HISTORY_BATCH_SIZE` | config | Unseen finished football fixtures imported per scheduled history sync (5 default, max 30). |
+| `ETI_SPORTS_HISTORY_SYNC_MINUTES` | config | Minimum minutes between scheduled football history syncs (1440 default, min 360). |
+| `ETI_SPORTS_PAPER_TOKEN` | secret | Protects the isolated sports paper bankroll, bet ledger and manual history sync. |
+| `ETI_SPORTS_SCAN_INTERVAL_MINUTES` | config | Minimum minutes between scheduled global football odds scans (360 default, min 60). |
 | `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
 | `ETI_SESSION_SECRET_PREVIOUS` | secret | Previous signing secret, accepted during rotation. |
 | `ETI_UNIVERSE_BATCH` | config | Symbols scanned per scheduled universe run. |
@@ -91,7 +96,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `FRED_SERIES_JSON` | config | Extra FRED series as JSON. |
 | `MARKET_PROVIDER_ORDER` | config | Comma-separated market-data provider priority. |
 | `NEWS_FEEDS_JSON` | config | News feed list as JSON. |
-| `OPENFIGI_API_KEY` | secret | Optional OpenFIGI key for instrument lookup. |
+| `ODDSPAPI_API_KEY` | secret | OddsPapi global football fixtures, bookmaker odds, scores and provider health. |\n| `ODDS_API_KEY` | secret | Optional The Odds API regional fallback for supported US and international markets. |\n| `OPENFIGI_API_KEY` | secret | Optional OpenFIGI key for instrument lookup. |
 | `RESEND_API_KEY` | secret | Resend key for alert email. Absent = alerts recorded as 'not delivered'. |
 | `SEC_USER_AGENT` | config | User-Agent string SEC EDGAR requires (name and contact email). |
 
