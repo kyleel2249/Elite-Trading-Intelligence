@@ -10,6 +10,22 @@ const headers={"content-type":"application/json; charset=utf-8","cache-control":
 const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers});
 const SPORTS:Record<string,string>={soccer_epl:"Premier League",soccer_uefa_champs_league:"UEFA Champions League",soccer_spain_la_liga:"La Liga",soccer_italy_serie_a:"Serie A",soccer_germany_bundesliga:"Bundesliga",soccer_france_ligue_one:"Ligue 1",basketball_nba:"NBA",basketball_wnba:"WNBA",americanfootball_nfl:"NFL",baseball_mlb:"MLB",icehockey_nhl:"NHL",tennis_atp_french_open:"ATP French Open",tennis_wta_french_open:"WTA French Open",cricket_test_match:"Test Cricket",rugby_union:"Rugby Union"};
 const jsonBody=async(req:Request)=>{try{return await req.json() as Record<string,unknown>}catch{return null}};
+const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+async function oddsPapiGet(apiKey:string,path:string,params:Record<string,string>):Promise<any>{
+ const url="https://api.oddspapi.io/v4/"+path+"?"+new URLSearchParams({...params,apiKey}).toString();
+ for(let attempt=0;attempt<3;attempt++){
+  const response=await fetch(url,{headers:{accept:"application/json"}});
+  if(response.status===429){
+   const payload=await response.json().catch(()=>({})) as any;
+   const error=payload?.error||payload;
+   if(error?.code==="RATE_LIMITED"&&attempt<2){const retryMs=Math.max(500,Math.min(15000,Number(error.retryMs)||1000));await pause(retryMs+100);continue;}
+   throw new Error("OddsPapi "+path+" "+(error?.code||"HTTP 429")+": "+(error?.message||"rate or request quota limit"));
+  }
+  if(!response.ok){const payload=await response.json().catch(()=>({})) as any;throw new Error("OddsPapi "+path+" HTTP "+response.status+": "+(payload?.error?.message||payload?.message||"provider request failed"));}
+  return await response.json();
+ }
+ throw new Error("OddsPapi "+path+" rate limit retry exhausted");
+}
 function authorized(req:Request,env:SportsEnv){const expected=env.ETI_SPORTS_PAPER_TOKEN;return !!expected&&req.headers.get("x-eti-sports-token")===expected;}
 function db(env:SportsEnv){return env.ETI_PORTFOLIO_DB;}
 async function init(d:D1Database){await d.prepare("INSERT OR IGNORE INTO sports_bankroll (id,balance_cents,created_at,updated_at) VALUES (1,100,strftime('%s','now')*1000,strftime('%s','now')*1000)").run();}
@@ -38,7 +54,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    // OddsPapi requires a sport-wide fixtures date range shorter than 48 hours.
    const from=new Date(),to=new Date(from.getTime()+47*60*60*1000);
    const baseUrl="https://api.oddspapi.io/v4/";
-   const call=async(path:string,params:Record<string,string>)=>{const q=new URLSearchParams({...params,apiKey:env.ODDSPAPI_API_KEY!});const r=await fetch(baseUrl+path+"?"+q.toString(),{headers:{accept:"application/json"}});if(!r.ok)throw new Error("OddsPapi "+path+" HTTP "+r.status);return await r.json() as any;};
+   const call=(path:string,params:Record<string,string>)=>oddsPapiGet(env.ODDSPAPI_API_KEY!,path,params);
    try{
      const raw=await call("fixtures",{sportId:"10",from:from.toISOString(),to:to.toISOString(),statusId:"0",hasOdds:"true",language:"en"});
      const candidates=(Array.isArray(raw)?raw:[]).filter((x:any)=>x?.fixtureId&&x.hasOdds&&Number.isFinite(Date.parse(x.startTime))&&Date.parse(x.startTime)>Date.now()).sort((a:any,b:any)=>Date.parse(a.startTime)-Date.parse(b.startTime));
@@ -90,7 +106,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    // Keep the sport-wide fixtures date range below OddsPapi's 48-hour limit.
    const now=Date.now(),from=new Date(now-47*60*60*1000),to=new Date(now);
    const baseUrl="https://api.oddspapi.io/v4/";
-   const call=async(path:string,params:Record<string,string>)=>{const q=new URLSearchParams({...params,apiKey:env.ODDSPAPI_API_KEY!});const r=await fetch(baseUrl+path+"?"+q.toString(),{headers:{accept:"application/json"}});if(!r.ok)throw new Error("OddsPapi "+path+" HTTP "+r.status);return await r.json() as any;};
+   const call=(path:string,params:Record<string,string>)=>oddsPapiGet(env.ODDSPAPI_API_KEY!,path,params);
    try{
      const fixtures=await call("fixtures",{sportId:"10",from:from.toISOString(),to:to.toISOString(),statusId:"2",language:"en"});
      const existing=await db(env)!.prepare("SELECT fixture_id FROM sports_match_results").all<any>();const seen=new Set((existing.results||[]).map((x:any)=>String(x.fixture_id)));const finished=(Array.isArray(fixtures)?fixtures:[]).filter((x:any)=>x?.fixtureId&&!seen.has(String(x.fixtureId))&&x.participant1Name&&x.participant2Name&&Date.parse(x.startTime)<=now).sort((a:any,b:any)=>Date.parse(a.startTime)-Date.parse(b.startTime)).slice(0,limit);
