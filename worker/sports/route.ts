@@ -81,14 +81,14 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    if(!authorized(req,env))return reply({error:"unauthorized"},401);
    if(!env.ODDSPAPI_API_KEY||!db(env))return reply({error:"history_sync_not_configured"},503);
    const body=await jsonBody(req);const automatic=body?.automatic===true;
-   if(automatic){try{const minutes=Math.max(360,Math.min(10080,Number((env as any).ETI_SPORTS_HISTORY_SYNC_MINUTES||720)));if(!await claimJob(db(env)!,"football-history-sync",Date.now(),minutes*60000))return reply({ok:true,skipped:true,reason:"history_sync_interval_not_elapsed"});}catch{return reply({error:"sports_job_state_not_ready",message:"Apply migration 0005 before enabling scheduled history sync."},503);}}
+   if(automatic){try{const minutes=Math.max(360,Math.min(10080,Number((env as any).ETI_SPORTS_HISTORY_SYNC_MINUTES||1440)));if(!await claimJob(db(env)!,"football-history-sync",Date.now(),minutes*60000))return reply({ok:true,skipped:true,reason:"history_sync_interval_not_elapsed"});}catch{return reply({error:"sports_job_state_not_ready",message:"Apply migration 0005 before enabling scheduled history sync."},503);}}
    const limit=Math.max(1,Math.min(30,Number(body?.limit||10)));
    const now=Date.now(),from=new Date(now-8*24*60*60*1000),to=new Date(now);
    const baseUrl="https://api.oddspapi.io/v4/";
    const call=async(path:string,params:Record<string,string>)=>{const q=new URLSearchParams({...params,apiKey:env.ODDSPAPI_API_KEY!});const r=await fetch(baseUrl+path+"?"+q.toString(),{headers:{accept:"application/json"}});if(!r.ok)throw new Error("OddsPapi "+path+" HTTP "+r.status);return await r.json() as any;};
    try{
      const fixtures=await call("fixtures",{sportId:"10",from:from.toISOString(),to:to.toISOString(),statusId:"2",language:"en"});
-     const finished=(Array.isArray(fixtures)?fixtures:[]).filter((x:any)=>x?.fixtureId&&x.participant1Name&&x.participant2Name&&Date.parse(x.startTime)<=now).sort((a:any,b:any)=>Date.parse(b.startTime)-Date.parse(a.startTime)).slice(0,limit);
+     const existing=await db(env)!.prepare("SELECT fixture_id FROM sports_match_results").all<any>();const seen=new Set((existing.results||[]).map((x:any)=>String(x.fixture_id)));const finished=(Array.isArray(fixtures)?fixtures:[]).filter((x:any)=>x?.fixtureId&&!seen.has(String(x.fixtureId))&&x.participant1Name&&x.participant2Name&&Date.parse(x.startTime)<=now).sort((a:any,b:any)=>Date.parse(b.startTime)-Date.parse(a.startTime)).slice(0,limit);
      let saved=0,skipped=0;
      for(let i=0;i<finished.length;i++){
        if(i>0)await new Promise(resolve=>setTimeout(resolve,1050));
