@@ -184,9 +184,10 @@ function eventRow(x){
  const bestText=best?"Best: "+best.market+" / "+best.selection+" @ "+best.decimal_odds+" • "+best.bookmaker+" • EV "+(best.expected_value*100).toFixed(1)+"%":"No calibrated value candidate";
  const code=String(x.market.market_id)+":"+String(x.outcome.outcome_code);
  const modelP=code==="101:101"?p?.home:code==="101:102"?p?.draw:code==="101:103"?p?.away:null;
+ const selectionLine=modelP===null?"No market-specific probability":"Selection P: "+(modelP*100).toFixed(2)+"% • EV: "+((modelP*Number(x.outcome.price)-1)*100).toFixed(2)+"%";
  const canBet=x.event.prediction?.decision==="VALUE_CANDIDATE"&&best?.market===x.market.key&&best?.bookmaker===x.book.key&&best?.selection===x.outcome.name;
  const stake=canBet?(x.event.prediction?.recommended_stake_cents||0)/100:0;
- return '<tr><td>'+esc(x.event.home_team+" vs "+x.event.away_team)+'<br><small>'+esc(x.event.league||"")+' • '+esc(x.event.commence_time||"")+'</small></td><td>'+esc(x.book.title)+'</td><td>'+esc(x.market.key)+'</td><td>'+esc(x.outcome.name)+'</td><td>'+Number(x.outcome.price).toFixed(2)+'</td><td>'+summary+'<br><small>'+esc(x.event.prediction?.decision||"NO MODEL")+'</small><br><small>'+esc(bestText)+'</small></td><td>
+ return '<tr><td>'+esc(x.event.home_team+" vs "+x.event.away_team)+'<br><small>'+esc(x.event.league||"")+' • '+esc(x.event.commence_time||"")+'</small></td><td>'+esc(x.book.title)+'</td><td>'+esc(x.market.key)+'</td><td>'+esc(x.outcome.name)+'</td><td>'+Number(x.outcome.price).toFixed(2)+'</td><td>'+summary+'<br><small>'+esc(selectionLine)+'</small><br><small>'+esc(x.event.prediction?.decision||"NO MODEL")+'</small><br><small>'+esc(bestText)+'</small></td><td>
 }
 async function scan(){
  $("events").innerHTML='<div class="empty">Retrieving upcoming fixtures and bookmaker odds…</div>';
