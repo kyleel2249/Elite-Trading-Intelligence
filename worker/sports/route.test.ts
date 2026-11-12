@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { withSports, ensureSportsMatchResultsTable, bookmakerTitle } from "./route.ts";
+import { withSports, ensureSportsMatchResultsTable, bookmakerTitle, oddsPapiGet } from "./route.ts";
 
 const base={fetch:()=>new Response("base")};
 test("sports dashboard is served as a separate paper-only workspace",async()=>{
@@ -53,4 +53,27 @@ test("SportyBet bookmaker slug is displayed with its canonical name",()=>{
  assert.equal(bookmakerTitle("sportybet"),"SportyBet");
  assert.equal(bookmakerTitle("SPORTYBET"),"SportyBet");
  assert.equal(bookmakerTitle("pinnacle"),"pinnacle");
+});
+
+test("football API always returns structured JSON for unexpected route failures",async()=>{
+ const app=withSports(base as any);
+ const env=new Proxy({}, {get(_target,key){if(key==="ODDSPAPI_API_KEY")throw new Error("forced diagnostic test");return undefined;}});
+ const response=await app.fetch(new Request("https://eti.test/api/sports/health"),env as any);
+ assert.equal(response.status,500);
+ assert.ok((response.headers.get("content-type")||"").includes("application/json"));
+ const body=await response.json() as any;
+ assert.equal(body.error,"sports_internal_error");
+ assert.match(body.message,/forced diagnostic test/);
+});
+test("OddsPapi invalid HTML or proxy responses report endpoint, status and content type",async()=>{
+ const original=globalThis.fetch;
+ globalThis.fetch=async()=>new Response("<html>upstream gateway error</html>",{status:502,headers:{"content-type":"text/html"}});
+ try{
+  await assert.rejects(()=>oddsPapiGet("test-key","fixtures",{sportId:"10"}),(error:any)=>String(error?.message||error).includes("ODDSPAPI_INVALID_JSON: fixtures returned HTTP 502")&&String(error?.message||error).includes("text/html"));
+ }finally{globalThis.fetch=original;}
+});
+test("sports dashboard surfaces the real non-JSON response instead of invalid_response",async()=>{
+ const app=withSports(base as any);const response=await app.fetch(new Request("https://eti.test/sports"),{} as any);const html=await response.text();
+ assert.match(html,/ETI returned a non-JSON response/);
+ assert.doesNotMatch(html,/error:"invalid_response"/);
 });

@@ -11,20 +11,27 @@ const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status
 const SPORTS:Record<string,string>={soccer_epl:"Premier League",soccer_uefa_champs_league:"UEFA Champions League",soccer_spain_la_liga:"La Liga",soccer_italy_serie_a:"Serie A",soccer_germany_bundesliga:"Bundesliga",soccer_france_ligue_one:"Ligue 1",basketball_nba:"NBA",basketball_wnba:"WNBA",americanfootball_nfl:"NFL",baseball_mlb:"MLB",icehockey_nhl:"NHL",tennis_atp_french_open:"ATP French Open",tennis_wta_french_open:"WTA French Open",cricket_test_match:"Test Cricket",rugby_union:"Rugby Union"};
 const jsonBody=async(req:Request)=>{try{return await req.json() as Record<string,unknown>}catch{return null}};
 const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-async function oddsPapiGet(apiKey:string,path:string,params:Record<string,string>):Promise<any>{
+export async function oddsPapiGet(apiKey:string,path:string,params:Record<string,string>):Promise<any>{
  const url="https://api.oddspapi.io/v4/"+path+"?"+new URLSearchParams({...params,apiKey}).toString();
  for(let attempt=0;attempt<3;attempt++){
   const response=await fetch(url,{headers:{accept:"application/json"}});
-  if(response.status===429){
-   const payload=await response.json().catch(()=>({})) as any;
-   const error=payload?.error||payload;
-   if(error?.code==="RATE_LIMITED"&&attempt<2){const retryMs=Math.max(500,Math.min(15000,Number(error.retryMs)||1000));await pause(retryMs+100);continue;}
-   throw new Error("OddsPapi "+path+" "+(error?.code||"HTTP 429")+": "+(error?.message||"rate or request quota limit"));
+  const body=await response.text();
+  let payload:any=null;
+  try{payload=body?JSON.parse(body):null;}catch{
+   const preview=body.slice(0,180);
+   throw new Error("ODDSPAPI_INVALID_JSON: "+path+" returned HTTP "+response.status+" ("+(response.headers.get("content-type")||"unknown content type")+"). Body preview: "+preview);
   }
-  if(!response.ok){const payload=await response.json().catch(()=>({})) as any;throw new Error("OddsPapi "+path+" HTTP "+response.status+": "+(payload?.error?.message||payload?.message||"provider request failed"));}
-  return await response.json();
+  if(response.status===429){
+   const error=payload?.error||payload||{};
+   if(error?.code==="RATE_LIMITED"&&attempt<2){const retryMs=Math.max(500,Math.min(15000,Number(error.retryMs)||1000));await pause(retryMs+100);continue;}
+   throw new Error("ODDSPAPI_RATE_LIMIT: "+path+" "+(error?.code||"HTTP 429")+": "+(error?.message||"rate or request quota limit"));
+  }
+  if(!response.ok)throw new Error("ODDSPAPI_HTTP_ERROR: "+path+" HTTP "+response.status+": "+(payload?.error?.message||payload?.message||"provider request failed"));
+  if(payload===null||typeof payload!=="object")throw new Error("ODDSPAPI_INVALID_PAYLOAD: "+path+" returned an empty or non-object JSON response");
+  if(payload.error)throw new Error("ODDSPAPI_PROVIDER_ERROR: "+path+": "+(payload.error.message||payload.error.code||JSON.stringify(payload.error)));
+  return payload;
  }
- throw new Error("OddsPapi "+path+" rate limit retry exhausted");
+ throw new Error("ODDSPAPI_RATE_LIMIT: "+path+" retry attempts exhausted");
 }
 function authorized(req:Request,env:SportsEnv){const expected=env.ETI_SPORTS_PAPER_TOKEN;return !!expected&&req.headers.get("x-eti-sports-token")===expected;}
 function db(env:SportsEnv){return env.ETI_PORTFOLIO_DB;}
@@ -38,10 +45,8 @@ async function init(d:D1Database){await d.prepare("INSERT OR IGNORE INTO sports_
 
 async function claimJob(d:D1Database,name:string,now:number,intervalMs:number){const r=await d.prepare("INSERT INTO sports_job_state (job_name,last_run_at,status,detail) VALUES (?,?,?,?) ON CONFLICT(job_name) DO UPDATE SET last_run_at=excluded.last_run_at,status=excluded.status,detail=excluded.detail WHERE sports_job_state.last_run_at<=? RETURNING job_name").bind(name,now,"RUNNING",null,now-intervalMs).first();return !!r;}
 async function finishJob(d:D1Database,name:string,status:string,detail:string|null){await d.prepare("UPDATE sports_job_state SET status=?,detail=? WHERE job_name=?").bind(status,detail,name).run();}
-export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async fetch(req,env){
- const u=new URL(req.url),p=u.pathname.replace(/\/+$/,"")||"/";
+export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async fetch(req,env){const u=new URL(req.url),p=u.pathname.replace(/\/+$/,"")||"/";if(!p.startsWith("/api/sports")&&!(req.method==="GET"&&p==="/sports"))return base.fetch(req,env);try{
  if(req.method==="GET"&&p==="/sports")return new Response(sportsPage(),{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"same-origin"}});
- if(!p.startsWith("/api/sports"))return base.fetch(req,env);
  if(p==="/api/sports/health"&&req.method==="GET"){
    const providers:any={oddspapi:{configured:!!env.ODDSPAPI_API_KEY,reachable:false},the_odds_api:{configured:!!env.ODDS_API_KEY,reachable:false}};
    if(env.ODDSPAPI_API_KEY){try{const q=new URLSearchParams({apiKey:env.ODDSPAPI_API_KEY});const r=await fetch("https://api.oddspapi.io/v4/account?"+q.toString(),{headers:{accept:"application/json"}});if(r.ok){const a=await r.json() as any;const active=(a.subscriptions||[]).filter((s:any)=>s.is_active);const subscribedBookmakers=[...new Set(active.flatMap((s:any)=>Object.keys(s.bookmakers||{}).map((x:string)=>x.toLowerCase())))].sort();providers.oddspapi={configured:true,reachable:true,active_subscription_count:active.length,request_limit:active.reduce((n:number,s:any)=>n+Number(s.request_limit||0),0),request_count:active.reduce((n:number,s:any)=>n+Number(s.request_count||0),0),sports:[...new Set(active.flatMap((s:any)=>s.sport_ids||[]).map(Number))],bookmaker_count:subscribedBookmakers.length,bookmakers:subscribedBookmakers,sportybet:{slug:"sportybet",subscribed:subscribedBookmakers.includes("sportybet")}};}else providers.oddspapi={configured:true,reachable:false,http_status:r.status};}catch{providers.oddspapi={configured:true,reachable:false,error:"connection_failed"};}}
@@ -194,6 +199,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    return reply({ok:true,id,result,gross_return_cents:gross,profit_cents:profit});
  }
  return reply({error:"not_found"},404);
+ }catch(error){const message=error instanceof Error?error.message:String(error);return reply({error:"sports_internal_error",message,path:new URL(req.url).pathname,checked_at:new Date().toISOString()},500);}
 }}}
 function sportsPage(){return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ETI Sports Betting Intelligence</title><style>
 :root{color-scheme:dark;--bg:#050914;--panel:#0e1830;--line:#263b5a;--txt:#e8f1ff;--mut:#8fa6c8;--cyan:#22d3ee;--green:#10d9a0;--red:#ff4d6d;--gold:#f5c542}*{box-sizing:border-box}body{margin:0;background:radial-gradient(1000px 500px at 10% -10%,#10224a 0,transparent 60%),radial-gradient(900px 500px at 100% 30%,#12313d55 0,transparent 60%),var(--bg);perspective:1400px;color:var(--txt);font:14px/1.5 Inter,system-ui,sans-serif}header{padding:16px 4vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}h1{margin:0;font-size:20px}a{color:var(--cyan)}main{max-width:1500px;margin:auto;padding:18px 4vw 60px}.bar,.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.bar{margin-bottom:14px}button,input{background:#091326;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit}button{cursor:pointer;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,background .18s ease;transform:translateZ(0)}button:hover{transform:translateY(-2px) translateZ(10px);box-shadow:0 9px 22px #0008;border-color:var(--cyan)}button:active{transform:translateY(1px) scale(.98)}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}button.primary{border-color:var(--cyan);color:var(--cyan);background:linear-gradient(135deg,#0d263a,#10243b)}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.card{background:linear-gradient(145deg,#152743dd,#0b1425ee);border:1px solid #345074;border-radius:16px;padding:15px;min-width:0;box-shadow:0 18px 38px #0006,inset 0 1px #ffffff12;transform:translateZ(0);transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease;backdrop-filter:blur(12px)}.card:hover{transform:translateY(-3px) rotateX(.6deg);box-shadow:0 24px 48px #0008,inset 0 1px #ffffff18;border-color:#3d7594}.c5{grid-column:span 5}.c7{grid-column:span 7}.c12{grid-column:span 12}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.kpi{background:#081225;border:1px solid var(--line);border-radius:10px;padding:12px}.kpi small,.muted,.foot{color:var(--mut)}.kpi b{display:block;font-size:22px;margin-top:4px}h2{font-size:15px;margin:0 0 12px}.scroll{overflow:auto;max-height:520px}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}td,th{text-align:left;padding:9px 7px;border-bottom:1px solid #20314a;font-size:12px;white-space:nowrap}th{color:var(--mut)}.positive{color:var(--green)}.negative{color:var(--red)}.warning{color:var(--gold)}.status{padding:4px 8px;border:1px solid var(--line);border-radius:999px;font-size:11px}.note{font-size:12px;color:var(--mut);margin-top:8px}.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.formgrid label{font-size:12px;color:var(--mut);display:grid;gap:4px}.formgrid input{width:100%}.empty{border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--mut)}@media(max-width:850px){.c5,.c7{grid-column:span 12}.formgrid{grid-template-columns:1fr}}
@@ -210,7 +216,7 @@ function sportsPage(){return `<!doctype html><html lang="en"><head><meta charset
 <section class="card c12"><h2>Model &amp; Risk Controls</h2><div class="grid"><div class="card c5"><b>Probability integrity</b><p class="note">Rolling venue-specific team attack/defence form, competition goal baselines, Poisson scoreline probabilities and out-of-sample temperature calibration.</p></div><div class="card c5"><b>Value and capital gates</b><p class="note">Minimum 3% expected value; 25% Kelly fraction; maximum 1% of the separate sports paper bankroll per event. No stake when data or calibration is inadequate.</p></div><div class="card c12"><b>Execution boundary</b><p class="note">Paper-only ledger. No bookmaker was contacted to place a real-money wager. No bookmaker login, deposits, withdrawals or live wagers are implemented. Automatic result settlement applies to model-backed Full Time Result paper bets only.</p></div></div></section>
 </div></main><script>
 const $=id=>document.getElementById(id);
-async function api(path,opts={}){const h=Object.assign({"content-type":"application/json"},opts.headers||{});if($("token").value)h["x-eti-sports-token"]=$("token").value;const r=await fetch(path,{...opts,headers:h});const j=await r.json().catch(()=>({error:"invalid_response"}));if(!r.ok)throw new Error(j.message||j.error||("HTTP "+r.status));return j}
+async function api(path,opts={}){const h=Object.assign({"content-type":"application/json","accept":"application/json"},opts.headers||{});if($("token").value)h["x-eti-sports-token"]=$("token").value;const r=await fetch(path,{...opts,headers:h});const raw=await r.text();let j;try{j=raw?JSON.parse(raw):{};}catch{const type=r.headers.get("content-type")||"unknown content type";const preview=raw.slice(0,220);throw new Error("ETI returned a non-JSON response for "+path+" (HTTP "+r.status+", "+type+"). Response preview: "+preview);}if(!r.ok)throw new Error(j.message||j.error||("HTTP "+r.status));return j}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 async function status(){try{const s=await api("/api/sports/status");let h=null;try{h=await api("/api/sports/health")}catch{}const odd=h?.providers?.oddspapi;const dbReady=h?.database?.ready;const bookieNames=(odd?.bookmakers||[]).slice(0,12).join(", ");const sportybet=odd?.sportybet?.subscribed?"SportyBet subscribed":"SportyBet not in active subscription";$("oddsState").textContent=odd?.reachable?"Connected":odd?.configured?"Key configured / connection failed":s.odds_providers?.the_odds_api==="configured"?"Fallback configured":"Not configured";$("provider").textContent="OddsPapi: "+(odd?.reachable?"reachable":odd?.configured?"unreachable":"key missing")+" • "+sportybet+" • subscribed bookmakers: "+(odd?.bookmaker_count??"—")+(bookieNames?" ("+bookieNames+")":"")+" • D1: "+(dbReady?"ready"+((h?.database?.repaired_tables||[]).length?" (self-repaired)":""):h?.database?.configured?"schema repair required":"not configured");}catch(e){$("provider").textContent=e.message}}
 let latestRows=[];
