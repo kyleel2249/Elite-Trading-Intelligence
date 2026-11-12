@@ -218,6 +218,22 @@ failed gate forces NO TRADE regardless of score. Confidence is qualitative unles
 outcomes exists. Fundamentals, news and expectancy are operator-supplied (token-protected admin routes); missing evidence is
 reported as unavailable and caps the score. It cannot place orders. See [docs/PRECISION_ENGINE.md](docs/PRECISION_ENGINE.md).
 
+## Daily report: ETI GLOBAL MARKET INTELLIGENCE
+
+`GET /api/daily-report` (page: `/daily`) assembles one structured report for the trading day: 16 sections (global conditions, economic
+developments, upcoming announcements, forex, gold and commodities, crypto, stocks, best opportunities, assets to avoid, volatility,
+liquidity, session recommendations, high-risk periods, validated strategy candidates, portfolio risk, final readiness verdict) and an
+opportunity table for EUR/USD, XAU/USD, BTC/USD and one selected stock. It is built only from ETI's own engines and live data: BUY or SELL appears
+only for a validated setup, and anything that could not be measured (for example a forex or equities feed that is not connected, or a
+missing economic calendar) is shown as unavailable and lowers the verdict. One report per UTC weekday is stored by the cron job when the
+`ETI_EXECUTION_LOG` KV binding exists. Read-only; it cannot place orders. See [docs/DAILY_REPORT.md](docs/DAILY_REPORT.md).
+
+## ETI Pro dashboard
+
+`/pro` is a neon dashboard (market chart, trade signal, readiness, daily report, system and execution status) that renders only what the live
+endpoints return: failed sources show as unavailable, stale data is flagged, and no sample balances, P/L or win rates are shown. Account
+figures stay in the Command Centre (`/command`), which needs the paper-account token.
+
 ## Advanced market analysis engine
 
 Technical, multi-timeframe, fundamental and news/sentiment engines feed a central intelligence layer at
@@ -278,7 +294,8 @@ See [docs/PREDICTION_LEDGER.md](docs/PREDICTION_LEDGER.md).
 ## Documentation
 
 See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs/MARKETS.md),
-[prediction ledger guide](docs/PREDICTION_LEDGER.md) and [Precision signal engine](docs/PRECISION_ENGINE.md).
+[prediction ledger guide](docs/PREDICTION_LEDGER.md), [Precision signal engine](docs/PRECISION_ENGINE.md)
+and [Daily intelligence report](docs/DAILY_REPORT.md).
 
 
 ## Broker execution — paper/testnet only
