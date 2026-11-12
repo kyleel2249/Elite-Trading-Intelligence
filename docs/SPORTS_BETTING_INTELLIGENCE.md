@@ -8,6 +8,7 @@ Worker secrets (never commit these to Git):
 - ODDSPAPI_API_KEY — global football fixtures, odds, results and account diagnostics.
 - ODDS_API_KEY — optional The Odds API fallback.
 - ETI_SPORTS_PAPER_TOKEN — protects the separate paper betting ledger and administrative history sync.
+- Existing ETI provider credentials removed from wrangler.jsonc must also be re-added as Worker secrets: TOKENOMIST_API_KEY, FMP_API_KEY and EVENT_FEED_TOKEN.
 
 A key committed to a repository, browser bundle, log or source file must be revoked and rotated immediately. GitHub Actions secrets do not automatically become Cloudflare Worker secrets; add the values to the deployed Worker under Settings → Variables and Secrets → Secrets.
 
