@@ -393,6 +393,28 @@ function renderTrades(){$('trades').innerHTML='<table><tr><th>Time</th><th>Side<
 let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='';
 function setConn(t,c){$('connection').textContent=t;$('connection').style.color=c;}
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
+async function getJson(url){const r=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}if(j===null)throw Error('Invalid JSON from '+url.split('?')[0]);return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
+function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
+async function load(){
+ const seq=++reqSeq,s=$('symbol').value,i=$('interval').value,key=s+'|'+i,q='symbol='+encodeURIComponent(s);
+ const urls={
+  candles:'/api/market/klines?'+q+'&interval='+encodeURIComponent(i)+'&limit=120',
+  depth:'/api/market/depth?'+q+'&limit=20',
+  trades:'/api/market/trades?'+q+'&limit=50',
+  ticker:'/api/market/ticker?'+q
+ };
+ const settled=await Promise.allSettled(Object.entries(urls).map(async ([name,url])=>[name,await getJson(url)]));
+ if(seq!==reqSeq)return;
+ const results={},problems=[];
+ for(const item of settled){if(item.status==='fulfilled'){const [name,value]=item.value;results[name]=value;}else problems.push(item.reason&&item.reason.message?item.reason.message:'Market request failed');}
+ let candleOk=false, providers=[];
+ if(results.candles&&Array.isArray(results.candles.data)&&results.candles.data.length){
+  candles=results.candles.data.map(v=>v.map(Number));provider=results.candles.provider||'unknown';lastGoodAt=Date.now();lastGoodKey=key;candleOk=true;providers.push(provider);
+  $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent=provider+(results.candles.failover?' (failover)':'');drawChart();
+ }else{
+  problems.unshift(results.candles?'Candles returned an empty or invalid response':'Candles: '+(settled[0].status==='rejected'?settled[0].reason.message:'unavailable'));
+  if(!(candles.length&&lastGoodKey===key)){candles=[];drawChart();}
+  setStale('Candles unavailable — '+problems[0].slice(0,150));
 function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
 function mkt(){return symMkt()==='futures'?'&market=futures':'';}
 async function getJson(url){const r=await fetch(url,{cache:'no-store'}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
@@ -427,6 +449,23 @@ async function load(){
   setConn('Market data unavailable · retry in '+Math.round(wait/1000)+'s','#ff637d');
   $('stamp').textContent=e.message;schedule(wait);
  }
+ if(results.depth&&results.depth.data&&Array.isArray(results.depth.data.bids)&&Array.isArray(results.depth.data.asks)){
+  book=results.depth.data;providers.push(results.depth.provider||'');
+  renderBook();
+ }else{problems.push('Order book unavailable');$('book').textContent='Order book unavailable — '+(settled[1].status==='rejected'?settled[1].reason.message:'invalid response');}
+ if(results.trades&&Array.isArray(results.trades.data)){
+  trades=results.trades.data.map(v=>({T:Number(v.time),m:!!v.isBuyerMaker,p:String(v.price),q:String(v.qty)}));providers.push(results.trades.provider||'');renderTrades();
+ }else{problems.push('Trade tape unavailable');$('trades').textContent='Trade tape unavailable — '+(settled[2].status==='rejected'?settled[2].reason.message:'invalid response');}
+ if(results.ticker&&results.ticker.data&&Number.isFinite(Number(results.ticker.data.volume))&&Number.isFinite(Number(results.ticker.data.priceChangePercent))){
+  const x=results.ticker.data;$('volume').textContent=fmt(x.volume);const change=Number(x.priceChangePercent);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';providers.push(results.ticker.provider||'');
+ }else{$('volume').textContent=candles.length?fmt(candles.at(-1)[5])+' (last candle)':'—';$('change').textContent='—';problems.push('Ticker unavailable');}
+ if(problems.length){setStale('Partial market data · '+problems.slice(0,3).join(' · ').slice(0,220));}else setStale('');
+ const unique=[...new Set(providers.filter(Boolean))];
+ $('stamp').textContent=(candleOk?'Updated ':'Last update ')+new Date().toLocaleTimeString()+(unique.length?' · '+unique.join(', '):'');
+ if(candleOk){failCount=0;setConn(problems.length?'Partially connected · '+unique.join(', '):'Market data connected · '+unique.join(', '),problems.length?'#f59e0b':'#21d69a');}
+ else{failCount++;setConn('Market data degraded · retrying','#ffb08c');}
+ if(provider==='binance'){if(!socket||socket.readyState>1)connectWs();}else if(socket){socket.onclose=null;socket.close();socket=null;}
+ schedule(5000);
 }
 function connectWs(){
  if(provider!=='binance')return;
@@ -678,6 +717,9 @@ async function loadSignal(){
   drawChart();renderSignalCharts();
  }
 }
+window.addEventListener('error',e=>{setConn('Dashboard script error · '+String(e.message||'unknown').slice(0,100),'#ff637d');});
+window.addEventListener('unhandledrejection',e=>{setConn('Dashboard request error · '+String(e.reason&&e.reason.message||e.reason||'unknown').slice(0,100),'#ffb08c');});
+refreshExecutionStatus();
 function fmtVal(v){if(v==null||v==='')return '—';if(Array.isArray(v))return v.map(fmtVal).join('; ');if(typeof v==='object')return '['+esc(v.classification||'')+'] '+esc(v.claim||'')+(v.source?' — '+esc(v.source):' — no source recorded');return esc(v);}
 let traderTimer=null;
 async function loadTraders(){

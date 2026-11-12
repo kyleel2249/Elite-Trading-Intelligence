@@ -300,7 +300,7 @@ function record(a: Attempt) {
 }
 
 export function providerOrder(env: MarketEnv, preferred?: string | null): ProviderId[] {
-  const configured = (env.MARKET_PROVIDER_ORDER || "binance,bybit,okx")
+  const configured = (env.MARKET_PROVIDER_ORDER || "bybit,binance,okx")
     .split(",").map((s) => s.trim().toLowerCase()).filter((s): s is ProviderId => (ALL_PROVIDERS as string[]).includes(s));
   const base = configured.length ? configured : ALL_PROVIDERS;
   if (preferred && (ALL_PROVIDERS as string[]).includes(preferred) && base.includes(preferred as ProviderId)) {
