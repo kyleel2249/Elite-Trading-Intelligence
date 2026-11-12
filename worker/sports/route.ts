@@ -26,7 +26,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    try{
      const fixtures=await call("fixtures",{sportId:"10",from:from.toISOString(),to:to.toISOString(),statusId:"0",hasOdds:"true",language:"en"}) as any[];
      const upcoming=(Array.isArray(fixtures)?fixtures:[]).filter(x=>x&&x.fixtureId&&x.hasOdds&&Date.parse(x.startTime)>Date.now()).sort((a,b)=>Date.parse(a.startTime)-Date.parse(b.startTime)).slice(0,limit);
-     const events=[];
+     const events:any[]=[];
      for(let i=0;i<upcoming.length;i++){
        const f=upcoming[i];
        if(i>0)await new Promise(resolve=>setTimeout(resolve,550));
@@ -64,13 +64,13 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
  if(p==="/api/sports/bets"&&req.method==="POST"){
    if(!authorized(req,env))return reply({error:"unauthorized"},401);if(!db(env))return reply({error:"database_not_configured"},503);
    const b=await jsonBody(req);if(!b)return reply({error:"invalid_json"},400);
-   const sport=String(b.sport||"").slice(0,40),event=String(b.event_name||"").trim().slice(0,180),market=String(b.market||"").trim().slice(0,80),selection=String(b.selection||"").trim().slice(0,100),odds=Number(b.odds),prob=Number(b.model_probability),stake=Math.round(Number(b.stake)*100);
+   const sport=String(b.sport||"").slice(0,40),event=String(b.event_name||"").trim().slice(0,180),market=String(b.market||"").trim().slice(0,80),selection=String(b.selection||"").trim().slice(0,100),odds=Number(b.odds),prob=Number(b.model_probability),stake=Math.round(Number(b.stake)*100),eventId=String(b.event_id||"").slice(0,100),bookmaker=String(b.bookmaker||"").slice(0,100),oddsProvider=String(b.odds_provider||"manual").slice(0,40),modelVersion=String(b.model_version||"manual-unverified").slice(0,80);
    if(!sport||!event||!market||!selection||!Number.isFinite(odds)||odds<1.01||odds>1000||!Number.isFinite(prob)||prob<=0||prob>=1||!Number.isSafeInteger(stake)||stake<1||stake>100000000)return reply({error:"invalid_bet",message:"Provide an event, market, selection, decimal odds, model probability between 0 and 1, and stake of at least $0.01."},400);
    const ev=prob*odds-1;if(ev<=0)return reply({error:"negative_expected_value",expected_value:ev,message:"Paper bet rejected: model probability does not show positive expected value. Do not force a bet."},422);
    await init(db(env)!);const account=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<{balance_cents:number}>();if(!account||stake>account.balance_cents)return reply({error:"insufficient_bankroll",balance_cents:account?.balance_cents??0},409);
    const id=crypto.randomUUID();const now=Date.now();const r=await db(env)!.batch([
     db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents-?,updated_at=? WHERE id=1 AND balance_cents>=?").bind(stake,now,stake),
-    db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0 WHERE changes()=1").bind(id,now,sport,event,market,selection,odds,prob,stake)
+    db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,event_id,bookmaker,odds_provider,implied_probability,expected_value,model_version) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0,?,?,?,?,?,? WHERE changes()=1").bind(id,now,sport,event,market,selection,odds,prob,stake,eventId||null,bookmaker||null,oddsProvider,1/odds,ev,modelVersion)
    ]);if(!r[1]?.meta?.changes)return reply({error:"stake_reservation_failed"},409);
    return reply({ok:true,id,expected_value:ev,stake_cents:stake,message:"Paper bet recorded. No bookmaker was contacted."},201);
  }
