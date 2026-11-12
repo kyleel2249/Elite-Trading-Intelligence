@@ -15,6 +15,19 @@ test("odds endpoint fails honestly when provider credentials are absent",async()
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/events?sport=soccer_epl"),{} as any);const j=await r.json() as any;
  assert.equal(r.status,503);assert.equal(j.error,"odds_provider_not_configured");
 });
-test("global football scan fails honestly without the regional odds provider key",async()=>{\n const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/football/next"),{} as any);const j=await r.json() as any;\n assert.equal(r.status,503);assert.equal(j.error,"global_odds_provider_not_configured");\n});\ntest("unrelated routes are delegated unchanged",async()=>{
+test("global football scan fails honestly without the regional odds provider key",async()=>{
+ const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/football/next"),{} as any);const j=await r.json() as any;
+ assert.equal(r.status,503);assert.equal(j.error,"global_odds_provider_not_configured");
+});
+test("unrelated routes are delegated unchanged",async()=>{
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/market"),{} as any);assert.equal(await r.text(),"base");
+});
+
+test("sports health endpoint reports provider and migration readiness without leaking credentials",async()=>{
+ const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/health"),{} as any);const j=await r.json() as any;
+ assert.equal(r.status,200);assert.equal(j.providers.oddspapi.configured,false);assert.equal(j.database.ready,false);assert.equal(JSON.stringify(j).includes("api_key"),false);
+});
+test("historical football result sync is protected by the paper token",async()=>{
+ const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/football/sync-history",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}),{} as any);const j=await r.json() as any;
+ assert.equal(r.status,401);assert.equal(j.error,"unauthorized");
 });

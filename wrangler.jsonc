@@ -1,19 +1,15 @@
 {
   "name": "elite-trading-intelligence-eti",
   "main": "worker/main.ts",
-
   "build": {
     "command": "node scripts/build-knowledge.mjs",
     "watch_dir": "app/knowledge"
   },
-
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
-
   "observability": {
     "enabled": true
   },
-
   "triggers": {
     "crons": [
       "*/15 * * * *",
@@ -21,7 +17,6 @@
       "*/5 * * * *"
     ]
   },
-
   "vars": {
     "APP_ENV": "production",
     "DATABASE_URL": "sqlite:///./eti.db",
@@ -29,12 +24,8 @@
     "ETI_KILL_SWITCH": "false",
     "PAPER_AUTOPILOT": "true",
     "MARKET_PROVIDER_ORDER": "binance,bybit,okx,bitget",
-    "TOKENOMIST_API_KEY": "f401e2a8-7ec3-428d-9b9b-0499a6735604",
-    "FMP_API_KEY": "ryHvCsifqrb0MTeXbQPOx3bcKhk9Tpxr",
-    "EVENT_FEED_TOKEN": "XPlowmq7j3aJhMR8OC6xFdkRb86KvI0OjFfG33EH6kBa6ojk+JBBaZfv0WmKsQN7",
     "SEC_USER_AGENT": "ETI (Elite Trading Intelligence; contact: davinatirzah@gmail.com)"
   },
-
   "d1_databases": [
     {
       "binding": "ETI_PORTFOLIO_DB",
@@ -43,7 +34,6 @@
       "migrations_dir": "migrations"
     }
   ],
-
   "kv_namespaces": [
     {
       "binding": "ETI_EXECUTION_LOG",
