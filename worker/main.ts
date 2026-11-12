@@ -76,11 +76,11 @@ export default {
     if (env.ODDSPAPI_API_KEY && env.ETI_SPORTS_PAPER_TOKEN && env.ETI_PORTFOLIO_DB) {
       const headers = { "x-eti-sports-token": String(env.ETI_SPORTS_PAPER_TOKEN), "content-type": "application/json" };
       ctx.waitUntil((async () => {
-        const scan = await app.fetch(new Request("https://eti.internal/api/sports/football/next?limit=1&automatic=1", { headers }), env);
+        const scan = await app.fetch(new Request("https://eti.internal/api/sports/football/next?limit=${Math.max(1, Math.min(12, Number(env.ETI_SPORTS_AUTO_SCAN_LIMIT || 1)))}&automatic=1", { headers }), env);
         if (!scan.ok) console.error("sports scan", scan.status, (await scan.text()).slice(0, 200));
         // OddsPapi applies a cooldown to fixture discovery; keep the second fixture request sequential.
         await new Promise(resolve => setTimeout(resolve, 2100));
-        const history = await app.fetch(new Request("https://eti.internal/api/sports/football/sync-history", { method: "POST", headers, body: JSON.stringify({ automatic: true, limit: 5 }) }), env);
+        const history = await app.fetch(new Request("https://eti.internal/api/sports/football/sync-history", { method: "POST", headers, body: JSON.stringify({ automatic: true, limit: Math.max(1, Math.min(30, Number(env.ETI_SPORTS_HISTORY_BATCH_SIZE || 5))) }) }), env);
         if (!history.ok) console.error("sports history sync", history.status, (await history.text()).slice(0, 200));
       })().catch(e => console.error("sports autonomous cycle failed", e instanceof Error ? e.message : e)));
     }
