@@ -218,34 +218,3 @@ $("place").onclick=async()=>{try{const j=await api("/api/sports/bets",{method:"P
 $("bets").addEventListener("click",async e=>{const b=e.target.closest("button[data-confirm]");if(!b)return;const s=$("bets").querySelector('select[data-settle="'+b.dataset.confirm+'"]');if(!s||!s.value)return;try{await api("/api/sports/bets/"+b.dataset.confirm+"/settle",{method:"POST",body:JSON.stringify({result:s.value})});await load();}catch(err){alert(err.message);}});
 status();
 </script></body></html>`;}
-+stake.toFixed(2)+'</td><td><button data-use="1" data-can-bet="'+canBet+'" data-probability="'+(modelP??"")+'" data-stake-cents="'+(canBet?(x.event.prediction?.recommended_stake_cents||0):0)+'" data-event-id="'+esc(x.event.id)+'" data-bookmaker="'+esc(x.book.key)+'" data-name="'+esc(x.event.home_team+" vs "+x.event.away_team)+'" data-market="'+esc(x.market.key)+'" data-selection="'+esc(x.outcome.name)+'" data-odds-value="'+x.outcome.price+'">Use</button>'+(canBet?'<button data-auto-bet="'+esc(x.event.id)+'">Paper bet</button>':"")+'</td></tr>';
-}
-async function scan(){
- $("events").innerHTML='<div class="empty">Retrieving upcoming fixtures and bookmaker odds…</div>';
- try{
-  const j=await api("/api/sports/football/next?limit=8");
-  $("quota").textContent="Provider: "+j.provider+" • Fixtures: "+(j.fixture_count??0)+" • Bookmakers: "+(j.bookmaker_count??0)+" • Training matches: "+(j.history_matches??0)+" • Calibration records: "+(j.model_calibration?.sampleSize??0);
-  $("preds").textContent=j.model_calibration?.stake_enabled?"Calibrated ("+j.model_calibration.sampleSize+")":(j.model_calibration?.sampleSize??0)>=100?"Quality gate failed":(j.history_matches??0)+" training matches";
-  const rows=[];for(const e of j.events||[])for(const b of e.bookmakers||[])for(const m of b.markets||[])for(const o of m.outcomes||[])rows.push({event:e,book:b,market:m,outcome:o});
-  $("events").innerHTML=rows.length?'<table><thead><tr><th>Fixture</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Odds</th><th>ETI model / value</th><th>Stake</th><th></th></tr></thead><tbody>'+rows.slice(0,250).map(eventRow).join("")+'</tbody></table>':'<div class="empty">No bookmaker outcomes returned for the upcoming fixtures.</div>';
- }catch(e){$("events").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
-}
-async function load(){
- try{
-  const j=await api("/api/sports/bets");
-  $("bankroll").textContent="$"+(j.balance_cents/100).toFixed(2);$("openBets").textContent=j.open_count;
-  $("bets").innerHTML=j.bets.length?'<table><thead><tr><th>Event</th><th>Selection</th><th>Bookmaker</th><th>Odds</th><th>Model P</th><th>EV</th><th>Stake</th><th>Status</th><th>P/L</th><th>Settle</th></tr></thead><tbody>'+j.bets.map(b=>'<tr><td>'+esc(b.event_name)+'<br><small>'+esc(b.sport)+' / '+esc(b.market)+'</small></td><td>'+esc(b.selection)+'</td><td>'+esc(b.bookmaker||"—")+'</td><td>'+Number(b.odds).toFixed(2)+'</td><td>'+(Number(b.model_probability)*100).toFixed(1)+'%</td><td>'+(Number(b.expected_value||0)*100).toFixed(1)+'%</td><td>$'+(b.stake_cents/100).toFixed(2)+'</td><td>'+esc(b.status)+'</td><td class="'+(b.profit_cents>=0?"positive":"negative")+'">$'+(b.profit_cents/100).toFixed(2)+'</td><td>'+(b.status==="OPEN"?'<select data-settle="'+esc(b.id)+'"><option value="">Choose</option><option>WON</option><option>LOST</option><option>VOID</option></select><button data-confirm="'+esc(b.id)+'">Apply</button>':"—")+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No paper bets recorded.</div>';
- }catch(e){$("bets").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
-}
-$("scan").onclick=scan;$("load").onclick=load;
-$("syncHistory").onclick=async()=>{try{const j=await api("/api/sports/football/sync-history",{method:"POST",body:JSON.stringify({limit:20})});$("quota").textContent="Historical results saved: "+j.results_saved+" • Total training matches: "+(j.history_total?.n??"updated");await scan();}catch(e){$("quota").textContent="History sync: "+e.message;}};
-$("events").addEventListener("click",async e=>{
- const auto=e.target.closest("button[data-auto-bet]");
- if(auto){try{const j=await api("/api/sports/bets",{method:"POST",body:JSON.stringify({event_id:auto.dataset.autoBet})});$("betMsg").textContent="Paper bet recorded • "+j.selection+" • EV "+(j.expected_value*100).toFixed(1)+"%";await load();}catch(err){$("betMsg").textContent=err.message;}return;}
- const b=e.target.closest("button[data-use]");if(!b)return;
- $("eventId").value=b.dataset.eventId;$("eventName").value=b.dataset.name;$("market").value=b.dataset.market;$("selection").value=b.dataset.selection;$("bookmaker").value=b.dataset.bookmaker;$("odds").value=b.dataset.oddsValue;
-});
-$("place").onclick=async()=>{try{const j=await api("/api/sports/bets",{method:"POST",body:JSON.stringify({event_id:$("eventId").value})});$("betMsg").textContent="Paper bet recorded • "+j.selection+" • EV "+(j.expected_value*100).toFixed(1)+"%";await load();}catch(e){$("betMsg").textContent=e.message;}};
-$("bets").addEventListener("click",async e=>{const b=e.target.closest("button[data-confirm]");if(!b)return;const s=$("bets").querySelector('select[data-settle="'+b.dataset.confirm+'"]');if(!s||!s.value)return;try{await api("/api/sports/bets/"+b.dataset.confirm+"/settle",{method:"POST",body:JSON.stringify({result:s.value})});await load();}catch(err){alert(err.message);}});
-status();
-</script></body></html>`;}
