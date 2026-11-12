@@ -32,7 +32,7 @@ The Worker scheduled handler invokes the sports scan and history sync. OddsPapi 
 - Manual dashboard scans can request up to 12 fixtures and manual history sync can import up to 30.
 - Provider calls are sequential, respect the documented fixtures/odds/scores cooldowns, and retry transient `429 RATE_LIMITED` responses using the provider's `retryMs`. Quota-exhaustion errors are not retried. Adjust intervals only after checking your account request allowance.
 
-The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0006.
+The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0007.
 
 ## Autonomous Football Prediction Engine
 
@@ -51,7 +51,7 @@ The model refuses to publish team-specific probabilities when it has fewer than 
 
 Predictions are stored before kickoff and later labelled from final scores. After at least 100 resolved predictions, ETI sorts labelled predictions chronologically, fits temperature scaling on the oldest 70%, and evaluates only on the newest 30% (at least 30 holdout matches). It reports holdout Brier score and log loss alongside the uncalibrated baseline. Calibration is rejected if it worsens either metric by more than 0.005, if Brier exceeds 0.62, or if log loss exceeds 1.08. The route independently enforces these gates before any stake can be recommended. These are conservative operational gates, not a guarantee of future performance.
 
-A value candidate requires at least 3% expected value at the best available price. The paper ledger enforces one open model-backed stake per fixture/model version and rejects concurrent duplicate entries. Migration 0006 keeps the earliest open entry if legacy duplicates exist, marks later duplicates VOID and refunds those duplicate stakes to the sports paper bankroll before creating the unique index. The suggested stake uses 25% Kelly and is capped at 1% of the separate sports paper bankroll per event. If the model is uncalibrated, data is stale or insufficient, or there is no positive edge, stake is zero.
+A value candidate requires at least 3% expected value at the best available price. The paper ledger enforces one open model-backed stake per fixture, including across model-version upgrades and rejects concurrent duplicate entries. Migration 0006 removes duplicate open stakes within a model version, and migration 0007 enforces one open model-backed stake per fixture across model versions. Both migrations keep the earliest open entry, mark later duplicates VOID and refund those duplicate stakes to the sports paper bankroll before creating the unique index. The suggested stake uses 25% Kelly and is capped at 1% of the separate sports paper bankroll per event. If the model is uncalibrated, data is stale or insufficient, or there is no positive edge, stake is zero.
 
 ### Stakeable market in this model version
 
