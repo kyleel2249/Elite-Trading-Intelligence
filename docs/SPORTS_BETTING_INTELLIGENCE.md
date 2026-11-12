@@ -19,7 +19,7 @@ A key committed to a repository, browser bundle, log or source file must be revo
 - POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous eight days and stores unseen results for model training. Manual request body may include limit (1–30).
 - POST /api/sports/bets — paper-token protected; accepts an event_id only for a persisted ETI model VALUE_CANDIDATE. It uses the stored best market, selection, bookmaker, odds, model probability and stake recommendation. Manual arbitrary probabilities and stakes are rejected; optional stake_cents cannot exceed the model recommendation.
 - GET /api/sports/bets — paper-token protected; returns the separate sports bankroll and paper ledger.
-- POST /api/sports/bets/{id}/settle — manual settlement remains available for supported paper entries. The history sync automatically settles model-backed Full Time Result, Both Teams To Score and Over/Under Full Time paper bets when final scores arrive.
+- POST /api/sports/bets/{id}/settle — manual settlement remains available for supported paper entries. The history sync automatically settles model-backed Full Time Result paper bets when final scores arrive. Other market bets are not auto-created by this model version.
 
 ## Autonomous schedule and quota protection
 
@@ -52,13 +52,11 @@ Predictions are stored before kickoff and later labelled from final scores. Afte
 
 A value candidate requires at least 3% expected value at the best available price. The suggested stake uses 25% Kelly and is capped at 1% of the separate sports paper bankroll per event. If the model is uncalibrated, data is stale or insufficient, or there is no positive edge, stake is zero.
 
-### Supported markets
+### Stakeable market in this model version
 
 - Full Time Result (Home / Draw / Away)
-- Both Teams To Score (Yes / No)
-- Over/Under Full Time 2.5 goals
 
-Other markets are displayed when returned by the provider but are not automatically recommended or paper-settled by this model version.
+The engine also calculates exploratory BTTS and Over/Under 2.5 probabilities from its Poisson score matrix, but they are explicitly not eligible for value recommendations or automatic paper stakes until each market has its own out-of-sample calibration and quality gate. Other markets are displayed when returned by the provider but are not automatically recommended or paper-settled.
 
 ### Results and journal
 
