@@ -1,5 +1,5 @@
 // GET /api/omnisignal?symbol=BTCUSDT&strategy=intraday&engines=swift,gainz
-// Analytical and read-only. It never submits orders; execution stays behind the existing risk-gated /api/orders routes.
+// Analytical and read-only. It never submits orders; execution stays behind the existing /api/orders routes and their in-process paper safeguards.
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { expectancyFor, expectancyOptions, expectancyStatus } from "./expectancy.ts";

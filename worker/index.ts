@@ -23,6 +23,7 @@ import { handleAnalysis } from "./analysis/api.ts";
 import type { AnalysisEnv } from "./analysis/fundamental-sources.ts";
 import { handleKnowledge } from "./knowledge.ts";
 import { handleReadiness } from "./readiness/api.ts";
+import { handleCalc } from "./calc.ts";
 import type { ReadinessEnv } from "./readiness/api.ts";
 import type { MarketEnv } from "./market.ts";
 import { handleAlpha, type AlphaEnv } from "./alpha/routes.ts";
@@ -79,6 +80,13 @@ ${PORTFOLIO_CSS}
 <div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
 <span id="overlayNote" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px;margin-bottom:8px"></span>
 <div id="stack" class="stack"><div class="chart big"><canvas id="chart" role="img" aria-label="Candlestick chart with ETI signal engine overlays"></canvas></div><div class="paneBox"><canvas id="paneRsi" role="img" aria-label="RSI 14 with engine momentum zones"></canvas></div><div class="paneBox"><canvas id="paneMacd" role="img" aria-label="MACD histogram and lines"></canvas></div><div class="paneBox"><canvas id="paneAdx" role="img" aria-label="ADX 14 trend strength"></canvas></div><div class="paneBox"><canvas id="paneScore" role="img" aria-label="ETI engine score per candle"></canvas></div><div id="tip" class="tip" role="status"></div></div>
+<div id="chartTicket" class="chartticket" role="region" aria-label="Trade from the chart">
+<style>.chartticket{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#0b1422}.chartticket .ct-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px}.chartticket label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}.chartticket input{width:130px}.calcgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px}.calcgrid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}.calckpi{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin:10px 0}.calckpi div{border:1px solid var(--line);border-radius:8px;padding:8px;background:#0b1422}.calckpi b{display:block;font-size:15px;color:var(--text)}@media(max-width:600px){.chartticket input{width:100%}.chartticket .ct-row>*{flex:1 1 120px}}</style>
+<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>Trade from the chart</b><span class="muted" id="ctCursor" aria-live="off">Click the chart to pick a price, or type one.</span></div>
+<div class="ct-row"><label>Price<input id="ctPrice" type="number" min="0" step="any" aria-label="Chart order price"></label><label>Quantity<input id="ctQty" type="number" min="0" step="any" aria-label="Chart order quantity"></label><button type="button" id="ctSize" title="Use the quantity from the calculator below">Calculator size</button></div>
+<div class="ct-row"><button type="button" id="ctBuyLimit" class="btn-buy">Buy limit at price</button><button type="button" id="ctSellLimit" class="btn-sell">Sell limit at price</button><button type="button" id="ctBuyMkt" class="btn-buy">Buy market</button><button type="button" id="ctSellMkt" class="btn-sell">Sell market</button><button type="button" id="ctClear">Clear</button></div>
+<div class="execution-note" id="ctHint" style="margin-top:8px">Orders use the same paper / testnet safeguards and confirmation as the Order Execution panel. No real money is used.</div>
+</div>
 <div class="execution-note" style="margin-top:8px">Every layer is the engine's own per-candle output. Ribbon: colour = BUY/SELL lean, opacity = |score|. Triangles: filled = high-conviction (|score| 55+) setup, hollow = lean flip. Green/red boxes = reward/risk of the latest signal (1R/2R/3R). Dashed green/red = prior 20-candle high/low. Dots with ✓/✕ = walk-forward replay trades (TP1 before stop).</div></section>
 <aside class="panel execpanel" id="executionPanel" aria-label="Order Execution">
 <h2>Order Execution</h2>
@@ -111,6 +119,26 @@ ${PLAN_HTML}
 <div style="margin-top:12px"><strong>Order preview / response</strong><div id="orderOutput" class="execution-output" style="margin-top:7px">No order prepared.</div></div>
 </aside>
 </div>
+<section class="panel" id="calcPanel" style="margin-top:14px">
+<div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Profit &amp; Leverage Calculator</h2><span class="muted" id="calcMeta">Estimates only</span></div>
+<p class="execution-note">For USDT-margined contracts with isolated margin. It never places an order. Leverage magnifies losses as well as profits. Liquidation is an estimate that ignores fees, funding and tiered maintenance margins: confirm with the exchange before relying on it.</p>
+<div class="calcgrid">
+<label>Side<select id="calcSide"><option value="long">Long (buy)</option><option value="short">Short (sell)</option></select></label>
+<label>Entry price<input id="calcEntry" type="number" min="0" step="any"></label>
+<label>Target price (optional)<input id="calcTarget" type="number" min="0" step="any"></label>
+<label>Stop price (optional)<input id="calcStop" type="number" min="0" step="any"></label>
+<label>Leverage: <b id="calcLevOut">10x</b><input id="calcLev" type="range" min="1" max="150" value="10" aria-label="Leverage"></label>
+<label>Size by<select id="calcSizeBy"><option value="margin">Margin (USDT)</option><option value="quantity">Quantity</option><option value="risk">Risk % of balance</option></select></label>
+<label id="calcMarginWrap">Margin (USDT)<input id="calcMargin" type="number" min="0" step="any" value="1000"></label>
+<label id="calcQtyWrap" style="display:none">Quantity<input id="calcQty" type="number" min="0" step="any"></label>
+<label id="calcBalWrap" style="display:none">Balance (USDT)<input id="calcBalance" type="number" min="0" step="any" value="10000"></label>
+<label id="calcRiskWrap" style="display:none">Risk % per trade<input id="calcRisk" type="number" min="0" step="any" value="1"></label>
+<label>Taker fee (bps)<input id="calcFee" type="number" min="0" step="any" value="5"></label>
+<label>Maintenance margin %<input id="calcMmr" type="number" min="0" step="any" value="0.5"></label>
+</div>
+<div class="execution-actions" style="margin-top:10px"><button type="button" id="calcLastPx">Use last price as entry</button><button type="button" id="calcRun" class="active">Calculate</button><label style="display:inline-flex;gap:6px;align-items:center;flex-direction:row"><input id="calcShow" type="checkbox" checked> Show levels on chart</label><button type="button" id="calcToTicket">Send size to chart ticket</button></div>
+<div id="calcOut" role="status" aria-live="polite"><span class="muted">Enter an entry price and press Calculate.</span></div>
+</section>
 ${PORTFOLIO_HTML}
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
@@ -171,7 +199,7 @@ function resize(c){const dpr=devicePixelRatio||1, r=c.getBoundingClientRect();c.
 const BARS=120,PAD_R=116,FUTURE=14,FONT='11px Inter,system-ui,sans-serif';
 const C={up:'#21d69a',down:'#ff637d',ema20:'#f0c674',ema50:'#56a8ff',ema200:'#c792ea',grid:'#24334a',muted:'#8fa3bd',text:'#eaf2ff',entry:'#e6edf7',amber:'#f0c674'};
 const layers={ema:true,bb:true,levels:true,markers:true,replay:true,ribbon:true,volume:true,trades:true};
-let sig=null,sigSeq=0,sigWantProvider=null,sigTimer=null,hoverIdx=-1;
+let sig=null,sigSeq=0,sigWantProvider=null,sigTimer=null,hoverIdx=-1,chartLines=[],chartScale=null;
 function fp(v){v=Number(v);if(!isFinite(v))return '—';const a=Math.abs(v),d=a>=1000?2:a>=100?3:a>=1?4:6;return v.toLocaleString(undefined,{minimumFractionDigits:Math.min(d,2),maximumFractionDigits:d});}
 const sg=v=>(v>0?'+':'')+v;
 function rgba(hex,a){const n=parseInt(hex.slice(1),16);return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';}
@@ -195,8 +223,9 @@ function drawChart(){
  candles.forEach(v=>{if(v[3]<lo)lo=v[3];if(v[2]>hi)hi=v[2];});
  if(ok&&layers.levels){const L=ch.levels;[L.stopLoss,L.entry].concat(L.targets).forEach(v=>{if(v<lo)lo=v;if(v>hi)hi=v;});}
  if(layers.trades)pfRange(candles[n-1][4]).forEach(v=>{if(v<lo)lo=v;if(v>hi)hi=v;});
+ chartLines.forEach(l=>{if(l.price>0&&Math.abs(l.price-candles[n-1][4])<candles[n-1][4]*.35){if(l.price<lo)lo=l.price;if(l.price>hi)hi=l.price;}});
  const pad=(hi-lo)*.05||1;lo-=pad;hi+=pad;
- const py=v=>bot-(v-lo)/(hi-lo)*(bot-top);
+ const py=v=>bot-(v-lo)/(hi-lo)*(bot-top);chartScale={top:top,bot:bot,lo:lo,hi:hi,plotW:g.plotW};
  x.font=FONT;x.lineWidth=1;
  for(let i=0;i<=5;i++){const y=top+i*(bot-top)/5;x.strokeStyle=C.grid;x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.fillStyle=C.muted;x.fillText(fp(hi-(hi-lo)*i/5),g.plotW+6,y+4);}
  const bw=Math.max(1,Math.min(14,g.step*.62));
@@ -224,7 +253,7 @@ function drawChart(){
  if(ok&&layers.markers)ch.markers.forEach(m=>{const i=cIdx.get(m.time);if(i===undefined)return;const v=candles[i],buy=m.label==='BUY',s=m.kind==='high'?7:5,cx=g.x(i),col=buy?C.up:C.down,y=buy?py(v[3])+6:py(v[2])-6;
   x.beginPath();if(buy){x.moveTo(cx,y);x.lineTo(cx-s,y+s*1.6);x.lineTo(cx+s,y+s*1.6);}else{x.moveTo(cx,y);x.lineTo(cx-s,y-s*1.6);x.lineTo(cx+s,y-s*1.6);}x.closePath();
   if(m.kind==='high'){x.fillStyle=col;x.fill();x.font='10px Inter,system-ui,sans-serif';x.textAlign='center';x.fillText(sg(m.score),cx,buy?y+s*1.6+11:y-s*1.6-4);x.textAlign='left';x.font=FONT;}else{x.strokeStyle=col;x.lineWidth=1.4;x.stroke();}});
- pfDrawTrades(x,g,py,labels);
+ pfDrawTrades(x,g,py,labels);drawChartLines(x,g,py,labels);
  x.restore();
  const lp=candles[n-1][4],ly=py(lp),lup=candles[n-1][4]>=candles[n-1][1];
  x.strokeStyle=lup?C.up:C.down;x.setLineDash([2,3]);x.lineWidth=1;x.beginPath();x.moveTo(0,ly);x.lineTo(g.plotW,ly);x.stroke();x.setLineDash([]);
@@ -534,6 +563,59 @@ async function submitOrder(side){
 }
 $('orderType').onchange=()=>{$('limitPriceWrap').style.display=$('orderType').value==='limit'?'flex':'none';};
 $('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();};
+/* ===== Chart trading + profit & leverage calculator ===== */
+function drawChartLines(x,g,py,labels){chartLines.forEach(l=>{if(!(l.price>0))return;const y=py(l.price);x.lineWidth=1.2;x.strokeStyle=l.color;x.setLineDash(l.dash||[4,3]);x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.setLineDash([]);labels.push({y:y,t:l.label,c:l.color});});}
+function setChartLines(src,lines){chartLines=chartLines.filter(l=>l.src!==src).concat(lines.map(l=>Object.assign({src:src},l)));drawChart();}
+function ctLast(){return Number(String($('last').textContent).replace(/,/g,''));}
+function ctRound(p){const a=Math.abs(p),d=a>=1000?2:a>=100?3:a>=1?4:6;return Number(p.toFixed(d));}
+function ctPriceAt(e){const s=chartScale;if(!s)return null;const r=$('chart').getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||x>s.plotW||y<s.top||y>s.bot)return null;return s.hi-(y-s.top)/(s.bot-s.top)*(s.hi-s.lo);}
+function ctRefresh(){const p=Number($('ctPrice').value),last=ctLast();
+ if(Number.isFinite(p)&&p>0){setChartLines('order',[{price:p,label:'ORDER '+fp(p),color:'#f0c674',dash:[6,3]}]);
+  const rel=Number.isFinite(last)&&last>0?(p>last?'above':p<last?'below':'at'):'';
+  $('ctHint').textContent=rel?('Price '+fp(p)+' is '+rel+' the last price '+fp(last)+'. A buy limit below (or sell limit above) the market waits to be filled; the other way round it fills immediately at the market price. Same paper/testnet safeguards and confirmation as the Order Execution panel.'):'Orders use the same paper / testnet safeguards and confirmation as the Order Execution panel.';}
+ else setChartLines('order',[]);}
+function ctSubmit(side,type){
+ const q=Number($('ctQty').value);
+ if(!(q>0)){$('orderOutput').textContent='Enter a quantity in the chart ticket first.';$('ctQty').focus();return;}
+ $('orderSymbol').value=$('symbol').value;$('orderQuantity').value=q;
+ if(type==='limit'){const p=Number($('ctPrice').value);if(!(p>0)){$('orderOutput').textContent='Click the chart or type a price first.';$('ctPrice').focus();return;}$('orderType').value='limit';$('orderLimitPrice').value=p;}
+ else $('orderType').value='market';
+ $('orderType').onchange();submitOrder(side);}
+(function wireChartTicket(){const st=$('stack');st.style.cursor='crosshair';
+ st.addEventListener('pointermove',e=>{const p=ctPriceAt(e);$('ctCursor').textContent=p===null?'Click the chart to pick a price, or type one.':'Cursor price '+fp(p)+' (click to use it)';});
+ st.addEventListener('click',e=>{const p=ctPriceAt(e);if(p===null)return;$('ctPrice').value=ctRound(p);ctRefresh();$('ctCursor').textContent='Price '+fp(ctRound(p))+' selected';});
+ $('ctPrice').oninput=ctRefresh;$('ctQty').oninput=()=>{$('orderQuantity').value=$('ctQty').value;};
+ $('ctBuyLimit').onclick=()=>ctSubmit('buy','limit');$('ctSellLimit').onclick=()=>ctSubmit('sell','limit');$('ctBuyMkt').onclick=()=>ctSubmit('buy','market');$('ctSellMkt').onclick=()=>ctSubmit('sell','market');
+ $('ctClear').onclick=()=>{$('ctPrice').value='';ctRefresh();$('ctCursor').textContent='Click the chart to pick a price, or type one.';};
+ $('ctSize').onclick=()=>{if(calcResult&&calcResult.ok){$('ctQty').value=Number(calcResult.position.quantity.toFixed(6));$('orderQuantity').value=$('ctQty').value;}else $('ctHint').textContent='Run the calculator first to get a position size.';};
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('ctPrice').value){$('ctClear').onclick();}});})();
+let calcResult=null,calcTimer=null;
+function calcNum(id){const v=$(id).value;return v===''?undefined:Number(v);}
+function calcBody(){return {side:$('calcSide').value,entry:calcNum('calcEntry'),target:calcNum('calcTarget'),stop:calcNum('calcStop'),leverage:Number($('calcLev').value),sizeBy:$('calcSizeBy').value,margin:calcNum('calcMargin'),quantity:calcNum('calcQty'),balance:calcNum('calcBalance'),riskPct:calcNum('calcRisk'),takerFeeBps:calcNum('calcFee'),maintenanceMarginPct:calcNum('calcMmr')};}
+function money(v){return v==null?'-':(v<0?'-':'')+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
+function calcOutcomeRow(label,o){if(!o)return '';const c=o.netPnl>=0?'#21d69a':'#ff637d';return '<tr><td>'+label+'</td><td>'+fp(o.price)+' ('+sg(o.movePct)+'%)</td><td>'+money(o.grossPnl)+'</td><td>'+money(o.fees+o.funding)+'</td><td style="color:'+c+'"><b>'+money(o.netPnl)+'</b></td><td style="color:'+c+'">'+sg(o.roiOnMarginPct)+'%</td></tr>';}
+function calcRender(d){
+ if(!d.ok){$('calcOut').innerHTML='<span style="color:#ffb08c">'+d.errors.map(esc).join(' | ')+'</span>';$('calcMeta').textContent='Check inputs';setChartLines('calc',[]);return;}
+ const p=d.position,l=d.liquidation;
+ let h='<div class="calckpi"><div>Quantity<b>'+esc(p.quantity)+'</b></div><div>Notional (USDT)<b>'+money(p.notional)+'</b></div><div>Margin (USDT)<b>'+money(p.margin)+'</b>'+(p.marginToBalancePct==null?'':'<span class="muted">'+p.marginToBalancePct+'% of balance</span>')+'</div><div>Est. liquidation<b style="color:#ff9a52">'+fp(l.price)+'</b><span class="muted">'+sg(l.distancePct)+'% from entry</span></div><div>Break-even incl. fees<b>'+fp(d.breakEven)+'</b></div><div>Entry fee (USDT)<b>'+money(d.fees.entry)+'</b></div>'+(d.rewardRisk==null?'':'<div>Net reward / risk<b>'+d.rewardRisk+'</b></div>')+'</div>';
+ if(d.atTarget||d.atStop)h+='<div class="scroll"><table><tr><th>At</th><th>Price</th><th>Gross P&amp;L</th><th>Fees + funding</th><th>Net P&amp;L (USDT)</th><th>ROI on margin</th></tr>'+calcOutcomeRow('Target',d.atTarget)+calcOutcomeRow('Stop',d.atStop)+'</table></div>';
+ h+='<ul class="ev" style="color:#ffb08c">'+d.warnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ul>';
+ $('calcOut').innerHTML=h;$('calcMeta').textContent='Estimates only';
+ if($('calcShow').checked){const lines=[{price:Number($('calcEntry').value),label:'CALC ENTRY '+fp(Number($('calcEntry').value)),color:'#56a8ff',dash:[5,4]},{price:l.price,label:'LIQ '+fp(l.price),color:'#ff9a52',dash:[2,3]}];
+  if(d.atTarget)lines.push({price:d.atTarget.price,label:'CALC TP '+fp(d.atTarget.price),color:'#21d69a',dash:[6,3]});
+  if(d.atStop)lines.push({price:d.atStop.price,label:'CALC SL '+fp(d.atStop.price),color:'#ff637d',dash:[6,3]});
+  setChartLines('calc',lines);}else setChartLines('calc',[]);}
+async function runCalc(){
+ try{const r=await fetch('/api/calc/position',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(calcBody())}),d=await r.json();calcResult=d;calcRender(d);}
+ catch(e){$('calcOut').innerHTML='<span style="color:#ffb08c">Calculator unavailable: '+esc(e.message)+'</span>';}}
+function calcSoon(){clearTimeout(calcTimer);calcTimer=setTimeout(runCalc,250);}
+function calcSync(){const s=$('calcSizeBy').value;$('calcMarginWrap').style.display=s==='margin'?'':'none';$('calcQtyWrap').style.display=s==='quantity'?'':'none';$('calcBalWrap').style.display=s==='risk'?'':'none';$('calcRiskWrap').style.display=s==='risk'?'':'none';$('calcLevOut').textContent=$('calcLev').value+'x';}
+['calcSide','calcEntry','calcTarget','calcStop','calcLev','calcSizeBy','calcMargin','calcQty','calcBalance','calcRisk','calcFee','calcMmr','calcShow'].forEach(id=>{$(id).addEventListener('input',()=>{calcSync();calcSoon();});$(id).addEventListener('change',()=>{calcSync();calcSoon();});});
+$('calcRun').onclick=runCalc;
+$('calcLastPx').onclick=()=>{const v=ctLast();if(v>0){$('calcEntry').value=ctRound(v);runCalc();}};
+$('calcToTicket').onclick=()=>{if(calcResult&&calcResult.ok){$('ctQty').value=Number(calcResult.position.quantity.toFixed(6));$('orderQuantity').value=$('ctQty').value;$('ctPrice').value=$('calcEntry').value;ctRefresh();$('ctHint').textContent='Size and entry copied from the calculator. Review them, then use the chart ticket buttons (paper/testnet only).';}else $('calcOut').innerHTML='<span style="color:#ffb08c">Calculate a valid position first.</span>';};
+new MutationObserver(()=>{if(!$('calcEntry').value){const v=ctLast();if(v>0){$('calcEntry').value=ctRound(v);runCalc();}}}).observe($('last'),{childList:true,characterData:true,subtree:true});
+calcSync();
 function syncOrderMarket(){const l=$('last').textContent;$('orderMarketPrice').textContent=l;$('orderChartSymbol').textContent=$('symbol').value;}
 new MutationObserver(syncOrderMarket).observe($('last'),{childList:true,characterData:true,subtree:true});syncOrderMarket();
 let amtDriver='qty';
@@ -773,6 +855,9 @@ export default {
     }
     if (url.pathname === "/api/signals") {
       return handleSignals(request, _env);
+    }
+    if (url.pathname === "/api/calc/position") {
+      return handleCalc(request);
     }
     if (url.pathname === "/api/readiness" || url.pathname.startsWith("/api/readiness/")) {
       return handleReadiness(request, _env);

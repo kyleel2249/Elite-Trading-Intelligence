@@ -452,7 +452,8 @@ def calculate(inp: Inputs) -> dict[str, Any]:
 # ----------------------------------------------------------------------------------------------- allocation
 
 def _cents(x: Decimal) -> Decimal:
-    return _round_down(x, D("0.01"))
+    # quantize so the exponent is always -2 (a bare product/division can otherwise print as "2500" rather than "2500.00")
+    return _round_down(x, D("0.01")).quantize(D("0.01"))
 
 
 def allocate_capital(total: Decimal, method: str, count: int, weights: Optional[Sequence[Decimal]] = None,

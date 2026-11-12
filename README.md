@@ -222,6 +222,13 @@ The same checks cover every pathway: the dashboard Buy/Sell buttons, `POST /api/
 The project has no risk gateway anywhere: the Python app's former preflight endpoint is now `POST /api/pretrade/check`, a dry run of the in-process `RiskEngine` that nothing depends on. Never enable withdrawals, transfers or wallet management with any key used here.
 
 
+## Profit & leverage calculator and chart trading
+
+The dashboard has a **Profit & Leverage Calculator** (`/api/calc/position`, 1-150x, margin / quantity / risk-% sizing, estimated liquidation, fees,
+net P&L and reward/risk, optional chart lines) and a **Trade from the chart** ticket: click the live chart to pick a price, then place a
+limit or market order through the same confirmed, safeguarded paper/testnet flow as the Order Execution panel. See
+[docs/CALCULATOR_AND_CHART_TRADING.md](docs/CALCULATOR_AND_CHART_TRADING.md). Liquidation figures are estimates; leverage magnifies losses.
+
 ## Elite-method signal engine (incremental release)
 
 The Worker now exposes a read-only `GET /api/signals?symbol=BTCUSDT&interval=1h` endpoint and a searchable `GET /api/intelligence/traders` directory. The signal engine uses validated OHLCV candles from Binance/Bybit/OKX failover and computes EMA 20/50/200, RSI 14, MACD, ATR 14, ADX, Bollinger bands, relative volume and 20-candle breakout levels. It returns BUY, SELL or WAIT; a reference entry; ATR-derived stop; and 1R, 2R and 3R targets.
