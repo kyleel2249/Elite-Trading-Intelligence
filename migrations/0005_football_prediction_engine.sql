@@ -29,7 +29,13 @@ CREATE TABLE IF NOT EXISTS sports_model_predictions (
   model_version TEXT NOT NULL,
   sample_size INTEGER NOT NULL,
   actual_outcome TEXT CHECK(actual_outcome IN ('H','D','A') OR actual_outcome IS NULL),
-  settled_at INTEGER
+  settled_at INTEGER,
+  best_selection TEXT,
+  best_odds REAL,
+  best_bookmaker TEXT,
+  expected_value REAL,
+  recommended_stake_cents INTEGER NOT NULL DEFAULT 0,
+  decision TEXT NOT NULL DEFAULT 'NO_BET'
 );
 CREATE INDEX IF NOT EXISTS sports_model_predictions_fixture ON sports_model_predictions(fixture_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS sports_model_predictions_evaluation ON sports_model_predictions(actual_outcome, created_at DESC);
