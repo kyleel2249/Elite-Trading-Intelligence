@@ -39,7 +39,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
    await init(db(env)!);const account=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<{balance_cents:number}>();if(!account||stake>account.balance_cents)return reply({error:"insufficient_bankroll",balance_cents:account?.balance_cents??0},409);
    const id=crypto.randomUUID();const now=Date.now();const r=await db(env)!.batch([
     db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents-?,updated_at=? WHERE id=1 AND balance_cents>=?").bind(stake,now,stake),
-    db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0 WHERE (SELECT balance_cents FROM sports_bankroll WHERE id=1)>=0").bind(id,now,sport,event,market,selection,odds,prob,stake)
+    db(env)!.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents) SELECT ?,?,?,?,?,?,?,?,?, 'OPEN',0 WHERE changes()=1").bind(id,now,sport,event,market,selection,odds,prob,stake)
    ]);if(!r[1]?.meta?.changes)return reply({error:"stake_reservation_failed"},409);
    return reply({ok:true,id,expected_value:ev,stake_cents:stake,message:"Paper bet recorded. No bookmaker was contacted."},201);
  }
