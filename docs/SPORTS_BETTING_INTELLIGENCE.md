@@ -16,7 +16,7 @@ A key committed to a repository, browser bundle, log or source file must be revo
 
 - GET /api/sports/status — reports whether credentials and the D1 binding are configured (not whether the provider is reachable).
 - GET /api/sports/health — performs live, key-safe provider probes and checks whether all sports D1 tables exist. It never returns the provider API key.
-- GET /api/sports/football/next?limit=8 — retrieves upcoming football fixtures in the next 47 hours, scans available bookmaker boards, and attaches model predictions, best available price, expected value, decision and recommended stake when the model is qualified.
+- GET /api/sports/football/next?limit=12&competition=uefa_nations_league — retrieves UEFA Nations League fixtures returned by OddsPapi in the next 47 hours, scans every bookmaker board returned for each selected fixture, and attaches model probabilities, best available price, expected value, decision and recommended stake when the model is qualified. Use `competition=all` for the general football feed. The endpoint reports when its 12-fixture safety cap truncates the provider feed.
 - POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous 47 hours and stores unseen results for model training. Manual request body may include limit (1–30).
 - POST /api/sports/bets — paper-token protected; accepts an event_id only for a persisted ETI model VALUE_CANDIDATE. It uses the stored best market, selection, bookmaker, odds, model probability and stake recommendation. Manual arbitrary probabilities and stakes are rejected; optional stake_cents cannot exceed the model recommendation.
 - GET /api/sports/bets — paper-token protected; returns the separate sports bankroll and paper ledger.
@@ -27,25 +27,25 @@ A key committed to a repository, browser bundle, log or source file must be revo
 The Worker scheduled handler invokes the sports scan and history sync. OddsPapi requires sport-wide fixture date ranges to be shorter than 48 hours, so both queries use a 47-hour window. History results are processed oldest-first within that window. D1 job locks prevent duplicate execution when multiple cron schedules fire:
 - ETI_SPORTS_SCAN_INTERVAL_MINUTES defaults to 360 (six hours), minimum 60.
 - ETI_SPORTS_HISTORY_SYNC_MINUTES defaults to 1440 (24 hours), minimum 360.
-- ETI_SPORTS_AUTO_SCAN_LIMIT defaults to 1 fixture per scheduled cycle; maximum 12.
+- ETI_SPORTS_AUTO_SCAN_LIMIT defaults to 12 fixtures per scheduled cycle; maximum 12. The Nations League dashboard scan requests up to 12 eligible fixtures per scan.
 - ETI_SPORTS_HISTORY_BATCH_SIZE defaults to 5 unseen finished fixtures per scheduled cycle; maximum 30.
 - Manual dashboard scans can request up to 12 fixtures and manual history sync can import up to 30.
 - Provider calls are sequential, respect the documented fixtures/odds/scores cooldowns, and retry transient `429 RATE_LIMITED` responses using the provider's `retryMs`. Quota-exhaustion errors are not retried. Adjust intervals only after checking your account request allowance.
 
 The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0007.
 
-## Autonomous Football Prediction Engine
+## UEFA Nations League coverage\n\nThe `/sports` dashboard defaults to UEFA Nations League. ETI filters the OddsPapi global football fixture feed by the competition name, scans up to 12 eligible fixtures inside the provider-safe 47-hour window, and requests the odds board for each fixture without a bookmaker filter. It therefore compares all bookmakers returned by the active subscription for those fixtures; it cannot guarantee that every national-team fixture or Ghanaian/African bookmaker is present in the provider feed. The dashboard can switch back to all football competitions. The automatic scheduled scan defaults to a maximum of 12 fixtures per cycle, subject to the provider response and account quota.\n\n## Autonomous Football Prediction Engine
 
 ### Model
 
-The current first model version is `eti-poisson-form-v1`. It:
+The current baseline model is `eti-poisson-form-v1`. It:
 1. Builds recent team form from stored final match results.
 2. Uses league-specific home/away goal baselines and venue-specific attack/defence rates with shrinkage toward league averages.
 3. Estimates expected home and away goals.
 4. Uses Poisson scoreline probabilities to derive 1X2, Both Teams To Score and Over/Under 2.5 probabilities.
 5. Compares those probabilities with the best currently available bookmaker price for each supported market/outcome.
 
-The model refuses to publish team-specific probabilities when it has fewer than five historical matches for either team or fewer than 20 relevant competition results. It will display “Insufficient history” and recommend zero stake.
+For UEFA Nations League fixtures, the engine first uses competition-specific results. If fewer than 20 are available, it may use only international national-team competitions (Nations League, World Cup, European Championship/Euro, international fixtures and qualifiers, Copa America, AFCON and Asian Cup) as the fallback pool; it does not mix club results into country-v-country estimates. The model refuses to publish team-specific probabilities when it has fewer than five historical matches for either team or fewer than 20 relevant international results. It will display “Insufficient history” and recommend zero stake. Nations League staking calibration is separately restricted to resolved international-competition predictions and must independently pass the same 100-record / 30-holdout quality gate.
 
 ### Calibration and value gate
 
@@ -86,7 +86,7 @@ Confirm readiness at GET /api/sports/health. If tables are missing, inspect Wran
 
 ## Operational limitations
 
-- The model is a transparent baseline, not a guarantee of accuracy. It does not yet incorporate verified injuries, lineups, xG, weather, player availability or tactical data.
+- The model is a transparent baseline, not a guarantee of accuracy. For Nations League predictions it can fall back to international-only history, but it does not yet incorporate verified injuries, lineups, xG, weather, player availability, travel fatigue or tactical data.
 - Initial model training is cold-started from recent OddsPapi final scores. Historical data accumulates over time; do not enable staking before the calibration gate reports stake_enabled=true.
 - Odds can change between scan and kickoff. ETI stores the scanned price and provider timestamp but should re-scan before recording a paper bet.
 - Provider coverage, request quotas and available markets vary by subscription and country. Ghanaian and African books appear only when the provider returns them for a fixture.

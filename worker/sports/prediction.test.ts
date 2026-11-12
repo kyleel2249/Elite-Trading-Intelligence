@@ -9,3 +9,11 @@ test("fractional Kelly never exceeds the configured event cap",()=>{const s=frac
 
 test("calibration refuses a weak model even with 100 resolved records",()=>{const pattern=[..."HHHHHHHHHHHHDDDDDAAA"];const rows=Array.from({length:200},(_,i)=>({pHome:.34,pDraw:.33,pAway:.33,outcome:pattern[i%pattern.length],settledAt:i+1} as any));const c=fitTemperature(rows);assert.equal(c.calibrated,false);});
 test("football score extraction uses regulation fulltime and never falls back to a result/half-time score",()=>{assert.deepEqual(extractFootballFullTimeScore({scores:{periods:{p1:{participant1Score:1,participant2Score:0},fulltime:{participant1Score:2,participant2Score:1},result:{participant1Score:3,participant2Score:1}}}}),{homeGoals:2,awayGoals:1});assert.equal(extractFootballFullTimeScore({scores:{periods:{p1:{participant1Score:1,participant2Score:0},result:{participant1Score:2,participant2Score:1}}}}),null);});
+
+test("Nations League predictions fall back only to international competition history",()=>{
+ const international=Array.from({length:24},(_,i)=>({fixtureId:"int-"+i,competition:i%2?"FIFA World Cup Qualifiers":"UEFA European Championship",homeTeam:i%2?"France":"Spain",awayTeam:i%2?"Spain":"France",homeGoals:i%3===0?2:1,awayGoals:i%4===0?1:0,playedAt:Date.now()-i*86400000}));
+ const p=estimateFootballMatch(international,"France","Spain","UEFA Nations League");
+ assert.equal(p.status,"uncalibrated");
+ assert.equal(p.sample.leagueMatches,24);
+ assert.ok(p.sample.homeTeamMatches>=5&&p.sample.awayTeamMatches>=5);
+});
