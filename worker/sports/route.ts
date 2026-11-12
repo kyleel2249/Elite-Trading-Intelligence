@@ -101,11 +101,14 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
        await db(env)!.prepare("INSERT INTO sports_match_results (fixture_id,played_at,competition,country,home_team,away_team,home_goals,away_goals,source,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fixture_id) DO UPDATE SET played_at=excluded.played_at,home_goals=excluded.home_goals,away_goals=excluded.away_goals,updated_at=excluded.updated_at").bind(f.fixtureId,Date.parse(f.startTime),f.tournamentName||null,f.categoryName||null,f.participant1Name,f.participant2Name,hg,ag,"OddsPapi",now).run();
        const outcome=hg>ag?"H":hg<ag?"A":"D";
        await db(env)!.prepare("UPDATE sports_model_predictions SET actual_outcome=?,settled_at=? WHERE fixture_id=? AND actual_outcome IS NULL").bind(outcome,now,f.fixtureId).run();
-       const openBets=await db(env)!.prepare("SELECT id,selection,odds,stake_cents FROM sports_bets WHERE event_id=? AND status='OPEN'").bind(f.fixtureId).all<any>();
+       const openBets=await db(env)!.prepare("SELECT id,market,selection,odds,stake_cents FROM sports_bets WHERE event_id=? AND status='OPEN'").bind(f.fixtureId).all<any>();
        for(const bet of openBets.results||[]){
-         const selected=String(bet.selection||"").toLowerCase();
-         const won=(selected==="home"&&outcome==="H")||(selected==="draw"&&outcome==="D")||(selected==="away"&&outcome==="A");
-         const valid=["home","draw","away"].includes(selected);if(!valid)continue;
+         const selected=String(bet.selection||"").toLowerCase(),market=String(bet.market||"").toLowerCase();
+         let won:boolean|null=null;
+         if(market==="full time result")won=(selected==="home"&&outcome==="H")||(selected==="draw"&&outcome==="D")||(selected==="away"&&outcome==="A");
+         else if(market==="both teams to score")won=(selected==="yes"&&hg>0&&ag>0)||(selected==="no"&&(hg===0||ag===0));
+         else if(market==="over/under full time")won=(selected==="over 2.5"&&hg+ag>=3)||(selected==="under 2.5"&&hg+ag<=2);
+         if(won===null)continue;
          const stake=Number(bet.stake_cents),gross=won?Math.round(stake*Number(bet.odds)):0,profit=gross-stake;
          await db(env)!.batch([
            db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(won?"WON":"LOST",profit,now,bet.id),
