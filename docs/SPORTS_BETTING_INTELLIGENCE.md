@@ -12,11 +12,14 @@ Worker secrets (never commit these to Git):
 
 A key committed to a repository, browser bundle, log or source file must be revoked and rotated immediately. GitHub Actions secrets do not automatically become Cloudflare Worker secrets; add the values to the deployed Worker under Settings → Variables and Secrets → Secrets.
 
+Optional Worker variable:
+- ETI_SPORTS_PAPER_BANKROLL_CENTS — starting balance (in cents) of a **new** sports paper ledger. Default 100000 (USD 1,000.00); accepted range 100 to 1,000,000,000. With the 1%-of-bankroll stake cap, a very small bankroll produces one-cent stakes, so the former hard-coded 100 cents (USD 1.00) was replaced by this setting. An existing ledger row is never changed automatically; see "Resetting the paper bankroll" below.
+
 ## Endpoints
 
 - GET /api/sports/status — reports whether credentials and the D1 binding are configured (not whether the provider is reachable).
 - GET /api/sports/health — performs live, key-safe provider probes and checks whether all sports D1 tables exist. It never returns the provider API key.
-- GET /api/sports/football/next?limit=12&competition=uefa_nations_league — retrieves UEFA Nations League fixtures returned by OddsPapi in the next 47 hours, scans every bookmaker board returned for each selected fixture, and attaches model probabilities, best available price, expected value, decision and recommended stake when the model is qualified. Use `competition=all` for the general football feed. The endpoint reports when its 12-fixture safety cap truncates the provider feed.
+- GET /api/sports/football/next?limit=12&competition=uefa_nations_league — retrieves UEFA Nations League fixtures returned by OddsPapi in the next 47 hours, scans every bookmaker board returned for each selected fixture, and attaches model probabilities, best available price, expected value, decision and recommended stake when the model is qualified. Use `competition=all` for the general football feed. The response reports `truncated` and `available_fixture_count` when the 12-fixture safety cap truncates the provider feed, and a `sportybet` block (fixture and outcome counts) so the dashboard can show whether SportyBet quotes the scanned fixtures. Public scans are cached for 120 seconds per isolate; the cache key is the effective limit **and** the competition filter, so Nations League and all-football scans never share an entry.
 - POST /api/sports/football/sync-history — paper-token protected; fetches finished fixtures and scores from the previous 47 hours and stores unseen results for model training. Manual request body may include limit (1–30).
 - POST /api/sports/bets — paper-token protected; accepts an event_id only for a persisted ETI model VALUE_CANDIDATE. It uses the stored best market, selection, bookmaker, odds, model probability and stake recommendation. Manual arbitrary probabilities and stakes are rejected; optional stake_cents cannot exceed the model recommendation.
 - GET /api/sports/bets — paper-token protected; returns the separate sports bankroll and paper ledger.
@@ -32,9 +35,13 @@ The Worker scheduled handler invokes the sports scan and history sync. OddsPapi 
 - Manual dashboard scans can request up to 12 fixtures and manual history sync can import up to 30.
 - Provider calls are sequential, respect the documented fixtures/odds/scores cooldowns, and retry transient `429 RATE_LIMITED` responses using the provider's `retryMs`. Quota-exhaustion errors are not retried. Adjust intervals only after checking your account request allowance.
 
-The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0007.
+The health endpoint reports active subscription request limits and usage. The scheduled scan requires ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, ETI_PORTFOLIO_DB and migrations 0003–0008.
 
-## UEFA Nations League coverage\n\nThe `/sports` dashboard defaults to UEFA Nations League. ETI filters the OddsPapi global football fixture feed by the competition name, scans up to 12 eligible fixtures inside the provider-safe 47-hour window, and requests the odds board for each fixture without a bookmaker filter. It therefore compares all bookmakers returned by the active subscription for those fixtures; it cannot guarantee that every national-team fixture or Ghanaian/African bookmaker is present in the provider feed. The dashboard can switch back to all football competitions. The automatic scheduled scan defaults to a maximum of 12 fixtures per cycle, subject to the provider response and account quota.\n\n## Autonomous Football Prediction Engine
+## UEFA Nations League coverage
+
+The `/sports` dashboard defaults to UEFA Nations League. ETI filters the OddsPapi global football fixture feed by the competition name, scans up to 12 eligible fixtures inside the provider-safe 47-hour window, and requests the odds board for each fixture without a bookmaker filter. It therefore compares all bookmakers returned by the active subscription for those fixtures; it cannot guarantee that every national-team fixture or Ghanaian/African bookmaker is present in the provider feed. The dashboard can switch back to all football competitions, and a bookmaker filter can narrow the displayed odds to SportyBet. The automatic scheduled scan defaults to a maximum of 12 fixtures per cycle, subject to the provider response and account quota.
+
+## Autonomous Football Prediction Engine
 
 ### Model
 
@@ -81,8 +88,23 @@ This includes:
 - 0003_sports_betting.sql
 - 0004_sports_event_audit.sql
 - 0005_football_prediction_engine.sql
+- 0006_sports_bet_idempotency.sql
+- 0007_sports_one_open_bet_per_fixture.sql
+- 0008_sports_match_results.sql
 
 Confirm readiness at GET /api/sports/health. If tables are missing, inspect Wrangler's configured D1 database name and migration history before retrying.
+
+### Resetting the paper bankroll
+
+The starting balance is only applied when the single `sports_bankroll` row is first created. A ledger created before `ETI_SPORTS_PAPER_BANKROLL_CENTS` existed still holds the old balance. To restart it deliberately (simulated money only), run against the D1 database while no paper bets are open:
+
+```sh
+npx wrangler d1 execute eti-portfolio-db --remote --command "UPDATE sports_bankroll SET balance_cents = 100000, updated_at = strftime('%s','now')*1000 WHERE id = 1 AND NOT EXISTS (SELECT 1 FROM sports_bets WHERE status = 'OPEN')"
+```
+
+## Tests
+
+`npm test` runs `worker/sports/*.test.ts`, including `regression.test.ts`, which compiles the dashboard script, checks that the dashboard HTML is a single well-formed document, verifies the scan-cache key separates competitions, exercises the Nations League international fallback, and confirms `package.json` and `wrangler.jsonc` are valid JSON without duplicate keys.
 
 ## Operational limitations
 
