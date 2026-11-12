@@ -13,6 +13,9 @@ const jsonBody=async(req:Request)=>{try{return await req.json() as Record<string
 function authorized(req:Request,env:SportsEnv){const expected=env.ETI_SPORTS_PAPER_TOKEN;return !!expected&&req.headers.get("x-eti-sports-token")===expected;}
 function db(env:SportsEnv){return env.ETI_PORTFOLIO_DB;}
 async function init(d:D1Database){await d.prepare("INSERT OR IGNORE INTO sports_bankroll (id,balance_cents,created_at,updated_at) VALUES (1,100,strftime('%s','now')*1000,strftime('%s','now')*1000)").run();}
+
+async function claimJob(d:D1Database,name:string,now:number,intervalMs:number){const r=await d.prepare("INSERT INTO sports_job_state (job_name,last_run_at,status,detail) VALUES (?,?,?,?) ON CONFLICT(job_name) DO UPDATE SET last_run_at=excluded.last_run_at,status=excluded.status,detail=excluded.detail WHERE sports_job_state.last_run_at<=? RETURNING job_name").bind(name,now,"RUNNING",null,now-intervalMs).first();return !!r;}
+async function finishJob(d:D1Database,name:string,status:string,detail:string|null){await d.prepare("UPDATE sports_job_state SET status=?,detail=? WHERE job_name=?").bind(status,detail,name).run();}
 export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async fetch(req,env){
  const u=new URL(req.url),p=u.pathname.replace(/\/+$/,"")||"/";
  if(req.method==="GET"&&p==="/sports")return new Response(sportsPage(),{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"same-origin"}});
