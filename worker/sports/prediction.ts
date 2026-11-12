@@ -34,7 +34,7 @@ function poisson(lambda: number, max = 10): number[] {
   return p.map(x=>x/sum);
 }
 export function estimateFootballMatch(history: MatchResult[], homeTeam: string, awayTeam: string, competition?: string): FootballPrediction {
-  const relevant=history.filter(m=>Number.isFinite(m.homeGoals)&&Number.isFinite(m.awayGoals)&&m.homeGoals>=0&&m.awayGoals>=0&&m.homeTeam&&m.awayTeam&&(!competition||(!!m.competition&&clean(m.competition)===clean(competition)))).sort((a,b)=>b.playedAt-a.playedAt);
+  let relevant=history.filter(m=>Number.isFinite(m.homeGoals)&&Number.isFinite(m.awayGoals)&&m.homeGoals>=0&&m.awayGoals>=0&&m.homeTeam&&m.awayTeam&&(!competition||(!!m.competition&&clean(m.competition)===clean(competition)))).sort((a,b)=>b.playedAt-a.playedAt);\n  // National-team competitions have sparse league-only history. For Nations League\n  // fixtures, use verified international competition results as the fallback pool;\n  // never blend club fixtures into country-v-country estimates.\n  if(competition&&/nations\\s+league/i.test(competition)&&relevant.length<20){\n    const international=/nations\\s+league|world\\s+cup|euro|european championship|international|qualif|copa america|africa cup|asian cup/i;\n    relevant=history.filter(m=>Number.isFinite(m.homeGoals)&&Number.isFinite(m.awayGoals)&&m.homeGoals>=0&&m.awayGoals>=0&&m.homeTeam&&m.awayTeam&&international.test(String(m.competition||""))).sort((a,b)=>b.playedAt-a.playedAt);\n  }
   const home=clean(homeTeam), away=clean(awayTeam);
   const homeMatches=relevant.filter(m=>clean(m.homeTeam)===home||clean(m.awayTeam)===home).slice(0,20);
   const awayMatches=relevant.filter(m=>clean(m.homeTeam)===away||clean(m.awayTeam)===away).slice(0,20);
