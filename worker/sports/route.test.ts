@@ -5,7 +5,7 @@ import { withSports } from "./route.ts";
 const base={fetch:()=>new Response("base")};
 test("sports dashboard is served as a separate paper-only workspace",async()=>{
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/sports"),{} as any);const html=await r.text();
- assert.equal(r.status,200);assert.match(html,/SPORTS BETTING INTELLIGENCE/);assert.match(html,/PAPER ONLY/);assert.match(html,/No bookmaker was contacted|ETI never places a bookmaker wager/);
+ assert.equal(r.status,200);assert.match(html,/SPORTS BETTING INTELLIGENCE/);assert.match(html,/PAPER ONLY/);assert.match(html,/No bookmaker was contacted|ETI never places a bookmaker wager/);assert.match(html,/Model probability/);assert.match(html,/Recommended stake USD/);assert.match(html,/id="place" disabled/);
 });
 test("sports status reports real provider and database configuration without fabricating readiness",async()=>{
  const app=withSports(base as any);const r=await app.fetch(new Request("https://eti.test/api/sports/status"),{} as any);const j=await r.json() as any;
