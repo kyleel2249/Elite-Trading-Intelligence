@@ -21,6 +21,7 @@ import { withAlgo } from "./algo/route.ts";
 import { withAgents } from "./agents/route.ts";
 import { withFutures } from "./agents/futures-route.ts";
 import { withCommand } from "./command/route.ts";
+import { withSports } from "./sports/route.ts";
 import { withPrecision } from "./precision/route.ts";
 import { runPrecisionCycle } from "./precision/cycle.ts";
 import { withDailyReport } from "./daily/route.ts";
@@ -45,7 +46,7 @@ import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
-const core = withJournal(withPro(withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any) as any) as any);
+const core = withSports(withJournal(withPro(withDailyReport(withPrecision(withCommand(withMarkets(withAlgo(withFutures(withAgents(base as any) as any) as any)) as any) as any) as any) as any) as any);
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
 const app = withSecurityHeaders(withIdentity(withProviders(withBackup(core as any) as any) as any) as any);
 const inner: any = base;
