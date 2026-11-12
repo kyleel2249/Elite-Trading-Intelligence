@@ -24,11 +24,14 @@
 
   "vars": {
     "APP_ENV": "production",
-    "DATABASE_URL": "postgresql+psycopg2://eti:eti@localhost:5432/eti",
+    "DATABASE_URL": "sqlite:///./eti.db",
     "ETI_EDGE": "native",
     "ETI_KILL_SWITCH": "false",
-    "MARKET_PROVIDER_ORDER": "binance,bybit,okx",
+    "PAPER_AUTOPILOT": "true",
+    "MARKET_PROVIDER_ORDER": "binance,bybit,okx,bitget",
     "TOKENOMIST_API_KEY": "f401e2a8-7ec3-428d-9b9b-0499a6735604",
+    "FMP_API_KEY": "ryHvCsifqrb0MTeXbQPOx3bcKhk9Tpxr",
+    "EVENT_FEED_TOKEN": "XPlowmq7j3aJhMR8OC6xFdkRb86KvI0OjFfG33EH6kBa6ojk+JBBaZfv0WmKsQN7",
     "SEC_USER_AGENT": "ETI (Elite Trading Intelligence; contact: davinatirzah@gmail.com)"
   },
 
