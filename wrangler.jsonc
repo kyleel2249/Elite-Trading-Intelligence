@@ -28,6 +28,7 @@
     "ETI_EDGE": "native",
     "ETI_KILL_SWITCH": "false",
     "MARKET_PROVIDER_ORDER": "binance,bybit,okx",
+    "TOKENOMIST_API_KEY": "f401e2a8-7ec3-428d-9b9b-0499a6735604",
     "SEC_USER_AGENT": "ETI (Elite Trading Intelligence; contact: davinatirzah@gmail.com)"
   },
 
