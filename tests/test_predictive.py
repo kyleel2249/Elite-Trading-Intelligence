@@ -26,3 +26,17 @@ def test_forecast_insufficient_history():
         klines=[{"close": 1.0, "data_status": "valid"}] * 3,
     )
     assert fc is None
+
+
+import pytest
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 0, -1, None, "not-a-price"])
+def test_forecast_refuses_corrupt_history(bad):
+    bars = [{"close": 100.0}] * 20 + [{"close": bad}]
+    assert PredictiveEngine().forecast(symbol="BTCUSDT", provider="binance", klines=bars) is None
+
+
+def test_forecast_refuses_invalid_bars():
+    bars = [{"close": 100.0}] * 20 + [{"close": 100.0, "data_status": "invalid"}]
+    assert PredictiveEngine().forecast(symbol="BTCUSDT", provider="binance", klines=bars) is None

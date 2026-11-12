@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from statistics import mean, pstdev
+from math import isfinite
 from typing import Any, Optional
 
 from app.intelligence.traders import ELITE_TRADERS
@@ -75,7 +76,15 @@ class PredictiveEngine:
         klines: list[dict[str, Any]],
         horizon: str = "intraday",
     ) -> Optional[ScenarioForecast]:
-        closes = [float(k["close"]) for k in klines if k.get("close") and k.get("data_status") != "invalid"]
+        # Refuse corrupt history rather than emitting NaN/Infinity or bridging bad bars.
+        try:
+            closes = [float(k["close"]) for k in klines]
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+        if any(k.get("data_status") == "invalid" for k in klines):
+            return None
+        if any(not isfinite(px) or px <= 0 for px in closes):
+            return None
         if len(closes) < 10:
             return None
 

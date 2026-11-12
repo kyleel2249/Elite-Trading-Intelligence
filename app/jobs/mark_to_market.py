@@ -31,12 +31,15 @@ class MarkToMarketJob:
 
     async def stop(self) -> None:
         self._running = False
-        if self._task:
-            self._task.cancel()
+        task = self._task
+        if task is not None:
+            task.cancel()
             try:
-                await self._task
+                await task
             except asyncio.CancelledError:
                 pass
+            finally:
+                self._task = None
 
     def status(self) -> dict:
         return {

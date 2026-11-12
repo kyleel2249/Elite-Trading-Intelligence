@@ -53,7 +53,7 @@ class StrategyRunner:
         if len(closes) < 25:
             return "flat"
         if module_id == "minervini_vcp":
-            sigs = vcp_signals(closes, lookback=30)
+            sigs = vcp_signals(closes, lookback=30, volumes=volumes)
         elif module_id == "wyckoff_supply_demand":
             sigs = wyckoff_signals(closes, volumes, lookback=40)
         elif module_id in ("turtle_trend", "darvas_box", "oneil_canslim"):
@@ -202,6 +202,7 @@ class StrategyRunner:
             data_status=ctx.data_status,
             data_age_seconds=ctx.data_age_seconds,
             fill_price_hint=fill_hint,
+            reference_price=snapshot.get("price") if snapshot else None,
             thesis=f"StrategyRunner:{module_id}:{signal}:{bt.signal_model}",
             council_action=signal.upper(),
         )

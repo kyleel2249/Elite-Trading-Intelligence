@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import hmac
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Query, status
 
 from app.config import get_settings
 
-PROTECTED_ENVS = frozenset({"production", "prod", "staging"})
+LOCAL_ENVS = frozenset({"development", "test", "local"})
 
 
 async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -23,7 +23,7 @@ async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     expected = (getattr(settings, "api_key", None) or "").strip() or None
 
     if not expected:
-        if (settings.app_env or "").strip().lower() in PROTECTED_ENVS:
+        if (settings.app_env or "").strip().lower() not in LOCAL_ENVS:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="API_KEY is not configured; protected routes are disabled in this environment",
@@ -36,3 +36,11 @@ async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-API-Key",
         )
+
+
+async def require_persistence_auth(
+    persist: bool = Query(False), x_api_key: str | None = Header(default=None)
+) -> None:
+    """Legacy GET persistence is opt-in and requires the same authorization as POST."""
+    if persist:
+        await require_api_key(x_api_key=x_api_key)

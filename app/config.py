@@ -1,6 +1,6 @@
 """Central configuration. Secrets only from environment."""
 from functools import lru_cache
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import AliasChoices, Field, field_validator
 
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
         env_ignore_empty=True,
     )
 
-    app_env: str = "development"
+    app_env: Literal["development", "test", "local", "production", "prod", "staging"] = "production"
     debug: bool = False
     secret_key: str = "change-me"
     api_key: Optional[str] = None
@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     liquid_api_key: Optional[str] = None
     liquid_api_base_url: Optional[str] = None
 
+    mtm_interval_seconds: int = Field(60, ge=1)
+    reconcile_interval_seconds: int = Field(120, ge=1)
+    investor_monitor_interval_seconds: int = Field(1800, ge=1)
     mtm_interval_seconds: int = 60
     reconcile_interval_seconds: int = 120
     investor_monitor_interval_seconds: int = 1800
@@ -112,6 +115,15 @@ class Settings(BaseSettings):
     require_fresh_data_for_live_orders: bool = True
     default_timezone: str = "Africa/Accra"
 
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def normalize_api_key(cls, value):
+        return value.strip() or None if isinstance(value, str) else value
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def normalize_app_env(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
     # --- ETI persistent memory & learning ---------------------------------------------------
     # Estimated per-side transaction cost applied to every closed trade (paper fills carry no
     # real fees). Same default as the backtest engine so live and simulated costs compare.

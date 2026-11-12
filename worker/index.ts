@@ -844,6 +844,73 @@ export default {
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
     }
+
+    let targetBase: URL;
+    try {
+      targetBase = new URL(backend);
+    } catch {
+      return new Response(
+        JSON.stringify({
+          error: "BACKEND_URL is not a valid absolute URL",
+        }),
+        { status: 500, headers: { "content-type": "application/json" } },
+      );
+    }
+
+    if (!['http:', 'https:'].includes(targetBase.protocol) || targetBase.username || targetBase.password || targetBase.pathname !== '/' || targetBase.search || targetBase.hash) {
+      return new Response(JSON.stringify({ error: 'BACKEND_URL must be an HTTP(S) origin without credentials, path, query or fragment' }), { status: 500, headers: { 'content-type': 'application/json' } });
+    }
+    const incoming = new URL(request.url);
+    // Component assignment keeps even network-path references on the configured host.
+    const target = new URL(targetBase);
+    target.pathname = incoming.pathname;
+    target.search = incoming.search;
+    if (target.origin !== targetBase.origin) {
+      return new Response('Invalid proxy target', { status: 400 });
+    }
+
+    const headers = new Headers();
+    request.headers.forEach((value, key) => {
+      if (!HOP_BY_HOP.has(key.toLowerCase())) {
+        headers.set(key, value);
+      }
+    });
+    headers.set("x-forwarded-host", incoming.host);
+    headers.set("x-forwarded-proto", incoming.protocol.replace(":", ""));
+
+    const init: RequestInit = {
+      method: request.method,
+      headers,
+      redirect: "manual",
+    };
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      init.body = request.body;
+      // @ts-expect-error duplex required for streaming bodies in some runtimes
+      init.duplex = "half";
+    }
+
+    try {
+      const upstream = await fetch(target.toString(), init);
+      const outHeaders = new Headers(upstream.headers);
+      outHeaders.set("x-eti-proxy", "cloudflare-worker");
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: outHeaders,
+      });
+    } catch (err) {
+      const message = "upstream fetch failed";
+      return new Response(
+        JSON.stringify({
+          error: "backend_unreachable",
+          message,
+          backend: targetBase.origin,
+        }),
+        {
+          status: 502,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        },
+      );
     if (url.pathname.startsWith("/api/portfolio/")) return handlePortfolio(request, _env as any);
     if (url.pathname.startsWith("/api/auth/")) return handleAuth(request, _env as any);
     if (url.pathname === "/alpha" || url.pathname.startsWith("/api/alpha")) {
