@@ -56,7 +56,9 @@ test("route: bearer, key, KV and hourly cap are enforced before any spend; succe
   assert.equal((await app.fetch(req(), { ...env, ANTHROPIC_API_KEY: undefined })).status, 503); assert.equal((await app.fetch(req(), { ...env, ETI_EXECUTION_LOG: undefined })).status, 503);
   assert.equal(llmCalls, 0, "nothing was spent on refused requests");
   const ok = await app.fetch(req(), env), j: any = await ok.json();
-  assert.equal(ok.status, 200, JSON.stringify(j)); assert.equal(j.advisory, true); assert.equal(j.brief.evidenceStrength, "low"); assert.equal(j.decision.action, analysis().decision.action); assert.equal(j.decision.confidence, analysis().decision.confidence);
+  assert.equal(ok.status, 200, JSON.stringify(j)); assert.equal(j.advisory, true); assert.equal(j.brief.evidenceStrength, "low"); // the route has no account state, so the Risk Manager cannot approve a position: compare with the same inputs, not the account-supplied helper
+  const same = analyze({ market, integrity: { killSwitch: false, liveFlagSet: false, executionTokenConfigured: true, auditLogConfigured: true }, now: NOW });
+  assert.equal(j.decision.action, same.decision.action); assert.equal(j.decision.confidence, same.decision.confidence);
   assert.ok(!JSON.stringify(j).includes("sk-secret-123")); assert.equal(llmCalls, 1);
   const capped = await app.fetch(req(), env); assert.equal(capped.status, 429); assert.equal(((await capped.json()) as any).error, "llm_hourly_cap_reached"); assert.equal(llmCalls, 1);
 });

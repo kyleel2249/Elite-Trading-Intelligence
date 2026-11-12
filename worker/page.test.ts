@@ -29,3 +29,10 @@ test("dashboard ships the 3D motion layer: reduced-motion safe, no external scri
   assert.match(html, /id="eti-motion"/); assert.match(html, /prefers-reduced-motion/); assert.match(html, /execpanel'\)\)return/);
   assert.doesNotMatch(html, /<script[^>]+src=/i, "no external script is loaded");
 });
+
+test("/elite is served, loads no external script, and carries none of the reference image's sample figures", async () => {
+  const { default: app } = await import("./main.ts"), r = await app.fetch(new Request("https://x.test/elite"), {} as any), html = await r.text();
+  assert.equal(r.status, 200); assert.match(html, /ETI Elite Trader Intelligence/); assert.doesNotMatch(html, /<script[^>]+src=/i);
+  for (const sample of ["2,450", "68.0%", "24,580", "102,500", "92%", "99.9%"]) assert.equal(html.includes(sample), false, "demo figure present: " + sample);
+  assert.doesNotMatch(html, /risk[-_ ]?gateway/i);
+});

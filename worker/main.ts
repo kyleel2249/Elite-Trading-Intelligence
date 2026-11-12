@@ -38,6 +38,7 @@ import { pollExecutionAlerts } from "./algo/alerts-api.ts";
 import { runScheduled as runAlphaCycle } from "./alpha/routes.ts";
 import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
+import { withElite } from "./elite/route.ts";
 import { withJournal } from "./journal/route.ts";
 import { runJournalCycle } from "./journal/sync.ts";
 import { withIdentity } from "./identity/routes.ts";
@@ -60,6 +61,7 @@ const coreLayers: Array<(next: any) => any> = [
   withDailyReport,
   withPro,
   withJournal,
+  withElite,
   // The guard sits directly outside the sports route: constant-time token check and a short scan cache (see sports/guard.ts).
   (next: any) => withSportsGuard(withSports(next)),
 ];
