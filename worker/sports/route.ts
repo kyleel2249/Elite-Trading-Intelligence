@@ -1,4 +1,4 @@
-import { estimateFootballMatch, fitTemperature, applyTemperature, fractionalKellyStake, type MatchResult } from "./prediction.ts";
+import { estimateFootballMatch, fitTemperature, applyTemperature, fractionalKellyStake, extractFootballFullTimeScore, type MatchResult } from "./prediction.ts";
 export interface SportsEnv {
   ETI_PORTFOLIO_DB?: D1Database;
   ETI_SPORTS_PAPER_TOKEN?: string;
@@ -55,11 +55,11 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      if(db(env)){
        const h=await db(env)!.prepare("SELECT fixture_id,played_at,competition,home_team,away_team,home_goals,away_goals FROM sports_match_results ORDER BY played_at DESC LIMIT 600").all<any>();
        history=(h.results||[]).map((x:any)=>({fixtureId:x.fixture_id,playedAt:Number(x.played_at),competition:x.competition||undefined,homeTeam:x.home_team,awayTeam:x.away_team,homeGoals:Number(x.home_goals),awayGoals:Number(x.away_goals)}));
-       const p=await db(env)!.prepare("SELECT p_home,p_draw,p_away,actual_outcome FROM sports_model_predictions WHERE actual_outcome IS NOT NULL ORDER BY settled_at DESC LIMIT 600").all<any>();
-       calibration=fitTemperature((p.results||[]).map((x:any)=>({pHome:Number(x.p_home),pDraw:Number(x.p_draw),pAway:Number(x.p_away),outcome:x.actual_outcome})));
+       const p=await db(env)!.prepare("SELECT p_home,p_draw,p_away,actual_outcome,settled_at FROM sports_model_predictions WHERE actual_outcome IS NOT NULL ORDER BY settled_at DESC LIMIT 600").all<any>();
+       calibration=fitTemperature((p.results||[]).map((x:any)=>({pHome:Number(x.p_home),pDraw:Number(x.p_draw),pAway:Number(x.p_away),outcome:x.actual_outcome,settledAt:Number(x.settled_at)})));
        try{await init(db(env)!);const a=await db(env)!.prepare("SELECT balance_cents FROM sports_bankroll WHERE id=1").first<any>();bankrollCents=Number(a?.balance_cents||0);}catch{bankrollCents=0;}
      }
-     const calibrated=calibration.calibrated&&Number(calibration.brierScore)<=0.62&&Number(calibration.logLoss)<=1.15;
+     const calibrated=calibration.calibrated&&Number(calibration.brierScore)<=0.62&&Number(calibration.logLoss)<=1.08;
      for(const e of events){
        const pred=estimateFootballMatch(history,e.home_team,e.away_team,e.league);
        const probs=calibration.calibrated?applyTemperature(pred.probabilities,calibration.temperature):{home:pred.probabilities.home,draw:pred.probabilities.draw,away:pred.probabilities.away};
@@ -96,10 +96,9 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      for(let i=0;i<finished.length;i++){
        if(i>0)await new Promise(resolve=>setTimeout(resolve,1050));
        const f=finished[i];const score=await call("scores",{fixtureId:String(f.fixtureId)});
-       const periods=score?.scores?.periods||score?.periods||score?.scores||{};
-       const result=periods.result||periods.fulltime||periods["0"];
-       const hg=Number(result?.participant1Score),ag=Number(result?.participant2Score);
-       if(!Number.isInteger(hg)||!Number.isInteger(ag)||hg<0||ag<0){skipped++;continue;}
+       const fullTime=extractFootballFullTimeScore(score);
+       if(!fullTime){skipped++;continue;}
+       const hg=fullTime.homeGoals,ag=fullTime.awayGoals;
        await db(env)!.prepare("INSERT INTO sports_match_results (fixture_id,played_at,competition,country,home_team,away_team,home_goals,away_goals,source,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fixture_id) DO UPDATE SET played_at=excluded.played_at,home_goals=excluded.home_goals,away_goals=excluded.away_goals,updated_at=excluded.updated_at").bind(f.fixtureId,Date.parse(f.startTime),f.tournamentName||null,f.categoryName||null,f.participant1Name,f.participant2Name,hg,ag,"OddsPapi",now).run();
        const outcome=hg>ag?"H":hg<ag?"A":"D";
        await db(env)!.prepare("UPDATE sports_model_predictions SET actual_outcome=?,settled_at=? WHERE fixture_id=? AND actual_outcome IS NULL").bind(outcome,now,f.fixtureId).run();
