@@ -15,10 +15,8 @@ CREATE TABLE IF NOT EXISTS sports_event_scans (
 CREATE INDEX IF NOT EXISTS sports_event_scans_fixture ON sports_event_scans(fixture_id, scanned_at DESC);
 CREATE INDEX IF NOT EXISTS sports_event_scans_time ON sports_event_scans(scanned_at DESC);
 
--- Extend each paper stake with source provenance and explicit price/probability metrics.
-ALTER TABLE sports_bets ADD COLUMN event_id TEXT;
-ALTER TABLE sports_bets ADD COLUMN bookmaker TEXT;
-ALTER TABLE sports_bets ADD COLUMN odds_provider TEXT;
-ALTER TABLE sports_bets ADD COLUMN implied_probability REAL;
-ALTER TABLE sports_bets ADD COLUMN expected_value REAL;
-ALTER TABLE sports_bets ADD COLUMN model_version TEXT;
+-- Source provenance and explicit price/probability metrics on each paper stake (event_id, bookmaker, odds_provider,
+-- implied_probability, expected_value, model_version) are defined in 0003_sports_betting.sql. They are deliberately not
+-- added with ALTER TABLE here: that statement fails with "duplicate column name" on a database whose sports_bets table was
+-- already created with them (for example by worker/sports/schema.ts), which aborted the deploy. schema.ts adds any missing
+-- column to a database created from an older 0003.
