@@ -105,6 +105,8 @@ async def pretrade_check(
     )
 
     price = req.limit_price if req.limit_price is not None else snapshot.get("price")
+    # Server-side quote only: it is what risk sizing charges when no stop exists.
+    snapshot_price = snapshot.get("price") if isinstance(snapshot.get("price"), (int, float)) and snapshot.get("price") > 0 else None
     # A live order without a trustworthy reference quote is rejected even when
     # the limit is supplied: the quote is needed for freshness and sanity checks.
     proposal = OrderProposal(
@@ -121,6 +123,7 @@ async def pretrade_check(
         current_drawdown_pct=risk_context.current_drawdown_pct,
         data_age_seconds=risk_context.data_age_seconds,
         data_status=risk_context.data_status,
+        reference_price=snapshot_price if snapshot_price is not None else price,
         meta={"reference_price": price},
     )
     decision = RiskEngine(settings).evaluate(proposal)

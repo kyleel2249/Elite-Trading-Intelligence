@@ -150,6 +150,11 @@ def _get_account(db: Session, account_id: str) -> FuturesAccount:
 def _bump(db: Session, acct: FuturesAccount, *, wallet: Decimal, realized: Decimal, fees: Decimal, funding: Decimal) -> None:
     """Write new account totals only if nobody else changed the account since we read it."""
     v = acct.version
+    # Round each stored total once, then derive the wallet from the rounded totals so the documented
+    # invariant (wallet = starting + realized - fees - funding) holds exactly at the stored precision.
+    q = D("1e-12")
+    realized, fees, funding = (x.quantize(q, rounding=ROUND_HALF_UP) for x in (realized, fees, funding))
+    wallet = _d(acct.starting_balance).quantize(q, rounding=ROUND_HALF_UP) + realized - fees - funding
     res = db.execute(update(FuturesAccount).where(FuturesAccount.account_id == acct.account_id, FuturesAccount.version == v)
                      .values(wallet_balance=_fmt(wallet), realized_pnl=_fmt(realized), fees_paid=_fmt(fees),
                              funding_paid=_fmt(funding), version=v + 1, updated_at=_now()))

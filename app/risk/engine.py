@@ -112,7 +112,10 @@ class RiskEngine:
             if (url.scheme != "https" or url.netloc != expected or url.path not in ("", "/")
                     or url.query or url.fragment):
                 reasons.append("Alpaca endpoint does not match requested environment")
-            if s.alpaca_paper != (proposal.environment == "paper"):
+            # A paper request is simulated internally unless live Alpaca keys are present; the mismatch only
+            # matters when real credentials exist (the trading service re-checks before any submission).
+            if s.alpaca_paper != (proposal.environment == "paper") and (
+                    proposal.environment != "paper" or getattr(s, "alpaca_configured", False)):
                 reasons.append("ALPACA_PAPER does not match requested environment")
         for name in ("qty", "equity", "daily_realized_pnl_pct", "current_drawdown_pct", "current_open_positions"):
             if not math.isfinite(getattr(proposal, name)):
@@ -183,6 +186,9 @@ class RiskEngine:
                     reasons.append(
                         f"Position notional {notional_pct:.2f}% exceeds max {max_notional_pct}% of equity"
                     )
+            elif proposal.provider == "oanda":
+                # The broker prices OANDA market orders and sizes in units: unverified notional is flagged, not guessed.
+                warnings.append("Position notional not verified: OANDA prices market orders at the broker")
             else:
                 # Fail closed in every environment: without a price the notional and risk cannot be measured.
                 reasons.append("Position notional cannot be verified (no reference_price, limit_price or ref_price); order rejected (fail-closed)")

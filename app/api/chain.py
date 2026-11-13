@@ -137,7 +137,7 @@ async def tokens(network: str = Query(..., max_length=24), db: Session = Depends
 
 @router.post("/transfer/preview")
 @guarded
-async def transfer_preview(body: TransferIn, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+async def preview_native_coin_send(body: TransferIn, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     return await ChainService(db, settings).preview_transfer(body.network, body.to, body.amount)
 
 

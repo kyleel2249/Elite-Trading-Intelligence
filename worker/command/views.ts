@@ -86,12 +86,12 @@ async function loadPfHist(){
 async function pfRecon(){
  if(!S.token){openModal('Reconcile','<div class="empty">Enter the execution token first.</div>');return;}
  openModal('Ledger reconciliation','<div class="mut">Running\u2026</div>');
- try{var r=await api('/api/portfolio/reconcile',{method:'POST',headers:{'content-type':'application/json',Authorization:'Bearer '+S.token},body:JSON.stringify({environment:PF.env})});var c=r.data.reconciliation||{};$('mb').innerHTML='<div class="row"><span class="pill"><i class="dot '+(c.ok?'ok':'bad')+'"></i>'+(c.ok?'Reconciled: no problems':'PROBLEMS FOUND ('+esc((c.problems||[]).length)+')')+'</span><span class="mut">source '+esc(c.source)+'</span></div>'+((c.problems||[]).length?'<ul>'+c.problems.map(function(p){return '<li>'+esc(p)+'</li>';}).join('')+'</ul>':'')+jsonBox(c);}
+ try{var r=await api('/api/portfolio/reconcile',{method:'POST',headers:Object.assign({'content-type':'application/json'},bearer()),credentials:'same-origin',body:JSON.stringify({environment:PF.env})});var c=r.data.reconciliation||{};$('mb').innerHTML='<div class="row"><span class="pill"><i class="dot '+(c.ok?'ok':'bad')+'"></i>'+(c.ok?'Reconciled: no problems':'PROBLEMS FOUND ('+esc((c.problems||[]).length)+')')+'</span><span class="mut">source '+esc(c.source)+'</span></div>'+((c.problems||[]).length?'<ul>'+c.problems.map(function(p){return '<li>'+esc(p)+'</li>';}).join('')+'</ul>':'')+jsonBox(c);}
  catch(e){$('mb').innerHTML='<div class="err">Reconciliation failed: '+esc(pfErr(e).message)+'</div>';}
 }
 async function pfCsv(){
  if(!S.token){openModal('Export','<div class="empty">Enter the execution token first.</div>');return;}
- try{var res=await fetch('/api/portfolio/history?'+pfq()+'&format=csv',{headers:{Authorization:'Bearer '+S.token},cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);var blob=await res.blob();var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='eti-closed-trades-'+PF.env+'.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);}
+ try{var res=await fetch('/api/portfolio/history?'+pfq()+'&format=csv',{headers:bearer(),credentials:'same-origin',cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);var blob=await res.blob();var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='eti-closed-trades-'+PF.env+'.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);}
  catch(e){openModal('Export failed','<div class="err">'+esc(e.message)+'</div>');}
 }
 async function loadScan(){

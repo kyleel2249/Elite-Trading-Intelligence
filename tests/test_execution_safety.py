@@ -67,6 +67,7 @@ async def test_alpaca_routing_cannot_bypass_live_gate(env, paper, url):
 @pytest.mark.asyncio
 async def test_broker_new_order_not_filled_from_hint(db):
     svc = TradingService(settings(), db)
+    svc._paper_resolution = lambda *a, **k: None   # exercise the exchange path, not the internal paper engine
     svc.alpaca.submit_order = AsyncMock(return_value={"id":"mock", "status":"new", "filled_qty":"0"})
     result = await svc.place_order(provider="alpaca", environment="paper", symbol="AAPL", side="buy",
         qty=1, equity=10000, order_type="limit", limit_price=90, fill_price_hint=100)
@@ -77,6 +78,7 @@ async def test_broker_new_order_not_filled_from_hint(db):
 @pytest.mark.asyncio
 async def test_simulated_limit_requires_crossing(db):
     svc = TradingService(settings(), db)
+    svc._paper_resolution = lambda *a, **k: None   # exercise the exchange path, not the internal paper engine
     result = await svc.place_order(provider="binance", environment="paper", symbol="TEST", side="buy",
         qty=1, equity=10000, order_type="limit", limit_price=90, fill_price_hint=100)
     assert result["status"] == "submitted"
@@ -183,6 +185,7 @@ async def test_binance_limit_payload_has_price_and_time_in_force():
 @pytest.mark.asyncio
 async def test_ambiguous_submission_retains_reconcilable_intent(db):
     svc = TradingService(settings(), db)
+    svc._paper_resolution = lambda *a, **k: None   # exercise the exchange path, not the internal paper engine
     svc.alpaca.submit_order = AsyncMock(side_effect=TimeoutError("mock timeout"))
     result = await svc.place_order(provider="alpaca", environment="paper", symbol="AAPL", side="buy",
                                    qty=1, equity=10000, reference_price=100)

@@ -504,7 +504,7 @@ def test_testnet_sessions_need_the_operator_and_cannot_be_borrowed_from_paper(en
     assert r.status_code == 401 and r.json()["detail"]["code"] == "operator_required"
     c.post("/api/auth/session", json={})
     paper_raw = c.cookies.get("eti_session_ip")
-    c.cookies.set("eti_session_xt", paper_raw, domain="testserver", path="/api")  # paper credential presented as testnet
+    c.cookies.set("eti_session_xt", paper_raw, domain="", path="/api")  # paper credential presented as testnet
     x = c.post("/api/auth/refresh", json={"environment": "exchange_testnet"})
     assert x.status_code == 403 and x.json()["detail"]["code"] == "wrong_environment"
     op = c.post("/api/auth/session", json={"environment": "exchange_testnet"}, headers={"X-API-Key": OP_KEY})
@@ -516,7 +516,7 @@ def test_logout_and_operator_revoke_end_sessions(env):
     c.post("/api/auth/session", json={})
     old = c.cookies.get("eti_session_ip")
     assert c.post("/api/auth/logout", json={}).json()["revoked"] is True
-    c.cookies.set("eti_session_ip", old, domain="testserver", path="/api")
+    c.cookies.set("eti_session_ip", old, domain="", path="/api")
     r = c.post("/api/paper/orders", json=ORDER)
     assert r.status_code == 401 and r.json()["detail"]["code"] == "token_revoked"
 
@@ -566,7 +566,7 @@ def test_session_rotates_automatically_and_old_cookie_survives_the_grace_period(
     assert c.post("/api/paper/orders", json=ORDER).status_code == 200
     new = c.cookies.get("eti_session_ip")
     assert new and new != old
-    c.cookies.set("eti_session_ip", old, domain="testserver", path="/api")  # an in-flight request still using the old one
+    c.cookies.set("eti_session_ip", old, domain="", path="/api")  # an in-flight request still using the old one
     assert c.post("/api/paper/orders", json=ORDER).status_code == 200
 
 

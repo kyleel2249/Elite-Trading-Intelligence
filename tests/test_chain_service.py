@@ -249,7 +249,7 @@ def test_swap_buy_preview_enforces_token_allowlist_and_slippage(env):
     assert not unlisted["allowed"] and any("token allowlist" in v for v in unlisted["violations"])
     s.allow_add(network="sepolia", address=TOKEN, kind="token", symbol="TKN", decimals=18)
     ok = run(s.preview_swap("sepolia", "buy", TOKEN, "0.01", 50))
-    assert ok["allowed"] and ok["data"].startswith("0x7ff36ab5") and ok["to"] == ROUTER and ok["value_wei"] == str(10 ** 16)
+    assert ok["allowed"] and ok["data"].startswith("0x7ff36ab5") and ok["to"].lower() == ROUTER and ok["value_wei"] == str(10 ** 16)
     assert ok["expected_out_wei"] == str(2 * 10 ** 16) and ok["min_out_wei"] == str(2 * 10 ** 16 * 9950 // 10000)
     loose = run(s.preview_swap("sepolia", "buy", TOKEN, "0.01", 900))
     assert not loose["allowed"] and any("slippage" in v for v in loose["violations"])
@@ -262,7 +262,7 @@ def test_swap_sell_needs_an_exact_approval_first(env):
     first = run(s.preview_swap("sepolia", "sell", TOKEN, "0.01", 50))
     assert first["needs_approval"] and not first["allowed"] and any("allowance" in v for v in first["violations"])
     ap = run(s.preview_approval("sepolia", TOKEN, "0.01"))
-    assert ap["allowed"] and ap["data"].startswith("0x095ea7b3") and ap["to"] == TOKEN and ap["value_wei"] == "0"
+    assert ap["allowed"] and ap["data"].startswith("0x095ea7b3") and ap["to"].lower() == TOKEN and ap["value_wei"] == "0"
     assert int(ap["data"][-64:], 16) == 10 ** 16                                  # exact amount, never unlimited
     fake.allowance = 10 ** 16
     ok = run(s.preview_swap("sepolia", "sell", TOKEN, "0.01", 50))

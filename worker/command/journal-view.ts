@@ -33,6 +33,20 @@ const BODY = `
 `;
 
 const JS = `
+/* ---- automatic cookie session (HttpOnly: this page never sees or stores the credential) ---- */
+var SESSION='__session__';
+var AUTH={mode:'pending'};
+function bearer(){return S.token&&S.token!==SESSION?{Authorization:'Bearer '+S.token}:{};}
+function authHdr(){var b=bearer();return {headers:b,credentials:'same-origin'};}
+async function startAuth(){
+ try{
+  var r=await fetch('/api/auth/session',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({environment:'paper'})});
+  var d=await r.json().catch(function(){return {};});
+  if(r.ok){AUTH.mode='auto';if(!S.token)S.token=SESSION;var wait=Math.max(5000,(d.refreshAfter||0)-Date.now());setTimeout(startAuth,Math.min(wait,3600000));}
+  else{AUTH.mode='manual';}
+ }catch(e){AUTH.mode='manual';}
+ try{if(LOADERS[S.view])LOADERS[S.view]();}catch(e){}
+}
 VIEWS.push('journal','analytics');
 var JR={status:'',symbol:''};
 function jrReady(){return !!S.token||AUTH.mode==='auto';}
@@ -117,6 +131,7 @@ LOADERS.analytics=function(){run('anal',loadAnalytics);};
 $('jApply').onclick=function(){JR.status=$('jStatus').value;JR.symbol=$('jSymbol').value.trim().toUpperCase();run('jtrades',loadJtrades);};
 $('jSync').onclick=jrSync;$('jVerify').onclick=jrVerify;$('jCsv').onclick=jrCsv;
 (function(){var h=(location.hash||'').slice(1);if(h==='journal'||h==='analytics')showView(h);})();
+startAuth();
 `;
 
 function swap(html: string, old: string, neu: string): string {
