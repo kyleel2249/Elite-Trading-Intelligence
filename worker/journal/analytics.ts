@@ -94,12 +94,13 @@ export interface Stats {
   orders: { total: number; executed: number; open: number; refused: number; brokerRejected: number; outcomeUnknown: number; cancelled: number; expired: number; analysedOnly: number; refusalReasons: { reason: string; count: number }[] };
   byStrategy: Group[]; bySymbol: Group[]; byEnvironment: Group[]; byHourUtc: Group[]; byWeekday: Group[];
   predictions: { total: number; evaluated: number; hits: number; misses: number; inconclusive: number; pending: number; hitRate: number | null; byStrategy: { key: string; evaluated: number; hits: number; hitRate: number | null }[]; calibration: { bucket: string; evaluated: number; hitRate: number | null }[] };
+  sportsPaper: { bets: number; settled: number; wins: number; losses: number; voided: number; open: number; net: number; predictions: number; predictionsEvaluated: number; predictionHits: number; predictionMisses: number; note: string };
   dataQuality: { anomalies: number; manualTrades: number; notes: number; sampleWarning: string | null };
 }
 export function computeStats(entries: JournalEntry[], now = Date.now()): Stats {
-  const trades = buildTrades(entries), by = (s: TradeStatus[]) => trades.filter(t => s.includes(t.status)).length, reasons = new Map<string, number>();
+  const allTrades = buildTrades(entries), trades = allTrades.filter(t => t.environment !== "sports_paper"), by = (s: TradeStatus[]) => trades.filter(t => s.includes(t.status)).length, reasons = new Map<string, number>();
   for (const t of trades.filter(t => t.status === "rejected")) for (const r of t.reasons.slice(0, 1)) reasons.set(r, (reasons.get(r) ?? 0) + 1);
-  const analyses = entries.filter(e => e.kind === "analysis" && ["BUY", "SELL"].includes(String((e.data as any).decision).toUpperCase())), evals = new Map(entries.filter(e => e.kind === "prediction_evaluated").map(e => [String((e.data as any).analysisId), e]));
+  const analyses = entries.filter(e => e.environment !== "sports_paper" && e.kind === "analysis" && ["BUY", "SELL"].includes(String((e.data as any).decision).toUpperCase())), evals = new Map(entries.filter(e => e.kind === "prediction_evaluated").map(e => [String((e.data as any).analysisId), e]));
   const evaluated = analyses.map(a => ({ a, ev: evals.get(a.id) })), done = evaluated.filter(x => x.ev && (x.ev.data as any).outcome !== "inconclusive"), hits = done.filter(x => (x.ev!.data as any).outcome === "hit");
   const rate = (h: number, t: number) => (t ? h / t : null), strat = new Map<string, { e: number; h: number }>(), cal = new Map<string, { e: number; h: number }>();
   for (const x of done) {
@@ -114,7 +115,16 @@ export function computeStats(entries: JournalEntry[], now = Date.now()): Stats {
     byHourUtc: groups(trades, t => String(new Date(t.firstAt).getUTCHours()).padStart(2, "0")).sort((a, b) => a.key.localeCompare(b.key)), byWeekday: groups(trades, t => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(t.firstAt).getUTCDay()]),
     predictions: { total: analyses.length, evaluated: done.length, hits: hits.length, misses: done.length - hits.length, inconclusive: evaluated.filter(x => x.ev && (x.ev.data as any).outcome === "inconclusive").length, pending: evaluated.filter(x => !x.ev).length, hitRate: rate(hits.length, done.length),
       byStrategy: [...strat].map(([key, v]) => ({ key, evaluated: v.e, hits: v.h, hitRate: rate(v.h, v.e) })), calibration: [...cal].map(([bucket, v]) => ({ bucket, evaluated: v.e, hitRate: rate(v.h, v.e) })).sort((a, b) => a.bucket.localeCompare(b.bucket)) },
+    sportsPaper: sportsSummary(allTrades.filter(t => t.environment === "sports_paper"), entries),
     dataQuality: { anomalies: entries.filter(e => e.kind === "anomaly").length, manualTrades: trades.filter(t => t.origin === "manual").length, notes: entries.filter(e => e.kind === "note").length, sampleWarning: small } };
+}
+
+function sportsSummary(rows: TradeRecord[], entries: JournalEntry[]) {
+  const bets = rows.filter(t => t.origin !== "manual" && t.tradeId.startsWith("sb-")), settled = bets.filter(t => t.status === "closed"), ev = entries.filter(e => e.environment === "sports_paper" && e.kind === "prediction_evaluated");
+  return { bets: bets.length, settled: settled.length, wins: settled.filter(t => t.result === "win").length, losses: settled.filter(t => t.result === "loss").length, voided: bets.filter(t => t.timeline.some(e => e.kind === "order_cancelled")).length, open: bets.filter(t => t.status === "filled" && !t.timeline.some(e => e.kind === "order_cancelled")).length,
+    net: settled.reduce((a, t) => a + (t.net ?? 0), 0), predictions: entries.filter(e => e.environment === "sports_paper" && e.kind === "analysis").length, predictionsEvaluated: ev.length,
+    predictionHits: ev.filter(e => (e.data as any).outcome === "hit").length, predictionMisses: ev.filter(e => (e.data as any).outcome === "miss").length,
+    note: "Simulated bets in the isolated sports paper ledger. Kept separate from trading statistics; wins, losses, voids and missed predictions are all recorded." };
 }
 
 /**

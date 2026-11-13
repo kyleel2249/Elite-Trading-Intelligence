@@ -142,3 +142,15 @@ test("a kill-switch refusal from an authenticated caller is journaled; an unauth
   const auth = await handleExecution(new Request("https://x.test/api/orders", { method: "POST", headers: { authorization: "Bearer " + TOKEN }, body }), env, { now: () => T0 }); assert.equal(auth.status, 423);
   const rows = (await openJournal(env)!.all()).entries; assert.equal(rows.length, 1); assert.equal(rows[0].kind, "order_rejected"); assert.equal(rows[0].tradeId, "kill-switch-1"); assert.equal((rows[0].data as any).stage, "kill_switch");
 });
+test("sports paper bets and predictions reach the journal (losses and misses included) without mixing into trading statistics", async () => {
+  const d = sqliteD1(); const { readFileSync, readdirSync } = await import("node:fs");
+  for (const f of readdirSync(new URL("../migrations/", import.meta.url)).filter(f => /^000[3-8]/.test(f)).sort()) for (const st of readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8").split(/;\s*\n/)) if (st.trim()) await d.prepare(st).run();
+  const bet = (id: string, status: string, profit: number) => d.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,settled_at,event_id,bookmaker,odds_provider,implied_probability,expected_value,model_version) VALUES (?,?, 'Football','A vs B','Full Time Result','Home',2.0,0.6,1000,?,?,?,?,'bk','t',0.5,0.2,'m1')").bind(id, T0, status, profit, T0 + 5, "fx-" + id).run();
+  await bet("b-won", "WON", 1000); await bet("b-lost", "LOST", -1000); await bet("b-void", "VOID", 0); await bet("b-open", "OPEN", 0);
+  await d.prepare("INSERT INTO sports_model_predictions (id,fixture_id,created_at,kickoff_at,competition,home_team,away_team,p_home,p_draw,p_away,expected_home_goals,expected_away_goals,sample_size,decision,model_version,actual_outcome,settled_at) VALUES ('p1','fx-b-won',?,?,'L','A','B',0.6,0.2,0.2,1.5,1.0,50,'NO_BET','m1','A',?)").bind(T0, T0 + 9, T0 + 10).run();
+  const env: any = { ETI_PORTFOLIO_DB: d }, r = await syncJournal(env, T0 + 100, { evaluate: false }); assert.equal(r.ok, true, r.errors.join());
+  const st = openJournal(env)!, { entries } = await st.all(), s = computeStats(entries, T0 + 200);
+  assert.equal(s.sportsPaper.bets, 4); assert.equal(s.sportsPaper.wins, 1); assert.equal(s.sportsPaper.losses, 1); assert.equal(s.sportsPaper.voided, 1); assert.equal(s.sportsPaper.open, 1); assert.equal(s.sportsPaper.net, 0);
+  assert.equal(s.sportsPaper.predictionMisses, 1, "a missed prediction is kept"); assert.equal(s.performance.closed, 0, "sports bets do not enter trading statistics"); assert.equal(s.orders.executed, 0);
+  assert.equal((await syncJournal(env, T0 + 300, { evaluate: false })).added, 0, "idempotent"); assert.equal((await verifyChain(st)).ok, true);
+});

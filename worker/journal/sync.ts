@@ -37,6 +37,35 @@ function ledgerEntries(environment: Environment, L: Ledger): NewEntry[] {
   return out;
 }
 
+
+/** Sports paper betting (separate "sports_paper" environment): every bet, settlement and model prediction, including losses and misses. */
+async function sportsEntries(d: any): Promise<NewEntry[]> {
+  const out: NewEntry[] = [];
+  const bets = (await d.prepare("SELECT id,created_at,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,settled_at,event_id,bookmaker,model_version FROM sports_bets ORDER BY created_at ASC LIMIT 2000").all()).results ?? [];
+  for (const b of bets) {
+    const tradeId = "sb-" + b.id, symbol = String(b.event_name ?? "").slice(0, 80) || null, stake = Number(b.stake_cents) / 100;
+    out.push({ id: `sb:${b.id}:placed`, at: Number(b.created_at), kind: "order_submitted", tradeId, symbol, environment: "sports_paper", source: "eti_auto", actor: "eti_sports",
+      data: { outcome: "executed", side: "back " + b.selection, type: b.market, quantity: stake, fillPrice: Number(b.odds), broker: b.bookmaker, strategy: b.model_version, simulated: true, modelProbability: Number(b.model_probability), via: "sports" } });
+    if (b.status === "WON" || b.status === "LOST") {
+      const profit = Number(b.profit_cents) / 100;
+      out.push({ id: `sb:${b.id}:closed`, at: Number(b.settled_at) || Number(b.created_at), kind: "trade_closed", tradeId, symbol, environment: "sports_paper", source: "eti_auto", actor: "eti_sports",
+        data: { qty: stake, entryPrice: Number(b.odds), exitPrice: null, gross: profit, fees: 0, net: profit, unknownFees: 0, strategy: b.model_version, result: b.status === "WON" ? "win" : "loss", via: "sports" } });
+    } else if (b.status === "VOID") out.push({ id: `sb:${b.id}:void`, at: Number(b.settled_at) || Number(b.created_at), kind: "order_cancelled", tradeId, symbol, environment: "sports_paper", source: "eti_auto", actor: "eti_sports", data: { reason: "bet voided: stake returned", reasons: ["bet voided: stake returned"], via: "sports" } });
+  }
+  const preds = (await d.prepare("SELECT id,fixture_id,created_at,competition,home_team,away_team,p_home,p_draw,p_away,best_selection,best_odds,expected_value,recommended_stake_cents,decision,model_version,actual_outcome,settled_at FROM sports_model_predictions ORDER BY created_at ASC LIMIT 2000").all()).results ?? [];
+  for (const p of preds) {
+    const tradeId = "sp-" + p.fixture_id, symbol = `${p.home_team} vs ${p.away_team}`.slice(0, 80), aid = `sp:${p.id}`;
+    out.push({ id: aid, at: Number(p.created_at), kind: "analysis", tradeId, symbol, environment: "sports_paper", source: "eti_auto", actor: "eti_sports",
+      data: { decision: String(p.decision ?? "NO_BET"), strategy: p.model_version, probabilities: { home: Number(p.p_home), draw: Number(p.p_draw), away: Number(p.p_away) }, bestSelection: p.best_selection, bestOdds: p.best_odds, expectedValue: p.expected_value, recommendedStakeCents: p.recommended_stake_cents, competition: p.competition, via: "sports" } });
+    if (p.actual_outcome) {
+      const pick = Number(p.p_home) >= Number(p.p_draw) && Number(p.p_home) >= Number(p.p_away) ? "H" : Number(p.p_away) >= Number(p.p_draw) ? "A" : "D";
+      out.push({ id: `sp:${p.id}:eval`, at: Number(p.settled_at) || Number(p.created_at), kind: "prediction_evaluated", tradeId, symbol, environment: "sports_paper", source: "derived", actor: "eti_evaluator",
+        data: { analysisId: aid, outcome: pick === p.actual_outcome ? "hit" : "miss", reason: `most likely outcome ${pick}, actual ${p.actual_outcome}`, via: "sports" } });
+    }
+  }
+  return out;
+}
+
 async function listAll(kv: KVL, prefix: string, cap = 2000): Promise<string[]> {
   const keys: string[] = []; let cursor: string | undefined;
   for (let i = 0; i < 20 && keys.length < cap; i++) { const r = await kv.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) }); keys.push(...r.keys.map(k => k.name)); if (r.list_complete !== false || !r.cursor) break; cursor = r.cursor; }
@@ -59,6 +88,8 @@ export async function syncJournal(env: SyncEnv, now = Date.now(), opts: { evalua
     }
     for (const a of ledger.anomalies ?? []) await put({ id: `anom:${environment}:` + (await sha256(JSON.stringify(a))).slice(0, 16), at: a.at, kind: "anomaly", tradeId: null, symbol: null, environment, source: "eti_auto", actor: "eti", data: { kind: a.kind, detail: a.detail, ref: a.ref ?? null } });
   });
+
+  await guarded("sports", async () => { const d = (env as any).ETI_PORTFOLIO_DB; if (!d) return; let rows: NewEntry[]; try { rows = await sportsEntries(d); } catch { return; /* sports tables not present: nothing to journal */ } for (const n of rows) await put(n); });
 
   const kv = env.ETI_EXECUTION_LOG as KVL | undefined;
   if (kv) {

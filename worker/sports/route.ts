@@ -198,7 +198,15 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
  const settle=p.match(/^\/api\/sports\/bets\/([0-9a-f-]+)\/settle$/i);
  if(settle&&req.method==="POST"){
    if(!authorized(req,env))return reply({error:"unauthorized"},401);if(!db(env))return reply({error:"database_not_configured"},503);const b=await jsonBody(req);const result=String(b?.result||"");if(!["WON","LOST","VOID"].includes(result))return reply({error:"invalid_result"},400);
-   const id=settle[1],bet=await db(env)!.prepare("SELECT stake_cents,odds,status FROM sports_bets WHERE id=?").bind(id).first<any>();if(!bet||bet.status!=="OPEN")return reply({error:"bet_not_open"},409);
+   const id=settle[1],bet=await db(env)!.prepare("SELECT stake_cents,odds,status,event_id,market,selection FROM sports_bets WHERE id=?").bind(id).first<any>();if(!bet||bet.status!=="OPEN")return reply({error:"bet_not_open"},409);
+   // A WON/LOST result is never taken on trust: it must match the recorded full-time score. Only VOID (postponed/abandoned) needs no score.
+   if(result!=="VOID"){
+     if(String(bet.market||"").toLowerCase()!=="full time result")return reply({error:"manual_result_unsupported_market",message:"Only Full Time Result bets can be settled against a recorded score. Use VOID for a postponed or abandoned match."},422);
+     const rec=await db(env)!.prepare("SELECT home_goals,away_goals FROM sports_match_results WHERE fixture_id=?").bind(String(bet.event_id)).first<any>();
+     if(!rec)return reply({error:"result_not_recorded",message:"No full-time score is recorded for this fixture yet. Run 'Sync historical results' first; results are never entered by hand."},409);
+     const hg=Number(rec.home_goals),ag=Number(rec.away_goals),outcome=hg>ag?"home":hg<ag?"away":"draw",derived=String(bet.selection||"").toLowerCase()===outcome?"WON":"LOST";
+     if(derived!==result)return reply({error:"result_mismatch",message:"The recorded score ("+hg+"-"+ag+") settles this bet as "+derived+".",derived_result:derived},422);
+   }
    const stake=Number(bet.stake_cents),gross=result==="WON"?Math.round(stake*Number(bet.odds)):result==="VOID"?stake:0,profit=gross-stake,now=Date.now();
    const settled=await db(env)!.batch([db(env)!.prepare("UPDATE sports_bets SET status=?,profit_cents=?,settled_at=? WHERE id=? AND status='OPEN'").bind(result,profit,now,id),db(env)!.prepare("UPDATE sports_bankroll SET balance_cents=balance_cents+?,updated_at=? WHERE id=1 AND changes()=1").bind(gross,now)]);
    if(!settled[0]?.meta?.changes)return reply({error:"bet_already_settled"},409);
