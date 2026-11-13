@@ -1,8 +1,9 @@
 """Tradable-symbol discovery: every Binance spot pair (public, no keys) and Alpaca US equities (needs keys).
 
 Binance's exchangeInfo is the source of truth, so newly listed pairs appear automatically when the cache
-refreshes (10 minutes, or on demand at most once a minute). Nothing is hard-coded or invented: if a source cannot
-be reached its status says so, and a stale cached list is labelled stale rather than passed off as current.
+refreshes (10 minutes, or on demand at most once a minute). It is read through app.market.binance_hosts, which
+fails over across Binance's official global hosts (never Binance.US). Nothing is hard-coded or invented: if a source
+cannot be reached its status says so, and a stale cached list is labelled stale rather than passed off as current.
 """
 from __future__ import annotations
 
@@ -14,10 +15,10 @@ from typing import Any, Optional
 import httpx
 
 from app.config import Settings, get_settings
+from app.market import binance_hosts
 
 logger = logging.getLogger("eti.symbols")
 
-BINANCE_PUBLIC_URL = "https://api.binance.com"   # market data only; never used for orders
 CACHE_TTL_SECONDS = 600
 MIN_REFRESH_SECONDS = 60
 
@@ -25,12 +26,9 @@ _cache: dict[str, dict[str, Any]] = {}
 
 
 async def _fetch_binance(transport: Optional[httpx.AsyncBaseTransport] = None) -> list[dict[str, Any]]:
-    async with httpx.AsyncClient(timeout=30.0, transport=transport) as c:
-        r = await c.get(f"{BINANCE_PUBLIC_URL}/api/v3/exchangeInfo")
-        r.raise_for_status()
-        data = r.json()
+    data, _host = await binance_hosts.get_json("/api/v3/exchangeInfo", transport=transport, timeout=30.0)
     out = []
-    for s in data.get("symbols", []):
+    for s in (data.get("symbols", []) if isinstance(data, dict) else []):
         if s.get("status") != "TRADING" or not s.get("isSpotTradingAllowed", True):
             continue
         sym = str(s.get("symbol") or "").upper()
@@ -61,6 +59,7 @@ async def _fetch_alpaca(settings: Settings, transport: Optional[httpx.AsyncBaseT
 
 def _meta(entry: Optional[dict[str, Any]], status: str, message: Optional[str] = None) -> dict[str, Any]:
     return {"status": status, "count": len(entry["items"]) if entry else 0, "message": message,
+            "host": entry.get("host") if entry else None,
             "fetched_at": datetime.fromtimestamp(entry["at"], timezone.utc).isoformat() if entry else None}
 
 
@@ -78,10 +77,12 @@ async def get_source(provider: str, settings: Optional[Settings] = None, refresh
         items = await (_fetch_binance(transport) if provider == "binance" else _fetch_alpaca(settings, transport))
     except Exception as exc:
         logger.warning("symbol list for %s failed: %s", provider, type(exc).__name__, exc_info=True)
+        why = exc.public_message if isinstance(exc, binance_hosts.BinanceUnavailable) else \
+            f"could not load the {provider} symbol list ({type(exc).__name__})"
         if entry:
-            return entry["items"], _meta(entry, "stale", "refresh failed; showing the last list we successfully fetched")
-        return [], _meta(None, "unavailable", f"could not load the {provider} symbol list ({type(exc).__name__})")
-    entry = {"items": items, "at": time.time()}
+            return entry["items"], _meta(entry, "stale", f"refresh failed; showing the last list we successfully fetched. {why}")
+        return [], _meta(None, "unavailable", why)
+    entry = {"items": items, "at": time.time(), "host": binance_hosts.last_good() if provider == "binance" else None}
     _cache[provider] = entry
     return items, _meta(entry, "ok")
 
