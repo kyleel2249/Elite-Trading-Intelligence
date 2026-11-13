@@ -12,6 +12,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ALPHA_EQUITY_WATCHLIST` | config | Comma-separated equity symbols for Global Alpha. |
 | `ALPHA_SUBREQUEST_BUDGET` | config | Cap on outbound sub-requests per Global Alpha run. |
 | `ANTHROPIC_API_KEY` | secret | Enables the optional LLM brief. Absent = feature off. |
+| `BACKEND_URL` | config | Optional. HTTP(S) origin (no path, credentials, query or fragment) that receives any route the Worker does not handle itself. Unset = unknown routes return a JSON 404. |
 | `BINANCE_API_KEY` | secret | Binance spot **testnet** key (trade-only). |
 | `BINANCE_FUTURES_API_KEY` | secret | Binance futures **testnet** key. |
 | `BINANCE_FUTURES_SECRET_KEY` | secret | Binance futures testnet secret. |
@@ -79,14 +80,14 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_RISK_GATE_TOKEN` | legacy | Removed. Ignored; reported as unused legacy config. |
 | `ETI_RISK_GATE_URL` | legacy | Removed. Ignored; if present the dashboard reports it as unused legacy config. |
 | `ETI_ROUND_TRIP_COST_BPS` | config | Assumed round-trip trading cost (bps) in signal maths. |
-| `ETI_SPORTS_AUTO_SCAN_LIMIT` | config | Upcoming football fixtures retrieved per scheduled scan (1 default, max 12). |
+| `ETI_SPORTS_AUTO_SCAN_LIMIT` | config | Upcoming football fixtures retrieved per scheduled scan (default 12, max 12). |
 | `ETI_SPORTS_HISTORY_BATCH_SIZE` | config | Unseen finished football fixtures imported per scheduled history sync (5 default, max 30). |
 | `ETI_SPORTS_HISTORY_SYNC_MINUTES` | config | Minimum minutes between scheduled football history syncs (1440 default, min 360). |
+| `ETI_SPORTS_PAPER_BANKROLL_CENTS` | config | Starting balance, in cents, of a **new** sports paper ledger (default 100000 = USD 1,000.00; range 100 to 1,000,000,000). An existing ledger is never changed automatically. |
 | `ETI_SPORTS_PAPER_TOKEN` | secret | Protects the isolated sports paper bankroll, bet ledger and manual history sync. |
 | `ETI_SPORTS_SCAN_INTERVAL_MINUTES` | config | Minimum minutes between scheduled global football odds scans (360 default, min 60). |
 | `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
 | `ETI_SESSION_SECRET_PREVIOUS` | secret | Previous signing secret, accepted during rotation. |
-| `ETI_SPORTS_PAPER_BANKROLL_CENTS` | config | Paper bankroll (in cents) for the sports paper-betting module. |
 | `ETI_UNIVERSE_BATCH` | config | Symbols scanned per scheduled universe run. |
 | `ETI_UNIVERSE_ENABLED` | config | Enables the scheduled universe scan. |
 | `ETI_UNIVERSE_MAX_SPREAD_BPS` | config | Skip symbols with a wider spread. |
@@ -97,7 +98,9 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `FRED_SERIES_JSON` | config | Extra FRED series as JSON. |
 | `MARKET_PROVIDER_ORDER` | config | Comma-separated market-data provider priority. |
 | `NEWS_FEEDS_JSON` | config | News feed list as JSON. |
-| `ODDSPAPI_API_KEY` | secret | OddsPapi global football fixtures, bookmaker odds, scores and provider health. |\n| `ODDS_API_KEY` | secret | Optional The Odds API regional fallback for supported US and international markets. |\n| `OPENFIGI_API_KEY` | secret | Optional OpenFIGI key for instrument lookup. |
+| `ODDSPAPI_API_KEY` | secret | OddsPapi global football fixtures, bookmaker odds, scores and provider health. |
+| `ODDS_API_KEY` | secret | Optional The Odds API regional fallback for supported US and international markets. |
+| `OPENFIGI_API_KEY` | secret | Optional OpenFIGI key for instrument lookup. |
 | `RESEND_API_KEY` | secret | Resend key for alert email. Absent = alerts recorded as 'not delivered'. |
 | `SEC_USER_AGENT` | config | User-Agent string SEC EDGAR requires (name and contact email). |
 
