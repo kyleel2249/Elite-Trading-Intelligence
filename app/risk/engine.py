@@ -232,8 +232,9 @@ class RiskEngine:
                 reasons.append(
                     f"Risk per trade {risk_pct:.2f}% exceeds limit {risk_limit:g}%"
                 )
-        elif server_px and proposal.equity > 0 and math.isfinite(proposal.qty):
+        elif (server_px and proposal.provider != "oanda" and proposal.equity > 0 and math.isfinite(proposal.qty)):
             # No stop and no estimate: charge the full notional to the risk budget (conservative).
+            # OANDA is excluded: its CFD/FX orders are margin-sized in units and flagged as unverified instead.
             risk_pct = abs(proposal.qty) * server_px / proposal.equity * 100.0
             # The full notional is already the most conservative risk measure, so the base limit applies.
             if risk_pct > s.default_risk_per_trade_pct + 1e-9:

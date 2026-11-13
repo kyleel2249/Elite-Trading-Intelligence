@@ -220,7 +220,8 @@ class TradingService:
                 }
 
             result = {
-                "status": execution["status"],
+                # OANDA answers with a submission acknowledgement; the journal still records the confirmed fill.
+                "status": "submitted" if provider == "oanda" and execution["status"] == "filled" else execution["status"],
                 "client_order_id": client_order_id,
                 "environment": environment,
                 "execution_mode": "exchange_testnet" if environment.lower() != "live" else "live",
