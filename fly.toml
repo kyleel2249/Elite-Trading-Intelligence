@@ -1,7 +1,8 @@
-# Fly.io config for the ETI FastAPI origin. Deployed by .github/workflows/deploy.yml
-# (or manually: flyctl deploy). Change `app` to a globally unique name if taken.
+# Fly.io config for the ETI FastAPI origin. Deployed by `flyctl deploy` (see docs/POSTGRES_FRANKFURT.md).
+# Change `app` to a globally unique name if taken.
 app = "eti-trading-intelligence"
-primary_region = "iad"
+# Frankfurt. Binance refuses US IP addresses, so the origin must not run in a US region.
+primary_region = "fra"
 
 [build]
   dockerfile = "Dockerfile"
@@ -9,16 +10,14 @@ primary_region = "iad"
 [env]
   APP_ENV = "production"
   PORT = "8000"
-  DATABASE_URL = "sqlite:////data/eti.db"
+  # DATABASE_URL is a Fly SECRET (fly secrets set DATABASE_URL=...), never committed here.
+  # With this flag the app refuses to start on anything but PostgreSQL, so a missing secret cannot
+  # silently put trading records in a throw-away SQLite file.
+  ETI_REQUIRE_POSTGRES = "true"
   LIVE_TRADING_ENABLED = "false"
   ALPACA_PAPER = "true"
   BINANCE_TESTNET_ENABLED = "true"
   BINANCE_LIVE_TRADING_ENABLED = "false"
-
-# SQLite lives on a persistent volume. Keep exactly one machine while using SQLite.
-[mounts]
-  source = "eti_data"
-  destination = "/data"
 
 [http_service]
   internal_port = 8000
