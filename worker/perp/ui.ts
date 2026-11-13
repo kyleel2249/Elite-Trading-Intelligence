@@ -47,6 +47,7 @@ function perpApplyMode(){
  $('stopPriceWrap').style.display=$('orderType').value==='stop'?'flex':'none';
  if(on){const av=Array.prototype.find.call($('orderBroker').options,o=>o.value==='alpaca');if(av&&$('orderBroker').value==='alpaca')$('orderBroker').value='eti_paper';if(av)av.disabled=true;}
  else{const av=Array.prototype.find.call($('orderBroker').options,o=>o.value==='alpaca');if(av)av.disabled=false;}
+ const fn=$('rdFutNote');if(fn)fn.hidden=!on;
  clearTimeout(perp.timer);if(on)perpLoad();
 }
 function perpBody(side){

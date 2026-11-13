@@ -59,6 +59,9 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_LIVE_TRADING_ENABLED` | config | Reported only. Live trading is disabled in this build regardless (`/api/orders/live` returns 423). |
 | `ETI_LLM_MAX_PER_HOUR` | config | Cap on LLM brief calls per hour. |
 | `ETI_LLM_MODEL` | config | Model id for the optional LLM brief. |
+| `ETI_LLM_MAX_INPUT_TOKENS` | config | Estimated input-token budget for one LLM brief; context is trimmed in tiers only when exceeded (default 8000). |
+| `ETI_LLM_CACHE_TTL` | config | Seconds an identical analysis review is served from KV instead of calling the LLM again; 0 disables (default 900). |
+| `REDIS_URL` | config | `redis://[:password@]host:port/db` for the Python cache and task queue; blank disables them. |
 | `ETI_MANAGE_ACCOUNTS` | config | Accounts whose open positions the scheduled run monitors. |
 | `ETI_MANAGE_AUTOCLOSE` | config | `true` lets the monitor close positions on confirmed invalidation. |
 | `ETI_MANAGE_STRATEGY` | config | Strategy used by the position monitor. |

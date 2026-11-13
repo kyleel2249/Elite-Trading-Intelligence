@@ -15,6 +15,7 @@ import { handlePortfolio } from "./portfolio/routes.ts";
 import { CALC_CSS, CALC_HTML, CALC_JS } from "./calculator/ui.ts";
 import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
 import { PERP_CSS, PERP_HTML, PERP_JS, PERP_ORDER_HTML } from "./perp/ui.ts";
+import { VIZ_CSS, VIZ_HTML, VIZ_JS } from "./viz3d/ui.ts";
 import type { ExecutionEnv } from "./execution.ts";
 import { handleMarket } from "./market.ts";
 import { handleSignals } from "./signals.ts";
@@ -122,6 +123,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 ${PORTFOLIO_CSS}
 ${CALC_CSS}
 ${PERP_CSS}
+${VIZ_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
@@ -197,6 +199,7 @@ ${PERP_HTML}
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
 
+${VIZ_HTML}
 <section class="panel" id="signalPanel" style="margin-top:14px">
 <h2>ETI AI Signal Engine</h2>
 <div class="meta"><span>Decision <b id="signalAction">ANALYSING…</b></span><span>Score <b id="signalScore">—</b></span><span>Conviction <b id="signalConviction">—</b></span><span>Historical win rate <b id="signalWinRate">Not validated</b></span><span>Provider <b id="signalProvider">—</b></span></div>
@@ -217,6 +220,7 @@ ${PERP_HTML}
 <section class="panel" id="readinessPanel" style="margin-top:14px">
 <style>.rdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:10px}.rdcard{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0b1422}.rdchip{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11px;border:1px solid currentColor;white-space:nowrap}.rdhours{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px;margin-top:8px}.rdhours span{height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#06101c;font-weight:700}.rdtable td,.rdtable th{text-align:left;vertical-align:top}.rdtable details{margin-top:4px;color:var(--muted)}@media(max-width:850px){.rdhours{grid-template-columns:repeat(6,minmax(0,1fr))}}</style>
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Market Readiness Engine</h2><span class="muted" id="rdMeta">Loading...</span></div>
+<p class="muted" id="rdFutNote" hidden style="margin:6px 0">Futures selected: readiness and analysis below are computed from SPOT market data for this symbol. They do not include funding, open interest or leverage conditions.</p>
 <p class="execution-note">Decides whether trading is advisable at all: now, today, tomorrow, in a session or in a particular hour. Standing aside is a valid outcome. Factors that cannot be verified are shown as not evaluated and lower the verdict instead of being assumed safe.</p>
 <div class="toolbar">
 <select id="rdMarket" aria-label="Market"><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="equities">Equities</option></select>
@@ -468,7 +472,7 @@ async function load(){
   if(d.status==='fulfilled'){book={bids:d.value.data.bids,asks:d.value.data.asks};}else problems.push('depth: '+d.reason.message);
   if(t.status==='fulfilled'){trades=t.value.data.map(v=>({T:Number(v.time),m:!!v.isBuyerMaker,p:String(v.price),q:String(v.qty)}));}else problems.push('trades: '+t.reason.message);
   if(tk.status==='fulfilled'){const x=tk.value.data;$('volume').textContent=fmt(x.volume);const c=Number(x.priceChangePercent);$('change').textContent=(c>=0?'+':'')+c.toFixed(2)+'%';$('change').style.color=c>=0?'#21d69a':'#ff637d';}else{$('volume').textContent=fmt(candles.at(-1)[5])+' (last candle)';$('change').textContent='—';problems.push('ticker: '+tk.reason.message);}
-  drawChart();renderBook();renderTrades();
+  drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());
   $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent=provider+(k.failover?' (failover)':'');
   failCount=0;setStale(problems.length?'Partial data — '+problems[0].slice(0,140):'');
   $('stamp').textContent='Updated '+new Date().toLocaleTimeString()+' via '+provider;
@@ -833,6 +837,7 @@ ${PORTFOLIO_JS}
 ${CALC_JS}
 pfInit();
 ${PERP_JS}
+${VIZ_JS}
 const SYM={all:[],market:'spot',venue:'',quote:'',cat:'',q:'',at:0,warn:''};
 function symRows(){let rows=SYM.market==='metals'?SYM.all.filter(r=>r[4]==='metals'):SYM.all.filter(r=>r[3]===SYM.market);if(SYM.venue)rows=rows.filter(r=>symV(r)===SYM.venue);const seen={};return rows.map((r,i)=>[r,(SYM.market==='metals'&&r[3]!=='spot'?2:0)+(symV(r)==='binance'?0:1),i]).sort((a,b)=>a[1]-b[1]||a[2]-b[2]).map(x=>x[0]).filter(r=>seen[r[0]]?false:(seen[r[0]]=1));}
 function symVisible(){const t=SYM.q.trim().toUpperCase();return symRows().filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));}

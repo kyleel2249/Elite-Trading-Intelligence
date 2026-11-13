@@ -20,5 +20,30 @@ services:
       timeout: 5s
       retries: 3
 
+  redis:
+    image: redis:7-alpine
+    profiles: ["queue"]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  worker:
+    build: .
+    profiles: ["queue"]
+    command: ["python", "-m", "app.infra.worker", "--queues", "default", "--beat"]
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:////data/eti.db
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - eti-data:/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
 volumes:
   eti-data:
+  redis-data:

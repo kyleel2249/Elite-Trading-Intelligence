@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     secret_key: str = "change-me"
     api_key: Optional[str] = None
     database_url: str = "sqlite:///./eti.db"
+    # Optional Redis (redis://[:password@]host:port/db) for the cache and task queue; blank = feature disabled, nothing else changes.
+    redis_url: str = ""
 
     live_trading_enabled: bool = False
     # Global kill switch — rejects all order submission when true.
