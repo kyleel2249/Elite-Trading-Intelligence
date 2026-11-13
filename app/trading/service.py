@@ -1,12 +1,13 @@
 """
 Trading service — single entry point for paper and live orders.
-Every order must pass RiskEngine before any provider submission.
-Paper fills update portfolio + journal (Claire Bennett audit trail).
+Paper orders (and testnet orders without exchange credentials) are executed by ETI's INTERNAL PAPER engine
+(app.paper) and never touch an exchange. Exchange testnet / live orders must pass RiskEngine before any
+provider submission. Paper fills update portfolio + journal (Claire Bennett audit trail).
 """
 from __future__ import annotations
 
-import uuid
 import math
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -15,9 +16,11 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.oanda import OandaClient, OandaError
+from app.paper import mode as paper_modes
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
-from app.trading.portfolio import PortfolioService
 from app.trading.executions import normalize_execution
+from app.trading.portfolio import PortfolioService
 
 
 class TradingService:
@@ -30,6 +33,29 @@ class TradingService:
 
     def _client_order_id(self) -> str:
         return f"eti-{uuid.uuid4().hex[:20]}"
+
+    def _creds_configured(self, provider: str) -> bool:
+        p = provider.lower()
+        if p == "alpaca":
+            return bool(self.settings.alpaca_configured)
+        if p == "binance":
+            return bool(self.settings.binance_configured)
+        return bool(getattr(self.settings, f"{p}_configured", False))
+
+    def _paper_resolution(self, provider: str, environment: str):
+        """INTERNAL_PAPER resolution, or None when the request must continue down the exchange path.
+        Live is never simulated here: live, testnet-with-credentials and unknown environments fall through to the risk-gated path."""
+        res = paper_modes.resolve_mode(provider.lower(), environment, creds_configured=self._creds_configured(provider),
+                                       live_enabled=bool(getattr(self.settings, "live_trading_enabled", False)))
+        return res if res.mode == paper_modes.INTERNAL_PAPER else None
+
+    async def _place_internal_paper(self, *, res, client_order_id: str, symbol: str, side: str, qty: float,
+                                    order_type: str, limit_price: Optional[float], thesis: Optional[str] = None) -> dict[str, Any]:
+        from app.paper.runtime import place_via_trading_service
+
+        return await place_via_trading_service(symbol=symbol.upper(), side=side.lower(), qty=qty, order_type=order_type.lower(),
+                                               limit_price=limit_price, thesis=thesis, client_order_id=client_order_id,
+                                               mode_info=res.to_dict())
 
     async def place_order(
         self,
@@ -56,6 +82,12 @@ class TradingService:
         provider, environment = provider.strip().lower(), environment.strip().lower()
         side, order_type, symbol = side.strip().lower(), order_type.strip().lower(), symbol.strip().upper()
         client_order_id = self._client_order_id()
+
+        paper_res = self._paper_resolution(provider, environment)
+        if paper_res is not None:
+            return await self._place_internal_paper(res=paper_res, client_order_id=client_order_id, symbol=symbol, side=side,
+                                                    qty=qty, order_type=order_type, limit_price=limit_price, thesis=thesis)
+
         proposal = OrderProposal(
             provider=provider.lower(),
             environment=environment.lower(),
@@ -104,8 +136,8 @@ class TradingService:
                 )
             return result
 
-        # Persist intent BEFORE a remote side effect. Timeouts and malformed
-        # responses remain discoverable by client_order_id during reconciliation.
+        # Persist intent BEFORE a remote side effect. Timeouts and malformed responses remain
+        # discoverable by client_order_id during reconciliation.
         if self.db is not None:
             PortfolioService(self.db).record_order_event(
                 client_order_id=client_order_id, provider=provider, environment=environment,
@@ -114,13 +146,14 @@ class TradingService:
             )
         try:
             if provider.lower() == "alpaca":
-                if environment.lower() == "paper" and not self.settings.alpaca_paper:
+                # Alpaca "paper"/"testnet" must hit the PAPER API only; never let live keys be used for a sandbox request.
+                if environment.lower() in ("paper", "testnet") and not self.settings.alpaca_paper:
                     return {
                         "status": "rejected",
                         "client_order_id": client_order_id,
                         "risk": {
                             "decision": "REJECTED",
-                            "reasons": ["Alpaca live credentials configured but paper environment requested"],
+                            "reasons": ["Alpaca live credentials configured but paper/testnet environment requested"],
                             "notes": "Mismatch between environment and ALPACA_PAPER",
                             "officer": "Helena Frost",
                         },
@@ -137,7 +170,7 @@ class TradingService:
                 execution = normalize_execution("alpaca", resp)
             elif provider.lower() == "binance":
                 use_testnet = environment.lower() in ("paper", "testnet")
-                # Paper without keys: simulate fill for journal/positions
+                # Paper without keys: simulate the fill from the server price for journal/positions.
                 if use_testnet and not self.binance.configured and fill_price_hint is not None:
                     if not math.isfinite(fill_price_hint) or fill_price_hint <= 0:
                         raise ValueError("Simulation requires a finite positive market price")
@@ -150,7 +183,6 @@ class TradingService:
                         "cummulativeQuoteQty": str(qty * fill_price_hint if crosses else 0),
                         "status": "FILLED" if crosses else "NEW",
                     }
-                    execution = normalize_execution("binance", resp)
                 else:
                     client = BinanceClient(self.settings, use_testnet=use_testnet)
                     resp = await client.submit_order(
@@ -161,7 +193,19 @@ class TradingService:
                         client_order_id=client_order_id,
                         limit_price=limit_price,
                     )
-                    execution = normalize_execution("binance", resp)
+                execution = normalize_execution("binance", resp)
+            elif provider.lower() == "oanda":
+                # paper -> OANDA practice account; live host is reachable only for environment="live" (risk-gated)
+                client = OandaClient(self.settings, use_practice=environment.lower() != "live")
+                resp = await client.submit_order(
+                    symbol=symbol, qty=qty, side=side, order_type=order_type,
+                    limit_price=limit_price, client_order_id=client_order_id,
+                )
+                # Only a real fill price counts: a pending limit order must not be journaled as filled at the market price.
+                oanda_fill = resp.get("fill_price")
+                execution = {"status": "filled" if oanda_fill is not None else "submitted",
+                             "filled_qty": qty if oanda_fill is not None else 0.0, "fill_price": oanda_fill,
+                             "provider_order_id": str(resp.get("id") or "") or None}
             else:
                 return {
                     "status": "rejected",
@@ -179,10 +223,12 @@ class TradingService:
                 "status": execution["status"],
                 "client_order_id": client_order_id,
                 "environment": environment,
+                "execution_mode": "exchange_testnet" if environment.lower() != "live" else "live",
                 "risk": {
                     "decision": decision.decision.value,
                     "reasons": decision.reasons,
                     "notes": decision.notes,
+                    "warnings": decision.warnings,
                     "officer": "Helena Frost",
                 },
                 "provider_response": resp,
@@ -190,6 +236,7 @@ class TradingService:
             }
 
             if self.db is not None:
+                # Only confirmed cumulative executions are journaled as fills; never a quote hint.
                 status = execution["status"]
                 PortfolioService(self.db).record_order_event(
                     client_order_id=client_order_id,
@@ -212,8 +259,20 @@ class TradingService:
         except Exception as e:
             if self.db is not None:
                 self.db.rollback()
+            # A definite broker refusal (OandaError) is an error; anything else (timeout, malformed
+            # response) may have reached the broker, so the order stays discoverable for reconciliation.
+            definite = isinstance(e, OandaError)
+            if definite and self.db is not None:
+                try:
+                    PortfolioService(self.db).record_order_event(
+                        client_order_id=client_order_id, provider=provider, environment=environment,
+                        symbol=symbol, side=side, qty=qty, status="rejected", risk_approved=False,
+                        risk_notes=str(e)[:500], thesis=thesis, council_action=council_action,
+                    )
+                except Exception:
+                    self.db.rollback()
             return {
-                "status": "submission_unknown",
+                "status": "error" if definite else "submission_unknown",
                 "client_order_id": client_order_id,
                 "risk": {
                     "decision": decision.decision.value,
@@ -224,9 +283,3 @@ class TradingService:
                 "error": str(e),
                 "provider_response": None,
             }
-"""
-Trading service — single entry point for paper and live orders.
-Paper orders (and testnet orders without exchange credentials) are executed by ETI's INTERNAL PAPER engine
-(app.paper) and never touch an exchange. Exchange testnet / live orders must pass RiskEngine before any
-provider submission. Paper fills update portfolio + journal (Claire Bennett audit trail).
-"""

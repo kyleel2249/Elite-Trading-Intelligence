@@ -1,6 +1,12 @@
-"""Paper portfolio: positions, fills, journal with filters."""
+"""Paper portfolio: positions, fills, journal with filters.
+
+Every position-changing fill is also handed to the ETI memory/learning pipeline *after* the
+portfolio transaction has committed. Learning failures are logged and swallowed: they can never
+block, reverse or alter order handling.
+"""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 import json
@@ -9,6 +15,9 @@ import math
 from sqlalchemy.orm import Session
 
 from app.models import OrderRecord, Position, JournalEntry
+from app.memory import models as _memory_models  # noqa: F401  (registers memory tables on Base.metadata)
+
+logger = logging.getLogger("eti.portfolio")
 
 
 def _utcnow() -> datetime:
@@ -20,6 +29,7 @@ class PortfolioService:
 
     def __init__(self, db: Session):
         self.db = db
+        self._pending_fills: list[dict[str, Any]] = []
 
     def record_order_event(
         self,
@@ -39,6 +49,7 @@ class PortfolioService:
         provider_order_id: Optional[str] = None,
         filled_qty: Optional[float] = None,
     ) -> OrderRecord:
+        self._pending_fills = []
         row = (
             self.db.query(OrderRecord)
             .filter(OrderRecord.client_order_id == client_order_id)
@@ -144,11 +155,33 @@ class PortfolioService:
                 side=side,
                 qty=delta,
                 price=delta_price,
+                ctx={
+                    "client_order_id": client_order_id,
+                    "thesis": thesis,
+                    "council_action": council_action,
+                },
             )
 
         self.db.commit()
         self.db.refresh(row)
+        self._dispatch_learning()
         return row
+
+
+    def _dispatch_learning(self) -> None:
+        """Hand committed fills to the post-trade learning pipeline (best effort)."""
+        events, self._pending_fills = self._pending_fills, []
+        if not events:
+            return
+        try:
+            from app.memory.learning import TradeLearningService
+
+            svc = TradeLearningService(self.db)
+            for ev in events:
+                svc.process_fill(ev)
+        except Exception:
+            self.db.rollback()
+            logger.warning("memory learning hook failed; order handling is unaffected", exc_info=True)
 
     def _apply_fill(
         self,
@@ -159,9 +192,22 @@ class PortfolioService:
         side: str,
         qty: float,
         price: float,
+        ctx: Optional[dict[str, Any]] = None,
     ) -> None:
         symbol = symbol.upper()
         side = side.lower()
+        ctx = ctx or {}
+        base_event: dict[str, Any] = {
+            "provider": provider,
+            "environment": environment,
+            "symbol": symbol,
+            "side": side,
+            "price": price,
+            "ts": _utcnow(),
+            "client_order_id": ctx.get("client_order_id"),
+            "thesis": ctx.get("thesis"),
+            "council_action": ctx.get("council_action"),
+        }
         pos = (
             self.db.query(Position)
             .filter(
@@ -186,6 +232,7 @@ class PortfolioService:
                 status="open",
             )
             self.db.add(pos)
+            self._pending_fills.append({**base_event, "kind": "open", "qty": qty, "position_side": pos_side})
             return
 
         if (pos.side == "long" and side == "buy") or (pos.side == "short" and side == "sell"):
@@ -195,6 +242,7 @@ class PortfolioService:
             pos.mark_price = price
             pos.unrealized_pnl = ((price - pos.avg_entry) if pos.side == "long" else (pos.avg_entry - price)) * pos.qty
             pos.updated_at = _utcnow()
+            self._pending_fills.append({**base_event, "kind": "add", "qty": qty})
             return
 
         if qty < pos.qty:
@@ -219,6 +267,7 @@ class PortfolioService:
                 pnl=pnl,
                 thesis="Partial position reduce",
             )
+            self._pending_fills.append({**base_event, "kind": "reduce", "qty": qty, "pnl": pnl})
         elif qty == pos.qty:
             if pos.side == "long":
                 pnl = (price - pos.avg_entry) * qty
@@ -242,6 +291,7 @@ class PortfolioService:
                 pnl=pnl,
                 thesis="Full position close",
             )
+            self._pending_fills.append({**base_event, "kind": "close", "qty": qty, "pnl": pnl})
         else:
             close_qty = pos.qty
             if pos.side == "long":
@@ -269,6 +319,10 @@ class PortfolioService:
                 pnl=pnl,
                 thesis="Position flip — closed leg",
             )
+            self._pending_fills.append({
+                **base_event, "kind": "flip", "qty": qty, "close_qty": close_qty, "remainder_qty": remainder,
+                "new_side": pos.side, "pnl": pnl,
+            })
 
     def mark_positions(self, marks: dict[tuple[str, str, str], float]) -> list[Position]:
         open_pos = self.db.query(Position).filter(Position.status == "open").all()
@@ -283,6 +337,13 @@ class PortfolioService:
                     p.unrealized_pnl = (p.avg_entry - px) * p.qty
                 p.updated_at = _utcnow()
         self.db.commit()
+        try:  # track best/worst marks for the learning loop's stop/target checks
+            from app.memory.learning import TradeLearningService
+
+            TradeLearningService(self.db).update_excursions(marks)
+        except Exception:
+            self.db.rollback()
+            logger.warning("excursion tracking failed", exc_info=True)
         return open_pos
 
     def list_positions(self, environment: Optional[str] = None, status: str = "open") -> list[Position]:
@@ -362,9 +423,3 @@ class PortfolioService:
             payload=kwargs.get("payload"),
         )
         self.db.add(entry)
-"""Paper portfolio: positions, fills, journal with filters.
-
-Every position-changing fill is also handed to the ETI memory/learning pipeline *after* the
-portfolio transaction has committed. Learning failures are logged and swallowed: they can never
-block, reverse or alter order handling.
-"""

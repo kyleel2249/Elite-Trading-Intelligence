@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.oanda import OandaClient
 from app.models import OrderRecord
 from app.trading.portfolio import PortfolioService
 from app.trading.executions import normalize_execution
@@ -29,6 +30,7 @@ class OrderReconciler:
         self.settings = settings or get_settings()
         self.alpaca = AlpacaClient(self.settings)
         self.binance = BinanceClient(self.settings)
+        self.oanda = OandaClient(self.settings)
 
     async def reconcile_open(self, limit: int = 50) -> dict[str, Any]:
         rows = (
@@ -74,6 +76,9 @@ class OrderReconciler:
             return await self._alpaca_status(row)
         if row.provider == "binance" and self.binance.configured:
             return await self._binance_status(row)
+        if row.provider == "oanda" and self.oanda.configured:
+            client = OandaClient(self.settings, use_practice=(row.environment or "paper").lower() != "live")
+            return await client.get_order_status(row.client_order_id)
         return None
 
     async def _alpaca_status(self, row: OrderRecord) -> Optional[dict[str, Any]]:
@@ -129,4 +134,3 @@ class OrderReconciler:
                 return None
             data = r.json()
             return normalize_execution("binance", data)
-"""Idempotent order status reconciliation against providers."""
