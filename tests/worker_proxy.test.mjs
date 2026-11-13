@@ -19,30 +19,49 @@ for (const pathname of ['/normal?x=1', '//attacker.example/payload', '///attacke
   });
 }
 
+// The Worker serves "/" and its own /api routes itself; BACKEND_URL only applies to routes it does not implement.
+const UNROUTED = 'https://edge.example/unrouted/path';
+
 for (const backend of ['ftp://origin.example', 'https://user:password@origin.example', 'https://origin.example/prefix', 'https://origin.example?secret=yes']) {
   test('reject unsafe backend configuration ' + backend, async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error('must not fetch'); };
     try {
-      const response = await worker.fetch(new Request('https://edge.example/'), {BACKEND_URL: backend});
+      const response = await worker.fetch(new Request(UNROUTED), {BACKEND_URL: backend});
       assert.equal(response.status, 500);
       assert.equal((await response.text()).includes('password'), false);
     } finally { globalThis.fetch = original; }
   });
 }
 
-test('missing backend fails closed', async () => {
-  assert.equal((await worker.fetch(new Request('https://edge.example/'), {})).status, 503);
+test('missing backend fails closed: unrouted paths 404 and nothing is forwarded', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('must not fetch'); };
+  try {
+    const response = await worker.fetch(new Request(UNROUTED), {});
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error, 'not_found');
+  } finally { globalThis.fetch = original; }
+});
+
+test('routes the Worker implements are never forwarded, even when BACKEND_URL is set', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('must not fetch'); };
+  try {
+    const response = await worker.fetch(new Request('https://edge.example/'), {BACKEND_URL: 'https://origin.example'});
+    assert.equal(response.status, 200);
+    assert.ok((response.headers.get('content-type') || '').includes('text/html'));
+  } finally { globalThis.fetch = original; }
 });
 
 test('invalid and unreachable backend errors do not reveal secret details', async () => {
-  const invalid = await worker.fetch(new Request('https://edge.example/'), {BACKEND_URL: 'bad backend secret-value'});
+  const invalid = await worker.fetch(new Request(UNROUTED), {BACKEND_URL: 'bad backend secret-value'});
   assert.equal(invalid.status, 500);
   assert.equal((await invalid.text()).includes('secret-value'), false);
   const original = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('secret-value upstream detail'); };
   try {
-    const response = await worker.fetch(new Request('https://edge.example/'), {BACKEND_URL: 'https://origin.example'});
+    const response = await worker.fetch(new Request(UNROUTED), {BACKEND_URL: 'https://origin.example'});
     assert.equal(response.status, 502);
     assert.equal((await response.text()).includes('secret-value'), false);
   } finally { globalThis.fetch = original; }

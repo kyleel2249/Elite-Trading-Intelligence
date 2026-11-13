@@ -54,6 +54,12 @@ test('activity, consensus, watch and learning renderers escape external strings'
 test('main dashboard scripts compile and authenticated reads include headers', () => {
   const source = fs.readFileSync(new URL('../app/templates/index.html', import.meta.url),'utf8');
   for (const match of source.matchAll(/<script>([\s\S]*?)<\/script>/g)) new vm.Script(match[1]);
-  assert.ok(source.includes("fetch('/api/paper-trading/portfolio',{headers:authHeaders()})"));
+  // Reads use the session cookie; every state-changing paper call goes through authHeaders().
+  for (const route of ['/api/paper/orders/preview', '/api/paper/orders/oco', "'/api/paper/orders', {"]) {
+    const at = source.indexOf(route);
+    assert.ok(at > 0, 'dashboard calls ' + route);
+    assert.ok(source.slice(at, at + 160).includes('authHeaders()'), route + ' sends authHeaders()');
+  }
   assert.equal(source.includes("localStorage.getItem('eti_api_key')"), false);
+  assert.equal(source.includes("localStorage.setItem('eti_api_key'"), false);
 });
