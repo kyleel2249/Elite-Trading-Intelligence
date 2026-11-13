@@ -1,6 +1,8 @@
 /**
  * Hardening layer placed directly around withSports (see worker/main.ts).
  *
+ *  0. Before any /api/sports request the sports D1 schema is ensured (schema.ts, idempotent, once per isolate), so an
+ *     un-migrated database can never fail a scan with "no such table".
  *  1. Paper-token checks use a constant-time comparison. A supplied but wrong token is rejected here,
  *     before the sports route runs, so the route's own `===` check is only reached with a correct token.
  *     A missing token is delegated unchanged, so the route keeps answering with its existing 401/503 bodies.
@@ -17,6 +19,7 @@
  *     predictions (see settlement.ts), so a sync that failed part-way can never strand a bet.
  */
 import { settleFromStoredResults } from "./settlement.ts";
+import { ensureSportsSchema } from "./schema.ts";
 interface GuardEnv { ETI_SPORTS_PAPER_TOKEN?: string; ETI_PORTFOLIO_DB?: D1Database }
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 interface Entry { at: number; status: number; body: string; headers: Array<[string, string]> }
@@ -125,6 +128,12 @@ export function withSportsGuard<E extends GuardEnv>(next: App<E>): App<E> {
 
       if (p === "/api/sports/events" && req.method === "GET" && !authed) {
         return new Response(JSON.stringify({ error: "unauthorized", message: "Live bookmaker odds use paid provider quota; supply the ETI Sports Paper Token." }), { status: 401, headers: jsonHeaders });
+      }
+
+      // Make sure every sports table, column and index exists before the route touches D1 (memoised per isolate).
+      if (env.ETI_PORTFOLIO_DB) {
+        try { await ensureSportsSchema(env.ETI_PORTFOLIO_DB); }
+        catch (e) { console.error("sports schema ensure failed", e instanceof Error ? e.message : e); }
       }
 
       if (p === "/api/sports/health" && req.method === "GET" && !authed) {
