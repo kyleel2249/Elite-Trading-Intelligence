@@ -7,7 +7,7 @@ import { sqliteD1 } from "../portfolio/testing.ts";
 const TOKEN = "sports-token-0123456789";
 async function world(score: [number, number] | null) {
   const db = sqliteD1(); const raw: any = db;
-  for (const f of readdirSync(new URL("../../migrations/", import.meta.url)).filter(f => /^000[3-8]/.test(f)).sort()) for (const st of readFileSync(new URL("../../migrations/" + f, import.meta.url), "utf8").split(/;\s*\n/)) if (st.trim()) await db.prepare(st).run();
+  for (const f of readdirSync(new URL("../../migrations/", import.meta.url)).filter(f => /^000[3-8]/.test(f)).sort()) for (const st of readFileSync(new URL("../../migrations/" + f, import.meta.url), "utf8").replace(/^\s*--.*$/gm, "").split(/;\s*\n/)) if (st.trim()) await db.prepare(st).run();
   await db.prepare("INSERT INTO sports_bankroll (id,balance_cents,created_at,updated_at) VALUES (1,100000,1,1)").run();
   await db.prepare("INSERT INTO sports_bets (id,created_at,sport,event_name,market,selection,odds,model_probability,stake_cents,status,profit_cents,event_id,bookmaker,odds_provider,implied_probability,expected_value,model_version) VALUES ('11111111-1111-1111-1111-111111111111',1,'Football','A vs B','Full Time Result','Home',2.0,0.6,1000,'OPEN',0,'fx1','bk','test',0.5,0.2,'m1')").run();
   if (score) await db.prepare("INSERT INTO sports_match_results (fixture_id,played_at,home_team,away_team,home_goals,away_goals,source,updated_at) VALUES ('fx1',1,'A','B',?,?,'test',1)").bind(score[0], score[1]).run();

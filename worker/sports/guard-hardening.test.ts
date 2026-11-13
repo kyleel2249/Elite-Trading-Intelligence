@@ -71,5 +71,6 @@ test("an authorised history sync triggers backlog settlement and reports it", as
   const res = await app.fetch(new Request("https://eti.test/api/sports/football/sync-history", { method: "POST", headers: auth, body: "{}" }), { ...env, ETI_PORTFOLIO_DB: db });
   assert.equal(res.status, 502);
   assert.match(res.headers.get("x-eti-backlog-settled") || "", /^1 bets/);
-  assert.equal(db.batches.length, 1);
+  // schema self-healing also uses batches now; count only the settlement batches
+  assert.equal(db.batches.filter((b: any[]) => b.some((st: any) => /UPDATE sports_bets/.test(st.sql))).length, 1);
 });
