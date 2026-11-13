@@ -10,6 +10,7 @@ import type { AgentsEnv, MarketLoader, ProviderLoader } from "./route.ts";
 import { fetchProviderData } from "./providers.ts";
 import { requestBrief } from "./llm.ts";
 import type { LlmEnv } from "./llm.ts";
+import { readUsage, savingsPct } from "../llm/usage.ts";
 
 export type LlmAgentsEnv = AgentsEnv & LlmEnv & { ETI_LLM_MAX_PER_HOUR?: string };
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
@@ -33,6 +34,12 @@ export function withLlmBrief<E extends LlmAgentsEnv>(base: App<E>, deps: LlmDeps
   return {
     async fetch(request, env) {
       const path = new URL(request.url).pathname;
+      if (path === "/api/llm/usage") {
+        if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+        if (!(await bearerOk(request, env))) return reply({ error: "unauthorized" }, 401);
+        const days = await readUsage(env.ETI_EXECUTION_LOG as any, clock(), 7), sum = days.reduce((a, d) => ({ calls: a.calls + d.calls, cacheHits: a.cacheHits + d.cacheHits, estimatedTokensRaw: a.estimatedTokensRaw + d.estimatedTokensRaw, estimatedTokensSent: a.estimatedTokensSent + d.estimatedTokensSent, actualInputTokens: a.actualInputTokens + d.actualInputTokens, actualOutputTokens: a.actualOutputTokens + d.actualOutputTokens, cacheReadTokens: a.cacheReadTokens + d.cacheReadTokens }), { calls: 0, cacheHits: 0, estimatedTokensRaw: 0, estimatedTokensSent: 0, actualInputTokens: 0, actualOutputTokens: 0, cacheReadTokens: 0 });
+        return reply({ note: "Estimates are heuristic; actual* come from the provider. Estimated savings compare the original uncompressed prompt with what was sent (cache hits send nothing).", days, last7Days: { ...sum, estimatedSavingsPct: savingsPct(sum) } });
+      }
       if (path !== "/api/agents/brief") return base.fetch(request, env);
       if (request.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
       if (!(await bearerOk(request, env))) return reply({ error: "unauthorized" }, 401);
@@ -56,10 +63,10 @@ export function withLlmBrief<E extends LlmAgentsEnv>(base: App<E>, deps: LlmDeps
       let pSup: SuppliedData = {};
       if (body.providers !== false) { try { pSup = (await loadProv(env, symbol, clock())).supplied; } catch { pSup = {}; } }
       const result = analyze({ market, supplied: mergeSupplied(pSup, { fundamentals: body.fundamentals, macro: body.macro, news: body.news, onchain: body.onchain }), integrity: integrityFromEnv(env), now: clock() });
-      const review = await requestBrief(env, result, deps.fetchImpl ?? fetch);
+      const review = await requestBrief(env, result, deps.fetchImpl ?? fetch, { kv, now: clock() });
       const decision = { action: result.decision.action, confidence: result.decision.confidence, vetoedBy: result.decision.vetoedBy };
       if (!review.ok) return reply({ advisory: true, error: review.error, llmStatus: review.status ?? null, analysisId: result.id, decision }, 502);
-      return reply({ advisory: true, notice: "LLM review is advisory only: it cannot change the decision, the Risk Manager or any order.", analysisId: result.id, symbol, interval, generatedAt: result.generatedAt, decision, brief: review.brief, model: review.model, usage: review.usage });
+      return reply({ advisory: true, notice: "LLM review is advisory only: it cannot change the decision, the Risk Manager or any order.", analysisId: result.id, symbol, interval, generatedAt: result.generatedAt, decision, brief: review.brief, model: review.model, usage: review.usage, tokens: review.tokens, cached: review.cached });
     },
   };
 }
