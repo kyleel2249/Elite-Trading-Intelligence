@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
-from app.integrations.oanda import OandaClient
 from app.models import OrderRecord
 from app.trading.portfolio import PortfolioService
+from app.trading.executions import normalize_execution
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,6 @@ class OrderReconciler:
         self.settings = settings or get_settings()
         self.alpaca = AlpacaClient(self.settings)
         self.binance = BinanceClient(self.settings)
-        self.oanda = OandaClient(self.settings)
 
     async def reconcile_open(self, limit: int = 50) -> dict[str, Any]:
         rows = (
@@ -46,33 +45,19 @@ class OrderReconciler:
                 remote = await self._fetch_status(row)
                 if not remote:
                     continue
-                new_status = remote.get("status")
-                fill_price = remote.get("fill_price")
-                if new_status and new_status != row.status:
-                    # Only advance
-                    row.status = new_status
-                    if fill_price is not None:
-                        row.fill_price = fill_price
-                    if remote.get("provider_order_id"):
-                        row.provider_order_id = str(remote["provider_order_id"])
-                    self.db.add(row)
-                    if new_status == "filled" and fill_price is not None and row.risk_approved:
-                        PortfolioService(self.db).record_order_event(
-                            client_order_id=row.client_order_id,
-                            provider=row.provider,
-                            environment=row.environment,
-                            symbol=row.symbol,
-                            side=row.side,
-                            qty=row.qty,
-                            status="filled",
-                            fill_price=fill_price,
-                            risk_approved=True,
-                            risk_notes=row.risk_notes or "",
-                            thesis="Reconciled fill",
-                            provider_order_id=row.provider_order_id,
-                        )
-                    updated.append(row.client_order_id)
+                # Account cumulative executions even when status did not change,
+                # and before terminalizing canceled/expired orders.
+                PortfolioService(self.db).record_order_event(
+                    client_order_id=row.client_order_id, provider=row.provider,
+                    environment=row.environment, symbol=row.symbol, side=row.side,
+                    qty=row.qty, status=remote["status"],
+                    filled_qty=remote.get("filled_qty"), fill_price=remote.get("fill_price"),
+                    risk_approved=row.risk_approved, risk_notes=row.risk_notes or "",
+                    thesis="Reconciled execution", provider_order_id=remote.get("provider_order_id"),
+                )
+                updated.append(row.client_order_id)
             except Exception as e:
+                self.db.rollback()
                 errors.append({"client_order_id": row.client_order_id, "error": str(e)})
                 logger.warning("Reconcile failed %s: %s", row.client_order_id, e)
         self.db.commit()
@@ -89,9 +74,6 @@ class OrderReconciler:
             return await self._alpaca_status(row)
         if row.provider == "binance" and self.binance.configured:
             return await self._binance_status(row)
-        if row.provider == "oanda" and self.oanda.configured:
-            client = OandaClient(self.settings, use_practice=(row.environment or "paper").lower() != "live")
-            return await client.get_order_status(row.client_order_id)
         return None
 
     async def _alpaca_status(self, row: OrderRecord) -> Optional[dict[str, Any]]:
@@ -111,24 +93,7 @@ class OrderReconciler:
             if r.status_code != 200:
                 return None
             data = r.json()
-            status = (data.get("status") or "").lower()
-            mapped = {
-                "new": "submitted",
-                "accepted": "submitted",
-                "pending_new": "pending",
-                "partially_filled": "partial",
-                "filled": "filled",
-                "canceled": "canceled",
-                "cancelled": "canceled",
-                "expired": "expired",
-                "rejected": "rejected",
-            }.get(status, status)
-            fill = data.get("filled_avg_price")
-            return {
-                "status": mapped,
-                "fill_price": float(fill) if fill else None,
-                "provider_order_id": data.get("id"),
-            }
+            return normalize_execution("alpaca", data)
 
     async def _binance_status(self, row: OrderRecord) -> Optional[dict[str, Any]]:
         import hashlib
@@ -163,22 +128,5 @@ class OrderReconciler:
             if r.status_code != 200:
                 return None
             data = r.json()
-            status = (data.get("status") or "").upper()
-            mapped = {
-                "NEW": "submitted",
-                "PARTIALLY_FILLED": "partial",
-                "FILLED": "filled",
-                "CANCELED": "canceled",
-                "REJECTED": "rejected",
-                "EXPIRED": "expired",
-            }.get(status, status.lower())
-            fill = data.get("avgPrice") or data.get("price")
-            try:
-                fill_f = float(fill) if fill and float(fill) > 0 else None
-            except Exception:
-                fill_f = None
-            return {
-                "status": mapped,
-                "fill_price": fill_f,
-                "provider_order_id": str(data.get("orderId") or ""),
-            }
+            return normalize_execution("binance", data)
+"""Idempotent order status reconciliation against providers."""

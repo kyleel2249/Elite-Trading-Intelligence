@@ -232,6 +232,11 @@ for _module_path, _label in (
     ("app.api.alpha", "alpha"),
     ("app.api.auth_session", "auth_session"),
     ("app.api.command_centre", "command_centre"),
+    ("app.api.futures_paper", "futures_paper"),
+    ("app.api.futures_calc", "futures_calc"),
+    ("app.api.chain", "chain"),
+    ("app.api.intel", "intel"),
+    ("app.api.market_symbols", "market_symbols"),
 ):
     try:
         _mod = __import__(_module_path, fromlist=["router"])
