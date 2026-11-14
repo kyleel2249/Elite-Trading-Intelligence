@@ -13,6 +13,7 @@ import { MAX_OPEN, MAX_OUTCOMES, entryFromSignal, expectancyOf, parseEntries, pa
 import { STRATEGIES, buildSignal, isStrategy } from "./service.ts";
 import { SYMBOL_RE, keys as baseKeys, precisionStore, type KvLike, type PrecisionEnv } from "./stores.ts";
 import { parseInstrument } from "./engine.ts";
+import { ingestEventCalendar } from "./ingest.ts";
 import { DAY_MS, isRecord, round } from "./util.ts";
 
 export const MAX_RESOLVE_FETCHES = 4;
@@ -33,6 +34,7 @@ export interface CycleReport {
   resolved: { id: string; status: string; netR: number | null }[];
   refit: { strategy: Strategy; calibration: string; expectancy: string }[];
   notes: string[];
+  ingest?: { status: string; detail: string; written: string[] };
 }
 
 async function readJson(kv: KvLike, key: string): Promise<unknown> { try { const t = await kv.get(key); return t ? JSON.parse(t) : null; } catch { return null; } }
@@ -55,6 +57,12 @@ export async function runPrecisionCycle(env: PrecisionEnv & Record<string, unkno
   const resolvedCfg = resolveConfig(env.ETI_PRECISION_CONFIG);
   const cfg = resolvedCfg.config, hash = scoreConfigHash(cfg);
   const order = providerOrder(env as any, null);
+
+  // 0. Pull the operator-configured event calendar into the news context (no-op when no calendar source is configured).
+  if (!opts.only) {
+    try { const ing = await ingestEventCalendar(env as any, pairs.map(p => p.symbol), now); if (ing.status !== "not_configured") report.ingest = ing; if (ing.status === "error") report.notes.push(`Event calendar ingestion: ${ing.detail}`); }
+    catch (e) { report.notes.push(`Event calendar ingestion failed: ${e instanceof Error ? e.message : "unknown"}`); }
+  }
 
   // 1. Resolve open signals from closed candles.
   let open = openBefore;
