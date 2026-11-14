@@ -141,8 +141,15 @@ listed in `transactionCosts.excludes`.
 
 ## Supplying fundamentals, news, expectancy
 
-ETI does not infer fundamentals or news from price and has no automated ingestion for them yet. They are supplied through
-the admin routes into an optional KV namespace, validated on write and again on read, and judged for age:
+ETI does not infer fundamentals or news from price. **Scheduled events are ingested automatically** from the calendar you already
+configure for the Readiness engine (`ETI_EVENT_FEED_URL` and/or `ETI_EVENTS_JSON`): each scheduled-cycle tick (at most every 15
+minutes) writes market-wide high/medium/low-impact events (USD, crypto or unscoped) to the news context, and symbol-scoped events
+to that asset's news key for configured symbols. Nothing is written when no calendar is configured, when the feed fails, or when any
+row is invalid (the calendar is then unverified, not clear), and fresh operator-supplied news (under 12 h old) is never overwritten.
+A successfully loaded, empty calendar is written as "no scheduled events". Fundamentals are **not** ingested automatically:
+converting raw statistics into a bullish/bearish bias would be an invented judgement, so they stay operator-supplied. Fundamentals,
+and any news you want to add yourself, are supplied through the admin routes into an optional KV namespace, validated on write and
+again on read, and judged for age:
 
 ```bash
 curl -X PUT "https://<worker>/api/precision/admin/fundamentals/BTC" -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
