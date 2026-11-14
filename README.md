@@ -394,4 +394,4 @@ curl 'https://<worker>.<subdomain>.workers.dev/api/intelligence/traders?q=reflex
 
 ## Global Alpha Intelligence
 
-Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and risk-gated paper/testnet execution. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Live execution is off by default and needs two operator flags plus a per-request confirmation.
+Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and paper/testnet execution through the in-process order safeguards. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Live execution is not available: Alpha orders go through the same paper/testnet handler as every other path, and no live route exists.
