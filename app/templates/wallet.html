@@ -4,6 +4,19 @@
 <h1>ETI wallet (on-chain)</h1>
 <div class="sub">ETI owns one EVM address. The private key is generated on the server, stored encrypted and never shown or exported. Testnets by default; every spend needs a previewed quote, passes the spending policy, and is confirmed by typing SEND.</div>
 
+<section class="panel" id="wdash" style="margin-top:12px" aria-labelledby="h-wd">
+  <h2 id="h-wd">Wallet dashboard <span class="chip" id="wd-chip">loading…</span></h2>
+  <div class="grid">
+    <div class="s6"><h3 class="sub">Paper wallet (simulated, not real money)</h3><div class="kpis" id="wd-paper" aria-live="polite"></div></div>
+    <div class="s6"><h3 class="sub">On-chain wallet (real keys; testnets by default)</h3><div class="kpis" id="wd-chain" aria-live="polite"></div></div>
+  </div>
+  <div class="grid" style="margin-top:10px">
+    <div class="s7"><h3 class="sub">Paper holdings and allocation</h3><div id="wd-alloc"></div></div>
+    <div class="s5"><h3 class="sub">Realized equity curve (30 days)</h3><div id="wd-curve"></div></div>
+  </div>
+  <p class="sub">The two wallets are never combined: paper figures are simulated by ETI; on-chain figures are read from the network RPC and show as unavailable when no RPC is configured.</p>
+</section>
+
 <div class="grid" style="margin-top:12px">
   <section id="wallet" class="panel gold s5"><h2>Wallet</h2><div id="wallet-body"></div></section>
   <section id="limits" class="panel s7"><h2>Spending policy in force (operator-controlled)</h2><div id="limits-body"></div></section>
@@ -48,11 +61,45 @@
 {% block scripts %}
 <script>
 (function () {
-  const { $, $$, el, fmt, api, toast, busy, modal, confirmTyped, kv, table, unavailable } = ETI;
+  const { $, $$, el, fmt, api, toast, busy, modal, confirmTyped, kv, table, unavailable, area } = ETI;
   let NETS = [], WALLET = null, ALLOW = [];
   const safe = (u) => (typeof u === 'string' && u.startsWith('https://') ? u : null);
   const link = (t, u) => (safe(u) ? el('a', { href: u, target: '_blank', rel: 'noopener noreferrer', text: t }) : document.createTextNode(t));
   const short = (a) => (a ? a.slice(0, 8) + '\u2026' + a.slice(-6) : '\u2014');
+
+  // ---------------------------------------------------------------- dashboard (paper wallet + on-chain summary)
+  const tile = (l, v, c, t) => el('div', { class: 'kpi', title: t || '' }, el('div', { class: 'l', text: l }), el('div', { class: 'v ' + (c || ''), text: String(v) }));
+  async function loadDash() {
+    let ok = 0;
+    try {
+      const d = await api('/api/command/performance?account_id=default&range=1M'); const s = d.summary, p = d.performance;
+      $('#wd-paper').replaceChildren(tile('Total value', fmt.usd(s.equity), '', 'Cash plus open positions at current marks'), tile('Cash', fmt.usd(s.cash)), tile('Available', fmt.usd(s.available_cash), '', 'Cash not reserved by resting buy orders'),
+        tile('Holdings value', fmt.usd(s.market_value)), tile('Net P&L', fmt.signed(s.total_pnl), fmt.cls(s.total_pnl), 'Equity minus starting cash'), tile('Realized P&L', fmt.signed(s.realized_pnl), fmt.cls(s.realized_pnl)),
+        tile('Unrealized P&L', fmt.signed(s.unrealized_pnl), fmt.cls(s.unrealized_pnl)), tile('Fees paid', fmt.usd(s.fees_paid)));
+      const pos = (s.positions || []).filter((x) => x.open !== false), total = s.equity > 0 ? s.equity : 0;
+      const rows = [{ symbol: 'Cash (USDT)', value: s.cash, weight: total ? s.cash / total * 100 : null, pnl: null }]
+        .concat(pos.map((x) => ({ symbol: x.symbol, value: x.market_value, weight: total ? x.market_value / total * 100 : null, pnl: x.unrealized_pnl })));
+      const bar = (w) => el('div', { style: 'background:rgba(0,168,255,.12);border-radius:4px;min-width:110px;height:10px' }, el('div', { style: 'height:10px;border-radius:4px;background:#00a8ff;width:' + Math.max(0, Math.min(100, w || 0)).toFixed(1) + '%' }));
+      $('#wd-alloc').replaceChildren(table([{ k: 'symbol', label: 'Asset' }, { k: 'value', label: 'Value', fmt: (v) => fmt.usd(v) }, { k: 'weight', label: 'Weight', fmt: (v) => (v == null ? '\u2014' : fmt.pct(v)) },
+        { k: 'weight', label: 'Allocation', fmt: (v) => bar(v) }, { k: 'pnl', label: 'Unrealized', fmt: (v) => (v == null ? '\u2014' : fmt.signed(v)), cls: (v) => (v == null ? '' : fmt.cls(v)) }], rows, 'Nothing held.'));
+      $('#wd-curve').replaceChildren(area((p.equity_curve || []).map((x) => x.equity), { label: 'Realized equity curve' }));
+      ok++;
+    } catch (e) { for (const id of ['#wd-paper', '#wd-alloc', '#wd-curve']) $(id).replaceChildren(unavailable(e.message, 'Paper wallet')); }
+    try {
+      const [st, tx] = await Promise.all([api('/api/chain/status', { timeout: 60000 }), api('/api/chain/txs?limit=100').catch(() => null)]);
+      const nets = st.networks || [], live = nets.filter((n) => n.connected);
+      const pending = tx ? (tx.transactions || []).filter((t) => t.status === 'pending').length : null;
+      $('#wd-chain').replaceChildren(tile('Wallet', st.wallet ? short(st.wallet.address) : 'not created', st.wallet ? '' : 'warn', st.wallet ? st.wallet.address : 'Create it in the Wallet panel below'),
+        tile('Networks connected', live.length + ' / ' + nets.length, live.length ? 'pos' : 'warn', 'Networks with a configured RPC that answered'),
+        ...nets.map((n) => tile(n.label + (n.mainnet ? ' (MAINNET)' : ''), n.balance != null ? n.balance + ' ' + n.native : (n.connected ? 'no balance' : 'unavailable'), n.balance != null && Number(n.balance) > 0 ? 'pos' : '', n.error || n.note || '')),
+        tile('Pending transactions', pending == null ? '\u2014' : pending, pending ? 'warn' : ''), tile('Kill switch', st.kill_switch ? 'ACTIVE (sends blocked)' : 'off', st.kill_switch ? 'neg' : ''));
+      ok++;
+    } catch (e) {
+      const m = String(e.message || e);
+      $('#wd-chain').replaceChildren(unavailable(/disabled|503/i.test(m) ? 'The on-chain wallet is disabled on this server (CHAIN_ENABLED=false).' : /401|403|api key/i.test(m) ? 'The server requires the ETI API key for wallet data (use the API key button in the header).' : m, 'On-chain wallet'));
+    }
+    $('#wd-chip').textContent = ok === 2 ? 'live' : ok === 1 ? 'partial' : 'unavailable';
+  }
 
   async function loadNets() {
     const d = await api('/api/chain/networks'); NETS = d.networks;
@@ -103,7 +150,7 @@
       { k: (r) => r, label: '', fmt: (r) => (r.status === 'pending' ? el('button', { class: 'btn sm', type: 'button', onclick: (ev) => busy(ev.currentTarget, async () => { await api('/api/chain/txs/' + r.id + '/refresh', { method: 'POST' }); await loadTxs(); }) }, 'Check') : '') }], t.transactions, 'No transactions yet.'));
     $('#ev-body').replaceChildren(table([{ k: 'ts', label: 'Time', fmt: fmt.time }, { k: 'event', label: 'Event' }, { k: 'network', label: 'Network' }, { k: (r) => JSON.stringify(r.detail || {}), label: 'Detail', wrap: true }], e.events, 'No events yet.'));
   }
-  async function refreshAll() { await Promise.allSettled([loadWallet(), loadAllow(), loadTxs()]); loadStatus(); }
+  async function refreshAll() { await Promise.allSettled([loadWallet(), loadAllow(), loadTxs(), loadDash()]); loadStatus(); }
 
   async function showPreview(p) {
     const rows = { Summary: p.summary, Network: p.label + (p.mainnet ? ' (MAINNET)' : ' (testnet)'), From: p.from, To: p.to, 'Value (wei)': p.value_wei, 'Gas limit': p.gas, 'Max fee cost': p.max_fee_cost + ' ' + p.native, 'Quote expires': p.expires_at ? fmt.time(p.expires_at) : '\u2014' };
@@ -135,7 +182,7 @@
   form('#f-scan', async (d) => { const r = await api('/api/chain/intel/blocks?network=' + ETI.enc(d.network) + '&count=' + Number(d.count) + '&threshold=' + ETI.enc(d.threshold.trim()), { timeout: 90000 }); $('#intel-out').replaceChildren(el('p', { class: 'sub', text: 'Scanned ' + r.blocks_scanned + ' block(s) up to ' + r.head + '. ' + r.note }), table([{ k: 'block', label: 'Block' }, { k: 'tags', label: 'Flag', fmt: (v) => v.join(', ') }, { k: (x) => x.value + ' ' + r.native, label: 'Value' }, { k: 'from', label: 'From', fmt: short }, { k: 'to', label: 'To', fmt: short }, { k: (x) => x, label: 'Tx', fmt: (x) => link(short(x.tx_hash), x.explorer_url) }], r.findings, 'No transfers at or above the threshold and none involving watch addresses.')); });
   $('#net-refresh').addEventListener('click', (e) => busy(e.currentTarget, loadStatus));
   $('#tx-refresh').addEventListener('click', (e) => busy(e.currentTarget, async () => { const r = await api('/api/chain/txs/refresh', { method: 'POST' }); toast('Checked ' + r.transactions.length + ' pending transaction(s)', 'good'); await loadTxs(); }));
-  document.addEventListener('DOMContentLoaded', async () => { await loadNets().catch((e) => toast(e.message, 'bad')); await refreshAll(); ETI.poll(() => loadTxs(), 30000); });
+  document.addEventListener('DOMContentLoaded', async () => { loadDash(); await loadNets().catch((e) => toast(e.message, 'bad')); await refreshAll(); ETI.poll(() => loadTxs(), 30000); ETI.poll(() => loadDash(), 30000); });
 })();
 </script>
 {% endblock %}
