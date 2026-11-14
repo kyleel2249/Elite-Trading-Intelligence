@@ -86,6 +86,15 @@ def test_production_without_any_key_is_fail_closed_and_dev_is_open(monkeypatch):
     assert client.get("/api/alpha/macro", headers=H(ANALYST)).status_code == 200
 
 
+def test_unknown_environment_names_fail_closed_not_open(monkeypatch):
+    for env in ("qa", "demo", "Production", "", "uat"):
+        _use(monkeypatch, app_env=env, api_key=None, alpha_role_keys=None)
+        assert client.post("/api/alpha/monitor").status_code == 503, env
+    for env in ("development", "test", "local"):
+        _use(monkeypatch, app_env=env, api_key=None, alpha_role_keys=None)
+        assert client.post("/api/alpha/monitor").status_code == 200, env
+
+
 def test_invalid_role_entries_grant_nothing(monkeypatch):
     _use(monkeypatch, app_env="production", api_key=ADMIN, alpha_role_keys="tooshort:trader,garbage")
     assert client.post("/api/alpha/monitor", headers=H("tooshort")).status_code == 401
