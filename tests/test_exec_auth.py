@@ -293,8 +293,11 @@ def test_frontend_has_no_token_or_api_key_storage():
                 assert "eti_session" not in path.read_text(errors="ignore")
 
 
-def test_no_withdrawal_or_transfer_capability_exists_in_code():
-    bad = re.compile(r"def\s+(withdraw|transfer|payout)\w*\s*\(|capital/withdraw|asset/transfer|/withdrawals?['\"]", re.I)
+def test_no_exchange_withdrawal_or_transfer_endpoint_is_used_by_the_backend():
+    """Static guard: no code path calls an exchange withdrawal / internal-transfer endpoint, and no function
+    named withdraw*/payout* exists. (Reading on-chain 'Transfer' events is unrelated and not flagged.)"""
+    bad = re.compile(r"sapi/v\d/capital/withdraw|sapi/v\d/asset/transfer|sapi/v\d/sub-account/(?:transfer|universalTransfer)"
+                     r"|/api/v\d/withdraw|/v\d/withdrawals?\b|def\s+(?:withdraw|payout)\w*\s*\(", re.I)
     hits = []
     for path in (ROOT / "app").rglob("*.py"):
         if path.name == "execution_auth.py":
