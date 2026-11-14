@@ -21,8 +21,7 @@ export const CHART_LAYOUT_CSS = `
 export const CHART_LAYOUT_JS = `
 (function(){
 if(typeof drawChart!=='function'||!$('stack')||$('cscroll'))return;
-var KEY='eti_candle_step',cfg={step:16,fit:false,atEnd:true};
-try{var saved=Number(localStorage.getItem(KEY));if(saved>=6&&saved<=40)cfg.step=saved;}catch(e){}
+var cfg={step:16,fit:false,atEnd:true}; /* kept in memory only: the dashboard stores nothing in the browser */
 var st=$('stack'),sc=document.createElement('div');
 sc.id='cscroll';sc.className='cscroll';sc.tabIndex=0;sc.setAttribute('role','region');
 sc.setAttribute('aria-label','Scrollable price chart. Use the horizontal scrollbar or the arrow keys to see older candles.');
@@ -41,7 +40,7 @@ function layout(){
 var base=drawChart;
 drawChart=function(){layout();base();if(cfg.atEnd&&!cfg.fit)sc.scrollLeft=sc.scrollWidth;};
 sc.addEventListener('scroll',function(){cfg.atEnd=sc.scrollLeft+sc.clientWidth>=sc.scrollWidth-8;});
-sel.addEventListener('change',function(){cfg.step=Number(sel.value);cfg.fit=false;$('barFit').setAttribute('aria-pressed','false');try{localStorage.setItem(KEY,String(cfg.step));}catch(e){}drawChart();});
+sel.addEventListener('change',function(){cfg.step=Number(sel.value);cfg.fit=false;$('barFit').setAttribute('aria-pressed','false');drawChart();});
 $('barFit').addEventListener('click',function(){cfg.fit=!cfg.fit;this.setAttribute('aria-pressed',String(cfg.fit));this.textContent=cfg.fit?'Back to scrolling':'Fit all candles';$('barNote').textContent=cfg.fit?'All candles squeezed into the visible width.':'Scroll sideways for older candles.';if(!cfg.fit)cfg.atEnd=true;drawChart();});
 $('barEnd').addEventListener('click',function(){cfg.atEnd=true;cfg.fit=false;drawChart();sc.scrollLeft=sc.scrollWidth;});
 if(typeof resetAndLoad==='function'){var rl=resetAndLoad;resetAndLoad=function(){cfg.atEnd=true;return rl.apply(this,arguments);};}
