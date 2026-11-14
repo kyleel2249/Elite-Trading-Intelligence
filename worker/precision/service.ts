@@ -25,7 +25,7 @@ export async function buildSignal(env: PrecisionEnv, symbol: string, strategy: S
   const failures: Record<string, string> = {};
   let provider = "unknown";
   const fetchedAt = Date.now();
-  const ctxPromise = loadContext(env, inst.base, strategy, fetchedAt, cfg.context.expectancyMaxAgeDays);
+  const ctxPromise = loadContext(env, inst.base, strategy, fetchedAt, cfg.context.expectancyMaxAgeDays, symbol);
   await Promise.all(need.map(async tf => {
     try { const r = await getMarketData("klines", { symbol, interval: tf, limit: 300 }, order); candles[tf] = r.data as Kline[]; if (tf === EXECUTION_TF[strategy]) provider = r.provider; }
     catch (e) { failures[tf] = e instanceof Error ? e.message : "unknown"; }

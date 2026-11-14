@@ -4,6 +4,7 @@
 import { parseCalibrationModel, type CalibrationModel } from "./calibration.ts";
 import { parseFundamentalContext, parseNewsContext, type FundamentalContext, type NewsContext } from "./context.ts";
 import type { Strategy } from "../algo/timeframes.ts";
+import { expectancyFor } from "../algo/expectancy.ts";
 import { DAY_MS, cleanText, isFiniteNumber, isRecord } from "./util.ts";
 
 /** Minimal shape of a Cloudflare KV namespace, so this module needs no platform types. */
@@ -60,7 +61,12 @@ export interface LoadedContext {
   storeConfigured: boolean;
 }
 
-export async function loadContext(env: PrecisionEnv, base: string | null, strategy: Strategy, now: number, expectancyMaxAgeDays: number): Promise<LoadedContext> {
+/**
+ * `symbol` lets symbol-specific evidence in the shared expectancy store apply. The shared store (worker/algo/expectancy.ts) has stricter rules than this
+ * module's own record (replay/paper source only, at least 30 trades, a 95% interval above zero for any positive claim, expiry), so it can only make
+ * the answer MORE conservative: negative shared evidence always wins, and validated shared evidence caps an optimistic record.
+ */
+export async function loadContext(env: PrecisionEnv, base: string | null, strategy: Strategy, now: number, expectancyMaxAgeDays: number, symbol?: string): Promise<LoadedContext> {
   const kv = precisionStore(env);
   const [f, n, mn, e, c] = await Promise.all([
     base ? readJson(kv, keys.fundamentals(base)) : null, base ? readJson(kv, keys.news(base)) : null, readJson(kv, keys.marketNews()),
@@ -72,6 +78,16 @@ export async function loadContext(env: PrecisionEnv, base: string | null, strate
     if (now - Date.parse(rec.asOf) > expectancyMaxAgeDays * DAY_MS) expectancyNote = `Measured expectancy from ${rec.source} (as of ${rec.asOf}) is older than ${expectancyMaxAgeDays} days and was not used.`;
     else expectancy = { expectancyR: rec.expectancyR, samples: rec.samples };
   }
+  try {
+    const shared = await expectancyFor(env, strategy, symbol ?? "*", now);
+    if (shared.status === "negative" && shared.expectancyR !== null) {
+      expectancy = { expectancyR: shared.expectancyR, samples: shared.samples ?? 0 };
+      expectancyNote = `Shared expectancy store records non-positive evidence (${shared.reasons.join("; ")}); it overrides any more optimistic record.`;
+    } else if (shared.status === "validated" && shared.expectancyR !== null && (!expectancy || shared.expectancyR < expectancy.expectancyR)) {
+      expectancy = { expectancyR: shared.expectancyR, samples: shared.samples ?? 0 };
+      expectancyNote = `Using validated evidence from the shared expectancy store (${shared.reasons.join("; ")}).`;
+    }
+  } catch { /* the shared store is best-effort here; an unreadable store never loosens anything */ }
   return { fundamentals: parseFundamentalContext(f), news: parseNewsContext(n), marketNews: parseNewsContext(mn), expectancy, expectancyNote, calibration: parseCalibrationModel(c), storeConfigured: !!kv };
 }
 
