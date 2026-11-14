@@ -1,8 +1,9 @@
-"""Financial Modeling Prep adapter: economic calendar and earnings calendar (Stable API).
+"""Financial Modeling Prep adapter (Stable API): economic/earnings calendars and company fundamentals.
 
-Schema notes: field names (date, country, event, currency, previous, estimate, actual, change, impact) come from
-third-party documentation of FMP's economic-calendar response and are UNVERIFIED against a live key until
-``scripts/live_provider_check.py`` passes. FMP publishes no revision field; ``revision`` is always None here.
+Endpoints used, all documented at https://site.financialmodelingprep.com/developer/docs/stable (checked 2026-11-12):
+/economic-calendar, /earnings-calendar, /profile?symbol=, /quote?symbol=, /income-statement?symbol=&period=&limit=,
+/key-metrics?symbol=&period=&limit=. Calendar response field names come from third-party documentation and stay UNVERIFIED until
+a live probe passes. FMP publishes no revision field; ``revision`` is always None here.
 """
 from __future__ import annotations
 
@@ -81,6 +82,8 @@ class FMPClient(ProviderClient):
     name = "fmp"
     capability = "calendar"
     base_url = "https://financialmodelingprep.com/stable"
+    rate_per_minute = 240       # conservative client-side ceiling; FMP plan limits vary and are not reported in responses
+    verify_ttl_seconds = 6 * 3600
 
     def _auth(self, params: dict, headers: dict) -> None:
         params["apikey"] = self._key
@@ -123,14 +126,77 @@ class FMPClient(ProviderClient):
         return ProviderResult(rows, res.provider, res.endpoint, res.fetched_at, res.latency_ms, res.from_cache,
                               {"rows_skipped_invalid": len(res.data) - len(rows), "range": self._range(start, end)})
 
+    @staticmethod
+    def _symbol(symbol: str) -> str:
+        s = (symbol or "").strip().upper()
+        if not s or len(s) > 15 or not all(c.isalnum() or c in ".-^" for c in s):
+            raise ProviderError("fmp", "bad_request", "invalid symbol")
+        return s
+
+    async def _rows(self, path: str, params: dict[str, Any], ttl: float) -> ProviderResult:
+        res = await self.request(path, params, cache_ttl=ttl)
+        return res
+
+    async def company_profile(self, symbol: str) -> ProviderResult:
+        """GET /stable/profile?symbol= (documented). Returns one normalised row or none."""
+        sym = self._symbol(symbol)
+        res = await self._rows("/profile", {"symbol": sym}, 6 * 3600)
+        row = next((r for r in res.data if isinstance(r, dict)), None)
+        data = None if row is None else {
+            "symbol": row.get("symbol"), "name": row.get("companyName"), "exchange": row.get("exchange") or row.get("exchangeFullName"),
+            "currency": row.get("currency"), "sector": row.get("sector"), "industry": row.get("industry"), "country": row.get("country"),
+            "market_cap": _num(row.get("marketCap")), "price": _num(row.get("price")), "beta": _num(row.get("beta")),
+            "last_dividend": _num(row.get("lastDividend")), "is_etf": row.get("isEtf"), "is_actively_trading": row.get("isActivelyTrading")}
+        return ProviderResult(data, res.provider, res.endpoint, res.fetched_at, res.latency_ms, res.from_cache, {"symbol": sym})
+
+    async def quote(self, symbol: str) -> ProviderResult:
+        """GET /stable/quote?symbol= (documented)."""
+        sym = self._symbol(symbol)
+        res = await self._rows("/quote", {"symbol": sym}, 30)
+        row = next((r for r in res.data if isinstance(r, dict)), None)
+        data = None if row is None else {
+            "symbol": row.get("symbol"), "price": _num(row.get("price")), "change": _num(row.get("change")),
+            "change_pct": _num(row.get("changePercentage") if row.get("changePercentage") is not None else row.get("changesPercentage")),
+            "volume": _num(row.get("volume")), "day_low": _num(row.get("dayLow")), "day_high": _num(row.get("dayHigh")),
+            "year_low": _num(row.get("yearLow")), "year_high": _num(row.get("yearHigh")), "market_cap": _num(row.get("marketCap")),
+            "timestamp": row.get("timestamp")}
+        return ProviderResult(data, res.provider, res.endpoint, res.fetched_at, res.latency_ms, res.from_cache, {"symbol": sym})
+
+    async def income_statements(self, symbol: str, period: str = "FY", limit: int = 4) -> ProviderResult:
+        """GET /stable/income-statement?symbol=&period=&limit= (documented)."""
+        sym = self._symbol(symbol)
+        if period not in ("FY", "Q1", "Q2", "Q3", "Q4") or not 1 <= limit <= 20:
+            raise ProviderError("fmp", "bad_request", "invalid period or limit")
+        res = await self._rows("/income-statement", {"symbol": sym, "period": period, "limit": limit}, 6 * 3600)
+        rows = [{"date": r.get("date"), "fiscal_year": r.get("fiscalYear"), "period": r.get("period"), "currency": r.get("reportedCurrency"),
+                 "revenue": _num(r.get("revenue")), "gross_profit": _num(r.get("grossProfit")), "operating_income": _num(r.get("operatingIncome")),
+                 "net_income": _num(r.get("netIncome")), "eps_diluted": _num(r.get("epsDiluted"))} for r in res.data if isinstance(r, dict)]
+        return ProviderResult(rows, res.provider, res.endpoint, res.fetched_at, res.latency_ms, res.from_cache, {"symbol": sym, "period": period})
+
+    async def key_metrics(self, symbol: str, period: str = "FY", limit: int = 4) -> ProviderResult:
+        """GET /stable/key-metrics?symbol=&period=&limit= (documented). Raw numeric fields are passed through as reported."""
+        sym = self._symbol(symbol)
+        if period not in ("FY", "Q1", "Q2", "Q3", "Q4") or not 1 <= limit <= 20:
+            raise ProviderError("fmp", "bad_request", "invalid period or limit")
+        res = await self._rows("/key-metrics", {"symbol": sym, "period": period, "limit": limit}, 6 * 3600)
+        rows = [{k: (_num(v) if k not in ("symbol", "date", "fiscalYear", "period", "reportedCurrency") else v) for k, v in r.items()}
+                for r in res.data if isinstance(r, dict)]
+        return ProviderResult(rows, res.provider, res.endpoint, res.fetched_at, res.latency_ms, res.from_cache, {"symbol": sym, "period": period})
+
     async def probe(self) -> dict[str, Any]:
-        """One small real request used by the live check script; reports plan access per endpoint."""
+        """Real read-only request per endpoint ETI uses; records which endpoints the subscription actually allows."""
         today = datetime.now(timezone.utc).date()
+        calls = (("economic_calendar", lambda: self.economic_calendar(today, today + timedelta(days=7))),
+                 ("earnings_calendar", lambda: self.earnings_calendar(today, today + timedelta(days=7))),
+                 ("profile", lambda: self.company_profile("AAPL")), ("quote", lambda: self.quote("AAPL")),
+                 ("income_statement", lambda: self.income_statements("AAPL", limit=1)),
+                 ("key_metrics", lambda: self.key_metrics("AAPL", limit=1)))
         out: dict[str, Any] = {}
-        for name, fn in (("economic_calendar", self.economic_calendar), ("earnings_calendar", self.earnings_calendar)):
+        for name, call in calls:
             try:
-                r = await fn(today, today + timedelta(days=7))
-                out[name] = {"status": "ok", "rows": len(r.data)}
+                r = await call()
+                n = len(r.data) if isinstance(r.data, list) else (0 if r.data is None else 1)
+                out[name] = {"status": "ok", "rows": n}
             except ProviderError as e:
                 out[name] = {"status": e.kind, "http": e.status}
         return out

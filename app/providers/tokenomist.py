@@ -5,7 +5,7 @@ budgeted by ``credit_reserve`` and cached. Data licence: personal / non-commerci
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 from .base import ProviderClient, ProviderError, ProviderResult
@@ -105,10 +105,21 @@ class TokenomistClient(ProviderClient):
                               {"pages_read": page, "truncated": page >= max_pages and (res.data.get("metadata") or {}).get("totalPages", 1) > max_pages,
                                "quota": self.health.quota})
 
+    rate_per_minute = 100      # documented limit is 120 requests/min
+    verify_ttl_seconds = 24 * 3600   # each probe spends credits (2 per verification)
+
     async def probe(self) -> dict[str, Any]:
-        """Smallest real request (1 credit): token list filtered to one slug."""
+        """Two real requests (2 credits): token list and unlock events for one slug, to prove both endpoints are authorised."""
+        out: dict[str, Any] = {}
         try:
             r = await self.token_list(["arbitrum"])
-            return {"token_list": {"status": "ok", "rows": len(r.data), "quota": self.health.quota}}
+            out["token_list"] = {"status": "ok", "rows": len(r.data), "quota": self.health.quota}
         except ProviderError as e:
-            return {"token_list": {"status": e.kind, "http": e.status}}
+            out["token_list"] = {"status": e.kind, "http": e.status}
+        try:
+            today = datetime.now(timezone.utc).date()
+            r = await self.unlock_events("arbitrum", today, today + timedelta(days=30), page_size=1, max_pages=1)
+            out["unlock_events"] = {"status": "ok", "rows": len(r.data), "quota": self.health.quota}
+        except ProviderError as e:
+            out["unlock_events"] = {"status": e.kind, "http": e.status}
+        return out
