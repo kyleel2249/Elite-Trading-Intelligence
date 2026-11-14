@@ -2,7 +2,7 @@
  * Worker entrypoint. Layers, outermost first:
  *  -4. security headers (nonce CSP, nosniff, HSTS, ...) on every response
  *  -3. identity (/account, /api/identity/*), provider status (/providers, /api/providers/*), encrypted backup (/api/backup/*)
- *  -2.5 ETI Pro dashboard (/pro): neon dashboard that reads only live ETI endpoints
+ *  -2.5 ETI Pro dashboard (/pro): neon dashboard that reads only live ETI endpoints; wallet page (/wallet): paper wallet from /api/portfolio/state
  *  -2. ETI DAILY INTELLIGENCE REPORT (/api/daily-report/*, /daily), read-only and analytical
  *  -1. ETI PRECISION SIGNAL ENGINE (/api/precision/*), read-only and analytical
  *   0. command centre (/command) and global-intelligence API (/api/intel/*)
@@ -28,6 +28,7 @@ import { runPrecisionCycle } from "./precision/cycle.ts";
 import { withDailyReport } from "./daily/route.ts";
 import { runDailyReportCycle } from "./daily/api.ts";
 import { withPro } from "./pro/route.ts";
+import { withWallet } from "./wallet/route.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runPaperCycle } from "./algo/paper-api.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
@@ -61,6 +62,7 @@ const coreLayers: Array<(next: any) => any> = [
   withPrecision,
   withDailyReport,
   withPro,
+  withWallet,
   withJournal,
   withElite,
   // The guard sits directly outside the sports route: constant-time token check and a short scan cache (see sports/guard.ts).
