@@ -5,6 +5,7 @@ import asyncio
 import logging
 import random
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Mapping, Optional
@@ -70,6 +71,9 @@ class Health:
     consecutive_failures: int = 0
     quota: Optional[dict[str, Any]] = None
     history: list[dict[str, Any]] = field(default_factory=list)  # bounded integration-health log
+    last_error_at: Optional[datetime] = None
+    verification: Optional[dict[str, Any]] = None  # result of the last real probe: {verified_at, endpoints:{name:{status,...}}}
+    verifying: bool = False
 
 
 class ProviderClient:
@@ -85,6 +89,8 @@ class ProviderClient:
     breaker_threshold = 5
     breaker_cooldown = 60.0
     history_limit = 200
+    rate_per_minute: Optional[int] = None   # client-side ceiling so a burst never exhausts the provider quota
+    verify_ttl_seconds = 6 * 3600           # how often automatic verification may re-probe this provider
 
     def __init__(self, api_key: Optional[str], transport: Optional[Transport] = None,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep, clock: Callable[[], float] = time.monotonic):
@@ -93,6 +99,7 @@ class ProviderClient:
         self._sleep, self._clock = sleep, clock
         self._cache: dict[tuple, tuple[float, Any]] = {}
         self._breaker_open_until = 0.0
+        self._calls: deque = deque()
         self.health = Health()
 
     # -- subclass hooks -------------------------------------------------------------------------
@@ -145,12 +152,18 @@ class ProviderClient:
             return ProviderResult(hit[1], self.name, path, utcnow(), 0.0, from_cache=True)
         if now < self._breaker_open_until:
             raise ProviderError(self.name, "circuit_open", "too many recent failures; backing off")
+        if self.rate_per_minute:
+            while self._calls and self._calls[0] < now - 60.0:
+                self._calls.popleft()
+            if len(self._calls) >= self.rate_per_minute:
+                raise ProviderError(self.name, "rate_limited", "local rate limit reached; request not sent")
         h = self.health
         last_err: Optional[ProviderError] = None
         for attempt in range(self.max_attempts):
             send_params, headers = dict(public_params), {}
             self._auth(send_params, headers)
             h.requests += 1
+            self._calls.append(self._clock())
             t0 = self._clock()
             retry_after: Optional[float] = None
             try:
@@ -177,6 +190,7 @@ class ProviderClient:
                 return ProviderResult(body, self.name, path, h.last_success, latency)
             h.failures += 1
             h.last_failure, h.last_error_kind = utcnow(), err.kind
+            h.last_error_at = h.last_failure
             self._log_event(f"error:{err.kind}", path)
             last_err = err
             retryable = err.kind in ("upstream", "rate_limited")
@@ -184,40 +198,78 @@ class ProviderClient:
                 break
             h.retries += 1
             await self._sleep(self._delay(attempt, retry_after))
-        h.consecutive_failures += 1
-        if h.consecutive_failures >= self.breaker_threshold:
-            self._breaker_open_until = self._clock() + self.breaker_cooldown
-            self._log_event("circuit_opened")
         assert last_err is not None
+        # Only outage-type failures feed the circuit breaker. A rejected key (auth), a plan limit or a bad request is a
+        # configuration problem: it must stay visible as such and must not mask itself as "down".
+        if last_err.kind in ("upstream", "rate_limited", "bad_response"):
+            h.consecutive_failures += 1
+            if h.consecutive_failures >= self.breaker_threshold:
+                self._breaker_open_until = self._clock() + self.breaker_cooldown
+                self._log_event("circuit_opened")
         raise last_err
 
     def note_data_timestamp(self, ts: Optional[datetime]) -> None:
         if ts and (self.health.latest_data_timestamp is None or ts > self.health.latest_data_timestamp):
             self.health.latest_data_timestamp = ts
 
+    async def probe(self) -> dict[str, Any]:  # pragma: no cover - overridden by providers
+        return {}
+
+    def record_verification(self, endpoints: dict[str, Any]) -> dict[str, Any]:
+        self.health.verification = {"verified_at": utcnow().isoformat(), "endpoints": endpoints}
+        self._log_event("verified", ",".join(f"{k}={v.get('status')}" for k, v in endpoints.items()))
+        return self.health.verification
+
+    async def verify(self) -> dict[str, Any]:
+        """Real, read-only probe of every endpoint ETI uses; the only thing that can prove subscription access."""
+        if not self.configured:
+            return self.record_verification({"_": {"status": "not_configured"}})
+        if self.health.verifying:
+            return self.health.verification or {}
+        self.health.verifying = True
+        try:
+            return self.record_verification(await self.probe())
+        finally:
+            self.health.verifying = False
+
+    def needs_verification(self) -> bool:
+        if not self.configured or self.health.verifying:
+            return False
+        v = self.health.verification
+        if not v:
+            return True
+        return (utcnow() - datetime.fromisoformat(v["verified_at"])).total_seconds() > self.verify_ttl_seconds
+
     def health_snapshot(self, stale_after_seconds: Optional[float] = None) -> dict[str, Any]:
+        """status: unconfigured | unverified | operational-equivalent 'ok' | degraded | down | unauthorized | plan_restricted.
+        'ok' is only ever reported after a real provider request succeeded; a secret that is merely present is 'unverified'."""
         h = self.health
+        breaker_open = self._clock() < self._breaker_open_until
         if not self.configured:
             status = "unconfigured"
-        elif self._clock() < self._breaker_open_until or h.consecutive_failures >= self.breaker_threshold:
+        elif breaker_open or h.consecutive_failures >= self.breaker_threshold:
             status = "down"
-        elif h.requests == 0:
-            status = "unknown"
-        elif h.consecutive_failures > 0 or (h.last_error_kind in ("auth", "plan_restricted") and not h.last_success):
+        elif h.last_success is None:
+            status = {"auth": "unauthorized", "plan_restricted": "plan_restricted"}.get(h.last_error_kind or "", "unverified" if h.requests == 0 else "degraded")
+        elif h.last_error_kind == "auth" and h.last_error_at and h.last_error_at >= h.last_success:
+            status = "unauthorized"   # key revoked/expired after earlier successes
+        elif h.consecutive_failures > 0:
             status = "degraded"
         else:
             status = "ok"
-        stale = None
-        if stale_after_seconds and h.last_success:
-            stale = (utcnow() - h.last_success).total_seconds() > stale_after_seconds
+        age = (utcnow() - h.last_success).total_seconds() if h.last_success else None
+        stale = None if (age is None or not stale_after_seconds) else age > stale_after_seconds
         return {"provider": self.name, "capability": self.capability, "configured": self.configured, "status": status,
                 "requests": h.requests, "failures": h.failures, "retries": h.retries,
                 "avg_latency_ms": round(h.total_latency_ms / h.successes, 1) if h.successes else None,
                 "last_success": h.last_success.isoformat() if h.last_success else None,
                 "last_failure": h.last_failure.isoformat() if h.last_failure else None,
                 "last_error_kind": h.last_error_kind,
+                "last_error": {"kind": h.last_error_kind, "at": h.last_error_at.isoformat() if h.last_error_at else None} if h.last_error_kind else None,
                 "latest_data_timestamp": h.latest_data_timestamp.isoformat() if h.latest_data_timestamp else None,
-                "sync_stale": stale, "quota": h.quota, "circuit_open": self._clock() < self._breaker_open_until}
+                "data_age_seconds": None if age is None else round(age, 1), "sync_stale": stale,
+                "quota": h.quota, "rate_per_minute": self.rate_per_minute, "circuit_open": breaker_open,
+                "verification": h.verification, "verifying": h.verifying}
 
 
 class Capability:
@@ -237,8 +289,6 @@ class Capability:
             except ProviderError as e:
                 attempts.append({"provider": p.name, "error": e.kind})
         detail = ", ".join(f"{a['provider']}={a['error']}" for a in attempts) or f"no provider implements {method}"
-        # When every provider failed the same way, report that cause (not_configured -> 503, auth/plan_restricted ...) instead of
-        # flattening it to "upstream": callers and HTTP mapping need the real reason. Mixed failures stay "upstream".
         kinds = {a["error"] for a in attempts}
         kind = kinds.pop() if len(kinds) == 1 else "upstream"
         raise ProviderError(self.name, kind, "all providers failed or unavailable: " + detail)
