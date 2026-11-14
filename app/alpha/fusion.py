@@ -167,6 +167,51 @@ def engine_derivatives(ctx: dict[str, Any]) -> EngineEvidence:
     return EngineEvidence("derivatives", True, "neutral", 0.2, evidence=ev, limitations=lim)
 
 
+def engine_catalysts(ctx: dict[str, Any]) -> EngineEvidence:
+    """Confirmed SEC filings. A recent bankruptcy / delisting notice / non-reliance / obligation-acceleration 8-K is a hard veto."""
+    c = ctx.get("catalysts")
+    if not c:
+        return EngineEvidence("catalysts", False, limitations=["no SEC filing data (equities only; needs ticker-to-CIK match)"])
+    hard, soft = c.get("hard_negative") or [], c.get("soft_negative") or []
+    ev = [f"{h['date']} 8-K item {h['item']}: {h['meaning']}" for h in hard[:3]] + [f"{x['date']} 8-K item {x['item']}: {x['meaning']}" for x in soft[:2]]
+    ev += [f"{e['date']} 8-K item {e['item']}: {e['meaning']} (attention, direction unknown)" for e in (c.get("events") or [])[:3]]
+    ev += [f"{o['date']} {o['form']} large-holder filing" for o in (c.get("ownership_filings") or [])[:2]]
+    lim = ["filings are confirmed events but their direction is not judged, except the listed hard-risk items", "8-K text is not read"]
+    if hard:
+        return EngineEvidence("catalysts", True, "bearish", 1.0, hard_veto=True, evidence=ev, limitations=lim)
+    if soft:
+        return EngineEvidence("catalysts", True, "bearish", 0.3, evidence=ev, limitations=lim)
+    return EngineEvidence("catalysts", True, "neutral", 0.2, evidence=ev or ["no notable filings in the window"], limitations=lim)
+
+
+def engine_insider(ctx: dict[str, Any]) -> EngineEvidence:
+    c = ctx.get("catalysts")
+    ins = (c or {}).get("insider")
+    if not ins:
+        return EngineEvidence("insider_activity", False, limitations=["no Form 4 data"])
+    ev = [f"{ins['distinct_buyers']} officer/director buyer(s), ${ins['purchase_value_usd']:,.0f} bought in open market (90 days)",
+          f"Form 4 filings read {ins.get('form4_filings_read')}, skipped {ins.get('form4_filings_skipped')}"]
+    lim = ["only open-market purchases are scored; sales are never scored", "limited to the most recent Form 4 filings"]
+    if ins["distinct_buyers"] >= 2:
+        return EngineEvidence("insider_activity", True, "bullish", 0.4, evidence=ev, limitations=lim)
+    return EngineEvidence("insider_activity", True, "neutral", 0.2, evidence=ev, limitations=lim)
+
+
+def engine_style_screens(ctx: dict[str, Any]) -> EngineEvidence:
+    """Live style screens (contrarian value, deep value, activist presence, reflexivity). Derived from the same data as other
+    engines, so soft evidence only and not counted as independent agreement."""
+    st = ctx.get("styles")
+    if not st:
+        return EngineEvidence("style_screens", False, limitations=["no style evaluation"])
+    flags = [f"{k}={v['state']}" for k, v in st.items() if v.get("state") not in ("NO_FLAG", "NOT_EVALUABLE")]
+    lim = ["ETI parameterizations of public ideas, not the investors' own rules; not backtested", "never approves or vetoes"]
+    if st.get("reflexivity", {}).get("state") == "BOOM_LATE_STAGE":
+        return EngineEvidence("style_screens", True, "bearish", 0.3, evidence=flags, limitations=lim)
+    if any(st.get(k, {}).get("state") in ("CANDIDATE", "ACTIVIST_INTEREST_PRESENT") for k in ("contrarian_value", "deep_value", "activist_presence")):
+        return EngineEvidence("style_screens", True, "bullish", 0.3, evidence=flags, limitations=lim)
+    return EngineEvidence("style_screens", True, "neutral", 0.2, evidence=flags or ["no style flags"], limitations=lim)
+
+
 def engine_risk(ctx: dict[str, Any]) -> EngineEvidence:
     """Hard-veto engine: liquidity, safety, data, volatility. Cannot be outvoted."""
     f, ac = ctx["features"], ctx["asset_class"]
@@ -191,7 +236,8 @@ def engine_risk(ctx: dict[str, Any]) -> EngineEvidence:
 
 
 for _n, _f in (("technical", engine_technical), ("strategy_lab", engine_strategy_lab), ("investor_intel", engine_investor),
-               ("onchain", engine_onchain), ("trading_council", engine_council), ("omnisignal_x", engine_omnisignal), ("macro_regime", engine_macro), ("fundamentals", engine_fundamentals), ("derivatives", engine_derivatives), ("risk", engine_risk)):
+               ("onchain", engine_onchain), ("trading_council", engine_council), ("omnisignal_x", engine_omnisignal), ("macro_regime", engine_macro), ("fundamentals", engine_fundamentals), ("derivatives", engine_derivatives), ("catalysts", engine_catalysts),
+               ("insider_activity", engine_insider), ("style_screens", engine_style_screens), ("risk", engine_risk)):
     register_engine(_n, _f)
 
 
@@ -243,7 +289,8 @@ def validate(db: Session, cand: AlphaCandidate, bars: Sequence[dict[str, Any]], 
              investor_assessments: Optional[list[dict[str, Any]]] = None, onchain: Optional[dict[str, Any]] = None,
              dex_pair: Optional[dict[str, Any]] = None, bench_closes: Optional[list[float]] = None,
              omnisignal: Optional[dict[str, Any]] = None, macro: Optional[dict[str, Any]] = None,
-             fundamentals: Optional[dict[str, Any]] = None, derivatives: Optional[dict[str, Any]] = None, record: bool = True) -> dict[str, Any]:
+             fundamentals: Optional[dict[str, Any]] = None, derivatives: Optional[dict[str, Any]] = None, catalysts: Optional[dict[str, Any]] = None,
+             styles: Optional[dict[str, Any]] = None, record: bool = True) -> dict[str, Any]:
     """Re-derive everything from `bars`. Returns the decision and updates the candidate."""
     settings = settings or get_settings()
     ac = cand.asset_class
@@ -255,12 +302,14 @@ def validate(db: Session, cand: AlphaCandidate, bars: Sequence[dict[str, Any]], 
     if fundamentals:
         from app.alpha.fundamentals import valuation_component
         comps["valuation"] = valuation_component(fundamentals.get("garp"))
+    if catalysts and catalysts.get("insider_component") is not None:
+        comps["institutional"] = catalysts["insider_component"]  # positive-only: insider open-market purchases
     early = score_early_alpha(ac, comps)
     safety = screen_dex_pair(dex_pair) if dex_pair else None
     regime = detect_regime(bars) if f.get("sufficient") else {"trend": "unknown", "regimes": ["any"]}
     lab = live_signals(bars, ac if ac != "token" else "crypto") if f.get("sufficient") else []
     ctx = {"asset_class": ac, "features": f, "stage": stg["stage"], "lab": lab, "council": council, "safety": safety,
-           "investor_assessments": investor_assessments or [], "onchain": onchain, "omnisignal": omnisignal, "macro": macro, "fundamentals": fundamentals, "derivatives": derivatives}
+           "investor_assessments": investor_assessments or [], "onchain": onchain, "omnisignal": omnisignal, "macro": macro, "fundamentals": fundamentals, "derivatives": derivatives, "catalysts": catalysts, "styles": styles}
     evidences: list[EngineEvidence] = []
     for name, fn in _ENGINES.items():
         try:
@@ -268,7 +317,7 @@ def validate(db: Session, cand: AlphaCandidate, bars: Sequence[dict[str, Any]], 
         except Exception as exc:  # noqa: BLE001 - a broken plug-in must not approve anything
             evidences.append(EngineEvidence(name, True, hard_veto=True, evidence=[f"engine error: {type(exc).__name__}"]))
     avail = [e for e in evidences if e.available]
-    bulls = [e for e in avail if e.bias == "bullish" and e.engine not in ("risk", "macro_regime")]  # macro is context, not independent agreement
+    bulls = [e for e in avail if e.bias == "bullish" and e.engine not in ("risk", "macro_regime", "style_screens")]  # context and derived screens are not independent agreement
     vetoes = [e for e in avail if e.hard_veto]
 
     checks: list[dict[str, Any]] = []

@@ -201,4 +201,4 @@ def test_library_marks_live_evaluators_without_pretending_to_backtest():
     for sid in ("buffett_quality_value", "lynch_garp", "druck_liquidity_regime", "dalio_cycle_balance", "special_situations"):
         m = LIBRARY[sid]
         assert m.evaluator and not m.executable and any("NOT a backtest" in c or "unimplemented" in c for c in m.caveats)
-    assert LIBRARY["soros_reflexivity_macro"].evaluator is None
+    assert LIBRARY["kovner_macro_catalyst"].evaluator is None and LIBRARY["lien_fx_rates"].evaluator is None  # still unimplemented, not faked

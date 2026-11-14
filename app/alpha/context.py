@@ -11,11 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.alpha.db_models import AlphaCandidate
 from app.alpha.discovery import candidate_dict
-from app.alpha.fundamentals import SecFundamentals, garp_screen, quality_screen
+from app.alpha.fundamentals import SecFundamentals, garp_screen, latest_metrics, quality_screen
 from app.alpha.investor_intel import assess_following
+from app.alpha.catalysts import SecSubmissions, load_catalysts
 from app.alpha.derivatives import load_derivatives
 from app.alpha.macro import load_macro
 from app.alpha.omnisignal_bridge import fetch_omnisignal
+from app.alpha.styles import evaluate_styles
 from app.alpha.providers import BinanceFutures, SecTickerUniverse
 from app.config import Settings
 from app.services.activity_store import ActivityStore
@@ -26,14 +28,18 @@ _FACTS: dict[int, tuple[float, dict[str, Any]]] = {}
 DAY = 86400
 
 
+async def cik_for(db: Session, settings: Settings, ticker: str, tickers: Optional[SecTickerUniverse] = None) -> Optional[int]:
+    if not _CIK["map"] or time.time() - _CIK["ts"] > DAY:
+        rows = await (tickers or SecTickerUniverse(user_agent=settings.sec_user_agent, db=db)).listed()
+        _CIK.update(ts=time.time(), map={r["ticker"].upper(): int(r["cik"]) for r in rows if r.get("cik") is not None})
+    return _CIK["map"].get(ticker.upper())
+
+
 async def load_fundamentals(db: Session, settings: Settings, ticker: str, price: Optional[float],
                             tickers: Optional[SecTickerUniverse] = None, facts_src: Optional[SecFundamentals] = None) -> Optional[dict[str, Any]]:
     """Quality + growth-at-reasonable-price screens from SEC XBRL for one US ticker; None when it cannot be evaluated."""
     try:
-        if not _CIK["map"] or time.time() - _CIK["ts"] > DAY:
-            rows = await (tickers or SecTickerUniverse(user_agent=settings.sec_user_agent, db=db)).listed()
-            _CIK.update(ts=time.time(), map={r["ticker"].upper(): int(r["cik"]) for r in rows if r.get("cik") is not None})
-        cik = _CIK["map"].get(ticker.upper())
+        cik = await cik_for(db, settings, ticker, tickers)
         if cik is None:
             return None
         hit = _FACTS.get(cik)
@@ -42,9 +48,22 @@ async def load_fundamentals(db: Session, settings: Settings, ticker: str, price:
             _FACTS[cik] = (time.time(), facts)
         else:
             facts = hit[1]
-        return {"cik": cik, "entity": facts.get("entityName"), "quality": quality_screen(facts), "garp": garp_screen(facts, price)}
+        return {"cik": cik, "entity": facts.get("entityName"), "quality": quality_screen(facts), "garp": garp_screen(facts, price),
+                "metrics": latest_metrics(facts)}
     except Exception:  # noqa: BLE001 - provider status already recorded
         logger.warning("fundamentals unavailable for %s", ticker, exc_info=True)
+        return None
+
+
+async def load_catalysts_for(db: Session, settings: Settings, ticker: str, tickers: Optional[SecTickerUniverse] = None,
+                             src: Optional[SecSubmissions] = None) -> Optional[dict[str, Any]]:
+    try:
+        cik = await cik_for(db, settings, ticker, tickers)
+        if cik is None:
+            return None
+        return await load_catalysts(src or SecSubmissions(settings.sec_user_agent, db=db), cik)
+    except Exception:  # noqa: BLE001
+        logger.warning("catalysts unavailable for %s", ticker, exc_info=True)
         return None
 
 
@@ -52,8 +71,10 @@ async def gather_context(db: Session, settings: Settings, cand: AlphaCandidate, 
                          omni_client: Optional[httpx.AsyncClient] = None,
                          macro_fn: Optional[Callable[[Settings], Awaitable[dict[str, Any]]]] = None,
                          fundamentals_fn: Optional[Callable[..., Awaitable[Optional[dict[str, Any]]]]] = None,
-                         derivatives_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None) -> dict[str, Any]:
-    ctx: dict[str, Any] = {"investor_assessments": [], "council": None, "omnisignal": None, "macro": None, "fundamentals": None, "derivatives": None}
+                         derivatives_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
+                         catalysts_fn: Optional[Callable[..., Awaitable[Optional[dict[str, Any]]]]] = None) -> dict[str, Any]:
+    ctx: dict[str, Any] = {"investor_assessments": [], "council": None, "omnisignal": None, "macro": None, "fundamentals": None,
+                           "derivatives": None, "catalysts": None, "styles": None}
     try:
         m = await (macro_fn or load_macro)(settings)
         ctx["macro"] = m if m.get("status") == "ok" else None
@@ -61,6 +82,7 @@ async def gather_context(db: Session, settings: Settings, cand: AlphaCandidate, 
         logger.warning("macro context failed", exc_info=True)
     if cand.asset_class == "equity":
         ctx["fundamentals"] = await (fundamentals_fn or load_fundamentals)(db, settings, cand.symbol, cand.last_price)
+        ctx["catalysts"] = await (catalysts_fn or load_catalysts_for)(db, settings, cand.symbol)
     if cand.asset_class in ("equity", "etf"):
         try:
             for act in ActivityStore(db).list_activities(ticker=cand.symbol, limit=20):
@@ -83,4 +105,10 @@ async def gather_context(db: Session, settings: Settings, cand: AlphaCandidate, 
             ctx["derivatives"] = await (derivatives_fn or (lambda sym: load_derivatives(BinanceFutures(db=db), sym)))(cand.symbol)
         except Exception:  # noqa: BLE001
             logger.warning("derivatives context failed for %s", cand.symbol, exc_info=True)
+    try:
+        from app.alpha.features import compute_features
+        f = compute_features(list(bars))
+        ctx["styles"] = evaluate_styles(f, ctx["fundamentals"], ctx["derivatives"], ctx["catalysts"], cand.last_price, cand.asset_class)
+    except Exception:  # noqa: BLE001
+        logger.warning("style screens failed for %s", cand.symbol, exc_info=True)
     return ctx
