@@ -1,0 +1,141 @@
+{% extends "eti_base.html" %}
+{% block title %}ETI Wallet{% endblock %}
+{% block content %}
+<h1>ETI wallet (on-chain)</h1>
+<div class="sub">ETI owns one EVM address. The private key is generated on the server, stored encrypted and never shown or exported. Testnets by default; every spend needs a previewed quote, passes the spending policy, and is confirmed by typing SEND.</div>
+
+<div class="grid" style="margin-top:12px">
+  <section id="wallet" class="panel gold s5"><h2>Wallet</h2><div id="wallet-body"></div></section>
+  <section id="limits" class="panel s7"><h2>Spending policy in force (operator-controlled)</h2><div id="limits-body"></div></section>
+</div>
+
+<section class="panel" style="margin-bottom:14px"><h2>Networks <button class="btn sm" id="net-refresh" type="button">Refresh</button></h2><div id="net-body"></div></section>
+
+<div class="grid">
+  <section id="send" class="panel s6"><h2>Send native coin</h2>
+    <form class="form" id="f-send"><label>Network<select name="network" class="netsel"></select></label>
+      <label>Destination<input name="to" required placeholder="0x… (must be allowlisted)" autocomplete="off"></label>
+      <label>Amount<input name="amount" required inputmode="decimal" placeholder="0.01"></label>
+      <button class="btn primary" type="submit">Preview</button></form></section>
+  <section id="swap" class="panel s6"><h2>Trade on a DEX (Uniswap-V2-style router)</h2>
+    <form class="form" id="f-swap"><label>Network<select name="network" class="netsel"></select></label>
+      <label>Side<select name="side"><option value="buy">Buy token with native</option><option value="sell">Sell token for native</option></select></label>
+      <label>Token<select name="token" id="tok-sel"></select></label>
+      <label>Amount<input name="amount" required inputmode="decimal" placeholder="native (buy) or token units (sell)"></label>
+      <label>Slippage (bps)<input name="slippage_bps" type="number" min="1" max="1000" value="50"></label>
+      <button class="btn primary" type="submit">Quote</button></form>
+    <p class="sub">Needs a router + wrapped-native address configured by the operator and the token on the allowlist. Approvals are exact-amount only.</p></section>
+</div>
+
+<div class="grid">
+  <section id="allow" class="panel s7"><h2>Allowlist (destinations, tokens, watch addresses)</h2><div id="allow-body"></div>
+    <form class="form" id="f-allow" style="margin-top:10px"><label>Network<select name="network" id="allow-net"></select></label>
+      <label>Kind<select name="kind"><option>destination</option><option>token</option><option>watch</option></select></label>
+      <label>Address<input name="address" required placeholder="0x…" autocomplete="off"></label>
+      <label>Label<input name="label"></label><label>Token symbol<input name="symbol" maxlength="16"></label>
+      <label>Token decimals<input name="decimals" type="number" min="0" max="36"></label>
+      <button class="btn" type="submit">Add</button></form></section>
+  <section class="panel s5"><h2>Blockchain intelligence</h2>
+    <form class="form" id="f-contract"><label>Network<select name="network" class="netsel"></select></label><label>Contract<input name="address" required placeholder="0x…"></label><button class="btn" type="submit">Inspect</button></form>
+    <form class="form" id="f-scan" style="margin-top:8px"><label>Network<select name="network" class="netsel"></select></label><label>Blocks<input name="count" type="number" min="1" max="20" value="5"></label><label>Large transfer ≥<input name="threshold" value="10"></label><button class="btn" type="submit">Scan blocks</button></form>
+    <div id="intel-out" style="margin-top:10px"></div></section>
+</div>
+
+<section id="txs" class="panel" style="margin-bottom:14px"><h2>Transactions <button class="btn sm" id="tx-refresh" type="button">Check pending</button></h2><div id="tx-body"></div></section>
+<section class="panel"><h2>Audit trail</h2><div id="ev-body"></div></section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const { $, $$, el, fmt, api, toast, busy, modal, confirmTyped, kv, table, unavailable } = ETI;
+  let NETS = [], WALLET = null, ALLOW = [];
+  const safe = (u) => (typeof u === 'string' && u.startsWith('https://') ? u : null);
+  const link = (t, u) => (safe(u) ? el('a', { href: u, target: '_blank', rel: 'noopener noreferrer', text: t }) : document.createTextNode(t));
+  const short = (a) => (a ? a.slice(0, 8) + '\u2026' + a.slice(-6) : '\u2014');
+
+  async function loadNets() {
+    const d = await api('/api/chain/networks'); NETS = d.networks;
+    $$('.netsel').forEach((s) => s.replaceChildren(...NETS.map((n) => el('option', { value: n.key, text: n.label + (n.configured ? '' : ' (no RPC)') }))));
+    $('#allow-net').replaceChildren(el('option', { value: '*', text: 'any network' }), ...NETS.map((n) => el('option', { value: n.key, text: n.label })));
+    const l = d.limits;
+    $('#limits-body').replaceChildren(kv({ 'Max per transaction (native)': l.max_tx, 'Max per 24h (native)': l.max_daily, 'Max slippage (bps)': l.max_slippage_bps, 'Destination allowlist required': l.require_allowlist, 'Mainnet sending enabled': l.mainnet_send_enabled }),
+      el('p', { class: l.mainnet_send_enabled ? 'warn' : 'sub', text: l.mainnet_send_enabled ? 'MAINNET SENDING IS ENABLED by the operator: transactions move real value.' : 'Mainnet sending is OFF: only testnet transactions can be sent. These limits are server environment settings; this page cannot change them.' }));
+  }
+  async function loadWallet() {
+    const w = (await api('/api/chain/wallet')).wallet; WALLET = w; const b = $('#wallet-body');
+    if (!w) {
+      b.replaceChildren(unavailable('ETI has no wallet yet. Creating one generates a new key on the server, encrypted with EXECUTION_VAULT_KEY.', 'No wallet'),
+        el('button', { class: 'btn primary', type: 'button', style: 'margin-top:10px', onclick: (e) => busy(e.currentTarget, createWallet) }, 'Create ETI wallet'));
+      return;
+    }
+    b.replaceChildren(el('div', { class: 'signal', style: 'font-size:15px;overflow-wrap:anywhere', text: w.address }),
+      el('div', { class: 'row', style: 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap' }, el('button', { class: 'btn sm', type: 'button', onclick: () => navigator.clipboard.writeText(w.address).then(() => toast('Address copied', 'good')) }, 'Copy address'), el('span', { class: 'chip', text: 'created ' + fmt.time(w.created_at) })),
+      el('p', { class: 'sub', text: 'The same address works on every EVM network. Send only the network\u2019s native coin or tokens ETI supports; funds sent elsewhere may be unrecoverable. The key cannot be exported: protect the database AND the vault key, and keep an operator backup.' }));
+  }
+  async function createWallet() {
+    const v = await modal('Create the ETI wallet?', el('div', {}, el('p', { text: 'ETI will generate a new private key on the server and store it encrypted. It is never displayed and cannot be exported. If the database or the vault key is lost, funds in this wallet are lost.' }), el('p', { class: 'warn', text: 'Start on a testnet. Do not fund it with more than you can afford to lose.' })), [{ label: 'Cancel', value: 'no' }, { label: 'Create wallet', value: 'go', kind: 'primary' }]);
+    if (v !== 'go') return;
+    const w = await api('/api/chain/wallet', { method: 'POST', body: { label: 'ETI wallet' } });
+    toast('Wallet created: ' + short(w.address), 'good'); await refreshAll();
+  }
+  async function loadStatus() {
+    $('#net-body').replaceChildren(el('div', { class: 'empty', text: 'Checking networks\u2026' }));
+    try {
+      const s = await api('/api/chain/status', { timeout: 90000 });
+      $('#net-body').replaceChildren(table([{ k: 'label', label: 'Network' }, { k: 'mainnet', label: 'Type', fmt: (v) => el('span', { class: 'badge ' + (v ? 'bad' : 'good'), text: v ? 'MAINNET' : 'testnet' }) },
+        { k: (r) => (r.connected ? 'connected' : r.configured ? 'unreachable' : 'no RPC'), label: 'RPC', fmt: (v) => el('span', { class: 'badge ' + (v === 'connected' ? 'good' : 'bad'), text: v }) },
+        { k: 'block', label: 'Block' }, { k: 'gas_price_gwei', label: 'Gas (gwei)', fmt: (v) => (v == null ? '\u2014' : v.toFixed(2)) },
+        { k: (r) => (r.balance != null ? r.balance + ' ' + r.native : '\u2014'), label: 'Balance' }, { k: (r) => r.error || r.note || '', label: 'Note', wrap: true }], s.networks, 'No network has an RPC endpoint configured.'));
+    } catch (e) { $('#net-body').replaceChildren(unavailable(e.message, 'Networks')); }
+  }
+  async function loadAllow() {
+    ALLOW = (await api('/api/chain/allowlist')).entries;
+    $('#tok-sel').replaceChildren(...ALLOW.filter((a) => a.kind === 'token').map((a) => el('option', { value: a.address, text: (a.symbol || 'token') + ' ' + short(a.address) + ' [' + a.network + ']' })));
+    $('#allow-body').replaceChildren(table([{ k: 'kind', label: 'Kind' }, { k: 'network', label: 'Network' }, { k: 'address', label: 'Address', fmt: short }, { k: 'label', label: 'Label' }, { k: 'symbol', label: 'Symbol' }, { k: 'decimals', label: 'Dec' },
+      { k: 'id', label: '', fmt: (id) => el('button', { class: 'btn sm danger', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { await api('/api/chain/allowlist/' + id, { method: 'DELETE' }); toast('Removed', 'good'); await loadAllow(); }) }, 'Remove') }], ALLOW, 'Empty. Transfers are refused until a destination is allowlisted.'));
+  }
+  async function loadTxs() {
+    const [t, e] = await Promise.all([api('/api/chain/txs?limit=30'), api('/api/chain/events?limit=20')]);
+    $('#tx-body').replaceChildren(table([{ k: 'created_at', label: 'Time', fmt: fmt.time }, { k: 'network', label: 'Network' }, { k: 'kind', label: 'Kind' }, { k: 'summary', label: 'Summary', wrap: true },
+      { k: 'status', label: 'Status', fmt: (v) => el('span', { class: 'badge ' + (v === 'confirmed' ? 'good' : v === 'failed' || v === 'broadcast_failed' ? 'bad' : 'warn'), text: v }) },
+      { k: (r) => r, label: 'Tx', fmt: (r) => link(short(r.tx_hash), r.explorer_url) }, { k: 'error', label: 'Error', wrap: true },
+      { k: (r) => r, label: '', fmt: (r) => (r.status === 'pending' ? el('button', { class: 'btn sm', type: 'button', onclick: (ev) => busy(ev.currentTarget, async () => { await api('/api/chain/txs/' + r.id + '/refresh', { method: 'POST' }); await loadTxs(); }) }, 'Check') : '') }], t.transactions, 'No transactions yet.'));
+    $('#ev-body').replaceChildren(table([{ k: 'ts', label: 'Time', fmt: fmt.time }, { k: 'event', label: 'Event' }, { k: 'network', label: 'Network' }, { k: (r) => JSON.stringify(r.detail || {}), label: 'Detail', wrap: true }], e.events, 'No events yet.'));
+  }
+  async function refreshAll() { await Promise.allSettled([loadWallet(), loadAllow(), loadTxs()]); loadStatus(); }
+
+  async function showPreview(p) {
+    const rows = { Summary: p.summary, Network: p.label + (p.mainnet ? ' (MAINNET)' : ' (testnet)'), From: p.from, To: p.to, 'Value (wei)': p.value_wei, 'Gas limit': p.gas, 'Max fee cost': p.max_fee_cost + ' ' + p.native, 'Quote expires': p.expires_at ? fmt.time(p.expires_at) : '\u2014' };
+    if (p.expected_out_wei) Object.assign(rows, { 'Expected out (raw)': p.expected_out_wei, 'Minimum out (raw)': p.min_out_wei, 'Slippage (bps)': p.slippage_bps });
+    const body = el('div', {}, kv(rows), p.warning ? el('p', { class: 'warn', text: p.warning }) : null,
+      p.violations.length ? el('div', {}, el('h3', { class: 'neg', text: 'Blocked by policy' }), el('ul', {}, p.violations.map((v) => el('li', { class: 'neg', text: v })))) : el('p', { class: 'pos', text: 'Allowed by the spending policy. Nothing has been sent yet.' }));
+    const acts = [{ label: 'Close', value: 'x' }];
+    if (p.needs_approval) acts.push({ label: 'Prepare approval', value: 'approve', kind: 'ok' });
+    if (p.allowed) acts.push({ label: 'Send transaction', value: 'send', kind: 'danger' });
+    const v = await modal('Review before sending', body, acts);
+    if (v === 'approve') return approve(p);
+    if (v !== 'send') return;
+    if (!(await confirmTyped('Confirm on-chain transaction', el('div', {}, el('p', { text: p.summary }), p.mainnet ? el('p', { class: 'neg', text: 'MAINNET: this moves real value and cannot be undone.' }) : el('p', { class: 'sub', text: 'Testnet transaction.' })), 'SEND'))) return;
+    const r = await api('/api/chain/send', { method: 'POST', body: { quote_id: p.quote_id, confirm: 'SEND' } });
+    await modal('Broadcast accepted', el('div', {}, kv(r.transaction), el('p', { class: 'sub', text: r.note })));
+    await loadTxs();
+  }
+  async function approve(p) {
+    const amt = $('#f-swap').elements.amount.value;
+    const ap = await api('/api/chain/approve/preview', { method: 'POST', body: { network: p.network, token: p.token, amount: amt } });
+    await showPreview(ap);
+    toast('After the approval confirms, quote the swap again.', 'warn');
+  }
+  function form(id, fn) { $(id).addEventListener('submit', (e) => { e.preventDefault(); busy(e.submitter || e.target.querySelector('button'), () => fn(Object.fromEntries(new FormData(e.target)))); }); }
+  form('#f-send', async (d) => showPreview(await api('/api/chain/transfer/preview', { method: 'POST', body: { network: d.network, to: d.to.trim(), amount: d.amount.trim() } })));
+  form('#f-swap', async (d) => showPreview(await api('/api/chain/swap/preview', { method: 'POST', body: { network: d.network, side: d.side, token: d.token, amount: d.amount.trim(), slippage_bps: Number(d.slippage_bps) } })));
+  form('#f-allow', async (d) => { await api('/api/chain/allowlist', { method: 'POST', body: { network: d.network, kind: d.kind, address: d.address.trim(), label: d.label || null, symbol: d.symbol || null, decimals: d.decimals === '' ? null : Number(d.decimals) } }); toast('Added to allowlist', 'good'); $('#f-allow').reset(); await loadAllow(); });
+  form('#f-contract', async (d) => { const r = await api('/api/chain/intel/contract?network=' + ETI.enc(d.network) + '&address=' + ETI.enc(d.address.trim())); $('#intel-out').replaceChildren(kv({ address: r.address, contract: r.is_contract, name: r.name, symbol: r.symbol, decimals: r.decimals, owner: r.owner }), el('ul', { class: 'list' }, r.indicators.map((i) => el('li', {}, el('span', { text: i.text }), el('span', { class: 'badge ' + i.severity, text: i.severity })))), r.disclaimer ? el('p', { class: 'sub', text: r.disclaimer }) : null); });
+  form('#f-scan', async (d) => { const r = await api('/api/chain/intel/blocks?network=' + ETI.enc(d.network) + '&count=' + Number(d.count) + '&threshold=' + ETI.enc(d.threshold.trim()), { timeout: 90000 }); $('#intel-out').replaceChildren(el('p', { class: 'sub', text: 'Scanned ' + r.blocks_scanned + ' block(s) up to ' + r.head + '. ' + r.note }), table([{ k: 'block', label: 'Block' }, { k: 'tags', label: 'Flag', fmt: (v) => v.join(', ') }, { k: (x) => x.value + ' ' + r.native, label: 'Value' }, { k: 'from', label: 'From', fmt: short }, { k: 'to', label: 'To', fmt: short }, { k: (x) => x, label: 'Tx', fmt: (x) => link(short(x.tx_hash), x.explorer_url) }], r.findings, 'No transfers at or above the threshold and none involving watch addresses.')); });
+  $('#net-refresh').addEventListener('click', (e) => busy(e.currentTarget, loadStatus));
+  $('#tx-refresh').addEventListener('click', (e) => busy(e.currentTarget, async () => { const r = await api('/api/chain/txs/refresh', { method: 'POST' }); toast('Checked ' + r.transactions.length + ' pending transaction(s)', 'good'); await loadTxs(); }));
+  document.addEventListener('DOMContentLoaded', async () => { await loadNets().catch((e) => toast(e.message, 'bad')); await refreshAll(); ETI.poll(() => loadTxs(), 30000); });
+})();
+</script>
+{% endblock %}
