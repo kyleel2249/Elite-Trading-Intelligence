@@ -57,6 +57,10 @@ class OrderProposal:
     reference_price: Optional[float] = None
     data_age_seconds: Optional[float] = None
     data_status: str = "unknown"
+    # Set ONLY by TradingService / the pre-trade check after the Capital Protection System has verified,
+    # from server-side positions, that this order strictly reduces an existing position. It lets exits
+    # through the loss/drawdown/position limits that block new risk. Never read from a request.
+    reduces_exposure: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -136,11 +140,12 @@ class RiskEngine:
                 reasons.append("BINANCE_LIVE_TRADING_ENABLED is false")
             if proposal.provider == "oanda" and not getattr(s, "oanda_live_trading_enabled", False):
                 reasons.append("OANDA_LIVE_TRADING_ENABLED is false")
-            # Live requires limit orders by default for controllable entry
-            if proposal.order_type == "market":
-                reasons.append("Live orders require limit order_type (market blocked on live path)")
-            if proposal.limit_price is None or proposal.limit_price <= 0:
-                reasons.append("Live orders require a positive limit_price")
+            # Live requires limit orders by default for controllable entry (verified exits may use market)
+            if not proposal.reduces_exposure:
+                if proposal.order_type == "market":
+                    reasons.append("Live orders require limit order_type (market blocked on live path)")
+                if proposal.limit_price is None or proposal.limit_price <= 0:
+                    reasons.append("Live orders require a positive limit_price")
             # Explicit confirmation via meta
             if getattr(s, "require_live_confirmation", True):
                 if not (proposal.meta or {}).get("live_confirmed"):
@@ -151,8 +156,17 @@ class RiskEngine:
             reasons.append("Quantity must be positive")
         if proposal.side not in ("buy", "sell"):
             reasons.append("Side must be buy or sell")
-        if proposal.equity <= 0:
+        if proposal.equity <= 0 and not proposal.reduces_exposure:
             reasons.append("Account equity must be positive for risk sizing")
+
+        if proposal.reduces_exposure:
+            # A verified exit only reduces risk: loss/drawdown/position/notional/freshness limits do not apply.
+            if reasons:
+                return RiskDecision(decision=Decision.REJECTED, reasons=reasons,
+                                    risk_per_trade_pct=0.0, notes="; ".join(reasons))
+            return RiskDecision(decision=Decision.APPROVED, reasons=["Exit reduces existing exposure"],
+                                risk_per_trade_pct=0.0, approved_qty=proposal.qty,
+                                notes="Approved by RiskEngine (exposure-reducing exit)")
 
         # --- Max position notional (6% default) ---
         # Market profiles may only tighten the approved limits (rule 7): clamp any multiplier above 1 to 1.
