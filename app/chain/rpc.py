@@ -76,6 +76,9 @@ class Rpc:
     async def receipt(self, tx_hash: str) -> Optional[dict]:
         return await self.request("eth_getTransactionReceipt", [tx_hash])
 
+    async def get_tx(self, tx_hash: str) -> Optional[dict]:
+        return await self.request("eth_getTransactionByHash", [tx_hash])
+
     async def call(self, to: str, data_hex: str) -> str:
         return await self.request("eth_call", [{"to": to, "data": data_hex}, "latest"])
 
