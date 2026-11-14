@@ -23,11 +23,11 @@ export interface TechnicalAnalysis {
   volumeProfile: VolumeProfile | null; fibonacci: FibAnalysis | null; momentum: MomentumAnalysis | null; volatility: VolatilityAnalysis | null; relativeStrength: RelativeStrength | null;
   report: EngineReport;
 }
-export interface TechnicalOptions { /** 'lite' skips zones, sweeps, order blocks, FVG, volume profile and Fibonacci to cut CPU (Workers Free plan). */ detail?: "full" | "lite"; benchmark?: { symbol: string; candles: Kline[] }; now?: number; maxStaleBars?: number; timeframeSeconds?: number }
+export interface TechnicalOptions { /** Most recent candles to analyse (plan-dependent). */ maxCandles?: number; /** 'lite' skips zones, sweeps, order blocks, FVG, volume profile and Fibonacci to cut CPU (Workers Free plan). */ detail?: "full" | "lite"; benchmark?: { symbol: string; candles: Kline[] }; now?: number; maxStaleBars?: number; timeframeSeconds?: number }
 
 export function technicalAnalysis(symbol: string, timeframe: string, allRows: Kline[], o: TechnicalOptions = {}): TechnicalAnalysis | { report: EngineReport } {
   const now = o.now ?? Date.now();
-  const rows = allRows.length > MAX_ANALYSED_CANDLES ? allRows.slice(-MAX_ANALYSED_CANDLES) : allRows;
+  const cap = Math.max(MIN_CANDLES, o.maxCandles ?? MAX_ANALYSED_CANDLES), rows = allRows.length > cap ? allRows.slice(-cap) : allRows;
   if (rows.length < MIN_CANDLES) return { report: unavailableReport(`technical:${timeframe}`, "technical", symbol, `Only ${rows.length} candles for ${timeframe}; at least ${MIN_CANDLES} are required for structure analysis`, [`${timeframe} candles (${MIN_CANDLES - rows.length} more)`], now) };
   const price = rows.at(-1)![4], a = lastAtr(rows);
   const pivots = findPivots(rows), structure = analyzeStructure(rows, pivots), levels = supportResistance(rows, pivots), zones = o.detail === "lite" ? [] : supplyDemandZones(rows), trendlines = detectTrendlines(rows, pivots);

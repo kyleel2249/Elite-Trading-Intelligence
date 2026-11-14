@@ -70,7 +70,7 @@ export interface MtfAnalysis {
   symbol: string; strategy: MtfStrategy; timeframes: TimeframeResult[]; layers: Record<Layer, LayerView>;
   alignment: "aligned_bullish" | "aligned_bearish" | "conflicted" | "mixed" | "insufficient"; conflicts: string[]; guidance: string[]; report: EngineReport;
 }
-export interface MtfInput { symbol: string; strategy: MtfStrategy; candles: Partial<Record<MtfTimeframe, Kline[]>>; now?: number; includeOneMinute?: boolean; detail?: "full" | "lite"; benchmark?: { symbol: string; candles: Partial<Record<MtfTimeframe, Kline[]>> } }
+export interface MtfInput { symbol: string; strategy: MtfStrategy; candles: Partial<Record<MtfTimeframe, Kline[]>>; now?: number; includeOneMinute?: boolean; detail?: "full" | "lite"; maxCandles?: number; benchmark?: { symbol: string; candles: Partial<Record<MtfTimeframe, Kline[]>> } }
 
 export function multiTimeframeAnalysis(inp: MtfInput): MtfAnalysis {
   const now = inp.now ?? Date.now(), strategy = inp.strategy, results: TimeframeResult[] = [];
@@ -89,7 +89,7 @@ export function multiTimeframeAnalysis(inp: MtfInput): MtfAnalysis {
     const bench = inp.benchmark?.candles[tf];
     const secs = tf === "1Y" ? 31536000 : tf === "1M" ? 2629800 : TF_SECS[tf];
     if (closed.length >= MIN_CANDLES) {
-      const a = technicalAnalysis(inp.symbol, tf, closed, { now, detail: inp.detail, timeframeSeconds: secs, benchmark: bench && inp.benchmark ? { symbol: inp.benchmark.symbol, candles: tf === "1Y" || tf === "1M" ? bench : closedCandles(tf, bench, now) } : undefined, maxStaleBars: tf === "1M" || tf === "1w" ? 2 : 3 });
+      const a = technicalAnalysis(inp.symbol, tf, closed, { now, detail: inp.detail, maxCandles: inp.maxCandles, timeframeSeconds: secs, benchmark: bench && inp.benchmark ? { symbol: inp.benchmark.symbol, candles: tf === "1Y" || tf === "1M" ? bench : closedCandles(tf, bench, now) } : undefined, maxStaleBars: tf === "1M" || tf === "1w" ? 2 : 3 });
       results.push({ timeframe: tf, layer, closedCandles: closed.length, mode: isFullAnalysis(a) ? "full" : "unavailable", report: a.report, analysis: isFullAnalysis(a) ? a : null, note });
     } else if (tf === "1Y" || tf === "1M" || tf === "1w") {
       results.push({ timeframe: tf, layer, closedCandles: closed.length, mode: "macro", report: macroContext(inp.symbol, tf, closed, tf === "1Y" ? 3 : 8, now), analysis: null, note });
@@ -140,3 +140,12 @@ export function multiTimeframeAnalysis(inp: MtfInput): MtfAnalysis {
   return { symbol: inp.symbol, strategy, timeframes: results, layers, alignment, conflicts: [...new Set(conflicts)], guidance, report };
 }
 function closedYears(rows: Kline[], now: number) { return rows.filter(r => periodEnd("1Y", r[0]) <= now); }
+
+/** Compact per-timeframe view for API responses: the report plus the handful of facts a reader needs. The full analysis object is opt-in. */
+export function slimTimeframe(t: TimeframeResult) {
+  const a = t.analysis;
+  return { timeframe: t.timeframe, layer: t.layer, mode: t.mode, closedCandles: t.closedCandles, note: t.note, report: t.report,
+    summary: a ? { price: a.price, trend: a.structure.trend, invalidationLevel: a.structure.invalidationLevel, lastStructureEvent: a.structure.events.at(-1) ?? null,
+      keyLevels: a.levels.slice(0, 3).map(l => ({ kind: l.kind, price: l.price, touches: l.touches, strength: l.strength })), momentum: a.momentum ? { state: a.momentum.state, rsi: a.momentum.rsi } : null, volatility: a.volatility?.regime ?? null,
+      recentBreaks: a.breaks.slice(-2).map(b => ({ type: b.type, direction: b.direction, level: b.level })), patterns: a.patterns.filter(p => p.bias !== "neutral").slice(-2).map(p => ({ name: p.name, bias: p.bias })) } : null };
+}

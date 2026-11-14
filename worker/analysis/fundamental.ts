@@ -127,15 +127,15 @@ export function stockFundamentals(s: StockInput): EngineReport {
 
 // =============================== CRYPTO ===============================
 export interface CryptoInput {
-  symbol: string; name?: string; asOf?: string; purpose?: string; genesisDate?: string;
+  symbol: string; name?: string; asOf?: string; purpose?: string; genesisDate?: string; marketCapRank?: number; ageYears?: number;
   team?: { publiclyIdentified?: boolean; founders?: string[]; notes?: string };
   supply?: { total?: number; circulating?: number; max?: number; priceUsd?: number; marketCapUsd?: number; fdvUsd?: number };
-  unlocks?: { date: string; tokens: number }[]; vesting?: string;
+  unlocks?: { date: string; tokens: number; insider?: boolean }[]; vesting?: string;
   holders?: { top10Pct?: number; top100Pct?: number; excludesExchangesAndBurn?: boolean; insiderPct?: number };
   liquidity?: { volume24hUsd?: number; dexLiquidityUsd?: number; spreadBps?: number };
   exchanges?: { tier1Count?: number; totalCount?: number; names?: string[] };
   network?: { activeAddresses30d?: number; activeAddressesChange30dPct?: number; txCount30d?: number; tvlUsd?: number; feesUsd30d?: number };
-  security?: { audits?: { firm: string; date?: string; url?: string }[]; sourceVerified?: boolean; upgradeable?: boolean; singleAdminKey?: boolean; mintable?: boolean; freezable?: boolean; knownExploitUnresolved?: boolean; bugBounty?: boolean };
+  security?: { audits?: { firm: string; date?: string; url?: string }[]; sourceVerified?: boolean; upgradeable?: boolean; singleAdminKey?: boolean; mintable?: boolean; freezable?: boolean; knownExploitUnresolved?: boolean; bugBounty?: boolean; honeypot?: boolean; hiddenOwner?: boolean; sellTaxPct?: number; buyTaxPct?: number; ownerRenounced?: boolean; liquidityLockedPct?: number };
   governance?: { model?: string; proposals90d?: number; turnoutPct?: number };
   adoption?: { users?: number; integrations?: number; revenueUsd30d?: number; notes?: string };
   development?: { commits90d?: number; contributors90d?: number; lastCommitDate?: string; repoUrl?: string };
@@ -162,6 +162,8 @@ export function cryptoFundamentals(c: CryptoInput): EngineReport {
   if (circ !== null && circ < 0.15 && (fdvMc ?? 0) > 5) flags.push({ severity: "high", flag: `Only ${round(circ * 100, 0)}% of supply circulates and FDV is ${round(fdvMc!, 1)}x market cap: heavy future dilution` });
   else if (fdvMc !== null && fdvMc > 5) flags.push({ severity: "high", flag: `FDV is ${round(fdvMc, 1)}x market cap: heavy future dilution` });
   if (unlockPct !== null && unlockPct >= 10) flags.push({ severity: "high", flag: `${round(unlockPct, 1)}% of circulating supply unlocks within 90 days: sell pressure risk` });
+  const soonList = (c.unlocks ?? []).filter(u => Number.isFinite(Date.parse(u.date)) && Date.parse(u.date) > now && Date.parse(u.date) - now <= 90 * DAY), insiderTokens = soonList.filter(u => u.insider).reduce((a, u) => a + u.tokens, 0);
+  if (unlockPct !== null && unlockPct >= 5 && soon > 0 && insiderTokens / soon >= 0.5) flags.push({ severity: "high", flag: `${round(insiderTokens / soon * 100, 0)}% of the upcoming 90-day unlock goes to team/investor allocations: insiders can sell into the market` });
   push("tokenomics", "tokenomics and supply", 18, avg([circ === null ? null : sc(circ, 0.1, 0.9), fdvMc === null ? null : sc(5 - fdvMc, 0, 4), unlockPct === null ? (c.unlocks ? 70 : null) : sc(15 - unlockPct, 0, 15)]),
     `Circulating ${circ === null ? "n/a" : round(circ * 100, 0) + "% of total"}, max supply ${sp?.max ?? "n/a"}, FDV/market-cap ${fdvMc === null ? "n/a" : round(fdvMc, 2)}x, 90d unlocks ${unlockPct === null ? (c.unlocks ? "none scheduled" : "unknown") : round(unlockPct, 1) + "% of circulating"}${c.vesting ? `; vesting: ${c.vesting}` : ""}`);
   // Holders
@@ -186,13 +188,18 @@ export function cryptoFundamentals(c: CryptoInput): EngineReport {
   const audits = sec?.audits ?? [];
   if (sec) {
     if (sec.knownExploitUnresolved) flags.push({ severity: "critical", flag: "A known exploit/vulnerability is reported as unresolved" });
+    if (sec.honeypot) flags.push({ severity: "critical", flag: "Token is flagged as a honeypot: holders may be unable to sell" });
+    if (sec.hiddenOwner) flags.push({ severity: "high", flag: "Contract has a hidden owner or can take back ownership" });
+    const tax = Math.max(sec.sellTaxPct ?? 0, sec.buyTaxPct ?? 0);
+    if (tax >= 50) flags.push({ severity: "critical", flag: `Trading tax of ${round(tax, 1)}%: effectively confiscatory` }); else if (tax >= 10) flags.push({ severity: "high", flag: `Trading tax of ${round(tax, 1)}%` });
+    if (num(sec.liquidityLockedPct) && sec.liquidityLockedPct < 20) flags.push({ severity: "medium", flag: `Only ${round(sec.liquidityLockedPct, 0)}% of liquidity-pool tokens are locked or burned: liquidity can be pulled` });
     if (sec.mintable) flags.push({ severity: "high", flag: "Token supply is mintable by a privileged key" });
     if (sec.freezable) flags.push({ severity: "high", flag: "Privileged key can freeze holder balances" });
     if (sec.singleAdminKey && sec.upgradeable) flags.push({ severity: "critical", flag: "Upgradeable contracts controlled by a single admin key: holders can be rugged without notice" });
     if (audits.length === 0 && sec.sourceVerified === false) flags.push({ severity: "critical", flag: "No security audit and contract source is not verified" });
     else if (audits.length === 0) flags.push({ severity: "medium", flag: "No published security audit" });
   }
-  push("security", "smart-contract security", 15, sec ? avg([audits.length ? sc(audits.length, 0, 2) : 15, sec.sourceVerified === undefined ? null : sec.sourceVerified ? 85 : 10, sec.upgradeable === undefined ? null : sec.upgradeable ? (sec.singleAdminKey ? 5 : 55) : 85, sec.mintable === undefined ? null : sec.mintable ? 15 : 85, sec.bugBounty === undefined ? null : sec.bugBounty ? 80 : 40]) : null,
+  push("security", "smart-contract security", 15, sec ? avg([audits.length ? sc(audits.length, 0, 2) : 15, sec.sourceVerified === undefined ? null : sec.sourceVerified ? 85 : 10, sec.upgradeable === undefined ? null : sec.upgradeable ? (sec.singleAdminKey ? 5 : 55) : 85, sec.mintable === undefined ? null : sec.mintable ? 15 : 85, sec.bugBounty === undefined ? null : sec.bugBounty ? 80 : 40, sec.honeypot === undefined ? null : sec.honeypot ? 0 : 85, sec.hiddenOwner === undefined ? null : sec.hiddenOwner ? 10 : 85]) : null,
     `${audits.length} audit(s)${audits.length ? ` (${audits.map(a => a.firm).join(", ")})` : ""}, source verified ${sec?.sourceVerified ?? "unknown"}, upgradeable ${sec?.upgradeable ?? "unknown"}, mintable ${sec?.mintable ?? "unknown"}. An audit reduces but never eliminates smart-contract risk`);
   push("governance", "governance", 4, c.governance ? avg([num(c.governance.proposals90d) ? sc(c.governance.proposals90d, 0, 8) : null, num(c.governance.turnoutPct) ? sc(c.governance.turnoutPct, 1, 20) : null]) : null, `Model ${c.governance?.model ?? "n/a"}, ${c.governance?.proposals90d ?? "n/a"} proposals/90d, turnout ${c.governance?.turnoutPct ?? "n/a"}%`);
   if (c.regulatory?.risk === "high") flags.push({ severity: "high", flag: `High regulatory exposure${c.regulatory.notes ? `: ${c.regulatory.notes}` : ""}` });
@@ -201,13 +208,18 @@ export function cryptoFundamentals(c: CryptoInput): EngineReport {
   if (!c.team && !c.security) warnings.push("Team and contract-security data are absent: these are exactly the facts that separate legitimate projects from scams, and automatic sources rarely supply them");
   const crit = flags.filter(f => f.severity === "critical").length, high = flags.filter(f => f.severity === "high").length;
   const rep = compose(parts, "fundamental:crypto", c.symbol, c.sources ?? [], now, "Weighted 0-100 category scores (tokenomics 18, security 15, holders 14, purpose/team 12, liquidity 12, adoption 10, network 8, development 6, listings 5, governance 4, regulatory 4) plus a LEGITIMACY GATE: 'high_risk' if any critical red flag or >= 3 high flags; 'caution' if any high flag; 'unverified' if completeness < 0.5 (absence of information is not evidence of legitimacy); otherwise 'substantive'. The central intelligence layer will not issue a bullish verdict for a token whose legitimacy is high_risk or unverified, regardless of its chart.", warnings, missing);
-  const legitimacy: Legitimacy = crit > 0 || high >= 3 ? "high_risk" : rep.completeness < 0.5 ? "unverified" : high > 0 ? "caution" : "substantive";
+  let legitimacy: Legitimacy = crit > 0 || high >= 3 ? "high_risk" : rep.completeness < 0.5 ? "unverified" : high > 0 ? "caution" : "substantive";
+  // Established assets (top-25 by market cap, >= 4 years old, >= 3 tier-1 venues, >= $100M daily volume) cannot be scams of the "unknown token" kind, and contract-level checks do not apply to
+  // native assets. Their legitimacy rests on market-structure evidence instead, and that basis is stated. Red flags still take precedence.
+  const established = (c.marketCapRank ?? Infinity) <= 25 && (c.ageYears ?? 0) >= 4 && (c.exchanges?.tier1Count ?? 0) >= 3 && (c.liquidity?.volume24hUsd ?? 0) >= 1e8;
+  let establishedBasis: string | undefined;
+  if (legitimacy === "unverified" && established && crit === 0 && high === 0) { legitimacy = "substantive"; establishedBasis = `Established asset: market-cap rank ${c.marketCapRank}, ${round(c.ageYears ?? 0, 1)} years old, ${c.exchanges?.tier1Count} tier-1 venues, $${Math.round((c.liquidity?.volume24hUsd ?? 0) / 1e6)}M daily volume. Legitimacy rests on market-structure evidence; contract-level and team data were not required.`; }
   if (legitimacy === "high_risk") { rep.score = Math.min(rep.score, -40); rep.stance = "bearish"; }
   else if (legitimacy === "unverified") { rep.score = Math.min(rep.score, 10); if (rep.stance === "bullish") rep.stance = "neutral"; rep.warnings.push("Legitimacy is UNVERIFIED: too little fundamental data to conclude the asset has real economic or technological value"); }
   else if (legitimacy === "caution") rep.score = Math.min(rep.score, 45);
   rep.confidence = legitimacy === "unverified" ? Math.min(rep.confidence, 35) : rep.confidence;
   for (const f of flags) rep.findings.unshift({ id: `flag-${f.flag.slice(0, 24)}`, kind: "red_flag", stance: "bearish", strength: f.severity === "critical" ? 95 : f.severity === "high" ? 75 : 50, description: `[${f.severity.toUpperCase()}] ${f.flag}` });
-  rep.extras = { legitimacy, redFlags: flags, circulatingShare: circ, fdvToMarketCap: fdvMc, unlockPct90d: unlockPct };
+  rep.extras = { legitimacy, redFlags: flags, circulatingShare: circ, fdvToMarketCap: fdvMc, unlockPct90d: unlockPct, ...(establishedBasis ? { establishedBasis } : {}) };
   return rep;
 }
 

@@ -5,6 +5,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 
 | Variable | Kind | Purpose |
 |---|---|---|
+| `AI` | binding | Optional Workers AI binding (`"ai": {"binding": "AI"}` in wrangler.jsonc, not enabled by default). Used only for the optional headline-sentiment second opinion when SENTIMENT_AI=on. |
 | `ALERT_EMAIL` | config | Legacy alias of ETI_ALERT_EMAIL (alert recipient). |
 | `ALPACA_API_KEY` | secret | Alpaca paper-trading and market-data key id (paper only). |
 | `ALPACA_DATA_FEED` | config | Alpaca data feed (`iex` default; `sip` needs a paid subscription). |
@@ -18,6 +19,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `BINANCE_FUTURES_SECRET_KEY` | secret | Binance futures testnet secret. |
 | `BINANCE_SECRET_KEY` | secret | Binance spot testnet secret. |
 | `COINGECKO_API_KEY` | secret | Optional CoinGecko key for fundamentals. |
+| `CRYPTO_PROFILES_JSON` | secret | Operator-curated crypto facts no free API provides (team identity, regulatory status, verified audits, unlocks), keyed by symbol. Only whitelisted, type-checked fields are read; they are labelled as operator assertions. |
 | `ETHERSCAN_API_KEY` | secret | Optional Etherscan key for on-chain data and provider probes. |
 | `ETI_ALERTS_DISABLED` | config | `true` turns alert delivery off. |
 | `ETI_ALERT_ACCOUNTS` | config | Accounts whose alerts are sent by the scheduled run. |
@@ -26,6 +28,8 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_ALERT_MAX_PER_HOUR` | config | Alert rate cap per hour. |
 | `ETI_ALPHA_KV` | binding | KV namespace for Global Alpha (falls back to ETI_EXECUTION_LOG). |
 | `ETI_ALPHA_TOKEN` | secret | Token for Global Alpha write routes (falls back to ETI_EXECUTION_TOKEN). |
+| `ETI_ANALYSIS_ALLOW_FULL` | config | `true` lets a Free-plan deployment serve `detail=full` analysis (only if you raised your own CPU limit). Default off. |
+| `ETI_ANALYSIS_PLAN` | config | `free` (default) or `paid`. Free = lite detail, capped inputs, calibration refused; paid = full detail and calibration. See docs/ANALYSIS_ENGINE.md. |
 | `ETI_AUTO_ROLLBACK` | config | `true` restores the last approved strategy config when results degrade. |
 | `ETI_AUTO_SESSIONS` | config | Controls automatic dashboard sessions (paper/testnet scopes only). |
 | `ETI_CSP_CONNECT` | config | Extra browser connect-src origins, space separated. |
@@ -61,6 +65,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_LLM_MODEL` | config | Model id for the optional LLM brief. |
 | `ETI_LLM_MAX_INPUT_TOKENS` | config | Estimated input-token budget for one LLM brief; context is trimmed in tiers only when exceeded (default 8000). |
 | `ETI_LLM_CACHE_TTL` | config | Seconds an identical analysis review is served from KV instead of calling the LLM again; 0 disables (default 900). |
+| `GITHUB_TOKEN` | secret | Optional GitHub token with no permissions, lifting the 60 requests/hour limit for crypto development-activity data. |
 | `REDIS_URL` | config | `redis://[:password@]host:port/db` for the Python cache and task queue; blank disables them. |
 | `ETI_MANAGE_ACCOUNTS` | config | Accounts whose open positions the scheduled run monitors. |
 | `ETI_MANAGE_AUTOCLOSE` | config | `true` lets the monitor close positions on confirmed invalidation. |
@@ -112,6 +117,10 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_PERP_MMR` | config | Futures paper maintenance margin rate used for liquidation price (default 0.005). |
 | `ETI_PERP_MAX_LEVERAGE` | config | Highest leverage the futures order routes accept (default 50). |
 | `ETI_PERP_MIN_NOTIONAL` | config | Smallest futures order notional in USDT (default 5). |
+| `SENTIMENT_AI` | config | `on` enables the AI headline-sentiment second opinion (also needs the AI binding). Default off. |
+| `SENTIMENT_AI_MODEL` | config | Workers AI model id for the sentiment second opinion (default `@cf/meta/llama-3.1-8b-instruct`). |
+| `TOKENOMIST_API_KEY` | secret | Optional Tokenomist Pro key for token unlock schedules (native port of the Python client). Licence: data is not redistributed; only derived metrics are returned. |
+| `TOKENOMIST_CREDIT_RESERVE` | config | Share (0-1, default 0.1) of the monthly Tokenomist credit allowance that is never spent. |
 
 Kinds: **secret** = private, never exposed to the browser or logs; **config** = non-sensitive setting; **binding** = Cloudflare KV/D1 resource; **legacy** = removed, ignored.
 

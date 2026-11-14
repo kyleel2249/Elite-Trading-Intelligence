@@ -1,0 +1,32 @@
+// FROZEN held-out set. Written AFTER the v2 model's rules were finalised and never used to change them; evaluated once (results in docs/ANALYSIS_ENGINE.md).
+// Hand-written by the engine's author in varied real-world headline styles: a regression guard and honest estimate, NOT an independent evaluation.
+import type { Row } from "./sentiment-dev.ts";
+const r = (cls: Row["cls"], label: Row["label"], text: string, ccy?: string): Row => ({ text, label, cls, ccy });
+export const HELDOUT: Row[] = [
+  r("equity", "p", "Amazon's cloud unit posts 19% sales growth, ahead of Wall Street estimates"), r("equity", "n", "Intel to lay off thousands as turnaround stalls"), r("equity", "p", "Costco reports higher membership renewals and raises quarterly dividend"),
+  r("equity", "n", "Walgreens stock hits 12-year low after dismal quarter"), r("equity", "0", "Ford confirms date for fourth-quarter earnings release"), r("equity", "p", "Eli Lilly obesity drug wins broader approval in Europe"),
+  r("equity", "n", "Meta faces record EU fine over data practices"), r("equity", "n", "Starbucks warns of softer traffic as customers pull back"), r("equity", "p", "Berkshire Hathaway discloses new stake in homebuilder"),
+  r("equity", "n", "Short seller alleges accounting irregularities at logistics firm"), r("equity", "p", "Visa and Mastercard shares advance as holiday spending outpaces forecasts"), r("equity", "0", "Oracle names new head of European operations"),
+  r("equity", "n", "Pharma giant's late-stage trial fails to meet primary endpoint"), r("equity", "p", "Defense contractor lands $4 billion Navy contract"), r("equity", "n", "Cruise line cancels sailings after engine failure, shares drop"),
+  r("equity", "p", "Shipping group swings to profit on higher freight rates"), r("equity", "n", "Utility cuts dividend to fund wildfire settlement"), r("equity", "0", "Dell to webcast its investor day presentation"),
+  r("equity", "p", "Chip equipment maker reports orders surging on AI demand"), r("equity", "n", "Department store chain closes 150 locations amid slumping sales"), r("equity", "n", "Auditor resigns from solar company citing concerns over controls"),
+  r("equity", "p", "Hospital operator upgraded to buy as margins recover"), r("equity", "n", "Boeing delays first delivery again, adding to supplier strain"), r("equity", "p", "Netflix subscriber additions exceed analyst projections"),
+  r("crypto", "p", "Solana network processes record transactions as developer activity rises"), r("crypto", "n", "Exchange insolvency fears trigger $800 million of customer withdrawals"), r("crypto", "p", "Pension fund allocates to spot Bitcoin ETFs"),
+  r("crypto", "n", "Attackers siphon $60 million from cross-chain protocol"), r("crypto", "0", "Ethereum Foundation posts quarterly transparency report"), r("crypto", "n", "Tether faces new probe from state attorneys general"),
+  r("crypto", "p", "Coinbase wins dismissal of key claims in securities lawsuit"), r("crypto", "n", "Token plummets after team wallets move millions to exchanges"), r("crypto", "p", "Stablecoin supply climbs to all-time high"),
+  r("crypto", "0", "Wallet provider adds support for a new network"), r("crypto", "n", "Miners capitulate as hash price slides toward record low"), r("crypto", "p", "Visa expands stablecoin settlement to more countries"),
+  r("crypto", "n", "Prosecutors seek 25-year sentence for exchange founder"), r("crypto", "0", "Bitcoin trades sideways as traders await Fed decision"), r("crypto", "p", "Lending protocol passes governance vote to share fees with token holders"),
+  r("fx", "p", "Sterling jumps as UK wage growth surprises to the upside", "GBP"), r("fx", "n", "Yen sinks to 34-year low as BOJ sticks with negative rates", "JPY"), r("fx", "p", "Dollar climbs after hotter-than-expected inflation print", "USD"),
+  r("fx", "n", "Euro falls as ECB officials flag possibility of further cuts", "EUR"), r("fx", "0", "Canadian dollar flat ahead of jobs data", "CAD"), r("fx", "p", "Australian dollar rallies after RBA keeps hawkish tone", "AUD"),
+  r("fx", "n", "Franc weakens as SNB intervenes against appreciation", "CHF"), r("fx", "p", "Kiwi gains on stronger-than-forecast dairy auction", "NZD"), r("fx", "n", "Dollar drops as weak payrolls raise bets on early Fed cuts", "USD"),
+  r("fx", "p", "Pound firms as Bank of England delays rate cuts", "GBP"), r("fx", "n", "Loonie slides as oil prices tumble", "CAD"), r("fx", "0", "ECB publishes account of last policy meeting", "EUR"),
+  r("macro", "p", "S&P 500 closes at record as megacaps rally"), r("macro", "n", "Stocks tumble as Treasury yields jump to 16-year high"), r("macro", "n", "Factory orders contract for fourth consecutive month"),
+  r("macro", "p", "Core inflation cools more than forecast, easing pressure on the Fed"), r("macro", "n", "Global shipping costs soar after Red Sea attacks"), r("macro", "p", "Oil rises as OPEC extends supply cuts"),
+  r("macro", "n", "China's property crisis deepens as developer defaults"), r("macro", "p", "Job growth beats expectations as unemployment dips"), r("macro", "0", "Treasury announces schedule for next week's auctions"),
+  r("macro", "n", "Wheat prices spike as drought threatens harvests"), r("macro", "p", "Copper climbs on surprise stimulus from Beijing"), r("macro", "n", "Business investment slumps as borrowing costs bite"),
+  r("equity", "p", "Despite a soft quarter, Salesforce shares surge on raised full-year guidance"), r("equity", "n", "Company beats profit forecast but shares sink on cautious outlook"), r("equity", "p", "Shares of the bank rally after stress test results"),
+  r("equity", "n", "Nike stock slides as inventory glut weighs on margins"), r("equity", "0", "Analyst reiterates neutral rating on Adobe"), r("crypto", "0", "What would a Bitcoin ETF approval mean for prices?"),
+  r("equity", "p", "FedEx jumps on cost-cutting plan"), r("equity", "n", "Biogen shares plunge after FDA rejects Alzheimer's drug"), r("equity", "p", "Merger approved by regulators with no remedies required"),
+  r("fx", "n", "Pound slumps on fears of snap election", "GBP"), r("macro", "p", "Falling gasoline prices lift consumer sentiment"), r("macro", "n", "Gold retreats as Treasury yields climb"),
+  r("equity", "n", "Chipmaker's CEO under investigation over stock sales"), r("crypto", "n", "Binance temporarily suspends withdrawals after system glitch"), r("equity", "p", "Moderna soars as flu vaccine shows strong efficacy"),
+];

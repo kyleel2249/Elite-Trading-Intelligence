@@ -3,7 +3,7 @@
 import type { CryptoInput, CurrencyMacro, StockInput } from "./fundamental.ts";
 import type { SourceRef } from "./types.ts";
 
-export interface AnalysisEnv { FRED_API_KEY?: string; SEC_USER_AGENT?: string; COINGECKO_API_KEY?: string; NEWS_FEEDS_JSON?: string; FRED_SERIES_JSON?: string }
+export interface AnalysisEnv { FRED_API_KEY?: string; SEC_USER_AGENT?: string; COINGECKO_API_KEY?: string; NEWS_FEEDS_JSON?: string; FRED_SERIES_JSON?: string; GITHUB_TOKEN?: string; TOKENOMIST_API_KEY?: string; TOKENOMIST_CREDIT_RESERVE?: string; CRYPTO_PROFILES_JSON?: string }
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 export class SourceError extends Error {
   source: string; configure?: string;
@@ -21,7 +21,8 @@ const ref = (name: string, url: string, now: number): SourceRef => ({ name, url,
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 
 // ------------------------------ CoinGecko (crypto) ------------------------------
-export function parseCoinGecko(j: any, now: number): { input: Partial<CryptoInput>; notes: string[] } {
+export interface CoinGeckoContext { id?: string; platforms?: Record<string, string>; repoUrl?: string; name?: string }
+export function parseCoinGecko(j: any, now: number): { input: Partial<CryptoInput>; notes: string[]; ctx: CoinGeckoContext } {
   const md = j?.market_data ?? {}, dev = j?.developer_data ?? {}, notes: string[] = [];
   const tickers: any[] = Array.isArray(j?.tickers) ? j.tickers : [];
   const markets = new Map<string, boolean>();
@@ -33,15 +34,17 @@ export function parseCoinGecko(j: any, now: number): { input: Partial<CryptoInpu
     liquidity: { volume24hUsd: n(md.total_volume?.usd) },
     exchanges: markets.size ? { tier1Count: [...markets.values()].filter(Boolean).length, totalCount: markets.size, names: names.slice(0, 8) } : undefined,
     development: n(dev.commit_count_4_weeks) !== undefined ? { commits90d: Math.round(dev.commit_count_4_weeks * 90 / 28), repoUrl: j?.links?.repos_url?.github?.[0] || undefined } : undefined,
-    asOf: j?.last_updated ?? undefined,
+    asOf: j?.last_updated ?? undefined, marketCapRank: n(j?.market_cap_rank),
+    ageYears: typeof j?.genesis_date === "string" && Number.isFinite(Date.parse(j.genesis_date)) ? (now - Date.parse(j.genesis_date)) / (365.25 * DAYS) : undefined,
   };
   if (!input.supply?.fdvUsd && input.supply?.priceUsd && input.supply.max) { input.supply.fdvUsd = input.supply.priceUsd * input.supply.max; notes.push("FDV derived as price x max supply"); }
   if (input.exchanges) notes.push("Tier-1 venue count uses CoinGecko 'green' trust-score venues as a proxy");
   if (input.development) notes.push("90-day commit count is extrapolated from CoinGecko's 4-week figure");
   notes.push("CoinGecko does not provide: team, holder concentration, unlock schedules, security audits, governance or regulatory data. Supply these via POST or a dedicated provider.");
-  return { input, notes };
+  const platforms: Record<string, string> = {}; for (const [k, v] of Object.entries(j?.platforms ?? {})) if (typeof v === "string" && v) platforms[k] = v;
+  return { input, notes, ctx: { id: j?.id, platforms, repoUrl: j?.links?.repos_url?.github?.find((u: unknown) => typeof u === "string" && u), name: j?.name } };
 }
-export async function fetchCryptoFundamentals(symbol: string, env: AnalysisEnv, f: FetchFn, now = Date.now()): Promise<{ input: CryptoInput; notes: string[] }> {
+export async function fetchCryptoFundamentals(symbol: string, env: AnalysisEnv, f: FetchFn, now = Date.now()): Promise<{ input: CryptoInput; notes: string[]; ctx: CoinGeckoContext }> {
   const base = symbol.toUpperCase().replace(/(USDT|USDC|BUSD|FDUSD|USD)$/, "") || symbol.toUpperCase();
   const h: Record<string, string> = env.COINGECKO_API_KEY ? { "x-cg-demo-api-key": env.COINGECKO_API_KEY } : {};
   const root = "https://api.coingecko.com/api/v3";
@@ -49,9 +52,9 @@ export async function fetchCryptoFundamentals(symbol: string, env: AnalysisEnv, 
   const hit = (s?.coins ?? []).filter((c: any) => String(c.symbol).toUpperCase() === base).sort((a: any, b: any) => (a.market_cap_rank ?? 1e9) - (b.market_cap_rank ?? 1e9))[0];
   if (!hit) throw new SourceError("CoinGecko", `No CoinGecko asset found for ticker ${base}`);
   const url = `${root}/coins/${encodeURIComponent(hit.id)}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=true&sparkline=false`;
-  const { input, notes } = parseCoinGecko(await getJson(f, "CoinGecko", url, h), now);
+  const { input, notes, ctx } = parseCoinGecko(await getJson(f, "CoinGecko", url, h), now);
   notes.unshift(`Resolved ticker ${base} to CoinGecko id "${hit.id}" (market-cap rank ${hit.market_cap_rank ?? "unranked"}). Tickers are not unique: verify this is the intended asset.`);
-  return { input: { symbol: base, ...input, sources: [ref("CoinGecko", url, now)], now }, notes };
+  return { input: { symbol: base, ...input, sources: [ref("CoinGecko", url, now)], now }, notes, ctx };
 }
 
 // ------------------------------ SEC EDGAR (stocks) ------------------------------
@@ -87,17 +90,45 @@ export function parseSecCompanyFacts(j: any, now: number): { input: Partial<Stoc
   notes.push("EDGAR provides no market price, sector medians, insider transactions or institutional ownership: valuation and ownership need those supplied via POST or another provider.");
   return { input, notes };
 }
-export async function fetchStockFundamentals(ticker: string, env: AnalysisEnv, f: FetchFn, now = Date.now()): Promise<{ input: StockInput; notes: string[] }> {
-  if (!env.SEC_USER_AGENT) throw new SourceError("SEC EDGAR", "SEC_USER_AGENT is not configured (SEC requires a descriptive User-Agent with contact details)", "Set SEC_USER_AGENT, e.g. 'Your Org admin@yourdomain.com'");
-  const h = { "user-agent": env.SEC_USER_AGENT };
+/** Ticker -> zero-padded CIK. ticker.txt is ~150 KB of plain text (cheap); company_tickers.json (~1 MB of JSON) is the fallback. */
+export async function lookupCik(ticker: string, h: Record<string, string>, f: FetchFn): Promise<string | null> {
+  try {
+    const r = await f("https://www.sec.gov/include/ticker.txt", { headers: h, signal: AbortSignal.timeout(TIMEOUT) });
+    if (r.ok) { const t = (await r.text()).toLowerCase(), m = t.match(new RegExp(`(?:^|\\n)${ticker.toLowerCase().replace(/[^a-z0-9.-]/g, "")}\\s+(\\d+)`)); if (m) return m[1].padStart(10, "0"); if (t.length > 1000) return null; }
+  } catch { /* fall back */ }
   const map = await getJson(f, "SEC EDGAR", "https://www.sec.gov/files/company_tickers.json", h);
   const hit: any = Object.values(map ?? {}).find((x: any) => String(x?.ticker).toUpperCase() === ticker.toUpperCase());
-  if (!hit) throw new SourceError("SEC EDGAR", `Ticker ${ticker} not found in SEC company list (non-US or not an SEC registrant)`);
-  const cik = String(hit.cik_str).padStart(10, "0"), url = `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`;
-  const { input, notes } = parseSecCompanyFacts(await getJson(f, "SEC EDGAR", url, h), now);
-  const sources = [ref("SEC EDGAR company facts", url, now)];
+  return hit ? String(hit.cik_str).padStart(10, "0") : null;
+}
+/**
+ * companyfacts for a large issuer is several MB of JSON: parsing it alone would exceed the Workers Free CPU budget. companyconcept returns one concept
+ * (tens of KB), so the needed concepts are fetched in parallel and assembled into the same shape parseSecCompanyFacts expects.
+ */
+export async function fetchSecFacts(cik: string, h: Record<string, string>, f: FetchFn): Promise<{ facts: any; entityName?: string; missing: string[] }> {
+  const us: Record<string, any> = {}, missing: string[] = [];
+  const get = async (tax: "us-gaap" | "dei", concept: string, unit: string) => {
+    try { const r = await f(`https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/${tax}/${concept}.json`, { headers: { accept: "application/json", ...h }, signal: AbortSignal.timeout(TIMEOUT) }); if (!r.ok) return null; const j: any = await r.json(); return { j, unit, entity: j?.entityName }; } catch { return null; }
+  };
+  const all = [...new Set(Object.values(CONCEPTS).flat())];
+  const [shares, ...res] = await Promise.all([get("dei", "EntityCommonStockSharesOutstanding", "shares"), ...all.map(c => get("us-gaap", c, "USD"))]);
+  let entityName: string | undefined = shares?.entity;
+  all.forEach((c, i) => { const r = res[i]; if (r?.j?.units) { us[c] = { units: r.j.units }; entityName ??= r.entity; } });
+  for (const [k, list] of Object.entries(CONCEPTS)) if (!list.some(c => us[c])) missing.push(k);
+  return { facts: { entityName, facts: { "us-gaap": us, dei: shares?.j?.units ? { EntityCommonStockSharesOutstanding: { units: shares.j.units } } : {} } }, entityName, missing };
+}
+export async function fetchStockFundamentals(ticker: string, env: AnalysisEnv, f: FetchFn, now = Date.now(), opts: { form4Max?: number } = {}): Promise<{ input: StockInput; notes: string[] }> {
+  if (!env.SEC_USER_AGENT) throw new SourceError("SEC EDGAR", "SEC_USER_AGENT is not configured (SEC requires a descriptive User-Agent with contact details)", "Set SEC_USER_AGENT, e.g. 'Your Org admin@yourdomain.com'");
+  const h = { "user-agent": env.SEC_USER_AGENT };
+  const cik = await lookupCik(ticker, h, f);
+  if (!cik) throw new SourceError("SEC EDGAR", `Ticker ${ticker} not found in SEC company list (non-US or not an SEC registrant)`);
+  const url = `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/`;
+  const sec = await fetchSecFacts(cik, h, f);
+  if (!Object.keys(sec.facts.facts["us-gaap"]).length) throw new SourceError("SEC EDGAR", `No XBRL financial data returned for CIK ${cik}`);
+  const { input, notes } = parseSecCompanyFacts(sec.facts, now);
+  if (sec.missing.length) notes.push(`SEC concepts not reported by this issuer: ${sec.missing.join(", ")}`);
+  const sources = [ref("SEC EDGAR XBRL company concepts", url, now)];
   try {
-    const ins = await fetchInsiderTransactions(cik, env, f, now);
+    const ins = await fetchInsiderTransactions(cik, env, f, now, opts.form4Max ?? 8);
     if (ins.filings > 0) { input.insiderTransactions = ins.txs; sources.push(ref("SEC EDGAR Form 4 filings", `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=4`, now)); notes.push(`Insider data: ${ins.filings} Form 4 filing(s) in the last 180 days parsed (${ins.txs.length} open-market transaction(s)${ins.failures ? `, ${ins.failures} filing(s) failed to load` : ""}).`); }
     else notes.push("No Form 4 filings in the last 180 days: insider activity is genuinely nil or unavailable; no insider conclusion is drawn.");
   } catch (e) { notes.push(`Insider data unavailable: ${e instanceof Error ? e.message : "error"}`); }
@@ -140,9 +171,9 @@ export function form4Urls(cik: string, submissions: any, now: number, max = 8): 
   }
   return urls;
 }
-export async function fetchInsiderTransactions(cik: string, env: AnalysisEnv, f: FetchFn, now: number): Promise<{ txs: InsiderTxParsed[]; filings: number; failures: number }> {
+export async function fetchInsiderTransactions(cik: string, env: AnalysisEnv, f: FetchFn, now: number, maxFilings = 8): Promise<{ txs: InsiderTxParsed[]; filings: number; failures: number }> {
   const h = { "user-agent": env.SEC_USER_AGENT ?? "" };
-  const subs = await getJson(f, "SEC EDGAR", `https://data.sec.gov/submissions/CIK${cik}.json`, h), urls = form4Urls(cik, subs, now);
+  const subs = await getJson(f, "SEC EDGAR", `https://data.sec.gov/submissions/CIK${cik}.json`, h), urls = form4Urls(cik, subs, now, maxFilings);
   const txs: InsiderTxParsed[] = []; let failures = 0;
   await Promise.all(urls.map(async u => { try { const r = await f(u, { headers: h, signal: AbortSignal.timeout(TIMEOUT) }); if (!r.ok) throw new Error(String(r.status)); txs.push(...parseForm4Xml(await r.text())); } catch { failures++; } }));
   return { txs, filings: urls.length, failures };

@@ -3,6 +3,8 @@
 // outdated, conflicting and possibly manipulated items are detected and surfaced, never silently averaged in.
 import { TIER, type NewsItem, type SourceType } from "./news-feeds.ts";
 import { clamp, round, stanceOf, unavailableReport, type EngineReport, type Finding, type Stance } from "./types.ts";
+import { pairOrientation, scoreText, type Cls } from "./sentiment-model.ts";
+import { blendScores, type AiScore } from "./sentiment-ai.ts";
 
 const HOUR = 3600000;
 export const SENTIMENT_RULES = { dedupeSimilarity: 0.5, maxFutureSkewMs: 5 * 60000, halfLifeHours: { social: 6, other: 24 }, outdatedHours: 72, excludeHours: 168, burstWindowMin: 60, burstMinItems: 4, corroborationSimilarity: 0.3 } as const;
@@ -16,10 +18,17 @@ const PRICE_MOVING = /\b(listing|lists|partnership|partners|acquir\w+|acquisitio
 const SHORTENER = /\b(bit\.ly|tinyurl\.com|goo\.gl|ow\.ly|cutt\.ly|rb\.gy)\b/i;
 const STOP = new Set(["the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "is", "are", "as", "at", "by", "with", "from", "that", "this", "it", "its", "be", "has", "have", "will", "says", "said", "after", "new"]);
 
-export const tokens = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9%.$\s-]/g, " ").split(/\s+/).filter(w => w.length > 2 && !STOP.has(w)));
+const tokenCache = new Map<string, Set<string>>();
+/** Token set of a headline, memoised: clustering, corroboration and burst detection compare the same headlines many times. Callers must not mutate the returned set. */
+export const tokens = (s: string): Set<string> => {
+  let t = tokenCache.get(s);
+  if (!t) { if (tokenCache.size > 4000) tokenCache.clear(); t = new Set(s.toLowerCase().replace(/[^a-z0-9%.$\s-]/g, " ").split(/\s+/).filter(w => w.length > 2 && !STOP.has(w))); tokenCache.set(s, t); }
+  return t;
+};
 export function similarity(a: string, b: string): number { const A = tokens(a), B = tokens(b); if (!A.size || !B.size) return 0; let i = 0; for (const t of A) if (B.has(t)) i++; return i / (A.size + B.size - i); }
 const textOf = (i: NewsItem) => `${i.title}. ${i.summary ?? ""}`;
 
+/** LEGACY v1 word-list scorer. Kept as the documented baseline for the benchmark; the engine itself uses scoreText (sentiment-model.ts). */
 export function polarity(text: string): { score: number; pos: string[]; neg: string[] } {
   const words = text.toLowerCase().replace(/[^a-z0-9\s'-]/g, " ").split(/\s+/).filter(Boolean), joined = " " + words.join(" ") + " ", pos: string[] = [], neg: string[] = [];
   let p = 0, n = 0;
@@ -47,8 +56,21 @@ export function validateItems(items: NewsItem[], now: number): { valid: NewsItem
   return { valid, rejected };
 }
 
-export interface Cluster { id: string; lead: NewsItem; items: NewsItem[]; sources: string[]; independentSources: number; bestTier: 1 | 2 | 3 | 4; polarity: number; first: number; last: number; socialOnly: boolean }
-export function clusterItems(items: NewsItem[]): Cluster[] {
+export interface AssessOpts { feedFailures?: string[]; cls?: Cls; fxPair?: { base: string; quote: string }; aiScores?: Map<string, AiScore> }
+export interface ItemScore { score: number; confidence: number; disagreement: boolean }
+/** Scores one item with the v2 model, oriented to the subject (FX pairs: +1 favours the base currency), optionally blended with an AI second opinion. */
+export function scoreItem(it: NewsItem, o: AssessOpts = {}): ItemScore {
+  let ctx: { cls?: Cls; ccy?: string } = { cls: o.cls }, sign = 1;
+  if (o.fxPair) { const or = pairOrientation(textOf(it), o.fxPair.base, o.fxPair.quote); if (or.sign === 0) return { score: 0, confidence: 0.1, disagreement: false }; ctx = { cls: "fx", ccy: or.ccy }; sign = or.sign; }
+  const t = scoreText(it.title, ctx); let score = t.score, conf = t.confidence;
+  if (Math.abs(score) < 0.15 && it.summary) { const m = scoreText(it.summary, ctx); score = t.score * 0.6 + m.score * 0.4 * 0.8; conf = Math.max(t.confidence * 0.8, m.confidence * 0.6); }
+  const ai = o.aiScores?.get(it.id);
+  if (ai) { const b = blendScores({ score, confidence: conf }, { score: ai.score * sign, confidence: ai.confidence }); return { score: b.score * sign, confidence: b.confidence, disagreement: b.disagreement }; }
+  return { score: score * sign, confidence: conf, disagreement: false };
+}
+
+export interface Cluster { id: string; lead: NewsItem; items: NewsItem[]; sources: string[]; independentSources: number; bestTier: 1 | 2 | 3 | 4; polarity: number; confidence: number; disagreements: number; first: number; last: number; socialOnly: boolean }
+export function clusterItems(items: NewsItem[], o: AssessOpts = {}): Cluster[] {
   const groups: NewsItem[][] = [];
   for (const it of [...items].sort((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt))) {
     const g = groups.find(gr => gr.some(x => similarity(x.title, it.title) >= SENTIMENT_RULES.dedupeSimilarity));
@@ -56,8 +78,8 @@ export function clusterItems(items: NewsItem[]): Cluster[] {
   }
   return groups.map(g => {
     const lead = [...g].sort((a, b) => TIER[a.sourceType] - TIER[b.sourceType] || Date.parse(a.publishedAt) - Date.parse(b.publishedAt))[0];
-    const sources = [...new Set(g.map(x => x.source))], times = g.map(x => Date.parse(x.publishedAt)), pol = g.map(x => polarity(textOf(x)).score);
-    return { id: lead.id, lead, items: g, sources, independentSources: sources.length, bestTier: Math.min(...g.map(x => TIER[x.sourceType])) as 1 | 2 | 3 | 4, polarity: pol.reduce((s, v) => s + v, 0) / pol.length, first: Math.min(...times), last: Math.max(...times), socialOnly: g.every(x => TIER[x.sourceType] === 4) };
+    const sources = [...new Set(g.map(x => x.source))], times = g.map(x => Date.parse(x.publishedAt)), sc = g.map(x => scoreItem(x, o)), pol = sc.map(x => x.score);
+    return { id: lead.id, lead, items: g, sources, independentSources: sources.length, bestTier: Math.min(...g.map(x => TIER[x.sourceType])) as 1 | 2 | 3 | 4, polarity: pol.reduce((s, v) => s + v, 0) / pol.length, confidence: sc.reduce((s, v) => s + v.confidence, 0) / sc.length, disagreements: sc.filter(x => x.disagreement).length, first: Math.min(...times), last: Math.max(...times), socialOnly: g.every(x => TIER[x.sourceType] === 4) };
   });
 }
 
@@ -65,12 +87,12 @@ export type EventStatus = "confirmed" | "reported" | "unverified" | "disputed" |
 export interface EventRecord { time: string; source: string; sourceType: SourceType; tier: 1 | 2 | 3 | 4; headline: string; url?: string; status: EventStatus; polarity: number; independentSources: number; ageHours: number; notes: string[] }
 export interface ManipulationSignal { kind: string; severity: "low" | "medium" | "high"; detail: string; itemIds: string[] }
 export interface SentimentConflict { kind: "contradictory_report" | "divergent_news_flow" | "correction_or_denial"; a: string; b: string; detail: string }
-export interface SentimentAssessment { events: EventRecord[]; rejected: RejectedItem[]; conflicts: SentimentConflict[]; manipulation: { risk: number; signals: ManipulationSignal[] }; outdatedCount: number; corroboratedSocial: number; unverifiedSocial: number; report: EngineReport }
+export interface SentimentAssessment { /** Cluster lead items ranked by weight in the score: the candidates for an AI second opinion. */ leads: { id: string; text: string; weight: number }[]; events: EventRecord[]; rejected: RejectedItem[]; conflicts: SentimentConflict[]; manipulation: { risk: number; signals: ManipulationSignal[] }; outdatedCount: number; corroboratedSocial: number; unverifiedSocial: number; report: EngineReport }
 
-export function assessSentiment(subject: string, raw: NewsItem[], now = Date.now(), opts: { feedFailures?: string[] } = {}): SentimentAssessment {
+export function assessSentiment(subject: string, raw: NewsItem[], now = Date.now(), opts: AssessOpts = {}): SentimentAssessment {
   const { valid, rejected } = validateItems(raw, now);
   const warnings: string[] = [...(opts.feedFailures ?? []).map(f => `News feed unavailable: ${f}`)];
-  const clusters = clusterItems(valid).filter(c => (now - c.last) / HOUR <= SENTIMENT_RULES.excludeHours || (warnings.push(`Excluded ${c.lead.source} item older than ${SENTIMENT_RULES.excludeHours / 24} days: "${c.lead.title.slice(0, 70)}"`), false));
+  const clusters = clusterItems(valid, opts).filter(c => (now - c.last) / HOUR <= SENTIMENT_RULES.excludeHours || (warnings.push(`Excluded ${c.lead.source} item older than ${SENTIMENT_RULES.excludeHours / 24} days: "${c.lead.title.slice(0, 70)}"`), false));
   const credible = (c: Cluster) => c.items.filter(x => TIER[x.sourceType] <= 3);
   const corroborated = (c: Cluster) => { // Social/unknown claims need a tier-1 source OR two independent tier<=3 sources that match the claim.
     if (!c.socialOnly) return true;
@@ -107,7 +129,7 @@ export function assessSentiment(subject: string, raw: NewsItem[], now = Date.now
         detail: same ? `Credible sources lean opposite ways (${round(a.polarity, 2)} vs ${round(b.polarity, 2)}) on overlapping subject matter` : `Credible but unrelated developments point opposite ways (${round(a.polarity, 2)} vs ${round(b.polarity, 2)}): the news flow is mixed, not contradictory` }); } }
   // Event ledger + weighted score.
   const events: EventRecord[] = [], findings: Finding[] = [];
-  let wSum = 0, sSum = 0, outdated = 0, corrobSocial = 0, unverSocial = 0;
+  let wSum = 0, sSum = 0, outdated = 0, corrobSocial = 0, unverSocial = 0, disagreements = 0; const leads: SentimentAssessment["leads"] = [];
   for (const c of clusters.sort((a, b) => b.last - a.last)) {
     const ageH = (now - c.last) / HOUR, notes: string[] = [], isOutdated = ageH > SENTIMENT_RULES.outdatedHours;
     let status: EventStatus = c.bestTier <= 2 ? "confirmed" : c.bestTier === 3 ? "reported" : "unverified";
@@ -116,8 +138,8 @@ export function assessSentiment(subject: string, raw: NewsItem[], now = Date.now
     if (isOutdated) { status = "outdated"; outdated++; notes.push(`Outdated: ${Math.round(ageH)}h old`); }
     const tier = c.bestTier, half = tier === 4 ? SENTIMENT_RULES.halfLifeHours.social : SENTIMENT_RULES.halfLifeHours.other;
     const fresh = Math.pow(0.5, Math.max(0, ageH) / half), tierW = { 1: 1, 2: 0.8, 3: 0.5, 4: 0.1 }[tier] * (c.socialOnly && corroborated(c) ? 5 : 1);
-    const w = tierW * fresh * (status === "disputed" ? 0.3 : 1) * (isOutdated ? 0.2 : 1) * Math.min(1.45, 1 + 0.15 * (c.independentSources - 1));
-    wSum += w; sSum += w * c.polarity;
+    const w = tierW * fresh * (0.6 + 0.4 * c.confidence) * (status === "disputed" ? 0.3 : 1) * (isOutdated ? 0.2 : 1) * Math.min(1.45, 1 + 0.15 * (c.independentSources - 1));
+    wSum += w; sSum += w * c.polarity; disagreements += c.disagreements; if (!isOutdated) leads.push({ id: c.lead.id, text: c.lead.title.slice(0, 300), weight: Number(w.toFixed(3)) });
     events.push({ time: new Date(c.last).toISOString(), source: c.lead.source, sourceType: c.lead.sourceType, tier, headline: c.lead.title, url: c.lead.url, status, polarity: round(c.polarity, 2), independentSources: c.independentSources, ageHours: round(ageH, 1), notes });
     if (!isOutdated && Math.abs(c.polarity) > 0.1) findings.push({ id: `ev-${c.id}`, kind: "news_event", stance: stanceOf(c.polarity * 100, 10), strength: Math.round(clamp(w * 80, 5, 100)), time: c.last, description: `[${status}] ${c.lead.source} @ ${new Date(c.last).toISOString()}: ${c.lead.title}` });
   }
@@ -125,15 +147,29 @@ export function assessSentiment(subject: string, raw: NewsItem[], now = Date.now
   if (signals.length) findings.unshift({ id: "manipulation", kind: "manipulation_risk", stance: "neutral", strength: risk, description: `Manipulation indicators (risk ${risk}/100): ${[...new Set(signals.map(s => s.kind))].join(", ")}` });
   if (outdated) warnings.push(`${outdated} item(s) are older than ${SENTIMENT_RULES.outdatedHours}h and are heavily discounted`);
   if (rejected.length) warnings.push(`${rejected.length} item(s) rejected for missing/invalid source or timestamp`);
+  if (disagreements) warnings.push(`${disagreements} headline(s) where the rule model and the AI second opinion disagree: their weight is reduced`);
   if (unverSocial) warnings.push(`${unverSocial} social/unverified narrative(s) are tracked but carry minimal weight until corroborated`);
   const usable = clusters.filter(c => !(now - c.last > SENTIMENT_RULES.outdatedHours * HOUR));
-  if (!usable.length) return { events, rejected, conflicts, manipulation: { risk, signals }, outdatedCount: outdated, corroboratedSocial: corrobSocial, unverifiedSocial: unverSocial, report: { ...unavailableReport("sentiment", "sentiment", subject, "No recent, valid, sourced news items were available for this subject", ["recent news within 72h"], now), warnings: warnings.length ? warnings : ["No recent news found"] } };
+  if (!usable.length) return { leads: [], events, rejected, conflicts, manipulation: { risk, signals }, outdatedCount: outdated, corroboratedSocial: corrobSocial, unverifiedSocial: unverSocial, report: { ...unavailableReport("sentiment", "sentiment", subject, "No recent, valid, sourced news items were available for this subject", ["recent news within 72h"], now), warnings: warnings.length ? warnings : ["No recent news found"] } };
   const sat = Math.min(1, wSum / 2.5), score = wSum > 0 ? clamp(sSum / wSum * 100 * 1.6 * sat, -100, 100) : 0;
   const conf = clamp(20 + Math.min(wSum, 4) * 12 + (usable.some(c => c.bestTier <= 2) ? 15 : 0) - risk * 0.4 - conflicts.length * 12 - outdated * 2, 0, 100);
   const conflicted = conflicts.length > 0 && usable.length >= 2;
   const report: EngineReport = { engine: "sentiment", domain: "sentiment", subject, stance: conflicted ? "conflicted" : stanceOf(score, 15), score: round(score), confidence: round(conf, 0), confidenceType: "evidence_quality_not_probability", status: valid.length ? "ok" : "partial",
     completeness: round(Math.min(1, usable.length / 5), 2), findings: findings.slice(0, 14), warnings, missing: [], sources: [...new Map(valid.map(i => [i.source, { name: i.source, url: i.url, publishedAt: i.publishedAt, retrievedAt: i.retrievedAt ?? new Date(now).toISOString() }])).values()].slice(0, 20), asOf: new Date(now).toISOString(),
-    methodology: `Lexicon-based polarity (finance word lists with negation handling: coarse, not ML), source-tier weighting (regulator/central bank/exchange/company 1.0, wire/research 0.8, media 0.5, social 0.1 until corroborated), freshness decay (half-life ${SENTIMENT_RULES.halfLifeHours.other}h, social ${SENTIMENT_RULES.halfLifeHours.social}h), near-duplicate clustering (Jaccard >= ${SENTIMENT_RULES.dedupeSimilarity}), corroboration rule (tier-1 source or two independent tier<=3 sources), correction/denial detection, and manipulation heuristics. Heuristic indicators are risk flags, not proof of manipulation.`,
+    methodology: `Rule-based model v2 (weighted phrases, negation, hedging, clause structure, asset-class and currency-pair orientation; deterministic, not a trained classifier) optionally blended with a Workers AI second opinion, source-tier weighting (regulator/central bank/exchange/company 1.0, wire/research 0.8, media 0.5, social 0.1 until corroborated), freshness decay (half-life ${SENTIMENT_RULES.halfLifeHours.other}h, social ${SENTIMENT_RULES.halfLifeHours.social}h), near-duplicate clustering (Jaccard >= ${SENTIMENT_RULES.dedupeSimilarity}), corroboration rule (tier-1 source or two independent tier<=3 sources), correction/denial detection, and manipulation heuristics. Heuristic indicators are risk flags, not proof of manipulation.`,
     extras: { manipulationRisk: risk, conflictCount: conflicts.length, unverifiedSocial: unverSocial } };
-  return { events, rejected, conflicts, manipulation: { risk, signals }, outdatedCount: outdated, corroboratedSocial: corrobSocial, unverifiedSocial: unverSocial, report };
+  return { leads: leads.sort((a, b) => b.weight - a.weight).slice(0, 12), events, rejected, conflicts, manipulation: { risk, signals }, outdatedCount: outdated, corroboratedSocial: corrobSocial, unverifiedSocial: unverSocial, report };
+}
+
+import { aiScoreItems, type AiEnv, type Memo } from "./sentiment-ai.ts";
+/** Rule-model assessment, then (when enabled) an AI second opinion on the highest-weight headlines and a second pass that blends it in. */
+export async function assessSentimentWithAi(subject: string, raw: NewsItem[], now: number, opts: AssessOpts, env: AiEnv, o: { maxItems: number; memo?: Memo }): Promise<SentimentAssessment> {
+  const first = assessSentiment(subject, raw, now, opts);
+  const modelInfo: Record<string, unknown> = { local: "rule-model-v2", ai: "off" };
+  if (!first.leads.length || String(env.SENTIMENT_AI ?? "").toLowerCase() !== "on") { first.report.extras = { ...(first.report.extras ?? {}), model: modelInfo }; return first; }
+  const r = await aiScoreItems(env, first.leads, { subject, cls: opts.cls ?? "unknown", maxItems: o.maxItems, memo: o.memo });
+  if (r.error || r.scores.size === 0) { first.report.warnings.push(r.error ? `AI second opinion unavailable (${r.error}): rule model only` : "AI second opinion unavailable: rule model only"); first.report.extras = { ...(first.report.extras ?? {}), model: { ...modelInfo, ai: { model: r.model, error: r.error ?? "no binding" } } }; return first; }
+  const second = assessSentiment(subject, raw, now, { ...opts, aiScores: r.scores });
+  second.report.extras = { ...(second.report.extras ?? {}), model: { local: "rule-model-v2", ai: { model: r.model, headlinesScored: r.used, cached: r.cached, maxWeight: "40%" } } };
+  return second;
 }

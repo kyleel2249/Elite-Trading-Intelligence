@@ -238,7 +238,7 @@ figures stay in the Command Centre (`/command`), which needs the paper-account t
 
 Technical, multi-timeframe, fundamental and news/sentiment engines feed a central intelligence layer at
 `/api/analysis/*` (and an on-demand dashboard panel). See [docs/ANALYSIS_ENGINE.md](docs/ANALYSIS_ENGINE.md) for
-methodology, endpoints, required secrets and limitations. It is analytical only and cannot place orders.
+methodology, Free-plan setup, endpoints, required secrets and limitations. It is analytical only and cannot place orders.
 
 ## Important feature boundary
 

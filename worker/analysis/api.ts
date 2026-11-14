@@ -2,23 +2,29 @@
 import { getMarketData, providerOrder, type Kline, type MarketEnv } from "../market.ts";
 import { runOmnisignal } from "../algo/omnisignal.ts";
 import { TIMEFRAMES as ALGO_TFS, type Timeframe as AlgoTf } from "../algo/timeframes.ts";
-import { fetchCryptoFundamentals, fetchCurrencyMacro, fetchDollarTrend, fetchStockFundamentals, SourceError, type AnalysisEnv, type FetchFn } from "./fundamental-sources.ts";
+import { fetchCurrencyMacro, fetchDollarTrend, fetchStockFundamentals, SourceError, type AnalysisEnv, type FetchFn } from "./fundamental-sources.ts";
 import { cryptoFundamentals, fundamentalUnavailable, fxFundamentals, stockFundamentals } from "./fundamental.ts";
 import { fetchNews, filterBySubject, subjectAliases, type NewsItem } from "./news-feeds.ts";
-import { assessSentiment } from "./sentiment.ts";
-import { closedCandles, MTF_TIMEFRAMES, multiTimeframeAnalysis, oneMinuteAppropriate, PROVIDER_INTERVAL, type MtfStrategy, type MtfTimeframe } from "./mtf.ts";
+import { assessSentiment, assessSentimentWithAi, type AssessOpts } from "./sentiment.ts";
+import type { AiEnv } from "./sentiment-ai.ts";
+import { closedCandles, slimTimeframe, MTF_TIMEFRAMES, multiTimeframeAnalysis, oneMinuteAppropriate, PROVIDER_INTERVAL, type MtfStrategy, type MtfTimeframe } from "./mtf.ts";
 import { isFullAnalysis, technicalAnalysis } from "./technical.ts";
 import { centralIntelligence } from "./intelligence.ts";
 import { fetchYahooQuote, loadYahooCandles } from "./market-data-ext.ts";
+import { buildCryptoInput } from "./crypto-pipeline.ts";
+import type { KVLike } from "./tokenomist.ts";
+import { loadInstitutional, type D1Like } from "./institutional.ts";
 import { calibrateTechnical } from "./calibrate.ts";
+import { planOf, resolveDetail, type PlanEnv } from "./plan.ts";
 import { loadEvents, relevant, currenciesOf, type EventsEnv, type MarketEvent } from "../readiness/events.ts";
 import { inferAssetClass, type AssetClass, type EngineReport } from "./types.ts";
 
-export type AnalysisApiEnv = MarketEnv & AnalysisEnv & EventsEnv;
+export type AnalysisApiEnv = MarketEnv & AnalysisEnv & EventsEnv & PlanEnv & AiEnv & { ETI_EXECUTION_LOG?: KVLike; ETI_PORTFOLIO_DB?: D1Like };
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type" };
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...HEADERS, ...extra } });
 export const STRATEGIES: MtfStrategy[] = ["scalp", "intraday", "swing", "position"];
 export const MAX_BODY_CHARS = 2_000_000, MAX_CANDLES = 5000, MAX_NEWS_ITEMS = 500;
+const cap = <T,>(a: T[], n: number) => (a.length > n ? a.slice(-n) : a);
 
 // ---- best-effort per-isolate rate limiting (Workers isolates are not shared, so this bounds bursts, not a global quota) ----
 const buckets = new Map<string, { n: number; reset: number }>();
@@ -97,18 +103,24 @@ function loadFundamental(symbol: string, cls: AssetClass, env: AnalysisApiEnv, n
 async function loadFundamentalUncached(symbol: string, cls: AssetClass, env: AnalysisApiEnv, now: number): Promise<FundResult> {
   try {
     if (cls === "crypto") {
-      const { input, notes } = await fetchCryptoFundamentals(symbol, env, fetchFn, now), rep = cryptoFundamentals({ ...input, symbol: input.symbol ?? symbol, now }), ev = await eventsFor(symbol, "crypto", env, now);
-      applyEventRisk(rep, ev.events, now, notes); if (ev.status !== "loaded") rep.warnings.push(ev.notes[0]);
-      notes.push("Token unlock schedules are not fetched by the Worker (the Tokenomist adapter lives in the Python backend): feed them as events or POST `unlocks`.");
-      return { report: rep, notes };
+      const b = await buildCryptoInput(symbol, env, fetchFn, env.ETI_EXECUTION_LOG, now), rep = cryptoFundamentals(b.input), ev = await eventsFor(symbol, "crypto", env, now), notes = [...b.notes];
+      rep.warnings.push(...b.warnings); applyEventRisk(rep, ev.events, now, notes); if (ev.status !== "loaded") rep.warnings.push(ev.notes[0]);
+      for (const u of b.unavailable) notes.push(`Unavailable: ${u.source} (${u.reason})${u.configure ? ` — ${u.configure}` : ""}`);
+      rep.extras = { ...(rep.extras ?? {}), dataSources: { used: b.used, unavailable: b.unavailable }, ...(b.unlockSummary ? { unlockSummary: b.unlockSummary } : {}) };
+      return { report: rep, notes, setup: b.unavailable.find(u => u.configure)?.configure };
     }
     if (cls === "stock") {
-      const { input, notes } = await fetchStockFundamentals(symbol, env, fetchFn, now);
+      const { input, notes } = await fetchStockFundamentals(symbol, env, fetchFn, now, { form4Max: planOf(env).form4Max });
       try {
         const q = await fetchYahooQuote(symbol, "stock", fetchFn);
         if (!input.marketCap && input.sharesOutstanding) { input.marketCap = q.price * input.sharesOutstanding; input.priceAsOf = new Date(q.time).toISOString(); notes.push("Market cap derived as latest price x latest cover-page share count; companies with several share classes may be understated."); input.sources = [...(input.sources ?? []), { name: "Yahoo Finance price", retrievedAt: new Date(now).toISOString() }]; }
       } catch (e) { notes.push(`Price unavailable (${e instanceof Error ? e.message : "error"}): valuation is not assessed.`); }
+      const inst = await loadInstitutional(env.ETI_PORTFOLIO_DB, symbol, input.sharesOutstanding, now);
+      if (inst.status === "loaded") { if (inst.ownershipPct !== undefined) input.institutionalOwnershipPct = inst.ownershipPct; if (inst.changePp !== undefined) input.institutionalOwnershipChangePct = inst.changePp; input.sources = [...(input.sources ?? []), { name: `SEC Form 13F aggregate (${inst.period})`, retrievedAt: new Date(now).toISOString() }]; }
+      notes.push(...inst.notes);
       const rep = stockFundamentals({ ...input, symbol, now }), ev = await eventsFor(symbol, "stock", env, now); applyEventRisk(rep, ev.events, now, notes); if (ev.status !== "loaded") rep.warnings.push(ev.notes[0]);
+      rep.warnings.push(...inst.warnings); rep.extras = { ...(rep.extras ?? {}), institutional: { status: inst.status, period: inst.period, holders: inst.holders, ownershipPct: inst.ownershipPct, changePp: inst.changePp, sharesChangePct: inst.sharesChangePct, topHolders: inst.top.slice(0, 5) } };
+      if (inst.status !== "loaded" && !rep.missing.includes("insider and institutional activity") && input.institutionalOwnershipPct === undefined) rep.warnings.push("Institutional ownership unavailable: " + (inst.notes[0] ?? "13F data not loaded"));
       return { report: rep, notes };
     }
     if (cls === "fx") {
@@ -127,25 +139,30 @@ async function loadFundamentalUncached(symbol: string, cls: AssetClass, env: Ana
     return { report: fundamentalUnavailable(symbol, `Fundamental data failed: ${e instanceof Error ? e.message : "unknown error"}`, ["fundamental data"], now), notes: [] };
   }
 }
-async function loadNews(symbol: string, cls: AssetClass, env: AnalysisApiEnv, now: number) {
-  const n = await cached("news:all", 300, () => fetchNews(env, fetchFn, now), r => r.items.length > 0), items = filterBySubject(n.items, subjectAliases(symbol, cls));
+/** Subject-aware scoring options: asset class, and for FX pairs the base/quote orientation (a headline about the quote currency counts against the pair). */
+export function sentimentOpts(symbol: string, cls: AssetClass): AssessOpts {
+  return { cls: cls === "stock" ? "equity" : cls, ...(cls === "fx" && symbol.length >= 6 ? { fxPair: { base: symbol.slice(0, 3), quote: symbol.slice(3, 6) } } : {}) };
+}
+async function loadNews(symbol: string, cls: AssetClass, env: AnalysisApiEnv, now: number, maxItems = 500) {
+  const n = await cached("news:all", 300, () => fetchNews(env, fetchFn, now), r => r.items.length > 0), items = filterBySubject(n.items, subjectAliases(symbol, cls)).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)).slice(0, maxItems);
   const failures = n.feeds.filter(f => f.status === "failed").map(f => `${f.feed}: ${f.error}`);
-  return { assessment: assessSentiment(symbol, items, now, { feedFailures: failures }), feeds: n.feeds, scanned: n.items.length, rejectedAtSource: n.rejected.length };
+  return { assessment: await assessSentimentWithAi(symbol, items, now, { ...sentimentOpts(symbol, cls), feedFailures: failures }, env, { maxItems: planOf(env).aiMaxItems, memo: cached }), feeds: n.feeds, scanned: n.items.length, rejectedAtSource: n.rejected.length };
 }
 
 export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise<Response> {
   const url = new URL(req.url), path = url.pathname.replace(/\/+$/, ""), now = Date.now();
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: HEADERS });
   if (req.method !== "GET" && req.method !== "POST") return reply({ error: "method_not_allowed", note: "Analytical endpoints only; they cannot place orders." }, 405);
-  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
-    configured: { FRED_API_KEY: !!env.FRED_API_KEY, SEC_USER_AGENT: !!env.SEC_USER_AGENT, COINGECKO_API_KEY: !!env.COINGECKO_API_KEY, NEWS_FEEDS_JSON: !!env.NEWS_FEEDS_JSON }, submitsOrder: false });
+  const limits0 = planOf(env);
+  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
+    plan: { plan: limits0.plan, defaultDetail: limits0.defaultDetail, fullDetailAllowed: limits0.allowFullDetail, maxCandlesPerTimeframe: limits0.maxCandles, calibrationAllowed: limits0.calibrateAllowed, maxNewsItems: limits0.maxNewsItems }, configured: { SENTIMENT_AI: String(env.SENTIMENT_AI ?? "").toLowerCase() === "on" && !!env.AI, TOKENOMIST_API_KEY: !!env.TOKENOMIST_API_KEY, GITHUB_TOKEN: !!env.GITHUB_TOKEN, CRYPTO_PROFILES_JSON: !!env.CRYPTO_PROFILES_JSON, institutionalDb: !!env.ETI_PORTFOLIO_DB, FRED_API_KEY: !!env.FRED_API_KEY, SEC_USER_AGENT: !!env.SEC_USER_AGENT, COINGECKO_API_KEY: !!env.COINGECKO_API_KEY, NEWS_FEEDS_JSON: !!env.NEWS_FEEDS_JSON }, submitsOrder: false });
   const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : path.endsWith("/mtf") ? 4 : 2, wait = rateLimited(ip, cost, now);
   if (wait !== null) return reply({ error: "rate_limited", retryAfterSeconds: wait }, 429, { "retry-after": String(wait) });
-  const post = req.method === "POST";
+  const post = req.method === "POST", limits = planOf(env);
   let body: any = {};
   if (post) { const j = await readJson(req); if (j.error) return reply({ error: j.error }, j.error === "body_too_large" ? 413 : 400); body = j.body; }
   const q = (k: string) => (post && body[k] !== undefined ? String(body[k]) : url.searchParams.get(k));
-  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") ? "BTCUSDT" : null));
+  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") ? "AAPL" : null));
   if (!symbol) return reply({ error: "invalid_symbol", expected: "1-20 characters from A-Z, 0-9, '.', '_' or '-'" }, 400);
   const stratRaw = (q("strategy") ?? "intraday") as MtfStrategy;
   if (!STRATEGIES.includes(stratRaw)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
@@ -167,8 +184,11 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       }
       let bench: { symbol: string; candles: Kline[] } | undefined;
       if (post && body.benchmark?.candles) { const b = sanitizeCandles(body.benchmark.candles); if (b.error) return reply({ error: "invalid_benchmark_candles", detail: b.error }, 400); bench = { symbol: parseSymbol(String(body.benchmark.symbol ?? "BENCHMARK")) ?? "BENCHMARK", candles: b.rows }; }
-      const a = technicalAnalysis(symbol, tf, tf === "1M" || tf === "1w" ? rows : closedCandles(tf, rows, now), { now, benchmark: bench, detail: q("detail") === "lite" ? "lite" : "full" });
-      return reply(isFullAnalysis(a) ? { ...a, dataQuality: { provider, candles: rows.length } } : { report: a.report, dataQuality: { provider, candles: rows.length } }, isFullAnalysis(a) ? 200 : 422);
+      const dt = resolveDetail(q("detail"), limits), a = technicalAnalysis(symbol, tf, tf === "1M" || tf === "1w" ? rows : closedCandles(tf, rows, now), { now, benchmark: bench, detail: dt.detail, maxCandles: limits.maxCandles });
+      const dq = { provider, candles: rows.length, plan: limits.plan, detail: dt.detail, ...(dt.downgraded ? { note: "detail=full was downgraded to lite on the free plan (set ETI_ANALYSIS_PLAN=paid)" } : {}) };
+      const verbose = q("include")?.includes("analysis");
+      const slim = isFullAnalysis(a) && !verbose ? { ...a, structure: { ...a.structure, pivots: a.structure.pivots.slice(-12) }, volumeProfile: a.volumeProfile ? { ...a.volumeProfile, bins: [] } : null } : a;
+      return reply(isFullAnalysis(a) ? { ...slim, dataQuality: dq } : { report: a.report, dataQuality: dq }, isFullAnalysis(a) ? 200 : 422);
     }
     if (path === "/api/analysis/mtf" || path === "/api/analysis/intelligence") {
       const wantIntel = path.endsWith("/intelligence"), frames = mtfFrames(stratRaw);
@@ -184,9 +204,9 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         const y = await loadYahooCandles(symbol, cls, frames, fetchFn); candles = y.candles; failures = y.failures; providers = Object.keys(y.candles).length ? ["yahoo-finance"] : []; yahooNotes = y.notes;
       } else mtfNote = `Unknown asset class for ${symbol}: pass ?assetClass=crypto|fx|stock or POST candles.`;
       const hasCandles = Object.keys(candles).length > 0;
-      const detail = q("detail") === "lite" ? "lite" : "full";
-      const mtf = hasCandles ? multiTimeframeAnalysis({ symbol, strategy: stratRaw, candles, now, benchmark: bench, detail }) : null;
-      if (!wantIntel) return mtf ? reply({ ...mtf, dataQuality: { providers, failures, notes: yahooNotes } }) : reply({ error: "market_data_unavailable", detail: mtfNote ?? "No candles could be loaded", failures }, 424);
+      const dr = resolveDetail(q("detail"), limits), detail = dr.detail;
+      const mtf = hasCandles ? multiTimeframeAnalysis({ symbol, strategy: stratRaw, candles, now, benchmark: bench, detail, maxCandles: limits.maxCandles }) : null;
+      if (!wantIntel) return mtf ? reply({ ...mtf, timeframes: q("include")?.includes("analysis") ? mtf.timeframes : mtf.timeframes.map(slimTimeframe), dataQuality: { providers, failures, notes: yahooNotes, plan: limits.plan, detail, detailDowngraded: dr.downgraded } }) : reply({ error: "market_data_unavailable", detail: mtfNote ?? "No candles could be loaded", failures }, 424);
 
       // central intelligence
       let fundamental: EngineReport | null = null, fundMissing: string | undefined, setup: string | undefined, fundNotes: string[] = [];
@@ -199,15 +219,15 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       } else tasks.push(loadFundamental(symbol, cls, env, now).then(r => { fundamental = r.report; fundNotes = r.notes; setup = r.setup; if (r.report.status === "unavailable") fundMissing = r.report.warnings[0]; }));
       if (post && Array.isArray(body.news)) {
         if (body.news.length > MAX_NEWS_ITEMS) return reply({ error: "too_many_news_items", max: MAX_NEWS_ITEMS }, 400);
-        sentiment = assessSentiment(symbol, body.news as NewsItem[], now);
-      } else tasks.push(loadNews(symbol, cls, env, now).then(r => { sentiment = r.assessment; feeds = r.feeds; }).catch(e => { sentMissing = `News ingestion failed: ${e instanceof Error ? e.message : "error"}`; }));
+        sentiment = await assessSentimentWithAi(symbol, cap(body.news as NewsItem[], limits.maxNewsItems), now, sentimentOpts(symbol, cls), env, { maxItems: limits.aiMaxItems, memo: cached });
+      } else tasks.push(loadNews(symbol, cls, env, now, limits.maxNewsItems).then(r => { sentiment = r.assessment; feeds = r.feeds; }).catch(e => { sentMissing = `News ingestion failed: ${e instanceof Error ? e.message : "error"}`; }));
       await Promise.all(tasks);
       let omni = null as ReturnType<typeof runOmnisignal> | null;
       if (mtf && q("include")?.includes("omnisignal") && hasCandles) {
         try { const c: Partial<Record<AlgoTf, Kline[]>> = {}; for (const tf of ALGO_TFS) if (candles[tf as MtfTimeframe]) c[tf] = candles[tf as MtfTimeframe]; omni = runOmnisignal({ symbol, strategy: stratRaw, candles: c, now }); } catch { omni = null; }
       }
       const brief = centralIntelligence({ symbol, assetClass: cls, strategy: stratRaw, mtf, fundamental, sentiment, omnisignal: omni, now, fundamentalMissingReason: fundMissing, sentimentMissingReason: sentMissing ?? (mtfNote ?? undefined) });
-      return reply({ ...brief, technicalDetail: mtf ? { alignment: mtf.alignment, layers: mtf.layers, timeframes: mtf.timeframes.map(t => ({ timeframe: t.timeframe, layer: t.layer, mode: t.mode, stance: t.report.stance, score: t.report.score, confidence: t.report.confidence, closedCandles: t.closedCandles })) } : null, dataQuality: { providers, notes: yahooNotes, detail, candleFailures: failures, newsFeeds: feeds, fundamentalNotes: fundNotes, setupRequired: setup ?? null, technicalNote: mtfNote } });
+      return reply({ ...brief, technicalDetail: mtf ? { alignment: mtf.alignment, layers: mtf.layers, timeframes: mtf.timeframes.map(t => ({ timeframe: t.timeframe, layer: t.layer, mode: t.mode, stance: t.report.stance, score: t.report.score, confidence: t.report.confidence, closedCandles: t.closedCandles })) } : null, dataQuality: { providers, notes: yahooNotes, plan: limits.plan, detail, detailDowngraded: dr.downgraded, candleFailures: failures, newsFeeds: feeds, fundamentalNotes: fundNotes, setupRequired: setup ?? null, technicalNote: mtfNote } });
     }
     if (path === "/api/analysis/fundamental") {
       if (post) {
@@ -219,8 +239,14 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       const r = await loadFundamental(symbol, cls, env, now);
       return reply({ ...r.report, notes: r.notes, setupRequired: r.setup ?? null }, r.report.status === "unavailable" ? 503 : 200);
     }
+    if (path === "/api/analysis/institutional") {
+      if (cls === "crypto" || cls === "fx") return reply({ error: "stocks_only", detail: "13F institutional ownership applies to US-listed equities" }, 400);
+      const so = Number(q("sharesOutstanding")); const r = await loadInstitutional(env.ETI_PORTFOLIO_DB, symbol, Number.isFinite(so) && so > 0 ? so : undefined, now);
+      return reply(r, r.status === "loaded" ? 200 : r.status === "no_data" ? 404 : 503);
+    }
     if (path === "/api/analysis/calibrate") {
-      const tf = (q("timeframe") ?? "1d") as MtfTimeframe, horizon = Math.min(100, Math.max(1, Number(q("horizon") ?? 10) || 10)), maxSamples = Math.min(300, Math.max(10, Number(q("maxSamples") ?? 80) || 80));
+      if (!limits.calibrateAllowed) return reply({ error: "plan_limit", detail: "Calibration needs far more CPU than the Workers Free plan allows (and a handful of samples would be statistically meaningless). Run `npm run calibrate -- SYMBOL INTERVAL` locally, or set ETI_ANALYSIS_PLAN=paid on a Workers Paid plan.", plan: limits.plan }, 403);
+      const tf = (q("timeframe") ?? "1d") as MtfTimeframe, horizon = Math.min(100, Math.max(1, Number(q("horizon") ?? 10) || 10)), maxSamples = Math.min(limits.calibrateMaxSamples, Math.max(10, Number(q("maxSamples") ?? 80) || 80));
       let rows: Kline[];
       if (post) { const sc = sanitizeCandles(body.candles); if (sc.error) return reply({ error: "invalid_candles", detail: sc.error }, 400); rows = sc.rows; }
       else {
@@ -232,8 +258,8 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       return reply({ symbol, ...calibrateTechnical(rows, { timeframe: tf, horizon, maxSamples, detail: "lite" }), note: "Technical engine only; fundamentals and news have no price-based history to calibrate against." });
     }
     if (path === "/api/analysis/news") {
-      if (post) { if (!Array.isArray(body.items)) return reply({ error: "items_array_required" }, 400); if (body.items.length > MAX_NEWS_ITEMS) return reply({ error: "too_many_news_items", max: MAX_NEWS_ITEMS }, 400); return reply(assessSentiment(symbol, body.items as NewsItem[], now)); }
-      const r = await loadNews(symbol, cls, env, now);
+      if (post) { if (!Array.isArray(body.items)) return reply({ error: "items_array_required" }, 400); if (body.items.length > MAX_NEWS_ITEMS) return reply({ error: "too_many_news_items", max: MAX_NEWS_ITEMS }, 400); return reply(await assessSentimentWithAi(symbol, cap(body.items as NewsItem[], limits.maxNewsItems), now, sentimentOpts(symbol, cls), env, { maxItems: limits.aiMaxItems, memo: cached })); }
+      const r = await loadNews(symbol, cls, env, now, limits.maxNewsItems);
       return reply({ ...r.assessment, feeds: r.feeds, itemsScanned: r.scanned, rejectedAtSource: r.rejectedAtSource });
     }
     return reply({ error: "not_found", path }, 404);

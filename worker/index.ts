@@ -233,7 +233,7 @@ ${VIZ_HTML}
 <pre id="rdText" class="execution-output" style="display:none"></pre>
 <section class="panel" id="intelPanel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Analysis Intelligence</h2><span class="muted" id="intelMeta">Technical, multi-timeframe, fundamental and news engines, weighed by a central intelligence layer</span></div>
-<div class="toolbar"><select id="intelStrategy"><option value="intraday">Intraday</option><option value="scalp">Scalp</option><option value="swing">Swing</option><option value="position">Position</option></select><select id="intelDetail" title="Lite skips the heaviest detectors to fit Workers Free CPU limits"><option value="full">Full detail</option><option value="lite">Lite (low CPU)</option></select><button id="intelRun">Run analysis for selected symbol</button></div>
+<div class="toolbar"><select id="intelStrategy"><option value="intraday">Intraday</option><option value="scalp">Scalp</option><option value="swing">Swing</option><option value="position">Position</option></select><select id="intelDetail" title="Lite skips the heaviest detectors to fit Workers Free CPU limits"><option value="lite">Lite (Free plan)</option><option value="full">Full (needs Paid plan)</option></select><button id="intelRun">Run analysis for selected symbol</button></div>
 <div id="intelOut" class="execution-note">Not run yet. Analysis is evidence for review, not an instruction to trade; it never places orders.</div>
 </section>
 <section class="panel" style="margin-top:14px">
