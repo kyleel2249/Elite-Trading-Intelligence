@@ -175,33 +175,27 @@ async def lifespan(app: FastAPI):
         await _start_component("adaptive_edge_job", adaptive_job.start)
     if settings.quiver_configured:
         await _start_component("investor_monitor_job", investor_monitor_job.start)
+    # These two used to sit after the first `yield` (a second yield in one lifespan), so they only ever ran at
+    # shutdown and never at startup. Start them here, before the single yield.
+    if settings.execution_enabled:
+        await _start_component("execution_supervisor_job", execution_supervisor_job.start)
+    if (alpha_job is not None and getattr(settings, "alpha_research_enabled", False)
+            and (getattr(settings, "app_env", "") or "").strip().lower() != "test"):
+        await _start_component("alpha_research_job", alpha_job.start)
     try:
         yield
     finally:
         # Keep cleaning up even if one component fails during shutdown.
-        results = await asyncio.gather(
-            investor_monitor_job.stop(), reconcile_job.stop(), mtm_job.stop(), stream_hub.stop(),
-            return_exceptions=True,
-        )
+        stops = [execution_supervisor_job.stop(), paper_job.stop(), investor_monitor_job.stop(),
+                 prediction_resolver_job.stop(), reconcile_job.stop(), mtm_job.stop(), stream_hub.stop()]
+        if alpha_job is not None:
+            stops.insert(0, alpha_job.stop())
+        if adaptive_job is not None:
+            stops.append(adaptive_job.stop())
+        results = await asyncio.gather(*stops, return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
                 logger.warning("shutdown component failed: %s", type(result).__name__)
-    if settings.execution_enabled:
-        await _start_component("execution_supervisor_job", execution_supervisor_job.start)
-    if alpha_job is not None and getattr(settings, "alpha_research_enabled", False):
-        await _start_component("alpha_research_job", alpha_job.start)
-    yield
-    if alpha_job is not None:
-        await alpha_job.stop()
-    await execution_supervisor_job.stop()
-    await paper_job.stop()
-    await investor_monitor_job.stop()
-    if adaptive_job is not None:
-        await adaptive_job.stop()
-    await prediction_resolver_job.stop()
-    await reconcile_job.stop()
-    await mtm_job.stop()
-    await stream_hub.stop()
 
 
 app = FastAPI(
@@ -237,6 +231,7 @@ for _module_path, _label in (
     ("app.api.chain", "chain"),
     ("app.api.intel", "intel"),
     ("app.api.market_symbols", "market_symbols"),
+    ("app.api.valuation", "valuation"),
 ):
     try:
         _mod = __import__(_module_path, fromlist=["router"])
