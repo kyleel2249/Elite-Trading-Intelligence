@@ -166,6 +166,29 @@ shortened so it never outlives the start of a blackout. `bias` is -1 (bearish) t
 Without any KV binding the engine still works: fundamentals, news, expectancy and calibration are simply `unavailable`, the
 score is capped, and confidence is qualitative.
 
+## Outcome ledger and automatic calibration
+
+An optional scheduled cycle records the engine's own tradeable signals, resolves them from closed candles and feeds the results back
+into calibration and expectancy. It never places an order.
+
+- **Enable**: set `ETI_PRECISION_SYMBOLS` (comma separated crypto symbols, at most 10, e.g. `BTCUSDT,ETHUSDT`). Optional:
+  `ETI_PRECISION_STRATEGIES` (default `intraday`) and `ETI_PRECISION_BATCH` (pairs evaluated per cron tick, 1 to 4, default 1; pairs
+  rotate every five minutes). A KV namespace must be bound (`ETI_PRECISION_DATA` or `ETI_EXECUTION_LOG`). Off by default.
+- **What is recorded**: only complete BUY/SELL plans. A signal is a limit order at its entry price, live until it expires.
+- **How it resolves** (closed candles only, never the forming one): filled by the first closed candle after the signal whose range
+  contains the entry; then walked bar by bar from the next candle with the stop tested first, 40/30/30 partial exits at TP1/TP2/TP3,
+  stop to break-even after TP1, ATR trail after TP2 and a 48-bar time stop. If no TP3 was justified the last 30% is trail/time managed
+  rather than closed at an invented target. Net R = realised R minus the signal's own estimated round-trip cost. A win is net R above zero.
+  Unfilled and void signals are reported but excluded from win rate and calibration.
+- **Refit**: once at least 100 outcomes exist and 25 new ones (or seven days) have accrued, calibration is refitted on outcomes scored
+  under the current scoring configuration only, and expectancy is re-estimated with a seeded bootstrap. A positive expectancy is stored as
+  proven only if its 95% interval is entirely above zero; otherwise it is stored as "unproven" and the expectancy gate reports
+  `not_evaluated`. A negative one is stored and blocks. Calibration still has to pass its own held-out checks before probabilities appear.
+- **Read it**: `GET /api/precision/ledger?strategy=intraday`. **Run now**: `POST /api/precision/admin/cycle[?symbol=&strategy=]` with the
+  admin token.
+- **Bounds**: a tick stays inside the Workers Free 50-subrequest limit (about 8 fetches per evaluated pair, at most 4 candle fetches to
+  resolve). Because only tradeable signals are recorded, calibration describes the score range the engine actually signals.
+
 ## Using a signal with the execution gateway
 
 The signal is analytical. To trade one, submit through `POST /api/orders` (paper / testnet) and pass the signal's `signalId` in
