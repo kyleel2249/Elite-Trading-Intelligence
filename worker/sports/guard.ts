@@ -88,7 +88,8 @@ async function cachedResponse(key: string, produce: () => Promise<Response>, tra
     pending = (async () => {
       const res = await produce();
       const entry = toEntry(res, transform(await res.text()));
-      if (entry.status === 200) {
+      // A partial scan (some fixtures skipped after provider errors) is served but never cached, so a retry can fill the gaps.
+      if (entry.status === 200 && res.headers.get("x-eti-partial") !== "1") {
         cache.set(key, entry);
         while (cache.size > MAX_ENTRIES) {
           const oldest = cache.keys().next().value;
