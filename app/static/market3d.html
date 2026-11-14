@@ -37,10 +37,13 @@
         <label class="sub" for="prov">Market</label>
         <select id="prov">
           <option value="binance" selected>Binance (crypto)</option>
+          <option value="bitget">Bitget (crypto)</option>
           <option value="alpaca">US stocks (Alpaca)</option>
+          <option value="oanda">Forex &amp; CFDs (OANDA)</option>
+          <option value="twelvedata">Non-US stocks &amp; forex (Twelve Data)</option>
         </select>
         <label class="sub" for="sym">Symbol</label>
-        <input id="sym" list="symlist" value="BTCUSDT" maxlength="20" autocapitalize="characters" autocomplete="off" spellcheck="false" size="12" aria-describedby="symhint">
+        <input id="sym" list="symlist" value="BTCUSDT" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" size="14" aria-describedby="symhint">
         <datalist id="symlist"></datalist>
         <label class="sub" for="int">Interval</label>
         <select id="int">
@@ -69,7 +72,7 @@
         <span><i class="sw" style="background:#ef4444"></i>Close &lt; open</span>
         <span><i class="sw" style="background:#3b82f6"></i>Volume (front row)</span>
       </div>
-      <p class="note">Drag (or use arrow keys) to rotate. Candles are plotted from exchange data; nothing is simulated. If data cannot be loaded or is stale the chart says so instead of showing old values as live. Stock candles are older than expected outside market hours and will be labelled stale.</p>
+      <p class="note">Drag (or use arrow keys) to rotate. Candles are plotted from exchange data; nothing is simulated. If data cannot be loaded or is stale the chart says so instead of showing old values as live. Stock and forex candles are older than expected outside market hours and will be labelled stale. OANDA, Alpaca and Twelve Data need their credentials configured on the server; without them the market says so. Non-US stocks are listed as TICKER:EXCHANGE (for example SAP:XETR).</p>
     </div>
   </section>
 

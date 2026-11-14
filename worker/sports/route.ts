@@ -12,27 +12,72 @@ const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status
 const SPORTS:Record<string,string>={soccer_epl:"Premier League",soccer_uefa_champs_league:"UEFA Champions League",soccer_spain_la_liga:"La Liga",soccer_italy_serie_a:"Serie A",soccer_germany_bundesliga:"Bundesliga",soccer_france_ligue_one:"Ligue 1",basketball_nba:"NBA",basketball_wnba:"WNBA",americanfootball_nfl:"NFL",baseball_mlb:"MLB",icehockey_nhl:"NHL",tennis_atp_french_open:"ATP French Open",tennis_wta_french_open:"WTA French Open",cricket_test_match:"Test Cricket",rugby_union:"Rugby Union"};
 const jsonBody=async(req:Request)=>{try{return await req.json() as Record<string,unknown>}catch{return null}};
 const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+/** Tunables for the OddsPapi client. Exported so tests can run without real delays. */
+export const oddsPapiRetry={maxAttempts:3,baseMs:400,maxDelayMs:15000,timeoutMs:15000};
+/** Structured provider failure: `message` keeps the stable ODDSPAPI_* prefix, the rest is for the API response. */
+export class OddsPapiError extends Error{
+ kind:"invalid_json"|"rate_limit"|"http_error"|"invalid_payload"|"provider_error"|"timeout"|"network";
+ providerStatus:number|null;retryable:boolean;path:string;retryAfterMs:number|null;
+ constructor(kind:OddsPapiError["kind"],message:string,path:string,providerStatus:number|null,retryable:boolean,retryAfterMs:number|null=null){
+  super(message);this.name="OddsPapiError";this.kind=kind;this.path=path;this.providerStatus=providerStatus;this.retryable=retryable;this.retryAfterMs=retryAfterMs;
+ }
+}
+// 5xx gateway/availability statuses are retried. A 505 ("HTTP version not supported") is not retryable by the
+// HTTP spec, but provider edge gateways emit it spuriously under load, so it is retried a bounded number of times.
+const RETRYABLE_STATUS=new Set([408,425,500,502,503,504,505]);
+const retryDelay=(attempt:number,hintMs:number|null)=>Math.min(oddsPapiRetry.maxDelayMs,Math.max(hintMs??0,oddsPapiRetry.baseMs*2**attempt));
 export async function oddsPapiGet(apiKey:string,path:string,params:Record<string,string>):Promise<any>{
  const url="https://api.oddspapi.io/v4/"+path+"?"+new URLSearchParams({...params,apiKey}).toString();
- for(let attempt=0;attempt<3;attempt++){
-  const response=await fetch(url,{headers:{accept:"application/json"}});
-  const body=await response.text();
+ let last:OddsPapiError|null=null;
+ for(let attempt=0;attempt<oddsPapiRetry.maxAttempts;attempt++){
+  if(attempt>0)await pause(retryDelay(attempt-1,last?.retryAfterMs??null));
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),oddsPapiRetry.timeoutMs);
+  let response:Response,body:string;
+  try{
+   response=await fetch(url,{headers:{accept:"application/json"},signal:controller.signal});
+   body=await response.text();
+  }catch(e){
+   const aborted=controller.signal.aborted||(e instanceof Error&&e.name==="AbortError");
+   // Never include the request URL here: it carries the API key.
+   last=aborted?new OddsPapiError("timeout","ODDSPAPI_TIMEOUT: "+path+" did not answer within "+Math.round(oddsPapiRetry.timeoutMs/1000)+"s",path,null,true)
+    :new OddsPapiError("network","ODDSPAPI_NETWORK: "+path+" connection failed",path,null,true);
+   continue;
+  }finally{clearTimeout(timer);}
+  const retryAfter=Number(response.headers.get("retry-after"));const retryAfterMs=Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:null;
+  const retryableStatus=RETRYABLE_STATUS.has(response.status);
   let payload:any=null;
   try{payload=body?JSON.parse(body):null;}catch{
    const preview=body.slice(0,180);
-   throw new Error("ODDSPAPI_INVALID_JSON: "+path+" returned HTTP "+response.status+" ("+(response.headers.get("content-type")||"unknown content type")+"). Body preview: "+preview);
+   last=new OddsPapiError("invalid_json","ODDSPAPI_INVALID_JSON: "+path+" returned HTTP "+response.status+" ("+(response.headers.get("content-type")||"unknown content type")+"). Body preview: "+preview,path,response.status,retryableStatus||response.ok,retryAfterMs);
+   if(last.retryable)continue;throw last;
   }
   if(response.status===429){
    const error=payload?.error||payload||{};
-   if(error?.code==="RATE_LIMITED"&&attempt<2){const retryMs=Math.max(500,Math.min(15000,Number(error.retryMs)||1000));await pause(retryMs+100);continue;}
-   throw new Error("ODDSPAPI_RATE_LIMIT: "+path+" "+(error?.code||"HTTP 429")+": "+(error?.message||"rate or request quota limit"));
+   const hint=error?.code==="RATE_LIMITED"?Math.max(500,Math.min(15000,Number(error.retryMs)||1000))+100:retryAfterMs;
+   last=new OddsPapiError("rate_limit","ODDSPAPI_RATE_LIMIT: "+path+" "+(error?.code||"HTTP 429")+": "+(error?.message||"rate or request quota limit"),path,429,error?.code==="RATE_LIMITED",hint);
+   if(last.retryable)continue;throw last;
   }
-  if(!response.ok)throw new Error("ODDSPAPI_HTTP_ERROR: "+path+" HTTP "+response.status+": "+(payload?.error?.message||payload?.message||"provider request failed"));
-  if(payload===null||typeof payload!=="object")throw new Error("ODDSPAPI_INVALID_PAYLOAD: "+path+" returned an empty or non-object JSON response");
-  if(payload.error)throw new Error("ODDSPAPI_PROVIDER_ERROR: "+path+": "+(payload.error.message||payload.error.code||JSON.stringify(payload.error)));
+  if(!response.ok){
+   last=new OddsPapiError("http_error","ODDSPAPI_HTTP_ERROR: "+path+" HTTP "+response.status+": "+(payload?.error?.message||payload?.message||"provider request failed"),path,response.status,retryableStatus,retryAfterMs);
+   if(last.retryable)continue;throw last;
+  }
+  if(payload===null||typeof payload!=="object")throw new OddsPapiError("invalid_payload","ODDSPAPI_INVALID_PAYLOAD: "+path+" returned an empty or non-object JSON response",path,response.status,false);
+  if(payload.error)throw new OddsPapiError("provider_error","ODDSPAPI_PROVIDER_ERROR: "+path+": "+(payload.error.message||payload.error.code||JSON.stringify(payload.error)),path,response.status,false);
   return payload;
  }
- throw new Error("ODDSPAPI_RATE_LIMIT: "+path+" retry attempts exhausted");
+ throw last??new OddsPapiError("rate_limit","ODDSPAPI_RATE_LIMIT: "+path+" retry attempts exhausted",path,429,true);
+}
+/** Maps a provider failure to an honest response status and a plain-language hint for the dashboard. */
+export function providerFailure(e:unknown):{status:number;message:string;provider_status:number|null;kind:string;retryable:boolean;hint:string}{
+ const message=e instanceof Error?e.message:"Odds provider unavailable";
+ if(!(e instanceof OddsPapiError))return{status:502,message,provider_status:null,kind:"unknown",retryable:false,hint:"Unexpected failure while contacting the odds provider."};
+ const hint=e.kind==="timeout"?"OddsPapi did not respond in time after "+oddsPapiRetry.maxAttempts+" attempts. Try again shortly."
+  :e.kind==="rate_limit"?"OddsPapi rate or quota limit reached. Wait a minute, or check the plan's request quota."
+  :e.providerStatus===505?"OddsPapi's gateway rejected the request with HTTP 505 (HTTP version not supported) on "+oddsPapiRetry.maxAttempts+" attempts. This is a fault on the provider side, not in your configuration. Retry in a minute; if it persists, report the time to OddsPapi support."
+  :e.providerStatus!==null&&e.providerStatus>=500?"OddsPapi returned a server error (HTTP "+e.providerStatus+") on every attempt. This is a provider-side outage; retry shortly."
+  :e.providerStatus===401||e.providerStatus===403?"OddsPapi rejected the API key. Check ODDSPAPI_API_KEY and that the subscription is active."
+  :"OddsPapi returned an unusable response.";
+ return{status:e.kind==="timeout"?504:502,message,provider_status:e.providerStatus,kind:e.kind,retryable:e.retryable,hint};
 }
 function authorized(req:Request,env:SportsEnv){const expected=env.ETI_SPORTS_PAPER_TOKEN;return !!expected&&req.headers.get("x-eti-sports-token")===expected;}
 function db(env:SportsEnv){return env.ETI_PORTFOLIO_DB;}
@@ -81,13 +126,18 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      let upcoming=candidates;
      if(automatic&&db(env)){const recent=await db(env)!.prepare("SELECT DISTINCT fixture_id FROM sports_event_scans WHERE scanned_at>=?").bind(Date.now()-24*60*60*1000).all<any>();const seen=new Set((recent.results||[]).map((x:any)=>String(x.fixture_id)));const fresh=candidates.filter((x:any)=>!seen.has(String(x.fixtureId)));upcoming=(fresh.length?fresh:candidates).slice(0,limit);}else upcoming=candidates.slice(0,limit);
      const events:any[]=[];
+     // One bad fixture must not discard the ones that already succeeded; stop early only if the provider is clearly down.
+     const failures:any[]=[];let consecutiveFailures=0;let firstFailure:unknown=null;
      for(let i=0;i<upcoming.length;i++){
        const f=upcoming[i];if(i>0)await new Promise(resolve=>setTimeout(resolve,550));
-       const odds=await call("odds",{fixtureId:String(f.fixtureId),oddsFormat:"decimal",language:"en",verbosity:"3"});
+       let odds:any;
+       try{odds=await call("odds",{fixtureId:String(f.fixtureId),oddsFormat:"decimal",language:"en",verbosity:"3"});consecutiveFailures=0;}
+       catch(e){const pf=providerFailure(e);failures.push({fixture_id:f.fixtureId,fixture:f.participant1Name+" vs "+f.participant2Name,kind:pf.kind,provider_status:pf.provider_status,retryable:pf.retryable,message:pf.message});if(firstFailure===null)firstFailure=e;if(++consecutiveFailures>=3)break;continue;}
        const bookmakerOdds=odds?.bookmakerOdds||{};
        const bookmakers=Object.entries(bookmakerOdds).filter(([,v]:[string,any])=>v?.bookmakerIsActive!==false&&!v?.suspended).map(([key,value]:[string,any])=>({key,title:bookmakerTitle(key),markets:Object.entries(value?.markets||{}).filter(([,m]:[string,any])=>m?.marketActive!==false).map(([marketKey,market]:[string,any])=>({key:({"101":"Full Time Result","104":"Both Teams To Score","106":"Over/Under Full Time"} as Record<string,string>)[marketKey]||"Market "+marketKey,market_id:marketKey,outcomes:Object.entries(market?.outcomes||{}).flatMap(([outcomeKey,outcome]:[string,any])=>Object.entries(outcome?.players||{}).filter(([,player]:[string,any])=>player?.active&&Number.isFinite(Number(player?.price))&&Number(player.price)>1).map(([,player]:[string,any])=>({name:({"101":{"101":"Home","102":"Draw","103":"Away"},"104":{"104":"Yes","105":"No"},"106":{"106":"Over 2.5","107":"Under 2.5"}} as Record<string,Record<string,string>>)[marketKey]?.[outcomeKey]||String(player?.bookmakerOutcomeId||outcomeKey)+(player?.playerName?" / "+player.playerName:""),outcome_code:outcomeKey,price:Number(player.price),last_update:player.changedAt||player.bookmakerChangedAt||null}))) }))}));
        events.push({id:f.fixtureId,sport_key:"soccer",sport_title:"Football",home_team:f.participant1Name,away_team:f.participant2Name,commence_time:f.startTime,league:f.tournamentName,country:f.categoryName,bookmakers});
      }
+     if(!events.length&&failures.length)throw firstFailure;
      let history:MatchResult[]=[];let calibration:any={temperature:1,sampleSize:0,brierScore:null,logLoss:null,calibrated:false};let bankrollCents=0;
      if(db(env)){
        const h=await db(env)!.prepare("SELECT fixture_id,played_at,competition,home_team,away_team,home_goals,away_goals FROM sports_match_results ORDER BY played_at DESC LIMIT 600").all<any>();
@@ -118,8 +168,9 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
      if(automatic&&db(env))await finishJob(db(env)!,"football-global-scan","OK","Fixtures "+events.length);
      const sportybetEvents=events.filter(e=>e.bookmakers.some((b:any)=>String(b.key).toLowerCase()==="sportybet"));
      const sportybetOutcomeCount=sportybetEvents.reduce((n:number,e:any)=>n+e.bookmakers.filter((b:any)=>String(b.key).toLowerCase()==="sportybet").reduce((m:number,b:any)=>m+b.markets.reduce((k:number,x:any)=>k+x.outcomes.length,0),0),0);
-     return reply({provider:"OddsPapi",sport:"football",competition_filter:competitionFilter,coverage:"bookmakers_returned_by_provider",coverage_note:competitionFilter==="uefa_nations_league"?"UEFA Nations League fixtures returned by the active OddsPapi football feed within the 47-hour window.":"All football fixtures returned by the active OddsPapi feed within the 47-hour window.",truncated:candidates.length>upcoming.length,available_fixture_count:candidates.length,fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_candidates:candidates.length,fixture_count:upcoming.length,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map((b:any)=>b.key)))].length,sportybet:{fixture_count:sportybetEvents.length,outcome_count:sportybetOutcomeCount},event_journal_saved:journalSaved,history_matches:history.length,model_calibration:{...calibration,stake_enabled:calibrated},next_event:events[0]||null,events});
-   }catch(e){if(u.searchParams.get("automatic")==="1"&&db(env)){try{await finishJob(db(env)!,"football-global-scan","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}return reply({error:"global_football_scan_failed",message:e instanceof Error?e.message:"Odds provider unavailable"},502);}
+     const scanBody={provider:"OddsPapi",sport:"football",competition_filter:competitionFilter,coverage:"bookmakers_returned_by_provider",coverage_note:competitionFilter==="uefa_nations_league"?"UEFA Nations League fixtures returned by the active OddsPapi football feed within the 47-hour window.":"All football fixtures returned by the active OddsPapi feed within the 47-hour window.",truncated:candidates.length>upcoming.length,available_fixture_count:candidates.length,fetched_at:new Date().toISOString(),window:{from:from.toISOString(),to:to.toISOString()},scan_limit:limit,fixture_candidates:candidates.length,fixture_count:events.length,fixtures_requested:upcoming.length,partial:failures.length>0,provider_errors:failures,bookmaker_count:[...new Set(events.flatMap(e=>e.bookmakers.map((b:any)=>b.key)))].length,sportybet:{fixture_count:sportybetEvents.length,outcome_count:sportybetOutcomeCount},event_journal_saved:journalSaved,history_matches:history.length,model_calibration:{...calibration,stake_enabled:calibrated},next_event:events[0]||null,events};
+     const scanResponse=reply(scanBody);if(failures.length)scanResponse.headers.set("x-eti-partial","1");return scanResponse;
+   }catch(e){if(u.searchParams.get("automatic")==="1"&&db(env)){try{await finishJob(db(env)!,"football-global-scan","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}const pf=providerFailure(e);return reply({error:"global_football_scan_failed",provider:"OddsPapi",message:pf.message,provider_status:pf.provider_status,kind:pf.kind,retryable:pf.retryable,hint:pf.hint,checked_at:new Date().toISOString()},pf.status);}
  }
  if(p==="/api/sports/football/sync-history"&&req.method==="POST"){
    if(!authorized(req,env))return reply({error:"unauthorized"},401);
@@ -160,7 +211,7 @@ export function withSports<E extends SportsEnv>(base:App<E>):App<E>{return{async
        saved++;
      }
      if(automatic)await finishJob(db(env)!,"football-history-sync","OK","Saved "+saved+" results; skipped "+skipped);return reply({ok:true,provider:"OddsPapi",fixtures_found:finished.length,results_saved:saved,skipped,history_total:await db(env)!.prepare("SELECT COUNT(*) AS n FROM sports_match_results").first()});
-   }catch(e){if(automatic&&db(env)){try{await finishJob(db(env)!,"football-history-sync","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}return reply({error:"football_history_sync_failed",message:e instanceof Error?e.message:"History provider unavailable"},502);}
+   }catch(e){if(automatic&&db(env)){try{await finishJob(db(env)!,"football-history-sync","ERROR",e instanceof Error?e.message:"provider unavailable");}catch{}}const pf=providerFailure(e);return reply({error:"football_history_sync_failed",provider:"OddsPapi",message:pf.message,provider_status:pf.provider_status,kind:pf.kind,retryable:pf.retryable,hint:pf.hint},pf.status);}
  }
  if(p==="/api/sports/events"&&req.method==="GET"){
    if(!env.ODDS_API_KEY)return reply({error:"odds_provider_not_configured",message:"Set the ODDS_API_KEY Worker secret to retrieve live bookmaker odds. No fixtures or odds are fabricated."},503);
@@ -228,7 +279,7 @@ function sportsPage(){return `<!doctype html><html lang="en"><head><meta charset
 <section class="card c12"><h2>Model &amp; Risk Controls</h2><div class="grid"><div class="card c5"><b>Probability integrity</b><p class="note">Rolling venue-specific team attack/defence form, competition goal baselines, Poisson scoreline probabilities and out-of-sample temperature calibration.</p></div><div class="card c5"><b>Value and capital gates</b><p class="note">Minimum 3% expected value; 25% Kelly fraction; maximum 1% of the separate sports paper bankroll per event. No stake when data or calibration is inadequate.</p></div><div class="card c12"><b>Execution boundary</b><p class="note">Paper-only ledger. No bookmaker was contacted to place a real-money wager. No bookmaker login, deposits, withdrawals or live wagers are implemented. Automatic result settlement applies to model-backed Full Time Result paper bets only.</p></div></div></section>
 </div></main><script>
 const $=id=>document.getElementById(id);
-async function api(path,opts={}){const h=Object.assign({"content-type":"application/json","accept":"application/json"},opts.headers||{});if($("token").value)h["x-eti-sports-token"]=$("token").value;const r=await fetch(path,{...opts,headers:h});const raw=await r.text();let j;try{j=raw?JSON.parse(raw):{};}catch{const type=r.headers.get("content-type")||"unknown content type";const preview=raw.slice(0,220);throw new Error("ETI returned a non-JSON response for "+path+" (HTTP "+r.status+", "+type+"). Response preview: "+preview);}if(!r.ok)throw new Error(j.message||j.error||("HTTP "+r.status));return j}
+async function api(path,opts={}){const h=Object.assign({"content-type":"application/json","accept":"application/json"},opts.headers||{});if($("token").value)h["x-eti-sports-token"]=$("token").value;const r=await fetch(path,{...opts,headers:h});const raw=await r.text();let j;try{j=raw?JSON.parse(raw):{};}catch{const type=r.headers.get("content-type")||"unknown content type";const preview=raw.slice(0,220);throw new Error("ETI returned a non-JSON response for "+path+" (HTTP "+r.status+", "+type+"). Response preview: "+preview);}if(!r.ok)throw new Error((j.message||j.error||("HTTP "+r.status))+(j.hint?" - "+j.hint:""));return j}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 async function loadStatus(){try{const s=await api("/api/sports/status");let h=null;try{h=await api("/api/sports/health")}catch{}const odd=h?.providers?.oddspapi;const dbReady=h?.database?.ready;const bookieNames=(odd?.bookmakers||[]).slice(0,12).join(", ");const sportybet=odd?.sportybet?.subscribed?"SportyBet subscribed":"SportyBet not in active subscription";$("oddsState").textContent=odd?.reachable?"Connected":odd?.configured?"Key configured / connection failed":s.odds_providers?.the_odds_api==="configured"?"Fallback configured":"Not configured";$("provider").textContent="OddsPapi: "+(odd?.reachable?"reachable":odd?.configured?"unreachable":"key missing")+" • "+sportybet+" • subscribed bookmakers: "+(odd?.bookmaker_count??"—")+(bookieNames?" ("+bookieNames+")":"")+" • D1: "+(dbReady?"ready"+((h?.database?.repaired_tables||[]).length?" (self-repaired)":""):h?.database?.configured?"schema repair required":"not configured");}catch(e){$("provider").textContent=e.message}}
 let latestRows=[];
@@ -249,7 +300,7 @@ async function scan(){
  try{
   const competition=$("competition").value;
   const j=await api("/api/sports/football/next?limit="+(competition==="uefa_nations_league"?12:8)+"&competition="+encodeURIComponent(competition));
-  $("quota").textContent="Competition: "+(j.competition_filter||"all")+" • Provider: "+j.provider+" • Fixtures: "+(j.fixture_count??0)+(j.truncated?" of "+(j.available_fixture_count??0):"")+" • Bookmakers: "+(j.bookmaker_count??0)+" • SportyBet: "+(j.sportybet?.fixture_count??0)+" fixtures / "+(j.sportybet?.outcome_count??0)+" outcomes • Training matches: "+(j.history_matches??0)+" • Calibration records: "+(j.model_calibration?.sampleSize??0);
+  $("quota").textContent="Competition: "+(j.competition_filter||"all")+" • Provider: "+j.provider+" • Fixtures: "+(j.fixture_count??0)+(j.truncated?" of "+(j.available_fixture_count??0):"")+" • Bookmakers: "+(j.bookmaker_count??0)+" • SportyBet: "+(j.sportybet?.fixture_count??0)+" fixtures / "+(j.sportybet?.outcome_count??0)+" outcomes • Training matches: "+(j.history_matches??0)+" • Calibration records: "+(j.model_calibration?.sampleSize??0)+(j.partial?" • WARNING: "+(j.provider_errors||[]).length+" fixture(s) skipped after provider errors - scan again shortly":"");
   $("preds").textContent=j.model_calibration?.stake_enabled?"Calibrated ("+j.model_calibration.sampleSize+")":(j.model_calibration?.sampleSize??0)>=100?"Quality gate failed":(j.history_matches??0)+" training matches";
   const rows=[];for(const e of j.events||[])for(const b of e.bookmakers||[])for(const m of b.markets||[])for(const o of m.outcomes||[])rows.push({event:e,book:b,market:m,outcome:o});latestRows=rows;renderEvents();
  }catch(e){$("events").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}

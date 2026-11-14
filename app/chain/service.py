@@ -27,8 +27,8 @@ from app.chain.models import ChainAllowlist, ChainEvent, ChainTransaction, Chain
 from app.chain.networks import NETWORKS, Network, dex_config, load_limits, rpc_url
 from app.chain.policy import fmt_units, to_units
 from app.chain.rpc import Rpc, RpcError
-from app.chain.txcodec import (decode_address, decode_string, decode_uint, decode_uint_array, encode_call, sign_1559,
-                               sign_legacy)
+from app.chain.txcodec import (decode_address, decode_string, decode_uint, decode_uint_array, enc_address, enc_uint, encode_call,
+                               selector, sign_1559, sign_legacy)
 from app.config import get_settings
 from app.execution.vault import CredentialVault, VaultError
 
@@ -36,6 +36,7 @@ logger = logging.getLogger("eti.chain")
 QUOTE_TTL_SECONDS = 120
 _SEND_LOCK = asyncio.Lock()
 EIP1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+SELL_SIG = "swapExactTokensForETH(uint256,uint256,address[],address,uint256)"
 
 
 class ChainError(Exception):
@@ -61,6 +62,12 @@ def _short(a: str) -> str:
 
 def _hexdata(b: bytes) -> str:
     return "0x" + b.hex()
+
+
+def _sell_calldata(amount_in: int, min_out: int, path: list[str], to: str, deadline: int) -> bytes:
+    """swapExactTokensForETH(amountIn, amountOutMin, path[], to, deadline); the dynamic array sits after 5 head words."""
+    head = enc_uint(amount_in) + enc_uint(min_out) + enc_uint(32 * 5) + enc_address(to) + enc_uint(deadline)
+    return selector(SELL_SIG) + head + enc_uint(len(path)) + b"".join(enc_address(p) for p in path)
 
 
 class ChainService:
@@ -298,25 +305,25 @@ class ChainService:
             raise ChainError("side must be buy|sell and token a valid address", 422)
         token = to_checksum(token)
         row = self.allow_row(net.key, token, "token")
-        decimals = (row.decimals if row and row.decimals is not None else 18)
+        decimals = row.decimals if row and row.decimals is not None else 18
+        symbol = row.symbol if row and row.symbol else "token"
+        try:
+            amount_in = to_units(amount) if side == "buy" else to_units(amount, decimals)
+        except ValueError as e:
+            raise ChainError(str(e), 422)
         w = self._wallet_or_error()
         rpc = await self._checked_rpc(net)
         deadline = int(time.time()) + 1200
         extra = {"token_allowed": row is not None, "slippage_bps": slippage_bps, "router_configured": True}
+        path = [wrapped, token] if side == "buy" else [token, wrapped]
         try:
+            out = decode_uint_array(await rpc.call(router, _hexdata(encode_call("getAmountsOut(uint256,address[])", [amount_in, path]))))[-1]
+            min_out = out * (10000 - slippage_bps) // 10000
             if side == "buy":
-                amount_in = to_units(amount)
-                path = [wrapped, token]
-                out = decode_uint_array(await rpc.call(router, _hexdata(encode_call("getAmountsOut(uint256,address[])", [amount_in, path]))))[-1]
-                min_out = out * (10000 - slippage_bps) // 10000
                 data = encode_call("swapExactETHForTokens(uint256,address[],address,uint256)", [min_out, path, w.address, deadline])
                 prep = await self._prepare(net, kind="swap", to=router, value=amount_in, data=data, notional=amount_in, extra=extra,
-                                           summary=f"Buy {fmt_units(out, decimals)} {(row.symbol if row else 'token')} (min {fmt_units(min_out, decimals)}) with {amount} {net.native}")
+                                           summary=f"Buy about {fmt_units(out, decimals)} {symbol} (min {fmt_units(min_out, decimals)}) with {amount} {net.native}")
             else:
-                amount_in = to_units(amount, decimals)
-                path = [token, wrapped]
-                out = decode_uint_array(await rpc.call(router, _hexdata(encode_call("getAmountsOut(uint256,address[])", [amount_in, path]))))[-1]
-                min_out = out * (10000 - slippage_bps) // 10000
                 bal = decode_uint(await rpc.call(token, _hexdata(encode_call("balanceOf(address)", [w.address]))))
                 allowance = decode_uint(await rpc.call(token, _hexdata(encode_call("allowance(address,address)", [w.address, router]))))
                 ev = []
@@ -325,25 +332,15 @@ class ChainService:
                 needs_approval = allowance < amount_in
                 if needs_approval:
                     ev.append("router allowance is too low: submit the exact-amount approval first and wait for it to confirm")
-                data = encode_call("swapExactTokensForETH(uint256,uint256,address[],address,uint256)", [amount_in, min_out, path, w.address, deadline]) \
-                    if False else b""
-                data = self._sell_calldata(amount_in, min_out, path, w.address, deadline)
-                prep = await self._prepare(net, kind="swap", to=router, value=0, data=data, notional=out, extra=extra, skip_estimate=needs_approval,
-                                           extra_violations=ev, summary=f"Sell {amount} {(row.symbol if row else 'token')} for about {fmt_units(out)} {net.native} (min {fmt_units(min_out)})")
+                prep = await self._prepare(net, kind="swap", to=router, value=0, data=_sell_calldata(amount_in, min_out, path, w.address, deadline),
+                                           notional=out, extra=extra, skip_estimate=needs_approval, extra_violations=ev,
+                                           summary=f"Sell {amount} {symbol} for about {fmt_units(out)} {net.native} (min {fmt_units(min_out)})")
                 prep["needs_approval"] = needs_approval
         except (RpcError, ValueError) as e:
             raise ChainError(f"DEX quote failed: {e}", 502)
         prep.update({"expected_out_wei": str(out), "min_out_wei": str(min_out), "slippage_bps": slippage_bps, "token": token, "router": router,
                      "warning": "Quotes come from the router's current pool state; MEV, price impact and token taxes are not modelled."})
         return prep
-
-    @staticmethod
-    def _sell_calldata(amount_in: int, min_out: int, path: list[str], to: str, deadline: int) -> bytes:
-        from app.chain.txcodec import enc_address, enc_uint, selector
-        sig = "swapExactTokensForETH(uint256,uint256,address[],address,uint256)"
-        head = enc_uint(amount_in) + enc_uint(min_out) + enc_uint(32 * 5) + enc_address(to) + enc_uint(deadline)
-        tail = enc_uint(len(path)) + b"".join(enc_address(p) for p in path)
-        return selector(sig) + head + tail
 
     async def preview_approval(self, network: str, token: str, amount: str) -> dict[str, Any]:
         net = self._net(network)
@@ -358,8 +355,10 @@ class ChainService:
         except ValueError as e:
             raise ChainError(str(e), 422)
         data = encode_call("approve(address,uint256)", [router, raw])
-        return await self._prepare(net, kind="approve", to=token, value=0, data=data, notional=0, extra={"token_allowed": row is not None, "router_configured": True},
-                                   summary=f"Approve the router to spend exactly {amount} {(row.symbol if row else 'token')} (no unlimited approval)")
+        prep = await self._prepare(net, kind="approve", to=token, value=0, data=data, notional=0, extra={"token_allowed": row is not None, "router_configured": True},
+                                   summary=f"Approve the router to spend exactly {amount} {row.symbol if row and row.symbol else 'token'} (no unlimited approval)")
+        prep["token"] = token
+        return prep
 
     # ------------------------------------------------------------------ send
     async def send(self, quote_id: str, confirm: str) -> dict[str, Any]:
@@ -456,6 +455,13 @@ class ChainService:
         rpc = await self._checked_rpc(net)
         ind: list[dict[str, str]] = []
         out: dict[str, Any] = {"network": net.key, "address": to_checksum(address), "indicators": ind}
+
+        async def read(sig: str, dec):
+            try:
+                return dec(await rpc.call(address, _hexdata(encode_call(sig, []))))
+            except (RpcError, ValueError):
+                return None
+
         try:
             code = await rpc.get_code(address)
             size = max(0, (len(code) - 2) // 2)
@@ -463,11 +469,6 @@ class ChainService:
             if size == 0:
                 ind.append({"severity": "informational", "text": "No contract code at this address (an ordinary account or not yet deployed)."})
                 return out
-            async def read(sig: str, dec):
-                try:
-                    return dec(await rpc.call(address, _hexdata(encode_call(sig, []))))
-                except (RpcError, ValueError):
-                    return None
             out["name"], out["symbol"] = await read("name()", decode_string), await read("symbol()", decode_string)
             out["decimals"], out["total_supply"] = await read("decimals()", decode_uint), await read("totalSupply()", decode_uint)
             owner = await read("owner()", decode_address)

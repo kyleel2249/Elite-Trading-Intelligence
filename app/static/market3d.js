@@ -1,9 +1,9 @@
 /* ETI 3D market view.
  * Dependency-free canvas renderer with a manual 3D projection (works offline, no CDN, CSP-friendly).
- * Data comes only from the ETI API: Binance pairs via GET /api/market/public-history, stocks via
- * GET /api/market/history?provider=alpaca; symbols are discovered with GET /api/market/symbols.
- * Nothing is generated or simulated: on any failure the view shows an "unavailable" state, and stale data is
- * labelled stale.
+ * Data comes only from the ETI API: candles via GET /api/market/public-history?provider=... (Binance, Bitget, Alpaca,
+ * OANDA, Twelve Data); symbols are discovered with GET /api/market/symbols.
+ * Nothing is generated or simulated: on any failure the view shows an "unavailable" state with the server's reason, and
+ * stale data is labelled stale.
  */
 (function () {
   'use strict';
@@ -15,8 +15,13 @@
   var INTERVAL_MS = { '1m': 6e4, '5m': 3e5, '15m': 9e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
   var LIMIT = 60, REFRESH_MS = 30000;
   var DEFAULT_VIEW = { yaw: -0.6, pitch: 0.45, zoom: 1 };
-  var LABEL = { binance: 'Binance', alpaca: 'Alpaca' };
-  var DEFAULT_SYMBOL = { binance: 'BTCUSDT', alpaca: 'AAPL' };
+  var LABEL = { binance: 'Binance', bitget: 'Bitget', alpaca: 'Alpaca', oanda: 'OANDA', twelvedata: 'Twelve Data' };
+  var DEFAULT_SYMBOL = { binance: 'BTCUSDT', bitget: 'BTCUSDT', alpaca: 'AAPL', oanda: 'EUR_USD', twelvedata: 'SAP:XETR' };
+  var SYM_RE = {
+    binance: /^[A-Z0-9]{3,20}$/, bitget: /^[A-Z0-9]{3,20}$/, alpaca: /^[A-Z0-9.\-]{1,12}$/, oanda: /^[A-Z0-9_]{3,20}$/,
+    twelvedata: /^([A-Z0-9.\-]{1,12}(:[A-Z0-9]{3,6})?|[A-Z]{3}\/[A-Z]{3})$/
+  };
+  var CRYPTO = { binance: 1, bitget: 1 };
 
   var S = { candles: [], status: 'loading', yaw: DEFAULT_VIEW.yaw, pitch: DEFAULT_VIEW.pitch, zoom: 1,
             auto: false, drag: null, W: 300, H: 300, req: 0, timer: 0, raf: 0, prov: 'binance', symReq: 0, symTimer: 0 };
@@ -43,7 +48,8 @@
         var dl = el('symlist'); dl.textContent = '';
         (j.items || []).forEach(function (it) {
           var o = document.createElement('option'); o.value = it.symbol;
-          o.label = it.name ? it.name : (it.base && it.quote ? it.base + '/' + it.quote : '');
+          var lab = it.name ? it.name : (it.base && it.quote ? it.base + '/' + it.quote : '');
+          o.label = (it.is_new ? 'NEW · ' : '') + lab + (it.exchange && prov === 'twelvedata' ? ' (' + it.exchange + ')' : '');
           dl.appendChild(o);
         });
         var src = (j.sources || {})[prov] || {};
@@ -52,7 +58,7 @@
           hint.textContent = (src.message || 'Symbol list unavailable') + '. You can still type a symbol and press Load.';
         } else {
           hint.textContent = j.total + ' matching symbol' + (j.total === 1 ? '' : 's') + ' in ' + (src.count || 0) + ' listed' +
-            (src.status === 'stale' ? ' (STALE list: ' + src.message + ')' : '') + '. Showing up to 40.';
+            (src.status === 'stale' ? ' (STALE list: ' + src.message + ')' : (src.message ? ' (' + src.message + ')' : '')) + '. Showing up to 40.';
         }
       })
       .catch(function () {
@@ -79,18 +85,22 @@
     var prov = el('prov').value;
     var sym = (el('sym').value || '').trim().toUpperCase();
     var iv = el('int').value;
-    var okSym = prov === 'binance' ? /^[A-Z0-9]{3,20}$/.test(sym) : /^[A-Z0-9.\-]{1,12}$/.test(sym);
+    var okSym = (SYM_RE[prov] || SYM_RE.binance).test(sym);
     if (!okSym || !INTERVAL_MS[iv]) {
       S.candles = []; S.status = 'invalid';
       setBanner('bad', 'Enter a valid symbol such as ' + DEFAULT_SYMBOL[prov] + '.');
       render(); return;
     }
     var token = ++S.req;
-    var url = prov === 'binance'
-      ? '/api/market/public-history?symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT
-      : '/api/market/history?provider=alpaca&symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT;
+    var url = '/api/market/public-history?provider=' + encodeURIComponent(prov) + '&symbol=' + encodeURIComponent(sym) +
+              '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT;
     fetch(url, { headers: { Accept: 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error(r.status === 404 ? 'unknown symbol' : 'HTTP ' + r.status); return r.json(); })
+      .then(function (r) {
+        if (r.ok) return r.json();
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          throw new Error(typeof j.detail === 'string' ? j.detail : (r.status === 404 ? 'unknown symbol' : 'HTTP ' + r.status));
+        });
+      })
       .then(function (rows) {
         if (token !== S.req) return; // a newer request superseded this one
         var c = clean(rows);
@@ -101,7 +111,7 @@
         var stale = lag > INTERVAL_MS[iv] * 1.5;
         S.status = stale ? 'stale' : 'live';
         setBanner(stale ? 'bad' : 'ok',
-          stale ? 'STALE: newest candle for ' + sym + ' closed ' + Math.round(lag / 60000) + ' min ago' + (prov === 'alpaca' ? ' (the market may be closed)' : '') + '. Do not treat as live.'
+          stale ? 'STALE: newest candle for ' + sym + ' closed ' + Math.round(lag / 60000) + ' min ago' + (CRYPTO[prov] ? '' : ' (the market may be closed)') + '. Do not treat as live.'
                 : 'Showing ' + c.out.length + ' ' + iv + ' candles for ' + sym + ' (' + LABEL[prov] + ', via ETI). Updated ' + new Date().toISOString().slice(11, 19) + ' UTC.' +
                   (c.bad ? ' ' + c.bad + ' invalid candle(s) excluded.' : ''));
         table(); render();

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     max_correlated_exposure_pct: float = 25.0
     # Hard notional cap per position as % of equity (product rule).
     max_position_notional_pct: float = 6.0
+    # Fractional Kelly used by /api/valuation sizing. Clamped to [0.25, 0.50]; keep 0.25 until
+    # out-of-sample evidence supports more.
+    kelly_fraction: float = 0.25
     require_live_confirmation: bool = True
 
     # Autonomous execution engine (docs/EXECUTION_ENGINE.md). Off by default.
@@ -152,6 +155,12 @@ class Settings(BaseSettings):
             if v.startswith(prefix):
                 return "postgresql+psycopg2://" + v[len(prefix):]
         return v
+
+    @field_validator("kelly_fraction", mode="after")
+    @classmethod
+    def _clamp_kelly_fraction(cls, v: float) -> float:
+        """Fractional Kelly stays within [0.25, 0.50] however the environment is set."""
+        return max(0.25, min(float(v), 0.50))
 
     @property
     def alpaca_configured(self) -> bool:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +11,6 @@ from fastapi.testclient import TestClient
 from app.chain import service as chain_service
 from app.chain.crypto import address_from_private, is_address, keccak256
 from app.chain.models import ChainAllowlist, ChainEvent, ChainTransaction, ChainWallet
-from app.chain.networks import NETWORKS
 from app.chain.rpc import RpcError
 from app.chain.service import ChainError, ChainService
 from app.database import SessionLocal, init_db
@@ -136,7 +134,7 @@ def test_transfer_requires_allowlist_cap_and_valid_input(env):
     assert ok["allowed"] and ok["quote_id"] and ok["value_wei"] == str(10 ** 16) and ok["fees"]["type"] == 2
     big = run(s.preview_transfer("sepolia", DEST, "0.06"))
     assert not big["allowed"] and any("per-transaction cap" in v for v in big["violations"])
-    for bad_to, bad_amt in ((("0x123"), "0.01"), (DEST, "0"), (DEST, "0.0000000000000000001")):
+    for bad_to, bad_amt in (("0x123", "0.01"), (DEST, "0"), (DEST, "0.0000000000000000001")):
         with pytest.raises(ChainError) as e:
             run(s.preview_transfer("sepolia", bad_to, bad_amt))
         assert e.value.status == 422
@@ -201,7 +199,7 @@ def test_tampered_and_expired_quotes_are_rejected(env, monkeypatch):
         with pytest.raises(ChainError) as e:
             run(s.send(bad, "SEND"))
         assert e.value.status == 400
-    monkeypatch.setattr(chain_service.time, "time", lambda: time.time.__call__() + 1000 if False else 4102444800.0)
+    monkeypatch.setattr(chain_service, "time", SimpleNamespace(time=lambda: 4102444800.0))   # year 2100: the quote is long expired
     with pytest.raises(ChainError) as e2:
         run(s.send(q, "SEND"))
     assert "expired" in e2.value.message and not fake.sent
@@ -253,6 +251,9 @@ def test_swap_buy_preview_enforces_token_allowlist_and_slippage(env):
     assert ok["expected_out_wei"] == str(2 * 10 ** 16) and ok["min_out_wei"] == str(2 * 10 ** 16 * 9950 // 10000)
     loose = run(s.preview_swap("sepolia", "buy", TOKEN, "0.01", 900))
     assert not loose["allowed"] and any("slippage" in v for v in loose["violations"])
+    with pytest.raises(ChainError) as e:
+        run(s.preview_swap("sepolia", "buy", TOKEN, "0", 50))
+    assert e.value.status == 422
 
 
 def test_swap_sell_needs_an_exact_approval_first(env):
@@ -326,3 +327,4 @@ def test_api_flow_without_key_material_in_any_response(env):
     assert [e["event"] for e in c.get("/api/chain/events").json()["events"]][0] == "tx_broadcast"
     st = c.get("/api/chain/status").json()
     assert st["wallet"]["address"] == r.json()["address"] and st["networks"][0]["connected"] is True
+    assert c.get("/wallet").status_code == 200
