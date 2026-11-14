@@ -1,3 +1,4 @@
+import { withChartView } from "./chartview.ts";
 /**
  * Dashboard visual layer: depth, glass surfaces and 3D pointer-responsive motion. Pure CSS + vanilla JS (the dashboard's CSP allows only
  * nonced inline code, so no external UI library is loaded). Purely cosmetic: it never touches data, handlers or element contents.
@@ -85,5 +86,5 @@ if(!reduce&&'MutationObserver' in window)watch.forEach(function(el){prev.set(el,
 </script>`;
 
 export function withMotion(page: string): string {
-  return page.replace("</head>", MOTION_CSS + "</head>").replace("</body>", MOTION_JS + "</body>");
+  return withChartView(page.replace("</head>", MOTION_CSS + "</head>").replace("</body>", MOTION_JS + "</body>"));
 }
