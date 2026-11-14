@@ -1,0 +1,90 @@
+{% extends "eti_base.html" %}
+{% block title %}Broker funding & fees{% endblock %}
+{% block content %}
+<h1>Broker wallet: funding &amp; fees</h1>
+<div class="sub">The broker provides the capital; ETI trades with it from the ETI wallet and pays the agreed fee back to the broker's wallet. ETI never holds the broker's key and cannot pull funds from it. Funding is counted only after the on-chain transfer is verified.</div>
+
+<div class="grid" style="margin-top:12px">
+  <section id="b-status" class="panel gold s6"><h2>Parties</h2><div id="b-status-body"></div></section>
+  <section class="panel s6"><h2>How funding works</h2>
+    <ol class="sub" style="margin:0;padding-left:18px;display:grid;gap:6px">
+      <li>Create the ETI wallet on the <a href="/wallet">ETI Wallet</a> page.</li>
+      <li>From the broker wallet, send native coin to the ETI address shown here.</li>
+      <li>Paste the transaction hash below. ETI checks sender, recipient, success and confirmations on-chain, then counts it as allocated capital.</li>
+      <li>ETI trades from that balance under the spending policy. Fees accrue on confirmed trades and are settled to the broker wallet with a previewed, confirmed payment.</li>
+    </ol></section>
+</div>
+
+<section class="panel" style="margin-bottom:14px"><h2>Funding health by network <button class="btn sm" id="b-refresh" type="button">Refresh</button></h2><div id="b-nets"></div></section>
+
+<div class="grid">
+  <section class="panel green s6"><h2>Verify a funding transfer</h2>
+    <form class="form" id="f-fund"><label>Network<select name="network" id="fund-net"></select></label>
+      <label>Transaction hash<input name="tx_hash" required placeholder="0x… (64 hex characters)" autocomplete="off"></label>
+      <button class="btn ok" type="submit">Verify on-chain</button></form>
+    <div id="fund-hist" style="margin-top:10px"></div></section>
+  <section class="panel purple s6"><h2>Fees owed to the broker</h2><div id="fee-body"></div>
+    <form class="form" id="f-settle" style="margin-top:10px"><label>Network<select name="network" id="settle-net"></select></label><button class="btn primary" type="submit">Preview fee payment</button></form>
+    <p class="sub">Payments go only to CHAIN_BROKER_ADDRESS, which is set by the server operator (no API can change it). Each payment needs a previewed quote and the typed word SEND.</p></section>
+</div>
+
+<section class="panel"><h2>Fee ledger</h2><div id="fee-table"></div></section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const { $, el, fmt, api, toast, busy, modal, confirmTyped, kv, table, unavailable } = ETI;
+  const safe = (u) => (typeof u === 'string' && u.startsWith('https://') ? u : null);
+  const link = (t, u) => (safe(u) ? el('a', { href: u, target: '_blank', rel: 'noopener noreferrer', text: t }) : document.createTextNode(t));
+  const short = (a) => (a ? a.slice(0, 8) + '\u2026' + a.slice(-6) : '\u2014');
+
+  async function load() {
+    const [st, fund, fees] = await Promise.allSettled([api('/api/chain/broker', { timeout: 90000 }), api('/api/chain/broker/funding'), api('/api/chain/broker/fees')]);
+    if (st.status === 'rejected') { $('#b-status-body').replaceChildren(unavailable(st.reason.message, 'Broker wallet')); return; }
+    const s = st.value;
+    const copy = (a) => el('button', { class: 'btn sm', type: 'button', onclick: () => navigator.clipboard.writeText(a).then(() => toast('Address copied', 'good')) }, 'Copy');
+    $('#b-status-body').replaceChildren(
+      el('dl', { class: 'kv' },
+        el('dt', { text: s.broker.name + ' wallet' }), el('dd', {}, s.broker.address ? [short(s.broker.address), ' ', copy(s.broker.address)] : el('span', { class: 'warn', text: 'not configured' })),
+        el('dt', { text: 'ETI wallet' }), el('dd', {}, s.eti_wallet ? [s.eti_wallet, ' ', copy(s.eti_wallet)] : el('span', { class: 'warn', text: 'not created yet' })),
+        el('dt', { text: 'Fee rate' }), el('dd', { text: s.fee_bps ? (s.fee_bps / 100).toFixed(2) + '% of each confirmed trade (ceiling ' + (s.max_fee_bps / 100) + '%)' : 'none configured' }),
+        el('dt', { text: 'Target funding' }), el('dd', { text: s.target_funding ? s.target_funding + ' (native, per network)' : 'not set' }),
+        el('dt', { text: 'Funding confirmations' }), el('dd', { text: String(s.funding_confirmations) })),
+      ...s.notes.map((n) => el('p', { class: 'warn', text: n })), el('p', { class: 'sub', text: s.model }));
+    $('#b-nets').replaceChildren(table([{ k: 'label', label: 'Network' }, { k: 'mainnet', label: 'Type', fmt: (v) => el('span', { class: 'badge ' + (v ? 'bad' : 'good'), text: v ? 'MAINNET' : 'testnet' }) },
+      { k: (r) => (r.connected ? 'connected' : 'unreachable'), label: 'RPC', fmt: (v) => el('span', { class: 'badge ' + (v === 'connected' ? 'good' : 'bad'), text: v }) },
+      { k: (r) => (r.broker_balance != null ? r.broker_balance + ' ' + r.native : '\u2014'), label: 'Broker balance' }, { k: (r) => (r.eti_balance != null ? r.eti_balance + ' ' + r.native : '\u2014'), label: 'ETI balance' },
+      { k: 'funded', label: 'Funded (verified)' }, { k: 'returned', label: 'Returned' }, { k: 'net_allocated', label: 'Net allocated' },
+      { k: (r) => (r.funded_ratio == null ? '\u2014' : Math.round(r.funded_ratio * 100) + '%'), label: 'vs target' },
+      { k: 'fees_accrued', label: 'Fees owed' }, { k: 'fees_settling', label: 'Settling' }, { k: 'fees_paid', label: 'Paid' }, { k: 'error', label: 'Note', wrap: true }],
+      s.networks, 'No network has an RPC endpoint configured.'));
+    const opts = s.networks.map((n) => el('option', { value: n.network, text: n.label }));
+    ['#fund-net', '#settle-net'].forEach((id) => $(id).replaceChildren(...opts.map((o) => o.cloneNode(true))));
+    $('#fund-hist').replaceChildren(fund.status === 'fulfilled' ? table([{ k: 'recorded_at', label: 'Recorded', fmt: fmt.time }, { k: 'network', label: 'Network' }, { k: (r) => r.value + ' ' + r.native, label: 'Amount' }, { k: 'confirmations', label: 'Conf' }, { k: (r) => r, label: 'Tx', fmt: (r) => link(short(r.tx_hash), r.explorer_url) }], fund.value.funding, 'No verified funding yet.') : unavailable(fund.reason.message, 'Funding'));
+    if (fees.status === 'fulfilled') {
+      const f = fees.value;
+      $('#fee-body').replaceChildren(el('p', { class: 'sub', text: f.fee_rule }), kv(Object.fromEntries(Object.entries(f.totals).flatMap(([n, t]) => Object.entries(t).map(([k, v]) => [n + ' \u00b7 ' + k, v])))));
+      $('#fee-table').replaceChildren(table([{ k: 'created_at', label: 'Accrued', fmt: fmt.time }, { k: 'network', label: 'Network' }, { k: 'notional', label: 'Trade notional' }, { k: (r) => (r.fee_bps / 100).toFixed(2) + '%', label: 'Rate' }, { k: 'fee', label: 'Fee' },
+        { k: 'status', label: 'Status', fmt: (v) => el('span', { class: 'badge ' + (v === 'paid' ? 'good' : v === 'settling' ? 'warn' : ''), text: v }) }], f.fees, 'No fees yet. Fees accrue when a trade confirms and a fee rate is configured.'));
+    } else { $('#fee-body').replaceChildren(unavailable(fees.reason.message, 'Fees')); }
+  }
+
+  async function review(p) {
+    const body = el('div', {}, kv({ Summary: p.summary, Network: p.label + (p.mainnet ? ' (MAINNET)' : ' (testnet)'), To: p.to, 'Value (wei)': p.value_wei, 'Max fee cost': p.max_fee_cost + ' ' + p.native, 'Fee rows covered': (p.fee_settlement.fee_ids || []).length }),
+      p.violations.length ? el('div', {}, el('h3', { class: 'neg', text: 'Blocked by policy' }), el('ul', {}, p.violations.map((v) => el('li', { class: 'neg', text: v })))) : el('p', { class: 'pos', text: 'Allowed by the spending policy. Nothing has been sent yet.' }));
+    const acts = [{ label: 'Close', value: 'x' }]; if (p.allowed) acts.push({ label: 'Pay fees to broker', value: 'send', kind: 'danger' });
+    if ((await modal('Review fee payment', body, acts)) !== 'send') return;
+    if (!(await confirmTyped('Confirm fee payment', el('p', { text: p.summary }), 'SEND'))) return;
+    const r = await api('/api/chain/broker/fees/settle/send', { method: 'POST', body: { quote_id: p.quote_id, confirm: 'SEND' } });
+    await modal('Broadcast accepted', el('div', {}, kv(r.transaction), el('p', { class: 'sub', text: r.fees_linked + ' fee row(s) are now "settling"; they become "paid" only after the payment confirms on-chain (check it on the ETI Wallet page).' })));
+    await load();
+  }
+  const form = (id, fn) => $(id).addEventListener('submit', (e) => { e.preventDefault(); busy(e.submitter || e.target.querySelector('button'), () => fn(Object.fromEntries(new FormData(e.target)))); });
+  form('#f-fund', async (d) => { const r = await api('/api/chain/broker/funding', { method: 'POST', body: { network: d.network, tx_hash: d.tx_hash.trim() } }); toast('Funding verified: ' + r.funding.value + ' ' + r.funding.native, 'good'); $('#f-fund').reset(); await load(); });
+  form('#f-settle', async (d) => review(await api('/api/chain/broker/fees/settle/preview', { method: 'POST', body: { network: d.network } })));
+  $('#b-refresh').addEventListener('click', (e) => busy(e.currentTarget, load));
+  document.addEventListener('DOMContentLoaded', () => { load(); ETI.poll(load, 60000); });
+})();
+</script>
+{% endblock %}
