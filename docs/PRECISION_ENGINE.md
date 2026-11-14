@@ -11,7 +11,7 @@ gates, and calibration-aware confidence. **It cannot place or authorise an order
 
 | Route | Purpose |
 |---|---|
-| `GET /api/precision/signal?symbol=BTCUSDT&strategy=intraday[&provider=binance]` | One signal. Strategies: `scalp` (5m), `intraday` (15m), `swing` (4h), `position` (1d). |
+| `GET /api/precision/signal?symbol=BTCUSDT&strategy=intraday[&provider=binance][&account=paper]` | One signal (`account=paper` needs the admin token; see Risk gates). Strategies: `scalp` (5m), `intraday` (15m), `swing` (4h), `position` (1d). |
 | `GET /api/precision/markets` | Supported markets and strategies. |
 | `GET /api/precision/config` | Effective configuration, its status (`default`, `override_applied`, `override_rejected`) and fingerprint. |
 | `GET /api/precision/calibration?strategy=intraday` | Whether a calibration model exists, whether it is usable, and exactly why not. |
@@ -95,8 +95,13 @@ costs (TP1 and final target), costs not consuming the reward, no high-impact new
 negative, independent validation has no hard failure, signal valid for at least one full bar, score at or above the
 configured minimum, and account-level risk limits when a verdict is supplied.
 
-**Account-level risk (equity, exposure, daily loss, drawdown) is not evaluated by this engine** and is reported as
-`not_evaluated`. Any order still has to pass the server-side risk preflight in the execution gateway.
+**Account-level risk is `not_evaluated` by default.** Pass `account=paper` with the admin bearer token to
+`GET /api/precision/signal` and the gate is decided from ETI's internal paper account (read-only): kill switch, an open position on the
+symbol, the open-position cap, the daily-loss limit, the consecutive-loss pause and the re-entry cooldown after a stop-out. A breach fails
+the gate and forces `NO TRADE`. With no stored paper account the gate stays `not_evaluated` (never a pass). The token is required because
+the verdict reveals account state, and the scheduled ledger deliberately ignores account state so it measures the engine itself.
+This covers only the internal paper account, not an exchange or broker account; any order still has to pass the server-side risk
+preflight in the execution gateway.
 
 ## Confidence and calibration
 
