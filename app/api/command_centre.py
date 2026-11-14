@@ -19,7 +19,7 @@ from app.command_centre import metrics
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import IntelligenceAlert, InvestorActivity
-from app.paper import wiring
+from app.paper import runtime as paper_runtime
 from app.services.activity_store import ActivityStore
 
 logger = logging.getLogger("eti.command_centre")
@@ -102,13 +102,44 @@ def _mode(settings: Settings) -> dict[str, Any]:
             "kill_switch": settings.kill_switch}
 
 
+async def _paper_summary_and_fills(account_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Summary and chronological fills from the canonical internal paper exchange (PaperExchange)."""
+    ex = paper_runtime.get_exchange()
+    if account_id != ex.account_id:
+        raise HTTPException(status_code=404, detail=f"unknown paper account '{account_id}'")
+    view = await ex.account()
+    fills = list(reversed(await ex.fills(100000)))
+    positions = []
+    for p in view.get("positions", []):
+        if not p.get("open"):
+            continue
+        unreal = float(p["qty"]) * (float(p["mark_price"]) - float(p["avg_cost"]))
+        positions.append({"symbol": p["symbol"], "qty": p["qty"], "avg_cost": p["avg_cost"], "mark": p["mark_price"],
+                          "market_value": p["market_value"], "unrealized_pnl": unreal})
+    start_cash = float(view["starting_cash"])
+    cfg = getattr(ex, "cfg", None)
+    open_orders = view.get("open_orders")
+    summary = {
+        "account_id": account_id, "starting_cash": start_cash, "equity": view["equity"], "cash": view["cash"],
+        "available_cash": view["available_cash"], "reserved_cash": view["reserved_cash"],
+        "market_value": sum(p["market_value"] for p in positions), "positions": positions,
+        "realized_pnl": view["realized_pnl"], "unrealized_pnl": view["unrealized_pnl"], "total_pnl": view["total_pnl"],
+        "return_pct": (view["total_pnl"] / start_cash * 100.0) if start_cash > 0 else 0.0, "fees_paid": view["fees_paid"],
+        "open_orders": len(open_orders) if isinstance(open_orders, (list, tuple)) else int(open_orders or 0),
+        "halted": bool(view.get("kill_switch")), "marks_stale_for": list(view.get("unmarked_symbols", [])),
+        "config": ({"max_order_notional_pct": cfg.max_order_pct, "max_position_pct": cfg.max_position_pct,
+                    "max_open_positions": cfg.max_open_positions, "taker_fee_bps": cfg.taker_fee_bps,
+                    "maker_fee_bps": cfg.maker_fee_bps, "min_notional": cfg.min_notional} if cfg is not None else {}),
+        "execution_mode": view.get("execution_mode"),
+    }
+    return summary, fills
+
+
 async def _account_view(account_id: str, range_key: str, settings: Settings) -> dict[str, Any]:
     key = range_key.upper()
     if key not in metrics.RANGE_DAYS:
         raise HTTPException(status_code=422, detail=f"range must be one of {', '.join(metrics.RANGE_DAYS)}")
-    svc = wiring.get_paper_service()
-    summary = await svc.summary(account_id)
-    fills = svc.fills(account_id, 100000)
+    summary, fills = await _paper_summary_and_fills(account_id)
     now = datetime.now(timezone.utc)
     start_cash = summary["starting_cash"]
     perf = metrics.performance(fills, start_cash, key, now)
@@ -163,8 +194,8 @@ async def command_report(kind: Literal["daily", "weekly", "monthly"] = "daily", 
         return view
     if format == "csv":
         cut = datetime.now(timezone.utc) - timedelta(days=metrics.RANGE_DAYS[range_key])
-        rows = [f for f in wiring.get_paper_service().fills(account_id, 100000)
-                if (metrics.parse_ts(f.get("ts")) or cut) >= cut]
+        _, all_fills = await _paper_summary_and_fills(account_id)
+        rows = [f for f in all_fills if (metrics.parse_ts(f.get("ts")) or cut) >= cut]
         return Response(content=metrics.fills_csv(rows), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="eti-{kind}-fills.csv"'})
     md = metrics.report_markdown(kind, view["performance"], view["summary"], datetime.now(timezone.utc), view["health"])
