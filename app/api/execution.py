@@ -5,12 +5,13 @@ import re
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import Settings, get_settings
 from app.execution.adapters.registry import INFO
 from app.execution.domain import AccountPolicy, Mode, OrderIntent, OrderType, Side, utcnow
 from app.execution.errors import ExecutionError, PermissionPolicyError
+from app.execution.quote_sizing import QuoteSizingError, size_from_usdt
 from app.execution.service import (REQUIRED_CREDENTIALS, SUPPORTED_ENVIRONMENTS, adapter_for, get_engine, get_store,
                                    get_vault, vault_configured)
 from app.execution.store import AccountRecord
@@ -86,7 +87,11 @@ class SignalBody(BaseModel):
     account_id: str = Field(..., pattern=ID)
     symbol: str = Field(..., min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
     side: Side
-    qty: float = Field(..., gt=0, allow_inf_nan=False)
+    qty: Optional[float] = Field(None, gt=0, allow_inf_nan=False,
+                                 description="Quantity in base units. Send this OR quote_amount, not both.")
+    quote_amount: Optional[float] = Field(None, gt=0, allow_inf_nan=False,
+                                          description="Amount to buy or sell in USDT (USDT-quoted symbols only), converted "
+                                                      "to a quantity server-side. Send this OR qty.")
     order_type: OrderType = OrderType.MARKET
     limit_price: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
     strategy: str = Field("manual", max_length=64)
@@ -95,6 +100,12 @@ class SignalBody(BaseModel):
     reduce_only: bool = False
     stop_loss: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
     take_profits: list[TakeProfit] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def _qty_xor_quote_amount(self):
+        if (self.qty is None) == (self.quote_amount is None):
+            raise ValueError("send exactly one of qty (base units) or quote_amount (USDT)")
+        return self
 
 
 class CloseBody(BaseModel):
@@ -238,13 +249,23 @@ async def disable_autonomous(account_id: str, who: str = Depends(operator)):
 async def submit_signal(body: SignalBody, settings: Settings = Depends(get_settings)):
     if not settings.execution_enabled:
         raise HTTPException(503, "Execution engine is disabled (EXECUTION_ENABLED=false)")
-    intent = OrderIntent(body.account_id, body.symbol, body.side, body.qty, body.order_type, body.limit_price,
+    qty, sizing = body.qty, None
+    if body.quote_amount is not None:
+        account = _account(body.account_id)
+        try:
+            qty, sizing = await size_from_usdt(body.quote_amount, body.symbol, body.limit_price, account.provider, settings)
+        except QuoteSizingError as exc:
+            raise HTTPException(exc.status, exc.message)
+    intent = OrderIntent(body.account_id, body.symbol, body.side, qty, body.order_type, body.limit_price,
                          body.strategy, body.thesis, body.signal_id, reduce_only=body.reduce_only)
     if body.stop_loss is not None or body.take_profits:
         if body.side != Side.BUY:
             raise HTTPException(422, "Protective stop-loss/take-profit orders are supported for long (buy) entries only")
         intent.meta["protective"] = {"stop_loss": body.stop_loss, "take_profits": [t.model_dump() for t in body.take_profits]}
-    return (await get_engine().submit_signal(intent)).to_dict()
+    result = (await get_engine().submit_signal(intent)).to_dict()
+    if sizing is not None:
+        result["sizing"] = sizing
+    return result
 
 
 @router.get("/proposals")
