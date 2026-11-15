@@ -20,6 +20,7 @@
   "vars": {
     "APP_ENV": "production",
     "CHAIN_ENABLED": "true",
+    "CHAIN_MAINNET_SEND_ENABLED": "on",
     "DATABASE_URL": "postgresql+psycopg2://user:pass@host:5432/eti",
     "ETI_EDGE": "native",
     "ETI_EVENT_FEED_URL": "https://finnhub.io/api/v1/calendar/economic",
