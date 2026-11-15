@@ -191,18 +191,23 @@ const ROWS = [
   ["XAUUSDT", "XAU", "USDT", "futures", "metals", "bitget", "usdt-futures"], ["PAXGUSDT", "PAXG", "USDT", "spot", "metals", "binance"],
 ];
 const names = (rows: any[]) => Array.from(rows, (r: any) => String(r[0])).sort();
-test("dashboard: dropdown merges venues, prefers Binance for shared pairs, and routes Bitget pairs to Bitget", () => {
+test("dashboard: Bitget is the default exchange; merged mode prefers Bitget for shared pairs; Binance is still selectable", () => {
   const { api, els } = clientFns();
+  assert.equal(api.SYM.venue, "bitget", "Bitget is the primary exchange");
+  els.symbol.value = "BTCUSDT"; assert.equal(api.mkt(), "&venue=bitget", "before the pair list loads the chart already asks Bitget");
   api.SYM.all = ROWS; api.SYM.at = 1;
   api.SYM.market = "spot";
+  api.SYM.venue = "";
   assert.deepEqual(names(api.symRows()), ["BTCUSDT", "PAXGUSDT", "TSLAONUSDT"]);
-  assert.equal(api.symRows().find((r: any) => r[0] === "BTCUSDT")[5], "binance");
-  els.symbol.value = "BTCUSDT"; assert.equal(api.mkt(), "");
+  assert.equal(api.symRows().find((r: any) => r[0] === "BTCUSDT")[5], "bitget");
+  els.symbol.value = "BTCUSDT"; assert.equal(api.mkt(), "&venue=bitget");
+  api.SYM.venue = "binance"; assert.equal(api.mkt(), ""); api.SYM.venue = "";
   els.symbol.value = "TSLAONUSDT"; assert.equal(api.mkt(), "&venue=bitget");
   els.symMarket.value = "futures"; api.SYM.market = "futures";
   els.symbol.value = "TSLAUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures");
   els.symbol.value = "BTCPERP"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdc-futures");
-  els.symbol.value = "BTCUSDT"; assert.equal(api.mkt(), "&market=futures");
+  els.symbol.value = "BTCUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures");
+  api.SYM.venue = "binance"; assert.equal(api.mkt(), "&market=futures"); api.SYM.venue = "";
   api.SYM.venue = "bitget"; api.SYM.at = 2;
   assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures", "same symbol, Bitget venue selected");
   assert.equal(api.symRows().length, 4); assert.ok(api.symRows().every((r: any) => r[5] === "bitget"));

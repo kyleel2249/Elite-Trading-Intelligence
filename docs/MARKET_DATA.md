@@ -45,3 +45,15 @@ for a Bitget request, so a chart always shows one exchange's prices and the `x-e
 - **Verification status**: covered by mocked-upstream tests only. The endpoint paths and response shapes follow Bitget's documented v2
   public API but could not be exercised against the live exchange from the build environment; check `/api/market/diag`-style
   behaviour on a deployed Worker (a 502 with `attempts` names the exact upstream failure).
+
+## Bitget as the primary exchange (live market chart)
+
+The dashboard's Live Market Chart now starts on **Bitget** (the Exchange selector defaults to "Bitget (primary)"; "All exchanges" shows a
+pair listed on both venues with Bitget data first, and Binance stays one click away). If Bitget's pair list cannot be loaded the dashboard
+falls back to the Binance list and says so in the pair-count line, rather than showing nothing. The market API itself is unchanged
+(`venue` still defaults to Binance for non-dashboard callers such as the algorithms, so their behaviour does not shift silently).
+
+## Bitget account and trade data (read-only)
+
+`docs/BITGET.md` describes `/api/bitget/*`: signed read-only access to balances, positions, order history and every fill for **spot, margin
+(cross and isolated) and USDT / USDC / coin-margined futures**, a 5-minute sync into KV, and public margin pair discovery.

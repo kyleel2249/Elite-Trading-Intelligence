@@ -51,6 +51,11 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_DUPLICATE_WINDOW_SECONDS` | config | Window in which an identical order is refused as a duplicate. |
 | `ETI_EDGE` | config | Adaptive-edge feature switch for the dashboard. |
 | `ETI_EVENTS_JSON` | config | Inline JSON of scheduled market events for the readiness engine. |
+| `BITGET_API_KEY` | secret | Bitget API key (read-only recommended: no trade, no withdraw). Also accepted: `BITGET_KEY`. |
+| `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY`. |
+| `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
+| `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
+| `ETI_BITGET_MARGIN_SYMBOLS` | config | Comma-separated margin pairs whose fills are synced (Bitget margin fills require a symbol), e.g. `BTCUSDT,ETHUSDT`. |
 | `ETI_EVENT_FEED_TOKEN` | secret | Bearer token for ETI_EVENT_FEED_URL. |
 | `ETI_EVENT_FEED_URL` | config | HTTPS JSON event feed for the readiness engine. |
 | `ETI_EXECUTION_API_TOKEN` | secret | Token for the optional Python execution engine. |
