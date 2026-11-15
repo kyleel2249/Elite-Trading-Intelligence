@@ -13,7 +13,7 @@ UI: `/wallet`. API: `/api/chain/*` (every route needs `X-API-Key` when the serve
 ## Safeguards (enforced server-side, in this order)
 1. **Testnets by default.** Mainnet sending is refused unless the operator sets `CHAIN_MAINNET_SEND_ENABLED=true`.
 2. **Preview, then send.** A preview runs the policy and returns an HMAC-signed, 120-second, **single-use** quote bound to the exact transaction. `send` re-verifies the quote, re-runs the policy, and requires the literal confirmation `SEND`.
-3. **Spending policy:** destination allowlist (required by default), per-transaction cap, 24-hour cap (failed broadcasts do not count), global kill switch (`KILL_SWITCH`), swap slippage cap, token allowlist, exact-amount approvals only (never unlimited).
+3. **Spending policy:** destination allowlist (required by default), no per-transaction or daily value caps (balance and gas are the only value limits), global kill switch (`KILL_SWITCH`), swap slippage cap, token allowlist, exact-amount approvals only (never unlimited).
 4. **Chain-ID check** on every RPC use: an endpoint that reports the wrong chain is refused.
 5. **Honest status:** a transaction is `pending` after the node accepts it and `confirmed`/`failed` only when a receipt says so. Broadcast rejections are recorded as `broadcast_failed`.
 6. **Audit trail** (`eti_chain_events`) and full transaction records. Nonces are serialised under a lock.
@@ -29,8 +29,6 @@ UI: `/wallet`. API: `/api/chain/*` (every route needs `X-API-Key` when the serve
 | Variable | Default | Meaning |
 |---|---|---|
 | `CHAIN_ENABLED` | true | Master switch for `/api/chain` |
-| `CHAIN_MAX_TX_NATIVE` | 0.05 | Max native value moved per transaction |
-| `CHAIN_MAX_DAILY_NATIVE` | 0.2 | Max native value moved per rolling 24h, per network |
 | `CHAIN_MAX_SLIPPAGE_BPS` | 100 | Max swap slippage (hard ceiling 1000) |
 | `CHAIN_REQUIRE_ALLOWLIST` | true | Transfers only to allowlisted destinations |
 | `CHAIN_MAINNET_SEND_ENABLED` | false | Allow sending on mainnet networks |
@@ -43,17 +41,3 @@ UI: `/wallet`. API: `/api/chain/*` (every route needs `X-API-Key` when the serve
 - Public RPCs can rate-limit or censor; use a private endpoint for anything serious.
 - Mainnet use is the operator's decision and responsibility. Start on a testnet.
 
-
-## Multi-signature withdrawal approval
-
-Mainnet sends (and any send when `CHAIN_MULTISIG_REQUIRED=true`) need an M-of-N approved withdrawal request.
-
-1. `POST /api/chain/withdrawals` `{network, to, amount, requester, nonce}` opens a request and returns `signing_digest`.
-2. Each approver signs the digest **offline** with their own key and calls `POST /api/chain/withdrawals/{id}/approve` `{r, s, recid}`.
-   The server recovers the signer from the signature; it must be in `CHAIN_MULTISIG_APPROVERS`, must not be the requester, and counts once.
-3. After `CHAIN_MULTISIG_THRESHOLD` approvals, `POST /api/chain/send` with `approval_id` signs and broadcasts. The approval must match the
-   quote's network, destination and amount, and is spent atomically (single use). If the broadcast is rejected by the node the approval stays
-   spent; open a new request.
-
-If the policy is missing or invalid, sends that require approval fail closed (HTTP 503). Approvals are stored in `eti_withdrawal_approvals`.
-Verified by `tests/test_chain_multisig_integration.py` and `tests/test_treasury_controls.py` against a fake RPC node only.

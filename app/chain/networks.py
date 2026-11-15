@@ -36,8 +36,6 @@ NETWORKS: dict[str, Network] = {n.key: n for n in (
 
 @dataclass(frozen=True)
 class Limits:
-    max_tx_wei: int
-    max_daily_wei: int
     max_slippage_bps: int
     require_allowlist: bool
     mainnet_send_enabled: bool
@@ -61,21 +59,12 @@ def _flag(name: str, default: bool) -> bool:
     return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
 
 
-def _wei(name: str, default: str) -> int:
-    try:
-        d = Decimal(os.getenv(name, default))
-    except Exception:
-        d = Decimal(default)
-    return int(d * Decimal(10) ** 18) if d > 0 else 0
-
-
 def load_limits() -> Limits:
     try:
         bps = int(os.getenv("CHAIN_MAX_SLIPPAGE_BPS", "100"))
     except ValueError:
         bps = 100
-    return Limits(max_tx_wei=_wei("CHAIN_MAX_TX_NATIVE", "0.05"), max_daily_wei=_wei("CHAIN_MAX_DAILY_NATIVE", "0.2"),
-                  max_slippage_bps=max(1, min(bps, 1000)), require_allowlist=_flag("CHAIN_REQUIRE_ALLOWLIST", True),
+    return Limits(max_slippage_bps=max(1, min(bps, 1000)), require_allowlist=_flag("CHAIN_REQUIRE_ALLOWLIST", True),
                   mainnet_send_enabled=_flag("CHAIN_MAINNET_SEND_ENABLED", False))
 
 

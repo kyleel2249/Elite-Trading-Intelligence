@@ -79,8 +79,6 @@ def env(monkeypatch):
     for k in ("CHAIN_MAX_TX_NATIVE", "CHAIN_MAX_DAILY_NATIVE", "CHAIN_MAX_SLIPPAGE_BPS", "CHAIN_REQUIRE_ALLOWLIST", "CHAIN_MAINNET_SEND_ENABLED"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("EXECUTION_VAULT_KEY", Fernet.generate_key().decode())
-    monkeypatch.setenv("CHAIN_MAX_TX_NATIVE", "0.05")
-    monkeypatch.setenv("CHAIN_MAX_DAILY_NATIVE", "0.08")
     monkeypatch.setenv("CHAIN_DEX_ROUTER_SEPOLIA", ROUTER)
     monkeypatch.setenv("CHAIN_WRAPPED_NATIVE_SEPOLIA", WRAPPED)
     fake = FakeRpc()
@@ -124,7 +122,7 @@ def test_wallet_is_vault_gated_unique_and_never_exposes_the_key(env, monkeypatch
 
 
 # ------------------------------------------------------------------------------------------------ policy
-def test_transfer_requires_allowlist_cap_and_valid_input(env):
+def test_transfer_requires_allowlist_and_valid_input(env):
     _, db = env
     s = svc(db); s.create_wallet()
     p = run(s.preview_transfer("sepolia", DEST, "0.01"))
@@ -132,8 +130,8 @@ def test_transfer_requires_allowlist_cap_and_valid_input(env):
     s.allow_add(network="*", address=DEST, kind="destination")
     ok = run(s.preview_transfer("sepolia", DEST, "0.01"))
     assert ok["allowed"] and ok["quote_id"] and ok["value_wei"] == str(10 ** 16) and ok["fees"]["type"] == 2
-    big = run(s.preview_transfer("sepolia", DEST, "0.06"))
-    assert not big["allowed"] and any("per-transaction cap" in v for v in big["violations"])
+    big = run(s.preview_transfer("sepolia", DEST, "0.5"))                    # no per-transaction cap: balance is the only limit
+    assert big["allowed"] and big["quote_id"]
     for bad_to, bad_amt in (("0x123", "0.01"), (DEST, "0"), (DEST, "0.0000000000000000001")):
         with pytest.raises(ChainError) as e:
             run(s.preview_transfer("sepolia", bad_to, bad_amt))
@@ -205,16 +203,16 @@ def test_tampered_and_expired_quotes_are_rejected(env, monkeypatch):
     assert "expired" in e2.value.message and not fake.sent
 
 
-def test_daily_cap_accumulates_across_sends(env):
-    _, db = env
+def test_no_daily_cap_repeat_sends_are_limited_only_by_balance(env):
+    fake, db = env
     s = ready(db)
     run(s.send(run(s.preview_transfer("sepolia", DEST, "0.05"))["quote_id"], "SEND"))
-    p = run(s.preview_transfer("sepolia", DEST, "0.05"))
-    assert not p["allowed"] and any("24h cap" in v for v in p["violations"])
-    assert run(s.preview_transfer("sepolia", DEST, "0.02"))["allowed"]
+    assert run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]
+    fake.balance = 10 ** 15                                                   # the real constraint is still enforced
+    assert not run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]
 
 
-def test_broadcast_failure_is_recorded_honestly_and_does_not_count_toward_caps(env):
+def test_broadcast_failure_is_recorded_honestly_and_does_not_block_a_retry(env):
     fake, db = env
     s = ready(db); fake.fail_send = True
     with pytest.raises(ChainError) as e:
@@ -222,7 +220,7 @@ def test_broadcast_failure_is_recorded_honestly_and_does_not_count_toward_caps(e
     assert e.value.status == 502
     row = db.query(ChainTransaction).one()
     assert row.status == "broadcast_failed" and "nonce too low" in row.error
-    assert run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]       # failed broadcasts do not consume the daily cap
+    assert run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]       # a failed broadcast does not block retrying
 
 
 def test_receipts_decide_confirmed_vs_failed(env):

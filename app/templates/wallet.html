@@ -106,7 +106,7 @@
     $$('.netsel').forEach((s) => s.replaceChildren(...NETS.map((n) => el('option', { value: n.key, text: n.label + (n.configured ? '' : ' (no RPC)') }))));
     $('#allow-net').replaceChildren(el('option', { value: '*', text: 'any network' }), ...NETS.map((n) => el('option', { value: n.key, text: n.label })));
     const l = d.limits;
-    $('#limits-body').replaceChildren(kv({ 'Max per transaction (native)': l.max_tx, 'Max per 24h (native)': l.max_daily, 'Max slippage (bps)': l.max_slippage_bps, 'Destination allowlist required': l.require_allowlist, 'Mainnet sending enabled': l.mainnet_send_enabled }),
+    $('#limits-body').replaceChildren(kv({ 'Max slippage (bps)': l.max_slippage_bps, 'Destination allowlist required': l.require_allowlist, 'Mainnet sending enabled': l.mainnet_send_enabled }),
       el('p', { class: l.mainnet_send_enabled ? 'warn' : 'sub', text: l.mainnet_send_enabled ? 'MAINNET SENDING IS ENABLED by the operator: transactions move real value.' : 'Mainnet sending is OFF: only testnet transactions can be sent. These limits are server environment settings; this page cannot change them.' }));
   }
   async function loadWallet() {

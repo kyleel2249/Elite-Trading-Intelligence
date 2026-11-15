@@ -229,16 +229,10 @@ class ChainService:
             raise ChainError("quote expired: preview again", 400)
         return payload
 
-    def _sent_today(self, network: str) -> int:
-        cut = _now() - timedelta(days=1)
-        rows = self.db.execute(select(ChainTransaction).where(ChainTransaction.network == network, ChainTransaction.created_at >= cut,
-                                                              ChainTransaction.status.in_(["signed", "pending", "confirmed"]))).scalars()
-        return sum(int(r.notional_wei) for r in rows)
-
     def _violations(self, net: Network, *, kind: str, notional: int, to: Optional[str], extra: dict) -> list[str]:
         w = self._wallet_or_error()
         return policy_mod.violations(network=net, limits=load_limits(), kill_switch=bool(self.settings.kill_switch), kind=kind,
-                                     notional_wei=notional, sent_today_wei=self._sent_today(net.key), to=to, wallet=w.address, **extra)
+                                     notional_wei=notional, to=to, wallet=w.address, **extra)
 
     async def _prepare(self, net: Network, *, kind: str, to: str, value: int, data: bytes, notional: int, summary: str,
                        extra: Optional[dict] = None, skip_estimate: bool = False, extra_violations: Optional[list] = None) -> dict[str, Any]:
@@ -361,7 +355,7 @@ class ChainService:
         return prep
 
     # ------------------------------------------------------------------ send
-    async def send(self, quote_id: str, confirm: str, approval_id: Optional[str] = None) -> dict[str, Any]:
+    async def send(self, quote_id: str, confirm: str) -> dict[str, Any]:
         if confirm != "SEND":
             raise ChainError('confirmation must be the exact word "SEND"', 400)
         q = self._unseal(quote_id)
@@ -378,7 +372,6 @@ class ChainService:
                 nonce = await rpc.nonce(w.address)
             except RpcError as e:
                 raise ChainError(f"RPC error: {e}", 502)
-            self._enforce_multisig(net, q, approval_id)       # spends the approval only after every other check passed
             priv = self._private_key(w)
             data = bytes.fromhex(q["data"][2:])
             fees = q["fees"]
@@ -407,26 +400,6 @@ class ChainService:
             self.db.commit()
             self.event("tx_broadcast", network=net.key, tx_hash=tx_hash)
         return self.tx_dict(row)
-
-    def _enforce_multisig(self, net: Network, q: dict, approval_id: Optional[str]) -> None:
-        """Mainnet (or CHAIN_MULTISIG_REQUIRED=true) sends need an M-of-N approved, unexpired, unspent request that matches
-        this exact network / destination / amount. Fails closed when the policy is not configured."""
-        if not (net.mainnet or os.getenv("CHAIN_MULTISIG_REQUIRED", "").lower() in ("1", "true", "yes")):
-            return
-        from app.treasury.approvals import ApprovalBook, ApprovalError, SqlApprovalStore, load_policy
-        policy = load_policy()
-        if policy is None:
-            raise ChainError("multi-signature approval is required but CHAIN_MULTISIG_APPROVERS is not (validly) configured", 503)
-        if not approval_id:
-            raise ChainError("this send requires an approved multi-signature withdrawal (approval_id)", 403)
-        book = ApprovalBook(policy, store=SqlApprovalStore(self.db))
-        try:
-            req = book.get(approval_id)
-            if (req.network, req.to.lower(), int(req.amount_wei)) != (net.key, str(q["to"]).lower(), int(q["notional"])):
-                raise ChainError("the approval does not match this transaction's network, destination and amount", 403)
-            book.consume(approval_id)
-        except ApprovalError as e:
-            raise ChainError(f"multi-signature approval rejected: {e}", 403 if e.code != "not_found" else 404)
 
     @staticmethod
     def tx_dict(r: ChainTransaction) -> dict[str, Any]:

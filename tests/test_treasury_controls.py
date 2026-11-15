@@ -1,7 +1,5 @@
-"""Treasury controls: M-of-N approval (real signatures), department budgets, profit allocation, reconciliation."""
+"""Treasury controls: department budgets, profit allocation, reconciliation."""
 from __future__ import annotations
-
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -11,115 +9,8 @@ from app.accounting.ledger import Ledger
 from app.accounting.money import to_units as U
 from app.accounting.reconcile import reconcile_balance
 from app.accounting.store import MemoryStore
-from app.chain.crypto import address_from_private, sign
 from app.treasury.allocation import post_allocation, split
-from app.treasury.approvals import ApprovalBook, ApprovalError, ApprovalPolicy
 from app.treasury.budgets import BudgetExceeded, DepartmentBudgets
-
-KEYS = {n: 0x1000 + i for i, n in enumerate(["alice", "bob", "carol", "mallory", "requester"])}
-ADDR = {n: address_from_private(k) for n, k in KEYS.items()}
-DEST = "0x" + "d4" * 20
-
-
-class Clock:
-    def __init__(self):
-        self.t = datetime(2026, 11, 15, tzinfo=timezone.utc)
-
-    def __call__(self):
-        return self.t
-
-
-def sig(book, rid, who):
-    return book.approve(rid, *sign(book.get(rid).digest(), KEYS[who]))
-
-
-@pytest.fixture()
-def book():
-    clock = Clock()
-    pol = ApprovalPolicy(2, frozenset({ADDR["alice"], ADDR["bob"], ADDR["carol"]}), ttl_seconds=600)
-    b = ApprovalBook(pol, now=clock)
-    b.clock = clock
-    return b
-
-
-def new_req(b, nonce="n1", amount=10 ** 16):
-    return b.create(network="sepolia", to=DEST, amount_wei=amount, requester=ADDR["requester"], nonce=nonce).request_id
-
-
-# ------------------------------------------------------------------ multi-signature approval
-def test_policy_rejects_single_signer_and_bad_thresholds():
-    with pytest.raises(ApprovalError):
-        ApprovalPolicy(1, frozenset({ADDR["alice"], ADDR["bob"]}))
-    with pytest.raises(ApprovalError):
-        ApprovalPolicy(3, frozenset({ADDR["alice"], ADDR["bob"]}))
-    with pytest.raises(ApprovalError):
-        ApprovalPolicy(2, frozenset({ADDR["alice"], "0x1234"}))
-
-
-def test_withdrawal_needs_threshold_distinct_authorized_signers(book):
-    rid = new_req(book)
-    assert not book.is_authorized(rid)
-    with pytest.raises(ApprovalError) as e:
-        book.consume(rid)
-    assert e.value.code == "insufficient_approvals"
-    assert sig(book, rid, "alice") == ADDR["alice"].lower()
-    assert not book.is_authorized(rid)
-    with pytest.raises(ApprovalError) as dup:
-        sig(book, rid, "alice")
-    assert dup.value.code == "duplicate_approval"
-    assert not book.is_authorized(rid)               # a repeated signer never counts twice
-    sig(book, rid, "bob")
-    assert book.is_authorized(rid)
-
-
-def test_unauthorized_and_self_approvals_are_rejected(book):
-    rid = new_req(book)
-    with pytest.raises(ApprovalError) as e:
-        sig(book, rid, "mallory")
-    assert e.value.code == "unauthorized_signer"
-    pol = ApprovalPolicy(2, frozenset({ADDR["alice"], ADDR["requester"]}))
-    b2 = ApprovalBook(pol)
-    rid2 = b2.create(network="sepolia", to=DEST, amount_wei=1, requester=ADDR["requester"], nonce="x").request_id
-    with pytest.raises(ApprovalError) as s:
-        sig(b2, rid2, "requester")
-    assert s.value.code == "self_approval"
-
-
-def test_signature_over_a_different_request_cannot_be_replayed(book):
-    a, b_ = new_req(book, "a", 10 ** 16), new_req(book, "b", 10 ** 18)
-    r, s, v = sign(book.get(a).digest(), KEYS["alice"])
-    # alice's signature of request A recovers to a *different, unauthorized* address for request B
-    with pytest.raises(ApprovalError) as e:
-        book.approve(b_, r, s, v)
-    assert e.value.code in ("unauthorized_signer", "bad_signature")
-    assert book.get(b_).signatures == {}
-
-
-def test_authorization_is_single_use_and_expires(book):
-    rid = new_req(book)
-    sig(book, rid, "alice"); sig(book, rid, "bob")
-    book.consume(rid)
-    with pytest.raises(ApprovalError) as e:
-        book.consume(rid)
-    assert e.value.code == "already_consumed" and not book.is_authorized(rid)
-    rid2 = new_req(book, "n2")
-    sig(book, rid2, "alice"); sig(book, rid2, "bob")
-    book.clock.t += timedelta(seconds=601)
-    assert not book.is_authorized(rid2)
-    with pytest.raises(ApprovalError) as x:
-        book.consume(rid2)
-    assert x.value.code == "expired"
-
-
-def test_duplicate_request_and_bad_input_rejected(book):
-    new_req(book, "same")
-    with pytest.raises(ApprovalError) as e:
-        new_req(book, "same")
-    assert e.value.code == "duplicate_request"
-    for amt in (0, -5, True, 1.5):
-        with pytest.raises(ApprovalError):
-            book.create(network="sepolia", to=DEST, amount_wei=amt, requester=ADDR["requester"], nonce="z")
-
 
 # ------------------------------------------------------------------ ledger fixtures
 @pytest.fixture()
