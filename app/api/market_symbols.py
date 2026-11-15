@@ -43,8 +43,10 @@ async def list_symbols(
 ):
     """Tradable pairs/instruments: Binance and Bitget spot (public), US stocks (Alpaca keys), forex/CFDs (OANDA keys),
     non-US stocks and forex pairs (Twelve Data key). Each source reports ok / stale / unavailable / not_configured.
-    `refresh=true` re-reads the lists (rate limited) so newly listed tokens appear; `new_only=true` shows only pairs this
-    server first saw after its first load of that exchange."""
+    The Binance and Bitget lists re-sync every minute in the background (started on first use) and expire after 60 s on
+    read, so newly listed pairs appear within about a minute. `refresh=true` forces a re-read (rate limited);
+    `new_only=true` shows only pairs this server first saw after its first load of that exchange."""
+    sym_mod.ensure_sync_started(settings)
     wanted = ["binance", "bitget", "alpaca", "oanda", "twelvedata"] if provider == "all" else [provider]
     items, sources = [], {}
     for p in wanted:
@@ -56,7 +58,14 @@ async def list_symbols(
         items = [i for i in items if (i.get("exchange") or "").upper() == ex]
     matched = sym_mod.search(items, q, quote, new_only)
     return {"total": len(matched), "limit": limit, "offset": offset, "items": matched[offset:offset + limit],
-            "sources": sources}
+            "sources": sources, "sync": sym_mod.sync_status()}
+
+
+@router.get("/api/market/symbols/sync-status")
+async def symbols_sync_status(settings: Settings = Depends(get_settings)):
+    """State of the one-minute Binance/Bitget pair sync (runs, last run, last error, baseline providers)."""
+    sym_mod.ensure_sync_started(settings)
+    return sym_mod.sync_status()
 
 
 @router.get("/api/market/binance-hosts")
