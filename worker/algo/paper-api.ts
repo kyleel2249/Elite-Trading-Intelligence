@@ -22,20 +22,37 @@ import { raiseAlerts } from "./alerts.ts";
 import { paperCycleAlerts } from "./alert-rules.ts";
 import { ParamRegistry, KVParamStore, degradationStep } from "./optimizer.ts";
 import { fitCalibration, loadCalibration, outcomesFrom, saveCalibration } from "./calibration.ts";
-import { KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
+import { DEFAULT_PAPER_CONFIG, KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
 
-export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string; ETI_ROUND_TRIP_COST_BPS?: string }
+export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string; ETI_ROUND_TRIP_COST_BPS?: string; ETI_PAPER_RISK_FRACTION?: string; ETI_PAPER_MAX_NOTIONAL_FRACTION?: string; ETI_PAPER_MAX_OPEN_POSITIONS?: string; ETI_PAPER_MAX_DAILY_LOSS_PCT?: string; ETI_PAPER_MAX_CONSECUTIVE_LOSSES?: string }
 export interface PaperDeps { now?: () => number; fetchImpl?: typeof fetch }
 interface KVWithList extends KVLike { list(o: { prefix: string; limit?: number }): Promise<{ keys: { name: string }[] }> }
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (k, v) => (v === Infinity ? "Infinity" : v)), { status, headers: HEADERS });
 
-/** Engine config derived from the environment. Only an explicit, positive ETI_MAX_ORDER_QUANTITY sets a quantity cap. */
-export function paperConfigFrom(env: ExecutionEnv): Partial<PaperConfig> {
+/**
+ * Balanced internal-paper policy. Values are bounded here as well as documented in wrangler.jsonc so a bad
+ * deployment variable cannot silently disable the risk limits. This config affects only the legacy simulated
+ * PaperEngine; it does not enable broker/testnet orders or live trading.
+ */
+function boundedSetting(raw: string | undefined, fallback: number, min: number, max: number, integer = false): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) return fallback;
+  return value;
+}
+export function paperConfigFrom(env: PaperEnv): Partial<PaperConfig> {
   const cap = Number(env.ETI_MAX_ORDER_QUANTITY);
-  return Number.isFinite(cap) && cap > 0 ? { maxOrderQuantity: cap } : {};
+  return {
+    riskFraction: boundedSetting(env.ETI_PAPER_RISK_FRACTION, DEFAULT_PAPER_CONFIG.riskFraction, 0.001, 0.02),
+    maxNotionalFraction: boundedSetting(env.ETI_PAPER_MAX_NOTIONAL_FRACTION, 0.5, 0.05, 1),
+    maxOpenPositions: boundedSetting(env.ETI_PAPER_MAX_OPEN_POSITIONS, 3, 1, 5, true),
+    maxDailyLossPct: boundedSetting(env.ETI_PAPER_MAX_DAILY_LOSS_PCT, 2, 0.25, 5),
+    maxConsecutiveLosses: boundedSetting(env.ETI_PAPER_MAX_CONSECUTIVE_LOSSES, 3, 2, 8, true),
+    ...(Number.isFinite(cap) && cap > 0 ? { maxOrderQuantity: cap } : {}),
+  };
 }
 
 export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps = {}): Promise<Response> {
