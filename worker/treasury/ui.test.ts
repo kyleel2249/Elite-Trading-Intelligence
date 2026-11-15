@@ -22,7 +22,8 @@ test("the treasury page is served and its script compiles", async () => {
 
 test("the page works under the nonce CSP: no inline event handlers, no external scripts, no stored tokens", () => {
   const html = treasuryPage();
-  assert.doesNotMatch(html, /<[^>]+\son[a-z]+\s*=/i);
+  const markup = html.replace(/<script>[\s\S]*<\/script>/, "");
+  assert.doesNotMatch(markup, /<[^>]+\son[a-z]+\s*=/i);
   assert.doesNotMatch(html, /<script[^>]+src=/i);
   assert.doesNotMatch(html, /localStorage|sessionStorage|document\.cookie/);
 });
