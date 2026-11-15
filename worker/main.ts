@@ -33,6 +33,7 @@ import { withDailyReport } from "./daily/route.ts";
 import { runDailyReportCycle } from "./daily/api.ts";
 import { withPro } from "./pro/route.ts";
 import { withWallet } from "./wallet/route.ts";
+import { withChainView } from "./chain/routes.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runGuardedPaperCycle } from "./paper-guard.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
@@ -47,6 +48,8 @@ import { withElite } from "./elite/route.ts";
 import { withJournal } from "./journal/route.ts";
 import { withCompany } from "./company/route.ts";
 import { withTreasury } from "./treasury/route.ts";
+import { withProfit } from "./profit/route.ts";
+import { runProfitCycle } from "./profit/engine.ts";
 import { runJournalCycle } from "./journal/sync.ts";
 import { withIdentity } from "./identity/routes.ts";
 import { withProviders, runProviderProbe } from "./providers/routes.ts";
@@ -69,9 +72,11 @@ const coreLayers: Array<(next: any) => any> = [
   withDailyReport,
   withPro,
   withWallet,
+  withChainView,
   withJournal,
   withCompany,
   withTreasury,
+  withProfit,
   withElite,
   // The guard sits directly outside the sports route: constant-time token check and a short scan cache (see sports/guard.ts).
   (next: any) => withSportsGuard(withSports(next)),
@@ -110,6 +115,7 @@ export default {
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
       ctx.waitUntil(runJournalCycle(env).then(() => undefined, () => undefined)); // journal backfill (throttled inside) and prediction evaluation
+      ctx.waitUntil(runProfitCycle(env as any).then(() => undefined, e => console.error("profit cycle failed", e instanceof Error ? e.message : e))); // recognise confirmed simulated results and allocate (throttled inside)
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills
       ctx.waitUntil(runPerpCycle(env).then(() => undefined, e => console.error("futures cycle failed", e instanceof Error ? e.message : e))); // match resting futures paper orders and liquidations; sync futures testnet fills
       return;

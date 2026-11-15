@@ -395,3 +395,7 @@ curl 'https://<worker>.<subdomain>.workers.dev/api/intelligence/traders?q=reflex
 ## Global Alpha Intelligence
 
 Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and paper/testnet execution through the in-process order safeguards. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Live execution is not available: Alpha orders go through the same paper/testnet handler as every other path, and no live route exists.
+
+## Wallet and profit management
+- `/wallet/chain`: on-chain wallet dashboard with live native-coin balances, block height and gas read from the node over JSON-RPC (see `docs/CHAIN.md`). The custodial wallet itself needs the Python backend (`BACKEND_URL`).
+- `/profit`: automatic profit management (realized, confirmed, net-of-fees profit only; capital protection; allocation; expense forecast; reports). See `docs/PROFIT_MANAGEMENT.md`.

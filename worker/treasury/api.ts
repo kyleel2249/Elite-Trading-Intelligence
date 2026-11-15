@@ -336,3 +336,9 @@ async function route(req: Request, env: TreasuryEnv, url: URL, sub: string, now:
 
   throw deny("not_found", 404);
 }
+
+/** Internals shared with the automatic profit engine (worker/profit). The engine posts through the same hash-chained, guarded path as the API. */
+/** Test hook: forget the cached schema check so a fresh in-memory database is initialised. */
+const resetSchemaCache = () => { ready = null; triggersPresent = false; };
+export const treasuryInternals = { resetSchemaCache, ensureSchema, postEntry, readBalances, activePolicy, policyOf, loadActor, balanceView, verify, quarterOf };
+export type { D1 as TreasuryD1 };
