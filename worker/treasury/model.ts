@@ -12,6 +12,8 @@
  *   5100 Operating expenses         5200 Trading losses
  * Realized profits (1200) can only be credited by recognising a profit batch that is recorded, settled and reconciled by three different
  * people. Allocations to operating funds, reserve, long-term investments and trading capital can only be drawn from 1200.
+ * Operating funds (1300) are funded ONLY by profit allocation: owner contributions may fund trading capital, the emergency reserve and
+ * long-term investments, but never operating funds, so operating expenses are only ever paid out of reconciled net profit.
  */
 import { isGlobal, seesAll, type Actor } from "../company/model.ts";
 
@@ -58,7 +60,8 @@ export function validateLines(lines: Line[]): string | null {
 }
 
 // ---- entry builders (each returns balanced lines) ----
-export const CONTRIBUTION_ACCOUNTS = ["1100", "1300", "1400", "1500"] as const;
+/** Owner contributions may fund these accounts. Operating funds (1300) are deliberately absent: they are funded only by profit allocation. */
+export const CONTRIBUTION_ACCOUNTS = ["1100", "1400", "1500"] as const;
 export const contributionLines = (account: string, cents: number): Line[] => [L(account, cents, 0), L("3100", 0, cents)];
 export const profitRecognitionLines = (net: number): Line[] => [L("1200", net, 0), L("4100", 0, net)];
 export const lossRecognitionLines = (loss: number): Line[] => [L("5200", loss, 0), L("1100", 0, loss)];
