@@ -17,6 +17,16 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `BINANCE_API_KEY` | secret | Binance spot **testnet** key (trade-only). |
 | `BINANCE_FUTURES_API_KEY` | secret | Binance futures **testnet** key. |
 | `BINANCE_FUTURES_SECRET_KEY` | secret | Binance futures testnet secret. |
+| `ETI_WALLET_EXECUTION` | var | `enabled` allows external wallet withdrawals to be executed (default off; needs D1). |
+| `ETI_WALLET_RP_ID` | var | WebAuthn relying-party id for signer approvals (defaults to the request host). |
+| `ETI_WALLET_ORIGINS` | var | Comma-separated origins allowed for signer approvals (defaults to the request origin). |
+| `ETI_WALLET_ALLOW_SYNCED_PASSKEYS` | var | `true` allows synced passkeys as signer keys (default: device-bound keys only). |
+| `ETI_WALLET_AAGUIDS` | var | Comma-separated AAGUID allow-list of approved hardware-key models. |
+| `ETI_WALLET_GOV_TIMELOCK_SEC` | var | Timelock for governance actions (default 86400). |
+| `ETI_SIGNER_URL` | secret | HTTPS URL of the signing gateway (HSM / MPC / KMS) that holds the keys. |
+| `ETI_SIGNER_SECRET` | secret | HMAC secret shared with the signing gateway. |
+| `BINANCE_WITHDRAW_API_KEY` | secret | Binance withdrawal-only API key (IP-restricted) for Binance-custody wallets. |
+| `BINANCE_WITHDRAW_SECRET_KEY` | secret | Secret for the Binance withdrawal key. |
 | `BINANCE_SECRET_KEY` | secret | Binance spot testnet secret. |
 | `COINGECKO_API_KEY` | secret | Optional CoinGecko key for fundamentals. |
 | `CRYPTO_PROFILES_JSON` | secret | Operator-curated crypto facts no free API provides (team identity, regulatory status, verified audits, unlocks), keyed by symbol. Only whitelisted, type-checked fields are read; they are labelled as operator assertions. |

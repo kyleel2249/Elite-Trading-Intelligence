@@ -46,6 +46,10 @@ The Worker is HTTPS-only behind Cloudflare. The browser's only WebSocket is the 
 ## Rate limiting and input validation
 Fixed-window limits (KV) on sign-in, MFA confirmation, session issue/refresh, portfolio actions, provider probing and backup. Every request body is parsed defensively and validated (types, lengths, enumerations, numeric ranges); SQL always uses bound parameters.
 
+## Corporate wallets (`worker/wallets/`)
+
+Purpose-separated wallets with multi-signature (WebAuthn hardware-key) approvals, timelocks, address whitelists, limits and an instant freeze. ETI holds no wallet private keys, seed phrases or passphrases: signing is delegated to an HSM / MPC / KMS gateway or exchange; secret-looking input is refused and never stored or logged; recovery uses an offline ECDH key split with Shamir shares. Details, rotation and recovery procedures: [WALLETS.md](WALLETS.md).
+
 ## Backup and recovery
 - `GET /api/backup/export` (master token or MFA administrator): ledger, accounts and audit trail as one AES-256-GCM file under `ETI_IDENTITY_KEY`; sessions are excluded. Use it on a schedule from a trusted machine, for example `curl -H "Authorization: Bearer $TOKEN" .../api/backup/export -o eti-$(date +%F).etibak`.
 - `POST /api/backup/restore` writes only into an **empty** database after checking the key, a checksum and the audit chain. It will not overwrite or merge with live data.
