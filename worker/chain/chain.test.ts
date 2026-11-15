@@ -85,3 +85,30 @@ test("the MetaMask panel is read-only: it never asks the wallet to sign, approve
   assert.match(html, /Connect MetaMask/); assert.match(html, /eth_requestAccounts/); assert.match(html, /eth_getBalance/);
   for (const m of ["eth_sendTransaction", "eth_sendRawTransaction", "personal_sign", "eth_sign", "eth_signTypedData", "eth_signTransaction", "wallet_addEthereumChain", "wallet_watchAsset"]) assert.equal(html.includes(m), false, m + " must not appear");
 });
+
+const KEY = "0123456789abcdef0123456789abcdef";
+test("Infura: key builds each endpoint; explicit CHAIN_RPC wins; a malformed key is ignored; without a key the old defaults stand", async () => {
+  const { rpcUrlFor: u, rpcSourceFor: src, CHAIN_NETS: nets } = await import("./networks.ts");
+  const hosts = Object.fromEntries(nets.map(n => [n.key, new URL(u(n, { INFURA_API_KEY: KEY })!).host]));
+  assert.deepEqual(hosts, { sepolia: "sepolia.infura.io", "base-sepolia": "base-sepolia.infura.io", "bsc-testnet": "bsc-testnet.infura.io", "polygon-amoy": "polygon-amoy.infura.io", ethereum: "mainnet.infura.io", base: "base-mainnet.infura.io", bsc: "bsc-mainnet.infura.io", polygon: "polygon-mainnet.infura.io" });
+  assert.equal(u(netByKey("ethereum")!, { INFURA_API_KEY: KEY }), "https://mainnet.infura.io/v3/" + KEY);
+  assert.equal(u(SEPOLIA, { INFURA_API_KEY: KEY, CHAIN_RPC_SEPOLIA: "https://mine.example/x" }), "https://mine.example/x");
+  assert.equal(src(SEPOLIA, { INFURA_API_KEY: KEY, CHAIN_RPC_SEPOLIA: "https://mine.example/x" }), "custom"); assert.equal(src(SEPOLIA, { INFURA_API_KEY: KEY }), "infura");
+  assert.equal(u(netByKey("ethereum")!, { INFURA_API_KEY: "not-a-key" }), undefined); assert.equal(src(SEPOLIA, {}), "public");
+  assert.equal(u(SEPOLIA, { INFURA_API_KEY: "short" }), "https://ethereum-sepolia-rpc.publicnode.com/");
+});
+
+test("Infura: the API key secret is sent as Basic auth only to infura.io; the key and secret never appear in responses or errors", async () => {
+  const { rpcHeadersFor } = await import("./networks.ts");
+  const env = { INFURA_API_KEY: KEY, INFURA_API_SECRET: "s3cr3t-value" };
+  assert.equal(rpcHeadersFor("https://mainnet.infura.io/v3/" + KEY, env).authorization, "Basic " + Buffer.from(":s3cr3t-value").toString("base64"));
+  assert.deepEqual(rpcHeadersFor("https://other.example/v3/x", env), {}); assert.deepEqual(rpcHeadersFor("https://evil.com/.infura.io", env), {});
+  assert.deepEqual(rpcHeadersFor("https://mainnet.infura.io/v3/" + KEY, { INFURA_API_KEY: KEY }), {});
+  const seen: { url: string; auth: string | null }[] = [];
+  const f = (async (url: any, init: any) => { seen.push({ url: String(url), auth: new Headers(init.headers).get("authorization") }); const b = JSON.parse(init.body); return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: b.method === "eth_chainId" ? "0xaa36a7" : "0x10" }), { status: 200 }); }) as typeof fetch;
+  const ok = await networkStatus(SEPOLIA, env, ADDR, f);
+  assert.equal(ok.connected, true); assert.equal(ok.source, "infura"); assert.ok(seen.every(x => x.url === "https://sepolia.infura.io/v3/" + KEY && x.auth === "Basic " + Buffer.from(":s3cr3t-value").toString("base64")));
+  assert.equal(JSON.stringify(ok).includes(KEY), false); assert.equal(JSON.stringify(ok).includes("s3cr3t"), false);
+  const bad = await networkStatus(SEPOLIA, env, ADDR, (async () => new Response("denied", { status: 401 })) as typeof fetch);
+  assert.equal(bad.connected, false); assert.equal(JSON.stringify(bad).includes(KEY), false);
+});

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.chain import policy as policy_mod
 from app.chain.crypto import address_from_private, generate_private_key, is_address, to_checksum
 from app.chain.models import ChainAllowlist, ChainEvent, ChainTransaction, ChainWallet
-from app.chain.networks import NETWORKS, Network, dex_config, load_limits, rpc_url
+from app.chain.networks import NETWORKS, Network, dex_config, load_limits, rpc_headers, rpc_url
 from app.chain.policy import fmt_units, to_units
 from app.chain.rpc import Rpc, RpcError
 from app.chain.txcodec import (decode_address, decode_string, decode_uint, decode_uint_array, enc_address, enc_uint, encode_call,
@@ -48,8 +48,8 @@ class ChainError(Exception):
 def make_rpc(network_key: str) -> Rpc:
     url = rpc_url(network_key)
     if not url:
-        raise ChainError(f"No RPC endpoint configured for {network_key} (set CHAIN_RPC_{network_key.upper().replace('-', '_')})", 503)
-    return Rpc(url)
+        raise ChainError(f"No RPC endpoint configured for {network_key} (set INFURA_API_KEY or CHAIN_RPC_{network_key.upper().replace('-', '_')})", 503)
+    return Rpc(url, headers=rpc_headers(url))
 
 
 def _now() -> datetime:

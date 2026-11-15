@@ -21,15 +21,15 @@ def _int(x: Any) -> int:
 
 
 class Rpc:
-    def __init__(self, url: str, *, client: Optional[httpx.AsyncClient] = None, timeout: float = 15.0):
-        self.url, self._client, self.timeout = url, client, timeout
+    def __init__(self, url: str, *, client: Optional[httpx.AsyncClient] = None, timeout: float = 15.0, headers: Optional[dict] = None):
+        self.url, self._client, self.timeout, self.headers = url, client, timeout, headers or {}
 
     async def request(self, method: str, params: Optional[list] = None) -> Any:
         body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []}
         own = self._client is None
         client = self._client or httpx.AsyncClient(timeout=self.timeout)
         try:
-            resp = await client.post(self.url, json=body)
+            resp = await client.post(self.url, json=body, headers=self.headers)
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, ValueError) as e:

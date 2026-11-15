@@ -86,7 +86,7 @@ function tile(s){
   if(s.balance==null)t.appendChild(el('div','mut',s.address?'balance unavailable':'no address selected'));
   function kv(k,v){var r=el('div','kv');r.appendChild(el('span','',k));r.appendChild(el('span','',v));t.appendChild(r);}
   kv('Chain id',s.chainId);kv('Block',s.block!=null?s.block.toLocaleString():'—');kv('Gas price',s.gasPriceGwei!=null?s.gasPriceGwei.toFixed(3)+' gwei':'—');
-  kv('Type',s.mainnet?'mainnet':'testnet');
+  kv('Type',s.mainnet?'mainnet':'testnet');if(s.source)kv('Node',s.source==='infura'?'Infura':(s.source==='custom'?'custom RPC':'public node'));
   if(s.address){var r=el('div','kv');r.appendChild(el('span','','Address'));r.appendChild(safeLink(s.explorer+'/address/'+s.address,short(s.address)));t.appendChild(r);}
   if(s.error)t.appendChild(el('div','err',s.error));else if(s.note)t.appendChild(el('div','note',s.note));
   return t;

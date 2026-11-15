@@ -1,9 +1,9 @@
 /** Minimal read-only JSON-RPC client. RPC URLs often embed API keys, so they never appear in errors or responses. */
 export class RpcError extends Error {}
-export async function rpc(url: string, method: string, params: unknown[] = [], timeoutMs = 8000, fetcher: typeof fetch = fetch): Promise<any> {
+export async function rpc(url: string, method: string, params: unknown[] = [], timeoutMs = 8000, fetcher: typeof fetch = fetch, headers: Record<string, string> = {}): Promise<any> {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const r = await fetcher(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: ctl.signal });
+    const r = await fetcher(url, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: ctl.signal });
     if (!r.ok) throw new RpcError("RPC HTTP " + r.status);
     const j: any = await r.json().catch(() => null);
     if (!j || typeof j !== "object") throw new RpcError("RPC returned a malformed response");

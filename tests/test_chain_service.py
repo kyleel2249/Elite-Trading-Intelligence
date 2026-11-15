@@ -326,3 +326,26 @@ def test_api_flow_without_key_material_in_any_response(env):
     st = c.get("/api/chain/status").json()
     assert st["wallet"]["address"] == r.json()["address"] and st["networks"][0]["connected"] is True
     assert c.get("/wallet").status_code == 200
+
+
+def test_infura_key_builds_endpoints_and_secret_only_goes_to_infura(monkeypatch):
+    from app.chain.networks import rpc_headers, rpc_url
+
+    key = "0123456789abcdef0123456789abcdef"
+    for k in ("CHAIN_RPC_ETHEREUM", "CHAIN_RPC_SEPOLIA", "INFURA_API_KEY", "INFURA_API_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    assert rpc_url("ethereum") is None
+    assert rpc_url("sepolia") == "https://ethereum-sepolia-rpc.publicnode.com"
+    monkeypatch.setenv("INFURA_API_KEY", "not-a-key")
+    assert rpc_url("ethereum") is None
+    monkeypatch.setenv("INFURA_API_KEY", key)
+    assert rpc_url("ethereum") == f"https://mainnet.infura.io/v3/{key}"
+    assert rpc_url("base") == f"https://base-mainnet.infura.io/v3/{key}"
+    assert rpc_url("polygon-amoy") == f"https://polygon-amoy.infura.io/v3/{key}"
+    monkeypatch.setenv("CHAIN_RPC_ETHEREUM", "https://mine.example/x")
+    assert rpc_url("ethereum") == "https://mine.example/x"
+    assert rpc_headers(rpc_url("sepolia")) == {}
+    monkeypatch.setenv("INFURA_API_SECRET", "s3cr3t")
+    assert rpc_headers(rpc_url("sepolia"))["Authorization"].startswith("Basic ")
+    assert rpc_headers("https://mine.example/x") == {}
+    assert rpc_headers("https://evil.com/.infura.io") == {}
