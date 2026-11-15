@@ -13,7 +13,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ALPHA_EQUITY_WATCHLIST` | config | Comma-separated equity symbols for Global Alpha. |
 | `ALPHA_SUBREQUEST_BUDGET` | config | Cap on outbound sub-requests per Global Alpha run. |
 | `ANTHROPIC_API_KEY` | secret | Enables the optional LLM brief. Absent = feature off. |
-| `BACKEND_URL` | config | Optional. HTTP(S) origin (no path, credentials, query or fragment) that receives any route the Worker does not handle itself. Unset = unknown routes return a JSON 404. |
+| `BACKEND_URL` | config | Origin of the Python backend (`https://host`, no path, credentials, query or fragment). Required for the custodial wallet at /wallet/chain (the Worker forwards /api/chain/* to it with a timeout, a GET retry and a header allowlist) and used as the generic fallback for routes the Worker does not implement. Check it at GET /api/chain-view/backend. The deploy workflow syncs it from a GitHub variable or secret named `BACKEND_URL`. |
 | `BINANCE_API_KEY` | secret | Binance spot **testnet** key (trade-only). |
 | `BINANCE_FUTURES_API_KEY` | secret | Binance futures **testnet** key. |
 | `BINANCE_FUTURES_SECRET_KEY` | secret | Binance futures testnet secret. |

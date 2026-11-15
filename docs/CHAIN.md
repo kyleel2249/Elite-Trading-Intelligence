@@ -41,3 +41,14 @@ UI: `/wallet`. API: `/api/chain/*` (every route needs `X-API-Key` when the serve
 - Public RPCs can rate-limit or censor; use a private endpoint for anything serious.
 - Mainnet use is the operator's decision and responsibility. Start on a testnet.
 
+
+## Connecting the Python backend (custodial wallet)
+
+The Worker serves the dashboard and reads native balances straight from the nodes. Creating the ETI wallet, tokens, the allowlist, transfer previews and the transaction list live in the Python backend (`/api/chain/*`).
+
+1. Deploy the backend: `fly launch --copy-config --no-deploy` then `fly secrets set DATABASE_URL=... ` and `fly deploy` (see `fly.toml`, health check `/api/system/health`). Any host that serves the Docker image over HTTPS works. Keep it outside US regions (Binance).
+2. Set the backend's chain options if needed: `CHAIN_ENABLED`, `CHAIN_RPC_<NETWORK>`, `CHAIN_REQUIRE_ALLOWLIST`, `CHAIN_MAINNET_SEND_ENABLED` (default false), `CHAIN_BROKER_ADDRESS`.
+3. Give the Worker the origin: add a GitHub repository variable (or secret) `BACKEND_URL=https://<your-backend-host>` and re-run the Deploy workflow, or run `npx wrangler secret put BACKEND_URL`. The value must be an origin only: no path, credentials, query or fragment.
+4. Verify: open `/api/chain-view/backend` (shows configured / connected / latency), then `/wallet/chain`.
+
+How the Worker connects (`worker/chain/backend.ts`): only `/api/chain/*` is forwarded; cookies are never sent; 10 s read / 20 s write timeout; a GET is retried once on a network error or 502/503/504; a POST (for example a send) is never retried; the network list is cached for 60 s per credential. Errors are explicit: `backend_not_configured` (503), `backend_invalid` (500), `backend_unreachable` (502), `backend_timeout` (504).

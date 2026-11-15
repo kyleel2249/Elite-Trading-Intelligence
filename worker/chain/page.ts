@@ -66,7 +66,10 @@ async function getJson(path,opt){
 function why(res){
   var d=res.json&&(res.json.detail!=null?res.json.detail:res.json.message||res.json.error);
   if(res.status===401||res.status===403)return 'The backend requires the ETI API key (enter it above).';
-  if(res.status===404&&!(res.json&&res.json.detail))return 'The wallet backend is not connected to this Worker (set BACKEND_URL to the Python backend that serves /api/chain).';
+  if(res.json&&res.json.error==='backend_not_configured')return 'The wallet backend is not connected: set BACKEND_URL on the Worker to the Python backend origin (docs/CHAIN.md).';
+  if(res.json&&res.json.error==='backend_invalid')return 'BACKEND_URL is set but invalid: it must be an https origin with no path.';
+  if(res.json&&res.json.error==='backend_timeout')return 'The wallet backend is too slow to answer right now.';
+  if(res.status===404&&!(res.json&&res.json.detail))return 'The wallet backend does not serve /api/chain (is it the ETI backend?).';
   if(res.status===502)return 'The wallet backend is unreachable right now.';
   if(res.status===503)return typeof d==='string'?d:'The on-chain wallet is disabled on the backend (CHAIN_ENABLED=false).';
   return typeof d==='string'?d:('HTTP '+res.status);
@@ -119,7 +122,7 @@ async function loadWallet(){
   ST.key=$('apiKey').value.trim();
   var r=await getJson('/api/chain/status',{headers:hdr()});
   var b=$('wBody');
-  if(!r.ok||!r.json){ST.backend=false;ST.wallet=null;clear(b);b.appendChild(el('div','warn',why(r)));b.appendChild(el('div','note','You can still read live node data and any address below: those do not need the backend.'));$('btnCreate').disabled=true;$('btnPrev').disabled=true;$('btnTx').disabled=true;$('wMeta').textContent='backend not connected';await loadTiles(null);return;}
+  if(!r.ok||!r.json){ST.backend=false;ST.wallet=null;clear(b);b.appendChild(el('div','warn',why(r)));var bs=await getJson('/api/chain-view/backend');if(bs.json){b.appendChild(el('div','note','Backend check: '+(bs.json.connected?'reachable in '+bs.json.latencyMs+' ms':(bs.json.error||'not reachable'))+(bs.json.backend?' ('+bs.json.backend+')':'')+'.'));}b.appendChild(el('div','note','You can still read live node data and any address below: those do not need the backend.'));$('btnCreate').disabled=true;$('btnPrev').disabled=true;$('btnTx').disabled=true;$('wMeta').textContent='backend not connected';await loadTiles(null);return;}
   ST.backend=true;ST.wallet=r.json.wallet;$('wMeta').textContent=r.json.kill_switch?'KILL SWITCH ACTIVE':'backend connected';
   $('btnPrev').disabled=!ST.wallet;$('btnTx').disabled=!ST.wallet;
   renderWallet(r.json.wallet,r.json);

@@ -47,8 +47,10 @@ jobs:
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
           ETI_SPORTS_PAPER_TOKEN: ${{ secrets.ETI_SPORTS_PAPER_TOKEN }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          # Origin of the Python wallet backend (https://host, no path). Set as a repository variable or secret named BACKEND_URL.
+          BACKEND_URL: ${{ vars.BACKEND_URL || secrets.BACKEND_URL }}
         run: |
-          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY; do
+          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL; do
             value="${!name}"
             if [ -n "$value" ]; then
               printf '%s' "$value" | npx wrangler secret put "$name"

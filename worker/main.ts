@@ -34,6 +34,7 @@ import { runDailyReportCycle } from "./daily/api.ts";
 import { withPro } from "./pro/route.ts";
 import { withWallet } from "./wallet/route.ts";
 import { withChainView } from "./chain/routes.ts";
+import { withChainBackend } from "./chain/backend.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
 import { runGuardedPaperCycle } from "./paper-guard.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
@@ -73,6 +74,7 @@ const coreLayers: Array<(next: any) => any> = [
   withPro,
   withWallet,
   withChainView,
+  withChainBackend,
   withJournal,
   withCompany,
   withTreasury,
