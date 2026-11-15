@@ -37,6 +37,10 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:6px 8px;b
 <section class="panel" id="pWallet"><h2>ETI wallet <small id="wMeta"></small></h2>
  <div class="row"><input id="apiKey" type="password" autocomplete="off" placeholder="ETI API key (only if the backend enforces one; kept in memory)" style="min-width:260px;flex:1"><button id="btnLoad">Load wallet</button><button id="btnCreate" disabled>Create wallet</button></div>
  <div id="wBody"><div class="empty">Loading the wallet from the backend…</div></div></section>
+<section class="panel" id="pMeta"><h2>MetaMask <small id="mMeta">your own wallet, connected in this browser: no backend needed, nothing is signed or sent</small></h2>
+ <div class="row"><button id="btnMm">Connect MetaMask</button><select id="mmNet" aria-label="Switch MetaMask network" disabled></select><button id="btnMmSwitch" disabled>Switch network</button><button id="btnMmCheck" disabled>Cross-check on the nodes</button><button id="btnMmOff" disabled>Disconnect</button></div>
+ <div id="mmOut" class="empty">Not connected.</div>
+ <div class="note">ETI only reads the account address, the network and the native balance. It never asks MetaMask to sign, approve or send. Funds stay in your MetaMask; the on-chain wallet above is a separate ETI-managed wallet that needs the backend.</div></section>
 <section class="panel"><h2>Native coin by network <small id="nMeta">live from the nodes over JSON-RPC</small></h2><div id="tiles" class="grid"></div>
  <div class="note" id="nNote"></div></section>
 <section class="panel"><h2>Check any address <small>native coin balance read straight from the chain</small></h2>
@@ -92,7 +96,7 @@ function fillSelects(){
 }
 async function loadNetworks(){
   var r=await getJson('/api/chain-view/networks');
-  if(r.ok&&r.json){ST.nets=r.json.networks||[];fillSelects();}
+  if(r.ok&&r.json){ST.nets=r.json.networks||[];fillSelects();mmFillSwitch();if(MM.acct)mmRender();}
 }
 async function loadTiles(address){
   var box=$('tiles');clear(box);
@@ -178,6 +182,54 @@ async function preview(){
   (p.violations||[]).forEach(function(v){box.appendChild(el('div','bad','• '+v));});
   var t=el('table');Object.keys(p).filter(function(k){return k!=='violations'&&k!=='quote_id'&&typeof p[k]!=='object';}).forEach(function(k){var tr=el('tr');tr.appendChild(el('th','',k));tr.appendChild(el('td','',p[k]));t.appendChild(tr);});box.appendChild(t);
 }
+
+var MM={acct:null,chain:null};
+function mmProvider(){var e=window.ethereum;if(!e)return null;if(e.providers&&e.providers.length){for(var i=0;i<e.providers.length;i++)if(e.providers[i].isMetaMask)return e.providers[i];}return e.isMetaMask?e:null;}
+function fmtWei(w,dec){var base=10n**18n,whole=w/base,frac=(w%base).toString().padStart(18,'0').slice(0,dec||6);while(frac.length&&frac.charAt(frac.length-1)==='0')frac=frac.slice(0,-1);return whole.toString()+(frac?'.'+frac:'');}
+function netByChain(id){for(var i=0;i<ST.nets.length;i++)if(ST.nets[i].chainId===id)return ST.nets[i];return null;}
+function mmFillSwitch(){var s=$('mmNet');clear(s);ST.nets.forEach(function(n){var o=el('option','',n.label+' ('+(n.mainnet?'mainnet':'testnet')+')');o.value=String(n.chainId);s.appendChild(o);});}
+function mmMsg(box,cls,t){clear(box);box.className='';box.appendChild(el('div',cls,t));}
+async function mmRender(){
+  var box=$('mmOut'),p=mmProvider();clear(box);
+  if(!p){box.appendChild(el('div','warn','MetaMask was not found in this browser.'));var a=el('a','','Install MetaMask');a.href='https://metamask.io/download/';a.target='_blank';a.rel='noopener noreferrer';box.appendChild(a);return;}
+  if(!MM.acct){box.appendChild(el('div','empty','Not connected.'));['mmNet','btnMmSwitch','btnMmCheck','btnMmOff'].forEach(function(i){$(i).disabled=true;});$('btnMm').disabled=false;return;}
+  ['mmNet','btnMmSwitch','btnMmCheck','btnMmOff'].forEach(function(i){$(i).disabled=false;});
+  var idHex=await p.request({method:'eth_chainId'}),id=parseInt(idHex,16),n=netByChain(id),bal=null,err=null;
+  try{bal=BigInt(await p.request({method:'eth_getBalance',params:[MM.acct,'latest']}));}catch(e){err='Could not read the balance from MetaMask.';}
+  MM.chain=id;var t=el('div','tile');
+  var top=el('div','net');top.appendChild(el('span','',n?n.label:'Chain id '+id));top.appendChild(el('span',n&&n.mainnet?'warn':'mut',n?(n.mainnet?'mainnet':'testnet'):'not a network ETI tracks'));t.appendChild(top);
+  var c=el('div','coin',bal==null?'—':fmtWei(bal,6));c.appendChild(el('span','sym',n?n.native:'native coin'));t.appendChild(c);
+  var r=el('div','kv');r.appendChild(el('span','','Account'));if(n)r.appendChild(safeLink(n.explorer+'/address/'+MM.acct,short(MM.acct)));else r.appendChild(el('span','',short(MM.acct)));t.appendChild(r);
+  var k=el('div','kv');k.appendChild(el('span','','Chain id'));k.appendChild(el('span','',id));t.appendChild(k);
+  if(err)t.appendChild(el('div','err',err));
+  var g=el('div','grid');g.appendChild(t);box.appendChild(g);
+  if(n)$('mmNet').value=String(id);
+}
+async function mmConnect(){
+  var p=mmProvider(),box=$('mmOut');
+  if(!p){await mmRender();return;}
+  $('btnMm').disabled=true;
+  try{var a=await p.request({method:'eth_requestAccounts'});MM.acct=a&&a[0]?a[0]:null;}
+  catch(e){MM.acct=null;mmMsg(box,'err',e&&e.code===4001?'You rejected the connection request in MetaMask.':(e&&e.code===-32002?'A MetaMask request is already open: check the extension.':'MetaMask could not connect.'));$('btnMm').disabled=false;return;}
+  $('btnMm').disabled=false;await mmRender();
+}
+async function mmSwitch(){
+  var p=mmProvider();if(!p)return;var id=parseInt($('mmNet').value,10),box=$('mmOut');
+  try{await p.request({method:'wallet_switchEthereumChain',params:[{chainId:'0x'+id.toString(16)}]});}
+  catch(e){var m=e&&e.code===4902?'That network is not added in MetaMask yet: add it in MetaMask first, then switch.':(e&&e.code===4001?'You rejected the network switch.':'MetaMask could not switch the network.');box.insertBefore(el('div','err',m),box.firstChild);return;}
+  await mmRender();
+}
+async function mmOff(){
+  var p=mmProvider();try{if(p)await p.request({method:'wallet_revokePermissions',params:[{eth_accounts:{}}]});}catch(e){}
+  MM.acct=null;await mmRender();
+}
+function mmCheck(){if(!MM.acct)return;$('watch').value=MM.acct;watch();$('watch').scrollIntoView({behavior:'smooth',block:'center'});}
+(function(){var p=mmProvider();if(!p)return;
+  p.on&&p.on('accountsChanged',function(a){MM.acct=a&&a[0]?a[0]:null;mmRender();});
+  p.on&&p.on('chainChanged',function(){mmRender();});
+  p.request({method:'eth_accounts'}).then(function(a){if(a&&a[0]){MM.acct=a[0];mmRender();}}).catch(function(){});
+})();
+$('btnMm').onclick=mmConnect;$('btnMmSwitch').onclick=mmSwitch;$('btnMmCheck').onclick=mmCheck;$('btnMmOff').onclick=mmOff;
 $('btnLoad').onclick=loadWallet;$('btnCreate').onclick=createWallet;$('btnWatch').onclick=watch;$('btnTok').onclick=loadTokens;$('btnPrev').onclick=preview;$('btnTx').onclick=refreshTxs;
 $('watch').addEventListener('keydown',function(e){if(e.key==='Enter')watch();});
 loadNetworks().then(loadWallet);

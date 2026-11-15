@@ -79,3 +79,9 @@ test("the full application serves the page with a nonce CSP and the paper wallet
   const w = await (await app.fetch(new Request("https://x.test/wallet"), {} as any)).text();
   assert.match(w, /href="\/wallet\/chain"/);
 });
+
+test("the MetaMask panel is read-only: it never asks the wallet to sign, approve or send", async () => {
+  const { walletPage } = await import("./page.ts"), html = walletPage();
+  assert.match(html, /Connect MetaMask/); assert.match(html, /eth_requestAccounts/); assert.match(html, /eth_getBalance/);
+  for (const m of ["eth_sendTransaction", "eth_sendRawTransaction", "personal_sign", "eth_sign", "eth_signTypedData", "eth_signTransaction", "wallet_addEthereumChain", "wallet_watchAsset"]) assert.equal(html.includes(m), false, m + " must not appear");
+});

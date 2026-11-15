@@ -52,3 +52,7 @@ The Worker serves the dashboard and reads native balances straight from the node
 4. Verify: open `/api/chain-view/backend` (shows configured / connected / latency), then `/wallet/chain`.
 
 How the Worker connects (`worker/chain/backend.ts`): only `/api/chain/*` is forwarded; cookies are never sent; 10 s read / 20 s write timeout; a GET is retried once on a network error or 502/503/504; a POST (for example a send) is never retried; the network list is cached for 60 s per credential. Errors are explicit: `backend_not_configured` (503), `backend_invalid` (500), `backend_unreachable` (502), `backend_timeout` (504).
+
+## MetaMask (no backend needed)
+
+`/wallet/chain` has a MetaMask panel. It connects your own MetaMask in the browser (`eth_requestAccounts`), shows the account, the network and the native balance, can ask MetaMask to switch between the networks ETI tracks, and can cross-check the same address on the Worker's nodes. It is read-only: ETI never requests a signature, approval or transaction, never adds networks or tokens, and stores nothing. This works without `BACKEND_URL`; the ETI-managed custodial wallet above it still needs the backend.
