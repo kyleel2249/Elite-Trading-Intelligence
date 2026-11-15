@@ -148,13 +148,8 @@ machine-readable or self-consistent enough to encode safely.
 | `GET /api/markets/calendars` | Holiday-calendar coverage and provenance, plus markets with none |
 | `GET /api/markets/snapshot?symbol=` | Live quote from the provider that can serve it (CFD/proxy labelled) |
 
-<<<<<<< HEAD
-Verdicts: `ready`, `caution`, `wait_for_session`, `analysis_only`, `blocked`. Nothing here submits an order.
-`POST /api/pretrade/check` (a dry run of the in-process risk engine) additionally returns `market_context` and `warnings`.
-=======
 Verdicts: `ready`, `caution`, `wait_for_session`, `needs_setup`, `analysis_only`, `blocked`. Nothing here submits an order.
-`POST /api/risk-gateway/preflight` additionally returns `market_context` and `warnings`.
->>>>>>> 053ecb9 (Add live calibration, Alpaca bars/options quote, and Cloudflare Worker market intelligence)
+`POST /api/pretrade/check` (a dry run of the in-process risk engine) additionally returns `market_context` and `warnings`.
 
 
 ## Metals on the live chart and in ETI

@@ -4,7 +4,7 @@ import { MAX_CYCLE_SYMBOLS, cycleConfig, handlePaper, runPaperCycle, type PaperE
 import main from "./main.ts";
 import { series } from "./algo/fixtures.ts";
 
-const TOKEN = "t".repeat(40), NOW = Date.UTC(2026, 10, 9, 12, 0, 0), PX = series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: 900000, end: 0 }).at(-1)![4];
+const TOKEN = "t".repeat(40), NOW = Date.UTC(2026, 10, 9, 12, 0, 0), PX = series(300, { drift: 0.25, noise: 0.8, seed: 7, stepMs: 900000, end: 0 }).at(-1)![4];
 const MS: Record<string, number> = { "1m": 60000, "5m": 300000, "15m": 900000, "30m": 1800000, "1h": 3600000, "4h": 14400000, "1d": 86400000, "1w": 604800000 };
 const kvStore = () => { const m = new Map<string, string>(); return { m, get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); }, list: async (o: { prefix: string; limit?: number }) => ({ keys: [...m.keys()].filter(k => k.startsWith(o.prefix)).sort().slice(0, o.limit ?? 1000).map(name => ({ name })) }) }; };
 const world = { clock: NOW, failSymbols: new Set<string>(), minuteOverride: null as null | ((s: string) => unknown[][] | null), fetched: [] as string[] };
@@ -15,7 +15,7 @@ const fetchImpl = (async (input: any, init?: any) => {
   if (world.failSymbols.has(sym)) return new Response("down", { status: 500 });
   if (u.pathname.includes("klines")) {
     const iv = u.searchParams.get("interval")!, ov = iv === "1m" ? world.minuteOverride?.(sym) : null; if (ov) return new Response(JSON.stringify(ov));
-    const step = MS[iv]; return new Response(JSON.stringify(series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: step, end: world.clock - step * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"])));
+    const step = MS[iv]; return new Response(JSON.stringify(series(300, { drift: 0.25, noise: 0.8, seed: 7, stepMs: step, end: world.clock - step * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"])));
   }
   if (u.pathname.includes("depth")) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(PX - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(PX + 0.01 + i * 0.01), "50"]) }));
   return new Response("x", { status: 500 });
