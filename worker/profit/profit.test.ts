@@ -131,7 +131,7 @@ test("API: needs sign-in, forbids unqualified users, serves status/report/foreca
   assert.equal(await (await call("/other", {}, false)).text(), "base");
 });
 
-test("migration 0011 matches the embedded profit schema", () => {
+test("migration 0013 matches the embedded profit schema", () => {
   const squash = (s: string) => s.replace(/\s+/g, "");
   const file = squash(readFileSync(new URL("../../migrations/0013_profit_engine.sql", import.meta.url), "utf8").replace(/--[^\n]*\n/g, "\n"));
   for (const stmt of SCHEMA) assert.ok(file.includes(squash(stmt)), "missing from migration: " + stmt.slice(0, 70));
