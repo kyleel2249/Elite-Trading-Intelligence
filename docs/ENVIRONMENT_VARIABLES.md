@@ -85,6 +85,16 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_PRECISION_STRATEGIES` | config | Strategies the ledger records (default `intraday`). |
 | `ETI_PRECISION_BATCH` | config | Pairs evaluated per cron tick, 1 to 4 (default 1). |
 | `ETI_READINESS_GATE` | config | `enforce`/`off`: whether a failing readiness check blocks orders. |
+| `ETI_RISK` | prefix | Common prefix of the autonomous risk-policy variables below (`worker/risk/policy.ts`). Each can only tighten the policy; values looser than the built-in hard ceilings are clamped back to them. Invalid values fall back to the default. |
+| `ETI_RISK_PER_TRADE` | config | Fraction of equity risked per trade (default 0.005 = 0.5%, ceiling 0.01). |
+| `ETI_RISK_MAX_NOTIONAL` | config | Maximum single-position notional as a fraction of equity (default and ceiling 0.5). |
+| `ETI_RISK_MAX_POSITIONS` | config | Maximum concurrent positions, integer (default and ceiling 3). |
+| `ETI_RISK_MAX_DAILY_LOSS` | config | Daily realized + unrealized loss, as a fraction of the day's equity baseline, that stops new entries (default and ceiling 0.02). |
+| `ETI_RISK_MAX_CONSECUTIVE_LOSSES` | config | Consecutive losing trades that stop new entries, integer (default and ceiling 3). |
+| `ETI_RISK_MIN_REWARD_RISK` | config | Minimum net reward-to-risk ratio after costs (default and floor 1.5). |
+| `ETI_RISK_MAX_LEVERAGE` | config | Maximum leverage (default and ceiling 1). |
+| `ETI_RISK_MIN_CASH_RESERVE` | config | Cash kept uncommitted as a fraction of equity (default and floor 0.5). |
+| `ETI_RISK_MAX_DRAWDOWN` | config | Drawdown from peak equity that stops new entries (default and ceiling 0.1). |
 | `ETI_RISK_GATE_TOKEN` | legacy | Removed. Ignored; reported as unused legacy config. |
 | `ETI_RISK_GATE_URL` | legacy | Removed. Ignored; if present the dashboard reports it as unused legacy config. |
 | `ETI_ROUND_TRIP_COST_BPS` | config | Assumed round-trip trading cost (bps) in signal maths. |
