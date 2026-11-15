@@ -10,6 +10,7 @@
 //   GET  /api/paper/performance
 //   GET  /api/paper/audit?limit=100
 import type { ExecutionEnv } from "../execution.ts";
+import { parsePolicy } from "../risk/policy.ts";
 import { authenticate, can } from "../auth/session.ts";
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
@@ -32,10 +33,19 @@ interface KVWithList extends KVLike { list(o: { prefix: string; limit?: number }
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (k, v) => (v === Infinity ? "Infinity" : v)), { status, headers: HEADERS });
 
-/** Engine config derived from the environment. Only an explicit, positive ETI_MAX_ORDER_QUANTITY sets a quantity cap. */
+/** Apply the shared, hard-ceiling risk policy to every paper entry path (scheduled and authenticated API). */
 export function paperConfigFrom(env: ExecutionEnv): Partial<PaperConfig> {
   const cap = Number(env.ETI_MAX_ORDER_QUANTITY);
-  return Number.isFinite(cap) && cap > 0 ? { maxOrderQuantity: cap } : {};
+  const policy = parsePolicy(env as unknown as Record<string, unknown>);
+  return {
+    riskFraction: policy.riskPerTrade,
+    maxNotionalFraction: policy.maxPositionNotional,
+    maxOpenPositions: policy.maxConcurrentPositions,
+    maxDailyLossPct: policy.maxDailyLoss * 100,
+    maxConsecutiveLosses: policy.maxConsecutiveLosses,
+    policy,
+    ...(Number.isFinite(cap) && cap > 0 ? { maxOrderQuantity: cap } : {}),
+  };
 }
 
 export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps = {}): Promise<Response> {
