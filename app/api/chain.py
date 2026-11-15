@@ -74,6 +74,21 @@ class ApproveIn(BaseModel):
 class SendIn(BaseModel):
     quote_id: str = Field(..., max_length=4000)
     confirm: str = Field(..., max_length=8)
+    approval_id: Optional[str] = Field(None, pattern=r"^0x[0-9a-f]{64}$")
+
+
+class WithdrawalRequestIn(BaseModel):
+    network: str = Field(..., max_length=24)
+    to: str = Field(..., pattern=ADDR)
+    amount: str = Field(..., pattern=AMT)
+    requester: str = Field(..., pattern=ADDR)
+    nonce: str = Field(..., min_length=8, max_length=80)
+
+
+class ApprovalSigIn(BaseModel):
+    r: str = Field(..., pattern=r"^[0-9a-fA-F]{1,64}$")
+    s: str = Field(..., pattern=r"^[0-9a-fA-F]{1,64}$")
+    recid: int = Field(..., ge=0, le=3)
 
 
 @router.get("/networks")
@@ -156,7 +171,7 @@ async def approve_preview(body: ApproveIn, db: Session = Depends(get_db), settin
 @router.post("/send")
 @guarded
 async def send(body: SendIn, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    return {"transaction": await ChainService(db, settings).send(body.quote_id, body.confirm),
+    return {"transaction": await ChainService(db, settings).send(body.quote_id, body.confirm, body.approval_id),
             "note": "Broadcast accepted by the node. It is not confirmed until a receipt says so (refresh the transaction)."}
 
 
@@ -197,3 +212,56 @@ async def intel_contract(network: str = Query(..., max_length=24), address: str 
 async def intel_blocks(network: str = Query(..., max_length=24), count: int = Query(5, ge=1, le=20), threshold: str = Query("10", pattern=AMT),
                        db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     return await ChainService(db, settings).scan_blocks(network, count, threshold)
+
+
+def _book(db: Session):
+    from app.treasury.approvals import ApprovalBook, SqlApprovalStore, load_policy
+    policy = load_policy()
+    if policy is None:
+        raise HTTPException(status_code=503, detail="multi-signature is not configured (CHAIN_MULTISIG_APPROVERS / CHAIN_MULTISIG_THRESHOLD)")
+    return ApprovalBook(policy, store=SqlApprovalStore(db))
+
+
+def _approval_view(book, req) -> dict[str, Any]:
+    return {"request_id": req.request_id, "network": req.network, "to": req.to, "amount_wei": str(req.amount_wei), "requester": req.requester,
+            "expires_at": req.expires_at.isoformat(), "approvals": sorted(req.signatures), "threshold": book.policy.threshold,
+            "authorized": book.is_authorized(req.request_id), "consumed": req.consumed,
+            "signing_digest": "0x" + req.digest().hex()}
+
+
+@router.post("/withdrawals", status_code=201)
+def create_withdrawal(body: WithdrawalRequestIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Open a withdrawal request. Approvers sign `signing_digest` offline with their own keys; keys never reach the server."""
+    from app.chain.crypto import to_checksum
+    from app.chain.policy import to_units
+    from app.treasury.approvals import ApprovalError
+    book = _book(db)
+    if body.network not in NETWORKS:
+        raise HTTPException(status_code=422, detail="unknown network")
+    try:
+        req = book.create(network=body.network, to=to_checksum(body.to), amount_wei=to_units(body.amount),
+                          requester=to_checksum(body.requester), nonce=body.nonce)
+    except (ApprovalError, ValueError) as e:
+        raise HTTPException(status_code=409 if getattr(e, "code", "") == "duplicate_request" else 422, detail=str(e))
+    return _approval_view(book, req)
+
+
+@router.post("/withdrawals/{request_id}/approve")
+def approve_withdrawal(request_id: str, body: ApprovalSigIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.treasury.approvals import ApprovalError
+    book = _book(db)
+    try:
+        book.approve(request_id, int(body.r, 16), int(body.s, 16), body.recid)
+    except ApprovalError as e:
+        raise HTTPException(status_code=404 if e.code == "not_found" else 403, detail=str(e))
+    return _approval_view(book, book.get(request_id))
+
+
+@router.get("/withdrawals/{request_id}")
+def get_withdrawal(request_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.treasury.approvals import ApprovalError
+    book = _book(db)
+    try:
+        return _approval_view(book, book.get(request_id))
+    except ApprovalError:
+        raise HTTPException(status_code=404, detail="unknown request")

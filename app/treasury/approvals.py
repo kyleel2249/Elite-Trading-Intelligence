@@ -61,10 +61,35 @@ class WithdrawalRequest:
         return "0x" + self.digest().hex()
 
 
-class ApprovalBook:
-    def __init__(self, policy: ApprovalPolicy, now=lambda: datetime.now(timezone.utc)):
-        self.policy, self._now = policy, now
+class MemoryApprovalStore:
+    """Process-local store (tests/dev). Production uses SqlApprovalStore."""
+    def __init__(self):
         self._reqs: dict[str, WithdrawalRequest] = {}
+
+    def add(self, req: WithdrawalRequest) -> bool:
+        if req.request_id in self._reqs:
+            return False
+        self._reqs[req.request_id] = req
+        return True
+
+    def get(self, request_id: str) -> Optional[WithdrawalRequest]:
+        return self._reqs.get(request_id)
+
+    def save_signature(self, req: WithdrawalRequest) -> None:
+        pass
+
+    def consume(self, request_id: str) -> bool:
+        r = self._reqs[request_id]
+        if r.consumed:
+            return False
+        r.consumed = True
+        return True
+
+
+class ApprovalBook:
+    def __init__(self, policy: ApprovalPolicy, now=lambda: datetime.now(timezone.utc), store=None):
+        self.policy, self._now = policy, now
+        self.store = store or MemoryApprovalStore()
         self._lock = threading.RLock()
 
     def create(self, *, network: str, to: str, amount_wei: int, requester: str, nonce: str) -> WithdrawalRequest:
@@ -74,16 +99,15 @@ class ApprovalBook:
             raise ApprovalError("amount must be a positive integer", "bad_request")
         if not nonce:
             raise ApprovalError("nonce is required", "bad_request")
-        now = self._now()
+        now = self._now().replace(microsecond=0)
         req = WithdrawalRequest(network, to, amount_wei, requester, nonce, now, now + timedelta(seconds=self.policy.ttl_seconds))
         with self._lock:
-            if req.request_id in self._reqs:
+            if not self.store.add(req):
                 raise ApprovalError("a request with this nonce already exists", "duplicate_request")
-            self._reqs[req.request_id] = req
         return req
 
     def get(self, request_id: str) -> WithdrawalRequest:
-        req = self._reqs.get(request_id)
+        req = self.store.get(request_id)
         if not req:
             raise ApprovalError("unknown request", "not_found")
         return req
@@ -107,6 +131,7 @@ class ApprovalBook:
             if signer in req.signatures:
                 raise ApprovalError("this approver has already signed", "duplicate_approval")
             req.signatures[signer] = (r, s, recid)
+            self.store.save_signature(req)
             return signer
 
     def is_authorized(self, request_id: str) -> bool:
@@ -123,5 +148,69 @@ class ApprovalBook:
                 raise ApprovalError("request expired", "expired")
             if len(req.signatures) < self.policy.threshold:
                 raise ApprovalError(f"{len(req.signatures)} of {self.policy.threshold} required approvals", "insufficient_approvals")
+            if not self.store.consume(request_id):       # atomic across processes for the SQL store
+                raise ApprovalError("request already executed", "already_consumed")
             req.consumed = True
             return req
+
+
+# ---------------------------------------------------------------------------------- SQL store + environment policy
+class SqlApprovalStore:
+    def __init__(self, db):
+        self.db = db
+
+    @staticmethod
+    def _to_req(row) -> WithdrawalRequest:
+        ts = lambda v: datetime.fromtimestamp(v, timezone.utc)  # noqa: E731
+        return WithdrawalRequest(row.network, row.to_address, int(row.amount_wei), row.requester, row.nonce, ts(row.created_at),
+                                 ts(row.expires_at), {k: (int(v[0], 16), int(v[1], 16), int(v[2])) for k, v in (row.signatures or {}).items()},
+                                 bool(row.consumed))
+
+    def add(self, req: WithdrawalRequest) -> bool:
+        from sqlalchemy.exc import IntegrityError
+        from app.treasury.models import WithdrawalApproval
+        self.db.add(WithdrawalApproval(request_id=req.request_id, network=req.network, to_address=req.to, amount_wei=str(req.amount_wei),
+                                       requester=req.requester, nonce=req.nonce, created_at=int(req.created_at.timestamp()),
+                                       expires_at=int(req.expires_at.timestamp()), signatures={}, consumed=False))
+        try:
+            self.db.commit()
+            return True
+        except IntegrityError:
+            self.db.rollback()
+            return False
+
+    def _row(self, request_id: str):
+        from sqlalchemy import select
+        from app.treasury.models import WithdrawalApproval
+        return self.db.execute(select(WithdrawalApproval).where(WithdrawalApproval.request_id == request_id)).scalar_one_or_none()
+
+    def get(self, request_id: str) -> Optional[WithdrawalRequest]:
+        self.db.expire_all()
+        row = self._row(request_id)
+        return self._to_req(row) if row else None
+
+    def save_signature(self, req: WithdrawalRequest) -> None:
+        row = self._row(req.request_id)
+        row.signatures = {k: [f"{v[0]:x}", f"{v[1]:x}", int(v[2])] for k, v in req.signatures.items()}
+        self.db.commit()
+
+    def consume(self, request_id: str) -> bool:
+        from sqlalchemy import update
+        from app.treasury.models import WithdrawalApproval
+        res = self.db.execute(update(WithdrawalApproval).where(WithdrawalApproval.request_id == request_id,
+                                                               WithdrawalApproval.consumed.is_(False)).values(consumed=True))
+        self.db.commit()
+        return res.rowcount == 1
+
+
+def load_policy() -> Optional[ApprovalPolicy]:
+    """CHAIN_MULTISIG_APPROVERS (comma-separated addresses) + CHAIN_MULTISIG_THRESHOLD (>=2). None when not configured."""
+    import os
+    raw = [a.strip() for a in os.getenv("CHAIN_MULTISIG_APPROVERS", "").split(",") if a.strip()]
+    if not raw:
+        return None
+    try:
+        return ApprovalPolicy(int(os.getenv("CHAIN_MULTISIG_THRESHOLD", "2")), frozenset(raw),
+                              int(os.getenv("CHAIN_MULTISIG_TTL_SECONDS", "3600")))
+    except (ValueError, ApprovalError):
+        return None     # an invalid policy is treated as "not configured": sends that require approval then fail closed

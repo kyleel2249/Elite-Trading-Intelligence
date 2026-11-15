@@ -42,3 +42,18 @@ UI: `/wallet`. API: `/api/chain/*` (every route needs `X-API-Key` when the serve
 - **Swap quotes** are the router's current pool state: price impact, MEV/sandwiching and token transfer taxes are not modelled. Contract inspection reports indicators only (no honeypot simulation, no source check): the absence of an indicator is not a safety verdict.
 - Public RPCs can rate-limit or censor; use a private endpoint for anything serious.
 - Mainnet use is the operator's decision and responsibility. Start on a testnet.
+
+
+## Multi-signature withdrawal approval
+
+Mainnet sends (and any send when `CHAIN_MULTISIG_REQUIRED=true`) need an M-of-N approved withdrawal request.
+
+1. `POST /api/chain/withdrawals` `{network, to, amount, requester, nonce}` opens a request and returns `signing_digest`.
+2. Each approver signs the digest **offline** with their own key and calls `POST /api/chain/withdrawals/{id}/approve` `{r, s, recid}`.
+   The server recovers the signer from the signature; it must be in `CHAIN_MULTISIG_APPROVERS`, must not be the requester, and counts once.
+3. After `CHAIN_MULTISIG_THRESHOLD` approvals, `POST /api/chain/send` with `approval_id` signs and broadcasts. The approval must match the
+   quote's network, destination and amount, and is spent atomically (single use). If the broadcast is rejected by the node the approval stays
+   spent; open a new request.
+
+If the policy is missing or invalid, sends that require approval fail closed (HTTP 503). Approvals are stored in `eti_withdrawal_approvals`.
+Verified by `tests/test_chain_multisig_integration.py` and `tests/test_treasury_controls.py` against a fake RPC node only.
