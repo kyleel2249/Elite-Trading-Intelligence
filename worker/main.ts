@@ -17,6 +17,8 @@
  * paper-trading cycle (a no-op unless ETI_PAPER_SYMBOLS is set; new entries also need ETI_PAPER_AUTOEXECUTE=true and no kill switch),
  * the Global Alpha loop, execution-session maintenance and the daily-report cycle (at most one report per UTC weekday, see
  * docs/DAILY_REPORT.md), then is forwarded unchanged to the existing application's scheduled handler.
+ * The paper cycle runs through runGuardedPaperCycle (worker/paper-guard.ts): a D1 execution lock plus a per-minute idempotency claim, so a
+ * duplicate or overlapping cron delivery cannot run it twice at once; if the lock store is unreachable, new entries are disabled for that run.
  */
 import base from "./index.ts";
 import { withAlgo } from "./algo/route.ts";
@@ -32,7 +34,7 @@ import { runDailyReportCycle } from "./daily/api.ts";
 import { withPro } from "./pro/route.ts";
 import { withWallet } from "./wallet/route.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
-import { runPaperCycle } from "./algo/paper-api.ts";
+import { runGuardedPaperCycle } from "./paper-guard.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
 import { manageAccount } from "./algo/manage.ts";
 import { raiseAlerts } from "./algo/alerts.ts";
@@ -116,7 +118,7 @@ export default {
     ctx.waitUntil(maintainAuth(env, Date.now()).then(() => undefined, () => undefined)); // rotate an aged signing key, retire old ones
     // Other cron ticks: paper-trading cycle (off unless ETI_PAPER_SYMBOLS is set) and the Global Alpha research loop.
     // Each pass is isolated so one failing never blocks the other.
-    ctx.waitUntil(runPaperCycle(env).then(() => undefined, e => console.error("paper cycle failed", e instanceof Error ? e.message : e)));
+    ctx.waitUntil(runGuardedPaperCycle(env).then(() => undefined, e => console.error("paper cycle failed", e instanceof Error ? e.message : e)));
     ctx.waitUntil(runAlphaCycle(env).then(() => undefined, e => console.error("alpha cycle failed", e instanceof Error ? e.message : e)));
     // Precision outcome ledger: record tradeable signals, resolve them from closed candles, refit calibration (off unless ETI_PRECISION_SYMBOLS is set and a KV namespace is bound).
     ctx.waitUntil(runPrecisionCycle(env, Date.now()).then(() => undefined, e => console.error("precision cycle failed", e instanceof Error ? e.message : e)));
