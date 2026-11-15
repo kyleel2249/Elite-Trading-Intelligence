@@ -11,6 +11,7 @@
  *   2. futures agents + gateway + monitor (/api/agents/futures/*, /api/futures/*, /agents/futures)
  *   3. multi-agent system (/api/agents/*, /agents)
  *   4. the existing application (worker/index.ts), left unchanged, which handles every other route.
+ * Company management (/api/company/*, see docs/COMPANY.md) sits next to the journal in the core chain.
  * Scheduled events: the every-minute cron runs the futures protective-stop monitor; any other cron runs the simulated
  * paper-trading cycle (a no-op unless ETI_PAPER_SYMBOLS is set; new entries also need ETI_PAPER_AUTOEXECUTE=true and no kill switch),
  * the Global Alpha loop, execution-session maintenance and the daily-report cycle (at most one report per UTC weekday, see
@@ -41,6 +42,7 @@ import { maintain as maintainAuth } from "./auth/session.ts";
 import { runPortfolioCycle } from "./portfolio/routes.ts";
 import { withElite } from "./elite/route.ts";
 import { withJournal } from "./journal/route.ts";
+import { withCompany } from "./company/route.ts";
 import { runJournalCycle } from "./journal/sync.ts";
 import { withIdentity } from "./identity/routes.ts";
 import { withProviders, runProviderProbe } from "./providers/routes.ts";
@@ -64,6 +66,7 @@ const coreLayers: Array<(next: any) => any> = [
   withPro,
   withWallet,
   withJournal,
+  withCompany,
   withElite,
   // The guard sits directly outside the sports route: constant-time token check and a short scan cache (see sports/guard.ts).
   (next: any) => withSportsGuard(withSports(next)),
