@@ -58,7 +58,7 @@ function money(c){const n=Number(c)||0,a=Math.abs(n);return (n<0?'-':'')+Math.fl
 function cents(id,signed){const v=String($(id).value).trim();const re=signed?/^-?\d+(\.\d{1,2})?$/:/^\d+(\.\d{1,2})?$/;if(!re.test(v))throw new Error('Enter a valid amount with up to 2 decimals in the field '+id);return Math.round(Number(v)*100);}
 function centsOr0(id){return String($(id).value).trim()===''?0:cents(id,false);}
 function bps(id){const v=String($(id).value).trim();if(!/^\d+(\.\d{1,2})?$/.test(v))throw new Error('Enter a valid percentage in the field '+id);const n=Math.round(Number(v)*100);if(n>10000)throw new Error('A percentage cannot exceed 100 (field '+id+')');return n;}
-function log(msg,ok){const el=$('log');el.textContent=(ok?'OK   ':'ERR  ')+new Date().toLocaleTimeString()+'  '+msg+'\n'+el.textContent;}
+function log(msg,ok){const el=$('log');el.textContent=(ok?'OK   ':'ERR  ')+new Date().toLocaleTimeString()+'  '+msg+'\\n'+el.textContent;}
 function why(e){if(e&&e.status===401)return 'Not signed in. Sign in at /account with a named account (multi-factor authentication is required for actions).';return e&&e.message?e.message:'Unexpected error';}
 async function api(method,path,body){
  const opt={method:method,credentials:'same-origin',headers:{accept:'application/json'}};
