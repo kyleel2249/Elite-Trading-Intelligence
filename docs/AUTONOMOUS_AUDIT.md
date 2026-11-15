@@ -1,7 +1,6 @@
-# ETI Autonomous Trading: Step 1 Audit and Dependency Map
+# ETI Autonomous Trading: Audit, Dependency Map and Build Log
 
-Status: documentation only. No runtime code changed in this step.
-Method: files read through the GitHub API. Nothing was compiled or run, so every statement below is an observation of source, not a test result.
+Method: files read through the GitHub API. Nothing was compiled or run by the author of these notes, so every statement is an observation of source, not a test result. Confirm with the CI run for each commit.
 
 ## 1. Entry point and layers (worker/main.ts)
 
@@ -14,24 +13,24 @@ Crons in wrangler.jsonc: `*/15 * * * *`, `* * * * *`, `*/5 * * * *`.
 
 | Cron | Work started via ctx.waitUntil |
 |---|---|
-| `* * * * *` (monitor) | futures protective-stop monitor, journal cycle, portfolio cycle (paper resting orders, exits, testnet fill sync), perp cycle |
+| `* * * * *` (monitor) | futures protective-stop monitor, journal cycle, portfolio cycle (D1 paper resting orders, exits, testnet fill sync), perp cycle |
 | UNIVERSE_CRON | position management for ETI_MANAGE_ACCOUNTS, execution alert polling, universe batch |
-| any other cron | provider probe, auth key maintenance, paper cycle, alpha cycle, precision cycle, daily report, then the base app's scheduled handler |
+| any other cron | provider probe, auth key maintenance, guarded paper cycle, alpha cycle, precision cycle, daily report, then the base app's scheduled handler |
 
-Observation: each pass is isolated with its own catch, but no shared cross-cycle execution lock is visible in main.ts. Cloudflare may fire several cron expressions in the same minute (for example minute 0 matches all three) and does not guarantee exactly-once delivery. Locking and idempotency must be verified inside each cycle (step 3).
+Cloudflare may fire several cron expressions in the same minute (minute 0 matches all three) and does not guarantee exactly-once delivery.
 
-## 3. Module map (from directory listing, internals not yet read in depth)
+## 3. Module map
 
 | Capability | Location |
 |---|---|
 | Execution engine | worker/execution.ts, worker/algo/* |
-| Paper trading | worker/algo/paper-api.ts, worker/portfolio/* |
-| Portfolio ledger and engine | worker/portfolio/ledger.ts, engine.ts, store.ts, routes.ts |
+| KV paper engine (non-transactional state in KV) | worker/algo/paper.ts, paper-api.ts |
+| D1 portfolio ledger and paper engine | worker/portfolio/ledger.ts, engine.ts, store.ts, routes.ts |
 | Wallet | worker/wallet/*, worker/portfolio/wallet-ui.ts |
 | Journal | worker/journal/* |
 | Treasury (double-entry, actual vs simulated) | worker/treasury/model.ts, schema.ts, api.ts, route.ts |
 | Company management | worker/company/* |
-| Risk and safeguards | worker/safeguards.ts |
+| Order safeguards (duplicate reservation, funds check, refusal audit) | worker/safeguards.ts |
 | Market data | worker/market.ts, markets.ts, markets-api.ts, worker/providers/* |
 | Strategies and signals | worker/strategies.ts, signals.ts, worker/algo/*, worker/precision/* |
 | Futures | worker/futures.ts, futures-monitor.ts, worker/perp/* |
@@ -42,21 +41,28 @@ Bindings: D1 `ETI_PORTFOLIO_DB` (migrations dir `migrations`), KV `ETI_EXECUTION
 
 ## 4. Findings
 
-1. **Real-money switches on in production config.** wrangler.jsonc vars include `CHAIN_ENABLED=true` and `CHAIN_MAINNET_SEND_ENABLED=on`. The target policy is paper-first with real transfers only behind an approval and activation gate. Action: add an explicit `LIVE_TRADING_ENABLED=false` flag and gate real sends behind it and the readiness checks (steps 4 and 7). Owner decision needed on turning mainnet send off now.
-2. **Kill switch exists** as `ETI_KILL_SWITCH=false` and is referenced by the paper cycle. Needs verification that every entry path (paper, futures, perp, testnet, manage) honours it.
-3. **Autopilot flags**: `PAPER_AUTOPILOT=true`; paper entries also need `ETI_PAPER_SYMBOLS` and `ETI_PAPER_AUTOEXECUTE=true`.
-4. **Possible parallel pipelines**: paper cycle (algo/paper-api), portfolio cycle (portfolio/routes), futures/perp cycles, and treasury have separate modules. Whether fills flow through one event pipeline into ledger, journal and treasury is unverified (step 5).
-5. **Spec items not yet confirmed present**: per-cycle execution lock, outbox for execution-to-ledger events, 0.5% risk-per-trade and 2% daily-loss enforcement matching the spec, reconciliation covering missing or duplicate fills, a Stop Trade button.
-6. A hardcoded contact email appears in `SEC_USER_AGENT` in wrangler.jsonc (informational).
+1. **Real-money switches in production config.** wrangler.jsonc vars include `CHAIN_ENABLED=true` and `CHAIN_MAINNET_SEND_ENABLED=on`. The code behind them has not been read. Owner decision recommended: turn mainnet send off until the activation gate passes.
+2. **Live trading is already disabled in this build.** `ETI_LIVE_TRADING_ENABLED` is report-only and `/api/orders/live` returns 423 (see docs/ENVIRONMENT_VARIABLES.md). No new live flag is added; this build does not activate live trading.
+3. **Kill switch** `ETI_KILL_SWITCH` is honoured by the paper cycle and its evaluate path. Not yet verified for every other entry path (futures, perp, testnet, manage).
+4. **Two parallel paper systems.** The KV `PaperEngine` (state stored without transactions, per its own status note) and the D1 portfolio engine. Whether fills from both reach ledger, journal and treasury through one pipeline is unverified.
+5. **Safeguards cover duplicates and funds, not equity risk.** worker/safeguards.ts checks clientOrderId reuse, identical-order windows and cash/holdings, but not the percent-of-equity policy now in worker/risk/policy.ts.
+6. A contact email appears in `SEC_USER_AGENT` in wrangler.jsonc (informational).
 
-## 5. Plan
+## 5. Build log
 
-1. This audit.
-2. Risk policy module with tests.
-3. Execution lock and idempotency for cycles.
-4. Wallet capital discovery, fail-closed reconciliation, live-trading gate flag.
-5. Execution, ledger, journal, treasury event pipeline.
-6. Dashboard controls on authenticated endpoints.
-7. Strategy scoring, learning, live activation gate checks.
+| Step | Status | Change |
+|---|---|---|
+| 1 | pushed | This audit. |
+| 2 | pushed | `worker/risk/policy.ts`: balanced risk policy and sizing, tested in `worker/risk-policy.test.ts`. Not yet called by any order path. |
+| 3 | pushed | Migration `0011_execution_locks.sql`, `worker/execution-lock.ts`: atomic D1 locks and idempotency claims, tested. |
+| 4 | pushed | `worker/risk/capital.ts`: capital snapshot and wallet/ledger reconciliation, tested. Not yet called by any order path. |
+| 5a/5b | pushed | `worker/paper-guard.ts`, wired into `worker/main.ts`: the scheduled KV paper cycle runs under the D1 lock with a per-minute idempotency claim. If the lock store is unreachable (for example migration 0011 not applied), the cycle still manages open positions but new entries are disabled for that run. |
 
-Each later step must be read against the real module internals first, and CI results must be checked before it is called verified.
+**Operator action required for step 5:** apply migration 0011 to the production D1 database (`wrangler d1 migrations apply eti-portfolio-db --remote`). Until then the guard runs in its degraded mode and the scheduled paper cycle opens no new positions.
+
+## 6. Remaining plan
+
+6. Apply the risk policy and capital snapshot to the paper entry path (replace entry sizing checks with `sizeTrade`).
+7. Execution-to-ledger outbox and reconciliation covering the KV and D1 paper systems, journal and treasury.
+8. Dashboard controls (pause, resume, kill switch, close positions, cancel orders) on authenticated endpoints.
+9. Strategy scoring, learning and the live-activation checks.
