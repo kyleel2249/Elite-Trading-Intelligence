@@ -51,10 +51,14 @@ export const canDecideBudget = (a: Actor, proposedBy: string) => a.mfa && a.id !
 export const canSubmitExpense = (a: Actor, dept: string) => inDept(a, dept);
 export function expenseDecisionBlock(a: Actor, e: { department: string; amountCents: number; requestedBy: string }, l: Limits = DEFAULT_LIMITS): string | null {
   if (!a.mfa) return "mfa_required";
+  const executive = isGlobal(a, "executive");
+  const finance = isGlobal(a, "finance_approver");
+  const head = isHead(a, e.department);
+  if (!executive && !finance && !head) return "no_approval_authority";
   if (a.id === e.requestedBy) return "cannot_decide_own_request";
-  if (isGlobal(a, "executive")) return null;
-  if (isGlobal(a, "finance_approver")) return e.amountCents <= l.financeCents ? null : "above_approval_limit";
-  if (isHead(a, e.department)) return e.amountCents <= l.headCents ? null : "above_approval_limit";
+  if (executive) return null;
+  if (finance) return e.amountCents <= l.financeCents ? null : "above_approval_limit";
+  if (head) return e.amountCents <= l.headCents ? null : "above_approval_limit";
   return "no_approval_authority";
 }
 export const canDecideExpense = (a: Actor, e: { department: string; amountCents: number; requestedBy: string }, l: Limits = DEFAULT_LIMITS) => expenseDecisionBlock(a, e, l) === null;
