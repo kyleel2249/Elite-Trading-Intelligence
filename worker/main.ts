@@ -113,7 +113,7 @@ export default {
         if (!history.ok) console.error("sports history sync", history.status, (await history.text()).slice(0, 200));
       })().catch(e => console.error("sports autonomous cycle failed", e instanceof Error ? e.message : e)));
     }
-    if (event.cron === UNIVERSE_CRON && bitgetCreds(env).complete && env.ETI_EXECUTION_LOG) ctx.waitUntil(syncBitget(env).then(() => undefined, e => console.error("bitget sync failed", e instanceof Error ? e.message : e)));
+
     if (event.cron === UNIVERSE_CRON) {
       // Position monitoring for the accounts listed in ETI_MANAGE_ACCOUNTS (comma separated). Closing needs ETI_MANAGE_AUTOCLOSE=true; otherwise report only.
       const accounts = String(env.ETI_MANAGE_ACCOUNTS ?? "").split(",").map((x: string) => x.trim()).filter((x: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(x)).slice(0, 3);
