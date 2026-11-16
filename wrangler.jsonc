@@ -47,7 +47,7 @@
     "ETI_RISK_MIN_CASH_RESERVE": "0.5",
     "ETI_RISK_MAX_DRAWDOWN": "0.1",
     "PAPER_AUTOPILOT": "true",
-    "MARKET_PROVIDER_ORDER": "binance,bybit,okx,bitget",
+    "MARKET_PROVIDER_ORDER": "binance,bybit,okx,bitget",\n    "ETI_BITGET_LIVE_ENABLED": "true",\n    "ETI_BITGET_MAX_LEVERAGE": "150",
     "SEC_USER_AGENT": "ETI (Elite Trading Intelligence; contact: davinatirzah@gmail.com)"
   },
   "d1_databases": [
