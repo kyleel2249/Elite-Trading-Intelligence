@@ -875,7 +875,7 @@ function symRebuild(want){
  sel.textContent='';
  if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
  sel.appendChild(frag);sel.value=cur;
- const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', refreshes every minute':'';
+ const refreshLabel=SYM.venue==='binance'?'Binance refreshes every 10 min':SYM.venue==='bitget'?'Bitget refreshes every minute':'Bitget refreshes every minute; Binance every 10 min';const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', '+refreshLabel:'';
  $('symCount').textContent=rows.length+' of '+all.length+' '+(SYM.venue==='bitget'?'Bitget':SYM.venue==='binance'?'Binance':'Binance + Bitget')+' '+(SYM.market==='futures'?'perpetual futures':SYM.market==='margin'?'margin':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'')+(SYM.venue==='bitget'||symVenueOf()==='bitget'?' · Bitget chart data and live order venue.':'');
  const dl=$('symbolList');if(dl&&dl.dataset.n!==String(SYM.at)){dl.textContent='';SYM.all.filter(r=>r[3]==='spot').forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});dl.dataset.n=String(SYM.at);}
 }
