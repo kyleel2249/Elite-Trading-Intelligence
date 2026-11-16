@@ -57,7 +57,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
 | `ETI_BITGET_LIVE_ENABLED` | config | `true` enables the separately authenticated Bitget live-order adapter. The master ETI execution token, Bitget trade-enabled credentials, explicit order confirmation, kill-switch check, idempotency and notional/leverage limits remain required. |
 | `ETI_BITGET_MAX_LEVERAGE` | config | Maximum allowed Bitget futures leverage (default 150x; capped by ETI at 150x and the exchange's own contract limit). |
-| `ETI_BITGET_MAX_NOTIONAL_USDT` | config | Maximum estimated notional per Bitget live order (default 10,000 quote units; checked against the submitted reference price or market-buy quote amount). |
+| `ETI_BITGET_MAX_NOTIONAL_USDT` | config | Maximum estimated notional per Bitget live order (default 1,000 quote units; checked against the submitted reference price or market-buy quote amount). |
 | `ETI_BITGET_MARGIN_SYMBOLS` | config | Comma-separated margin pairs whose fills are synced (Bitget margin fills require a symbol), e.g. `BTCUSDT,ETHUSDT`. |
 | `ETI_EVENT_FEED_TOKEN` | secret | Bearer token for ETI_EVENT_FEED_URL. |
 | `ETI_EVENT_FEED_URL` | config | HTTPS JSON event feed for the readiness engine. |
