@@ -219,5 +219,5 @@ test("dashboard: Bitget is the default exchange; merged mode prefers Bitget for 
 
 test("dashboard exposes Bitget as a live order venue and retains both market-data venues", () => {
   const src = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-  assert.match(src, /id="symVenue"/); assert.match(src, /symbols\?venue=all/); assert.match(src, /Bitget pairs are chart-only/);
+  assert.match(src, /id="symVenue"/); assert.match(src, /symbols\?venue=all/); assert.match(src, /value="bitget">Bitget Live/); assert.match(src, /orderBitgetMarket/);
 });
