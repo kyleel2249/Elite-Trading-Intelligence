@@ -523,7 +523,7 @@ export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: 
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
 const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
 /** The pair list is re-read from Binance at most every 10 minutes per isolate (and shared at the edge); browsers re-request it on the same interval. */
-export const SYMBOL_TTL_MS = 10 * 60 * 1000;
+export const SYMBOL_TTL_MS = 60 * 1000;
 const SYMBOL_SOURCES: Record<MarketKind, { hosts: string[]; path: string }> = {
   spot: { hosts: PROVIDERS.binance.hosts, path: "/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING" },
   futures: { hosts: PROVIDERS.binance_usdm.hosts, path: "/fapi/v1/exchangeInfo" },
@@ -545,7 +545,7 @@ export async function listBinanceSymbols(market: MarketKind = "spot", fetchImpl:
   const attempts: SymbolAttempt[] = [], src = SYMBOL_SOURCES[market];
   for (const host of src.hosts) {
     try {
-      const res = await fetchImpl(host + src.path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 540 } } as RequestInit);
+      const res = await fetchImpl(host + src.path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit);
       if (!res.ok) { attempts.push({ host, status: res.status, errorClass: classifyStatus(res.status) }); continue; }
       const j: any = await res.json(), list = Array.isArray(j?.symbols) ? j.symbols : null;
       if (!list) { attempts.push({ host, status: res.status, errorClass: "invalid_payload" }); continue; }
