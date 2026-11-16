@@ -32,7 +32,7 @@ export async function bitgetSign(secret: string, timestamp: string, method: stri
 const ALLOWED = new Set([
   "/api/v2/spot/account/assets", "/api/v2/spot/trade/fills", "/api/v2/spot/trade/history-orders",
   "/api/v2/margin/crossed/account/assets", "/api/v2/margin/crossed/fills", "/api/v2/margin/crossed/history-orders",
-  "/api/v2/margin/isolated/account/assets", "/api/v2/margin/isolated/fills", "/api/v2/margin/isolated/history-orders",
+  "/api/v2/margin/isolated/account/assets", "/api/v2/margin/isolated/fills", "/api/v2/margin/isolated/history-orders", "/api/v2/margin/currencies",
   "/api/v2/mix/account/accounts", "/api/v2/mix/account/account", "/api/v2/mix/order/fills", "/api/v2/mix/order/orders-history", "/api/v2/mix/position/all-position",
 ]);
 
@@ -169,11 +169,10 @@ export async function syncAll(env: Record<string, any>, deps: Deps = {}, only?: 
 }
 
 // ----------------------------------------------------------------------------------------------------------------- public margin pair list
-export async function listMarginPairs(fetchImpl: typeof fetch = fetch) {
-  const res = await fetchImpl(`${BASE}/api/v2/margin/currencies`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15000) });
-  const j: any = await res.json().catch(() => null);
-  if (!j || j.code !== "00000" || !Array.isArray(j.data)) throw new BitgetError("invalid_payload", res.status, "Bitget margin currency list unavailable");
-  return j.data.filter((x: any) => /^[A-Z0-9]{5,20}$/.test(String(x?.symbol ?? ""))).map((x: any) => ({
+export async function listMarginPairs(env: Record<string, any>, deps: Deps = {}) {
+  const data: any = await bitgetGetSigned(env, "/api/v2/margin/currencies", {}, deps);
+  if (!Array.isArray(data)) throw new BitgetError("invalid_payload", null, "Bitget margin currency list unavailable");
+  return data.filter((x: any) => /^[A-Z0-9]{5,20}$/.test(String(x?.symbol ?? ""))).map((x: any) => ({
     symbol: String(x.symbol), base: String(x.baseCoin ?? ""), quote: String(x.quoteCoin ?? ""), status: String(x.status ?? ""),
     crossed: num(x.maxCrossedLeverage) > 0, isolated: num(x.maxIsolatedLeverage) > 0, maxCrossedLeverage: num(x.maxCrossedLeverage), maxIsolatedLeverage: num(x.maxIsolatedLeverage),
   }));
@@ -185,7 +184,7 @@ export async function handleBitget(req: Request, env: Record<string, any>, deps:
   const url = new URL(req.url), path = url.pathname.replace(/\/+$/, "");
   const sub = path.slice("/api/bitget".length) || "/";
   if (sub === "/margin-pairs" && req.method === "GET") {   // public data, no credentials
-    try { const pairs = await listMarginPairs(deps.fetchImpl); return reply({ venue: "bitget", market: "margin", count: pairs.length, pairs }); }
+    try { const pairs = await listMarginPairs(env, deps); return reply({ venue: "bitget", market: "margin", count: pairs.length, pairs }); }
     catch (e) { return reply({ error: e instanceof BitgetError ? e.code : "failed", message: e instanceof BitgetError ? e.message : undefined }, 502); }
   }
   if (!(await authorized(req, env as any))) return reply({ error: "unauthorized" }, 401);
