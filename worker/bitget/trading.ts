@@ -27,7 +27,7 @@ async function post(env:BitgetLiveEnv,path:string,payload:Record<string,unknown>
     const r=await (deps.fetchImpl??fetch)(BASE+path,{method:"POST",headers:{"ACCESS-KEY":c.key!,"ACCESS-SIGN":sign,"ACCESS-TIMESTAMP":ts,"ACCESS-PASSPHRASE":c.passphrase!,"Content-Type":"application/json","locale":"en-US"},body,signal:AbortSignal.timeout(12000)});
     const data=await r.json().catch(()=>({message:"Bitget returned invalid JSON"}));
     if(r.ok&&data?.code==="00000")return {ok:true,data:data.data??data};
-    return {ok:false,definite:r.status>=400&&r.status<500&&r.status!==408,status:r.status||502,data:{httpStatus:r.status,code:data?.code??"bitget_rejected",message:String(data?.msg??data?.message??"Bitget rejected the request").slice(0,240),data:data?.data??null}};
+    return {ok:false,definite:(r.status>=400&&r.status<500&&r.status!==408)||(r.ok&&data?.code!=="00000"&&String(data?.code)!=="40010"),status:r.status||502,data:{httpStatus:r.status,code:data?.code??"bitget_rejected",message:String(data?.msg??data?.message??"Bitget rejected the request").slice(0,240),data:data?.data??null}};
   } catch(e) { return {ok:false,definite:false,status:0,data:{code:"network_outcome_unknown",message:e instanceof Error?e.message:"network failure"}}; }
 }
 const response=(body:unknown,status=200)=>new Response(json(body),{status,headers});
@@ -56,6 +56,8 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   if(futures&&!["crossed","isolated"].includes(marginMode))return response({ok:false,error:"invalid_margin_mode"},400);
   const productType=market==="usdt-futures"?"USDT-FUTURES":market==="usdc-futures"?"USDC-FUTURES":"COIN-FUTURES";
   const marginCoin=String(body?.marginCoin??(market==="usdt-futures"?"USDT":market==="usdc-futures"?"USDC":symbol.replace(/USD$/,""))).toUpperCase();
+  const force=String(body?.timeInForce??"gtc").toLowerCase();
+  if(!["gtc","ioc","fok","post_only"].includes(force))return response({ok:false,error:"invalid_time_in_force"},400);
   const tradeSide=String(body?.tradeSide??"open");
   if(futures&&!["open","close"].includes(tradeSide))return response({ok:false,error:"invalid_trade_side"},400);
   const reduceOnly=body?.reduceOnly===true;
@@ -73,8 +75,6 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
     await kv.put("exec:live:id:"+clientOid,outcome,{expirationTtl:90*86400});
     return r;
   };
-  const force=String(body?.timeInForce??"gtc").toLowerCase();
-  if(!["gtc","ioc","fok","post_only"].includes(force))return response({ok:false,error:"invalid_time_in_force"},400);
   // Futures account configuration is explicit and confirmed before the order call.
   if(futures){
     const modeSet=await post(env,"/api/v2/mix/account/set-margin-mode",{symbol,productType,marginCoin,marginMode},deps);
@@ -92,7 +92,7 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
     payload={symbol,side,orderType:type,loanType:["normal","autoLoan","autoRepay","autoLoanAndRepay"].includes(body?.loanType)?body.loanType:"normal",force,price:type==="limit"?String(price):undefined,baseSize:type==="market"&&side==="buy"?undefined:String(qty),quoteSize:type==="market"&&side==="buy"?String(quoteAmount):undefined,clientOid};
   } else {
     path="/api/v2/mix/order/place-order";
-    payload={symbol,productType:market,marginMode,marginCoin,size:String(qty),price:type==="limit"?String(price):undefined,side,tradeSide,orderType:type,force,clientOid,reduceOnly:reduceOnly?"YES":"NO",
+    payload={symbol,productType,marginMode,marginCoin,size:String(qty),price:type==="limit"?String(price):undefined,side,tradeSide,orderType:type,force,clientOid,reduceOnly:reduceOnly?"YES":"NO",
       presetStopLossPrice:body?.plan?.stop?String(body.plan.stop):undefined,presetStopSurplusPrice:body?.plan?.tp1?String(body.plan.tp1):undefined};
   }
   const sent=await post(env,path,payload,deps);
