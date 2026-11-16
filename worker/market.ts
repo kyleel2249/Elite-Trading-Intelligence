@@ -21,8 +21,8 @@ export type ProviderId = "binance" | "bybit" | "okx" | "binance_usdm" | "bitget"
 export type MarketKind = "spot" | "futures";
 /** Where a pair is listed. Binance is the default; Bitget is selected explicitly per request (venue=bitget) and is never silently substituted for Binance data. */
 export type Venue = "binance" | "bitget";
-export type BitgetProductType = "usdt-futures" | "usdc-futures" | "coin-futures";
-export const BITGET_PRODUCT_TYPES: BitgetProductType[] = ["usdt-futures", "usdc-futures", "coin-futures"];
+export type BitgetProductType = "USDT-FUTURES" | "USDC-FUTURES" | "COIN-FUTURES";
+export const BITGET_PRODUCT_TYPES: BitgetProductType[] = ["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"];
 export type Endpoint = "klines" | "depth" | "trades" | "ticker";
 /** [openTime, open, high, low, close, volume, takerBuyBaseVolume?]. The optional 7th field is the exchange-reported aggressive-buy volume (Binance klines only). */
 export type Kline = [number, number, number, number, number, number, number?];
@@ -180,10 +180,10 @@ const BITGET_MIX_GRAN: Record<string, string> = {
 };
 /** Bitget futures product type from the contract symbol when the caller did not say: ...USDT, ...USDC / ...PERP, ...USD (coin-margined). */
 export function bitgetProductFor(symbol: string): BitgetProductType {
-  if (/USDC$|PERP$/.test(symbol)) return "usdc-futures";
-  if (/USDT$/.test(symbol)) return "usdt-futures";
-  if (/USD$/.test(symbol)) return "coin-futures";
-  return "usdt-futures";
+  if (/USDC$|PERP$/.test(symbol)) return "USDC-FUTURES";
+  if (/USDT$/.test(symbol)) return "USDT-FUTURES";
+  if (/USD$/.test(symbol)) return "COIN-FUTURES";
+  return "USDT-FUTURES";
 }
 /** Spot and futures share one envelope ({code:"00000", data}) and the same row shapes, so one parser serves both. Anything unexpected is a provider failure, never a guess. */
 function parseBitget(endpoint: Endpoint, j: any, p: Params): unknown {
