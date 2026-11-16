@@ -545,7 +545,7 @@ function orderValidation(o,requireCredentials=true){
  if(!/^[A-Z0-9._-]{2,24}$/.test(o.symbol))return 'Enter a valid symbol.';
  if(!Number.isFinite(o.quantity)||o.quantity<=0)return 'Enter a quantity greater than zero.';
  if(o.type==='limit'&&(!Number.isFinite(o.limitPrice)||o.limitPrice<=0))return 'Enter a valid limit price.';
- if(o.type==='stop'&&o.broker!=='eti_paper')return 'Stop-loss orders are available on ETI Internal Paper only. On exchange testnet use the alert-only levels.';
+ if(o.type==='stop'&&o.broker!=='eti_paper')return 'Standalone stop orders are available on ETI Internal Paper only. For Bitget futures, attach preset stop-loss and take-profit levels to the market or limit order.';
  if(o.type==='stop'&&o.side!=='sell')return 'A stop-loss order protects a long position: use Sell.';
  if(o.type==='stop'&&(!Number.isFinite(o.stopPrice)||o.stopPrice<=0))return 'Enter a valid stop price.';
  if(!$('operatorId').value.trim())return 'Enter an operator ID for the audit record.';
@@ -609,7 +609,7 @@ async function submitOrder(side){
  if(o.broker==='bitget'){body.bitgetMarket=o.bitgetMarket;body.leverage=o.leverage;body.marginMode=o.marginMode;body.quoteAmount=Number($('orderAmount').value)||((o.side==='buy'&&o.type==='market')?o.quantity*orderRefPrice():undefined);body.referencePrice=o.type==='limit'?o.limitPrice:orderRefPrice();body.loanType=$('orderBitgetLoanType').value;body.tradeSide='open';body.marginCoin=o.bitgetMarket==='usdt-futures'?'USDT':o.bitgetMarket==='usdc-futures'?'USDC':undefined;}
  if(o.type==='limit')body.limitPrice=o.limitPrice;
  if(o.type==='stop')body.stopPrice=o.stopPrice;
- if(side==='buy'){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
+ if(side==='buy'||(o.broker==='bitget'&&o.bitgetMarket.endsWith('futures'))){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
  $('orderOutput').textContent='Submitting order…';
  try{
   const headers={'content-type':'application/json'};
