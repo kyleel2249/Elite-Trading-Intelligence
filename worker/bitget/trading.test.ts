@@ -25,6 +25,13 @@ test("Bitget futures configures isolated margin and leverage before submitting a
  assert.match(calls[2].url,/mix\/order\/place-order$/);assert.equal(calls[2].body.productType,"usdt-futures");assert.equal(calls[2].body.marginMode,"isolated");assert.equal(calls[2].body.side,"sell");
 });
 
+test("Bitget isolated hedge-mode futures sets equal long and short leverage without changing margin mode",async()=>{
+ const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};const calls:any[]=[];
+ const r=await placeBitgetLiveOrder(env,orderBody({bitgetMarket:"usdt-futures",quantity:0.01,leverage:40,marginMode:"isolated",referencePrice:60000}),{now:()=>1700000000000,fetchImpl:(async(url:any,init:any)=>{calls.push({url,body:init.body?JSON.parse(init.body):null});return String(url).includes("/mix/account/account?")?new Response(JSON.stringify({code:"00000",data:{marginMode:"isolated",posMode:"hedge_mode"}})):ok();}) as any});
+ assert.equal(r.status,201);assert.equal(calls.length,3);
+ assert.equal(calls[1].body.longLeverage,"40");assert.equal(calls[1].body.shortLeverage,"40");assert.equal(calls[1].body.leverage,undefined);
+});
+
 test("Bitget cross and isolated margin orders use the correct classic V2 endpoint and size units",async()=>{
  for(const market of ["margin-crossed","margin-isolated"]){
   const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};let seen:any;
