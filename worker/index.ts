@@ -127,7 +127,7 @@ ${VIZ_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
-<div class="toolbar"><select id="symVenue" aria-label="Exchange" title="Bitget is the primary market-data exchange. Pick Binance, or All (a pair listed on both shows Bitget prices). Bitget pairs are chart-only: orders go to ETI Internal Paper or Binance testnet."><option value="bitget" selected>Bitget (primary)</option><option value="binance">Binance</option><option value="">All exchanges (Bitget first)</option></select><select id="symMarket" aria-label="Market type" title="Spot pairs, USDT/USDC-margined perpetual futures, or Metals: gold, silver, platinum, palladium, copper and gold-backed tokens from both Binance markets"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option><option value="metals">Metals (gold, silver, copper)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symEti" class="muted" aria-live="polite" style="font-size:12px;display:none"></span><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
+<div class="toolbar"><select id="symVenue" aria-label="Exchange" title="Bitget is the primary market-data exchange. Pick Binance, or All (a pair listed on both shows Bitget prices). Bitget chart and live order venue. Live orders require the master ETI token and explicit confirmation."><option value="bitget" selected>Bitget (primary)</option><option value="binance">Binance</option><option value="">All exchanges (Bitget first)</option></select><select id="symMarket" aria-label="Market type" title="Spot pairs, USDT/USDC-margined perpetual futures, or Metals: gold, silver, platinum, palladium, copper and gold-backed tokens from both Binance markets"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option><option value="margin">Margin (cross / isolated)</option><option value="metals">Metals (gold, silver, copper)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symEti" class="muted" aria-live="polite" style="font-size:12px;display:none"></span><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="refresh" class="active">Refresh market</button><span class="muted" id="stamp">Waiting for market data…</span></div>
 <div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
@@ -147,8 +147,8 @@ ${VIZ_CSS}
 <div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Broker <b id="brokerStatus">Checking…</b></span><span>Safeguards <b id="safeguardStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
 <details class="execution-note"><summary>Execution safeguards (read before trading)</summary><p class="execution-note">Orders are sent only after you preview and confirm them. ETI Internal Paper and exchange testnets authenticate automatically with short-lived server-side sessions: nothing to type, and nothing stored in this page. Exchange testnet keys are read from Worker secrets; if they are missing or rejected, orders run in ETI Internal Paper and this panel says so. Live mode stays disabled and needs the live switch, live broker keys, the execution token and the separate live activation secret. Protect this dashboard with Cloudflare Access. Never enter withdrawal or transfer credentials here.</p></details>
 <div class="execution-grid">
-<label>Venue<select id="orderBroker"><option value="eti_paper">ETI Internal Paper (automatic)</option><option value="alpaca">Alpaca paper (exchange testnet)</option><option value="binance">Binance testnet (exchange)</option></select></label>
-<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off" list="symbolList"><datalist id="symbolList"></datalist></label>
+<label>Venue<select id="orderBroker"><option value="eti_paper">ETI Internal Paper (automatic)</option><option value="alpaca">Alpaca paper (exchange testnet)</option><option value="binance">Binance testnet (exchange)</option><option value="bitget">Bitget Live (real funds)</option></select></label>
+<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off" list="symbolList"><datalist id="symbolList"></datalist></label><label id="bitgetMarketWrap" style="display:none">Bitget product<select id="orderBitgetMarket"><option value="spot">Spot</option><option value="margin-crossed">Cross margin</option><option value="margin-isolated">Isolated margin</option><option value="usdt-futures">USDT futures</option><option value="usdc-futures">USDC futures</option><option value="coin-futures">Coin futures</option></select></label><label id="bitgetLeverageWrap" style="display:none">Bitget leverage (1–150x)<input id="orderBitgetLeverage" type="number" min="1" max="150" step="1" value="10"></label><label id="bitgetMarginModeWrap" style="display:none">Futures margin mode<select id="orderBitgetMarginMode"><option value="isolated">Isolated</option><option value="crossed">Cross</option></select></label>
 <label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop-loss (sell, Internal Paper)</option></select></label>
 <label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
 <label>Amount (<span id="orderQuote">USDT</span>)<input id="orderAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter amount to trade"><small id="orderAmountNote" class="mut" aria-live="polite">Type an amount and the quantity is filled in at the reference price.</small></label>
@@ -454,7 +454,7 @@ function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'no
 function symInfo(){const m=symMkt(),s=$('symbol').value,c=SYM.all.filter(r=>r[0]===s&&r[3]===(m==='futures'?'futures':'spot')),row=(SYM.venue&&c.find(r=>symV(r)===SYM.venue))||c.find(r=>symV(r)==='bitget')||c.find(r=>symV(r)==='binance')||c[0]||null;return{market:m,row:row,venue:row?symV(row):(SYM.all.length?'binance':'bitget')};}
 function symV(r){return r[5]||'binance';}
 function symVenueOf(){return symInfo().venue;}
-function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
+function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value==='margin')return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
 function mkt(){const i=symInfo();return (i.market==='futures'?'&market=futures':'')+(i.venue==='bitget'?'&venue=bitget'+(i.row&&i.row[6]?'&pt='+encodeURIComponent(i.row[6]):''):'');}
 async function getJson(url){const r=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}if(j===null)throw Error('Invalid JSON from '+url.split('?')[0]);return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
 function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
@@ -536,7 +536,7 @@ async function renderAuthEnvs(){
 function selectedOrder(){
  const broker=$('orderBroker').value, type=$('orderType').value;
  const quantity=Number($('orderQuantity').value), symbol=$('orderSymbol').value.trim().toUpperCase();
- const order={broker,symbol,type,quantity,side:window.etiSelectedSide||'buy',timeInForce:$('orderTif').value};
+ const order={broker,symbol,type,quantity,side:window.etiSelectedSide||'buy',timeInForce:$('orderTif').value,bitgetMarket:$('orderBitgetMarket').value,leverage:Number($('orderBitgetLeverage').value),marginMode:$('orderBitgetMarginMode').value};
  if(type==='limit') order.limitPrice=Number($('orderLimitPrice').value);
  if(type==='stop') order.stopPrice=Number($('orderStopPrice').value);
  return order;
@@ -552,14 +552,14 @@ function orderValidation(o,requireCredentials=true){
  return '';
 }
 function renderPreview(o){
- const summary={venue:o.broker==='eti_paper'?'ETI INTERNAL PAPER (simulated, no exchange)':o.broker,mode:o.broker==='eti_paper'?'internal paper (simulated)':'exchange paper/testnet',symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
+ const summary={venue:o.broker==='eti_paper'?'ETI INTERNAL PAPER (simulated, no exchange)':o.broker==='bitget'?'BITGET LIVE (real funds)':o.broker,mode:o.broker==='bitget'?'live':'exchange paper/testnet',market:o.broker==='bitget'?o.bitgetMarket:undefined,leverage:o.broker==='bitget'&&o.bitgetMarket.endsWith('futures')?o.leverage:undefined,marginMode:o.broker==='bitget'&&o.bitgetMarket.endsWith('futures')?o.marginMode:undefined,symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
  if(o.type==='limit')summary.limitPrice=o.limitPrice;
  {const px=o.type==='limit'?o.limitPrice:o.type==='stop'?o.stopPrice:orderRefPrice();if(px>0&&o.quantity>0){summary.referencePrice=px;summary['estimatedAmount_'+orderQuoteName()]=Math.round(o.quantity*px*100)/100;}}
  summary.executionSource={actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'};
  $('orderOutput').textContent='Review this order carefully before submission: | '+JSON.stringify(summary,null,2);
 }
 function describeOutcome(r,d){
- if(d&&d.ok&&d.outcome==='executed')return d.broker==='eti_paper'?'FILLED in ETI Internal Paper (simulated; no exchange contacted)'+(d.fill?' · '+d.fill.quantity+' @ '+Number(d.fill.price).toFixed(4):''):'EXECUTED on '+(d.mode==='testnet'?'Binance testnet':'Alpaca paper')+' · broker order '+d.brokerOrderId+' · status '+d.brokerStatus;
+ if(d&&d.ok&&d.outcome==='executed')return d.broker==='eti_paper'?'FILLED in ETI Internal Paper (simulated; no exchange contacted)'+(d.fill?' · '+d.fill.quantity+' @ '+Number(d.fill.price).toFixed(4):''):d.broker==='bitget'?'ACCEPTED by Bitget LIVE · order '+d.brokerOrderId+' · verify final fill in Bitget': 'EXECUTED on '+(d.mode==='testnet'?'Binance testnet':'Alpaca paper')+' · broker order '+d.brokerOrderId+' · status '+d.brokerStatus;
  if(d&&d.ok&&d.outcome==='resting')return 'ACCEPTED into the ETI internal paper book (simulated): it fills only when the market trades through its price';
  if(d&&d.outcome==='rejected')return 'REFUSED by ETI safeguards ('+(d.stage||'check')+'): '+((d.reasons&&d.reasons[0])||d.error)+' · the broker was NOT contacted';
  if(d&&d.outcome==='broker_rejected')return 'REJECTED by the broker (HTTP '+d.status+') · see the broker response below';
@@ -571,19 +571,20 @@ function describeOutcome(r,d){
 async function refreshExecutionStatus(){
  try{
   const r=await fetch('/api/execution/status',{cache:'no-store'}),d=await r.json();executionStatus=d;
-  const b=$('orderBroker').value,internal=b==='eti_paper';
-  const ready=internal||(b==='alpaca'?d.alpaca_paper_configured:d.binance_testnet_configured), name=internal?'ETI Internal Paper':b==='alpaca'?'Alpaca Paper':'Binance Testnet';
+  const b=$('orderBroker').value,internal=b==='eti_paper',bitget=b==='bitget';
+  const ready=internal||(b==='alpaca'?d.alpaca_paper_configured:b==='bitget'?d.bitget_configured&&d.bitget_live_enabled:d.binance_testnet_configured), name=internal?'ETI Internal Paper':b==='alpaca'?'Alpaca Paper':bitget?'Bitget Live':'Binance Testnet';
   const sg=d.safeguards||{}, ok=!d.kill_switch&&(internal||(ready&&d.audit_log_configured))&&d.audit_log_configured;
-  $('executionStatus').textContent=d.kill_switch?'Halted (kill switch)':ok?'Ready · paper/testnet only':!d.audit_log_configured?'Needs audit log (KV binding)':'Needs '+name+' credentials (internal paper still works)';
+  $('executionStatus').textContent=d.kill_switch?'Halted (kill switch)':ok?(bitget?'Ready · Bitget live orders (master token required)':'Ready · paper/testnet') :!d.audit_log_configured?'Needs audit log (KV binding)':'Needs '+name+' credentials / live activation';
   $('executionStatus').style.color=ok?'#21d69a':'#ffb08c';
-  if($('brokerStatus')){$('brokerStatus').textContent=name+(internal?' · simulated, no exchange':ready?' · credentials set':' · not configured');$('brokerStatus').style.color=ready?'#21d69a':'#ffb08c';}
+  if($('brokerStatus')){$('brokerStatus').textContent=name+(internal?' · simulated, no exchange':ready?' · credentials and activation set':' · not configured');$('brokerStatus').style.color=ready?'#21d69a':'#ffb08c';}
+  $('bitgetMarketWrap').style.display=bitget?'':'none';const bf=bitget&&$('orderBitgetMarket').value.endsWith('futures');$('bitgetLeverageWrap').style.display=bf?'':'none';$('bitgetMarginModeWrap').style.display=bf?'':'none';
   if($('safeguardStatus')){$('safeguardStatus').textContent=sg.engine==='in_process'?'In-process · max qty '+(sg.max_order_quantity==null?'unset':sg.max_order_quantity)+' · duplicate window '+sg.duplicate_window_seconds+'s'+(d.live_flag_ignored?' · live flag ignored':'')+(d.legacy_gateway_config_ignored?' · old gateway settings ignored (safe to delete)':''):'Unknown';$('safeguardStatus').style.color=sg.engine==='in_process'?'#21d69a':'#ff637d';}
   $('killSwitchStatus').textContent=d.kill_switch?'ACTIVE':'Inactive';
   $('killSwitchStatus').style.color=d.kill_switch?'#ff637d':'#21d69a';
  }catch(e){$('executionStatus').textContent='Status unavailable';$('executionStatus').style.color='#ff637d';}
 }
 async function refreshExecutionHistory(){
- const token=$('executionToken').value,env=$('orderBroker').value==='eti_paper'?'internal_paper':'exchange_testnet';
+ const token=$('executionToken').value,env=$('orderBroker').value==='eti_paper'?'internal_paper':$('orderBroker').value==='bitget'?'live':'exchange_testnet';
  $('executionHistory').textContent='Loading audit records…';
  try{
   const r=await fetch('/api/execution/history?environment='+env,{credentials:'same-origin',headers:token?{Authorization:'Bearer '+token}:{},cache:'no-store'}),d=await r.json();
@@ -600,11 +601,12 @@ async function submitOrder(side){
  const problem=orderValidation(o);if(problem){$('orderOutput').textContent=problem;return;}
  if(executionStatus&&executionStatus.kill_switch){$('orderOutput').textContent='Execution blocked: emergency kill switch is active.';return;}
  renderPreview(o);
- const modeLabel=o.broker==='eti_paper'?'INTERNAL PAPER, SIMULATED':'EXCHANGE '+(o.broker==='binance'?'BINANCE TESTNET':'ALPACA PAPER');
+ const modeLabel=o.broker==='eti_paper'?'INTERNAL PAPER, SIMULATED':o.broker==='bitget'?'BITGET LIVE, REAL FUNDS':'EXCHANGE '+(o.broker==='binance'?'BINANCE TESTNET':'ALPACA PAPER');
  const detail=side.toUpperCase()+' '+o.quantity+' '+o.symbol+' via '+o.broker.toUpperCase()+' ('+modeLabel+', '+o.type.toUpperCase()+')';
- if(!window.confirm('FINAL ORDER CONFIRMATION |  | '+detail+' |  | This submits a PAPER / TESTNET order. No real money is used. Continue?'))return;
+ if(!window.confirm('FINAL ORDER CONFIRMATION |  | '+detail+' |  | '+(o.broker==='bitget'?'This submits a LIVE Bitget order using real funds. Losses may be immediate. Confirm the market, quantity, leverage and margin mode. Continue?':'This submits a PAPER / TESTNET order. No real money is used. Continue?')))return;
  const clientOrderId='eti'+crypto.randomUUID().replace(/-/g,'').slice(0,29);
  const body={broker:o.broker,symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity,timeInForce:o.timeInForce,clientOrderId,riskConfirmed:true,executionSource:{actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'}};
+ if(o.broker==='bitget'){body.bitgetMarket=o.bitgetMarket;body.leverage=o.leverage;body.marginMode=o.marginMode;body.quoteAmount=Number($('orderAmount').value)||undefined;body.tradeSide='open';body.marginCoin=o.bitgetMarket==='usdt-futures'?'USDT':o.bitgetMarket==='usdc-futures'?'USDC':undefined;}
  if(o.type==='limit')body.limitPrice=o.limitPrice;
  if(o.type==='stop')body.stopPrice=o.stopPrice;
  if(side==='buy'){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
@@ -612,9 +614,9 @@ async function submitOrder(side){
  try{
   const headers={'content-type':'application/json'};
   if($('executionToken').value)headers.Authorization='Bearer '+$('executionToken').value;
-  const send=()=>fetch('/api/orders',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify(body)});
+  const send=()=>fetch(o.broker==='bitget'?'/api/orders/live':'/api/orders',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify(body)});
   let r=await send();
-  if(r.status===401&&!$('executionToken').value){await startSessions();r=await send();}
+  if(r.status===401&&!$('executionToken').value&&o.broker!=='bitget'){await startSessions();r=await send();}
   const d=await r.json().catch(()=>({}));
   if(d.fallback&&d.notice)authBanner(d.notice,'warn');
   $('orderOutput').textContent=describeOutcome(r,d)+' | '+JSON.stringify(d,null,2);
@@ -622,7 +624,8 @@ async function submitOrder(side){
  }catch(e){$('orderOutput').textContent='Order submission failed before a response was received: '+e.message+' | Check the audit history before retrying.';pfKick();}
 }
 $('orderType').onchange=()=>{const t=$('orderType').value;$('limitPriceWrap').style.display=t==='limit'?'flex':'none';$('stopPriceWrap').style.display=t==='stop'?'flex':'none';};
-$('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();if(perpOn())perpLoad();};
+$('orderBroker').onchange=()=>{const b=$('orderBroker').value;if(b!=='eti_paper'&&b!=='bitget'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}if(b==='bitget')authBanner('Bitget live orders require the master ETI_EXECUTION_TOKEN. Paper/testnet session tokens cannot authorise real-money orders.','warn');$('orderTif').value=b==='binance'||b==='bitget'?'gtc':'day';refreshExecutionStatus();if(perpOn())perpLoad();};
+$('orderBitgetMarket').onchange=()=>{const f=$('orderBitgetMarket').value.endsWith('futures');$('bitgetLeverageWrap').style.display=f?'':'none';$('bitgetMarginModeWrap').style.display=f?'':'none';};
 /* ===== Chart trading + profit & leverage calculator ===== */
 function drawChartLines(x,g,py,labels){chartLines.forEach(l=>{if(!(l.price>0))return;const y=py(l.price);x.lineWidth=1.2;x.strokeStyle=l.color;x.setLineDash(l.dash||[4,3]);x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.setLineDash([]);labels.push({y:y,t:l.label,c:l.color});});}
 function setChartLines(src,lines){chartLines=chartLines.filter(l=>l.src!==src).concat(lines.map(l=>Object.assign({src:src},l)));drawChart();}
@@ -872,14 +875,16 @@ function symRebuild(want){
  sel.textContent='';
  if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
  sel.appendChild(frag);sel.value=cur;
- const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', refreshes every 10 min':'';
- $('symCount').textContent=rows.length+' of '+all.length+' '+(SYM.venue==='bitget'?'Bitget':SYM.venue==='binance'?'Binance':'Binance + Bitget')+' '+(SYM.market==='futures'?'perpetual futures':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'')+(SYM.venue==='bitget'||symVenueOf()==='bitget'?' · Bitget pairs are chart-only: ETI places no orders on Bitget.':'');
+ const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', refreshes every minute':'';
+ $('symCount').textContent=rows.length+' of '+all.length+' '+(SYM.venue==='bitget'?'Bitget':SYM.venue==='binance'?'Binance':'Binance + Bitget')+' '+(SYM.market==='futures'?'perpetual futures':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'')+(SYM.venue==='bitget'||symVenueOf()==='bitget'?' · Bitget chart data and live order venue.':'');
  const dl=$('symbolList');if(dl&&dl.dataset.n!==String(SYM.at)){dl.textContent='';SYM.all.filter(r=>r[3]==='spot').forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});dl.dataset.n=String(SYM.at);}
 }
 async function loadSymbols(){
  try{
   const j=(await getJson('/api/market/symbols?venue=all')).data||{};
-  SYM.all=j.symbols||[];SYM.at=Date.now();
+  SYM.all=j.symbols||[];
+  try{const mr=await fetch('/api/bitget/margin-pairs',{cache:'no-store'});if(mr.ok){const md=await mr.json();(md.pairs||[]).forEach(p=>{if(p.crossed||p.isolated)SYM.all.push([p.symbol,p.base,p.quote,'margin','crypto','bitget']);});}}catch(e){}
+  SYM.at=Date.now();
   if(SYM.venue==='bitget'&&!SYM.all.some(r=>symV(r)==='bitget')&&SYM.all.length){SYM.venue='';$('symVenue').value='';SYM.warn='Bitget pair list unavailable: showing Binance pairs until it recovers';}
   SYM.warn=(j.warnings||[]).length?'could not refresh '+j.warnings.map(w=>w.market).join(', ')+' list':'';
   Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)SYM.warn=(SYM.warn?SYM.warn+'; ':'')+k+' list is stale';});
@@ -902,7 +907,7 @@ $('symSearch').addEventListener('input',()=>{SYM.q=$('symSearch').value;symRebui
 $('symSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const t=SYM.q.trim().toUpperCase();if(!t)return;const rows=symRows(),m=rows.find(r=>r[0]===t)||rows.find(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(r[0].indexOf(t)>=0||r[1]===t));if(m){$('symbol').value=m[0];$('symbol').dispatchEvent(new Event('change'));$('symSearch').value='';SYM.q='';symRebuild();}});
 $('symQuote').addEventListener('change',()=>{SYM.quote=$('symQuote').value;symRebuild();});
 $('symCat').addEventListener('change',()=>{SYM.cat=$('symCat').value;symRebuild();});
-loadSymbols();setInterval(loadSymbols,600000);
+loadSymbols();setInterval(loadSymbols,60000);
 $('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();etiMarketNote();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
 </script></body></html>`;
 const page = withMotion(html);
