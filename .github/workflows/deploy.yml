@@ -40,6 +40,13 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "::error::Set CLOUDFLARE_ACCOUNT_ID in GitHub Actions secrets"; exit 1)
           npx wrangler d1 migrations apply eti-portfolio-db --remote
 
+      - name: Validate required GainzAlgo secrets
+        env:
+          ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
+        run: |
+          test -n "$ETI_GAINZ_WEBHOOK_SECRET" || (echo "::error::Set ETI_GAINZ_WEBHOOK_SECRET in GitHub Actions secrets"; exit 1)
+          test "${#ETI_GAINZ_WEBHOOK_SECRET}" -ge 32 || (echo "::error::ETI_GAINZ_WEBHOOK_SECRET must contain at least 32 characters"; exit 1)
+
       - name: Sync optional sports Worker secrets from GitHub Actions
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -66,6 +73,38 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
+
+      - name: Verify live GainzAlgo service, webhook and D1 readiness
+        shell: bash
+        env:
+          ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}
+        run: |
+          for attempt in $(seq 1 10); do
+            response="$(curl --silent --show-error --fail https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/gainz/status)" || { sleep 3; continue; }
+            if printf '%s' "$response" | node -e '
+              let input = "";
+              process.stdin.on("data", chunk => input += chunk);
+              process.stdin.on("end", () => {
+                const h = JSON.parse(input);
+                const engines = Array.isArray(h.engines) && h.engines.includes("gainz_v2") && h.engines.includes("gainz_v2_alpha");
+                const ready = h.databaseConfigured === true && h.databaseReady === true && h.webhookConfigured === true && engines && h.automaticOrderSubmission === false;
+                if (!ready) {
+                  console.error(JSON.stringify({databaseConfigured:h.databaseConfigured,databaseReady:h.databaseReady,webhookConfigured:h.webhookConfigured,engines:h.engines,automaticOrderSubmission:h.automaticOrderSubmission}));
+                  process.exit(1);
+                }
+                console.log("GainzAlgo readiness verified: V2, V2 Alpha, webhook secret and D1 tables are ready; automatic execution remains disabled.");
+              });
+            '; then
+              if [ -n "$ETI_GAINZ_ADMIN_TOKEN" ]; then
+                private_response="$(curl --silent --show-error --fail -H "Authorization: Bearer $ETI_GAINZ_ADMIN_TOKEN" https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/gainz/signals)" || { echo "::error::Gainz admin token was rejected by the live Worker"; exit 1; }
+                printf '%s' "$private_response" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s);if(!Array.isArray(x.signals)||typeof x.count!=="number")process.exit(1);console.log("Gainz authenticated signal-history API verified.");});'
+              fi
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::GainzAlgo readiness failed. Verify ETI_GAINZ_WEBHOOK_SECRET, ETI_PORTFOLIO_DB binding and migration 0014."
+          exit 1
 
       - name: Verify live sports service and D1 readiness
         shell: bash
