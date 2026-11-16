@@ -41,6 +41,16 @@ test("Bitget cross and isolated margin orders use the correct classic V2 endpoin
  }
 });
 
+test("Bitget futures rejects stop-loss and take-profit levels on the wrong side of entry",async()=>{
+ const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};let calls=0;
+ const fetchImpl=(async()=>{calls++;return ok();}) as any;
+ const longBad=await placeBitgetLiveOrder(env,orderBody({bitgetMarket:"usdt-futures",referencePrice:100,quantity:1,plan:{stop:101,tp1:110}}),{fetchImpl});
+ assert.equal(longBad.status,400);assert.equal((await longBad.json() as any).error,"invalid_stop_loss_direction");
+ const shortBad=await placeBitgetLiveOrder(env,orderBody({bitgetMarket:"usdt-futures",side:"sell",referencePrice:100,quantity:1,plan:{stop:90,tp1:80}}),{fetchImpl});
+ assert.equal(shortBad.status,400);assert.equal((await shortBad.json() as any).error,"invalid_stop_loss_direction");
+ assert.equal(calls,0);
+});
+
 test("kill switch, missing explicit confirmation, leverage limits and duplicate ids fail closed",async()=>{
  const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};
  assert.equal((await placeBitgetLiveOrder({...env,ETI_KILL_SWITCH:"true"},orderBody())).status,423);
