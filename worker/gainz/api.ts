@@ -56,12 +56,15 @@ export async function handleGainz(req:Request,env:GainzEnv,now=Date.now()):Promi
     const raw=await bodyText(req);if(raw===null)return reply({error:"body_too_large_or_unreadable"},413);
     if(!await hmacOk(env.ETI_GAINZ_WEBHOOK_SECRET,req.headers.get("x-eti-gainz-timestamp")||"",raw,req.headers.get("x-eti-gainz-signature")||""))return reply({error:"invalid_webhook_signature_or_timestamp"},401);
     let p:any;try{p=JSON.parse(raw)}catch{return reply({error:"invalid_json"},400);}
-    const cfgRow=await d.prepare("SELECT config_json FROM gainz_config WHERE id=1").first<any>();
-    const cfg={...defaultConfig,...(cfgRow?JSON.parse(cfgRow.config_json):{})};
-    const s=parseSignal(p,now,cfg.maxSignalAgeSeconds,cfg.minimumRewardRisk);if(!s)return reply({error:"invalid_signal_payload",required:["engine","symbol","direction","timeframe","signalTimestamp"]},400);
     const d=db(env);if(!d)return reply({error:"database_not_configured"},503);
-    try{if(!await ensureTables(d))return reply({error:"migration_required",migration:"0014_gainz_intelligence.sql"},503);const saved=await persistSignal(d,s);return reply({accepted:!saved.duplicate,duplicate:saved.duplicate,signalId:s.id,state:s.state,consensus:s.consensus,consensusScore:s.consensusScore},saved.duplicate?200:202);}
-    catch(e){return reply({error:"signal_persistence_failed",detail:e instanceof Error?e.message:"database error"},503);}
+    try{
+      const cfgRow=await d.prepare("SELECT config_json FROM gainz_config WHERE id=1").first<any>();
+      const cfg={...defaultConfig,...(cfgRow?JSON.parse(cfgRow.config_json):{})};
+      const s=parseSignal(p,now,cfg.maxSignalAgeSeconds,cfg.minimumRewardRisk);if(!s)return reply({error:"invalid_signal_payload",required:["engine","symbol","direction","timeframe","signalTimestamp"]},400);
+      if(!await ensureTables(d))return reply({error:"migration_required",migration:"0014_gainz_intelligence.sql"},503);
+      const saved=await persistSignal(d,s);
+      return reply({accepted:!saved.duplicate,duplicate:saved.duplicate,signalId:s.id,state:s.state,consensus:s.consensus,consensusScore:s.consensusScore},saved.duplicate?200:202);
+    }catch(e){return reply({error:"signal_persistence_failed",detail:e instanceof Error?e.message:"database error"},503);}
   }
   if(path==="/api/gainz/status"&&req.method==="GET"){
     const d=db(env);let ready=false;try{ready=!!(d&&await ensureTables(d));}catch{}
