@@ -122,7 +122,9 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_SPORTS_PAPER_BANKROLL_CENTS` | config | Starting balance, in cents, of a **new** sports paper ledger (default 100000 = USD 1,000.00; range 100 to 1,000,000,000). An existing ledger is never changed automatically. |
 | `ETI_SPORTS_PAPER_TOKEN` | secret | Protects the isolated sports paper bankroll, bet ledger and manual history sync. |
 | `ETI_SPORTS_SCAN_INTERVAL_MINUTES` | config | Minimum minutes between scheduled global football odds scans (360 default, min 60). |
-| `ETI_GAINZ_WEBHOOK_SECRET` | secret | HMAC-SHA256 secret for signed TradingView GainzAlgo V2 / V2 Alpha webhook requests. |\n| `ETI_GAINZ_ADMIN_TOKEN` | secret | Optional dedicated bearer token for the GainzAlgo Intelligence Centre; falls back to `ETI_EXECUTION_TOKEN` when absent. |\n| `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
+| `ETI_GAINZ_WEBHOOK_SECRET` | secret | HMAC-SHA256 secret for signed TradingView GainzAlgo V2 / V2 Alpha webhook requests. |
+| `ETI_GAINZ_ADMIN_TOKEN` | secret | Optional dedicated bearer token for the GainzAlgo Intelligence Centre; falls back to `ETI_EXECUTION_TOKEN` when absent. |
+| `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
 | `ETI_SESSION_SECRET_PREVIOUS` | secret | Previous signing secret, accepted during rotation. |
 | `ETI_UNIVERSE_BATCH` | config | Symbols scanned per scheduled universe run. |
 | `ETI_UNIVERSE_ENABLED` | config | Enables the scheduled universe scan. |
