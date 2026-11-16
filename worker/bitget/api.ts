@@ -172,7 +172,7 @@ export async function syncAll(env: Record<string, any>, deps: Deps = {}, only?: 
 // ----------------------------------------------------------------------------------------------------------------- public margin pair list
 export async function listMarginPairs(deps: Deps = {}) {
   let res: Response;
-  try { res = await (deps.fetchImpl ?? fetch)(`${BASE}/api/v3/market/instruments?category=MARGIN`, { headers: { accept: "application/json", "user-agent": "ETI-Market-Data/1.0" }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit); }
+  try { res = await (deps.fetchImpl ?? fetch)(`${BASE}/api/v3/market/instruments?category=MARGIN`, { headers: { accept: "application/json", "user-agent": "Mozilla/5.0 (compatible; ETI-Market-Data/1.0)", origin: "https://www.bitget.com", referer: "https://www.bitget.com/" }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit); }
   catch { throw new BitgetError("network_error", null, "Bitget margin instrument request failed"); }
   const j: any = await res.json().catch(() => null);
   if (!res.ok || !j || j.code !== "00000" || !Array.isArray(j.data)) throw new BitgetError("invalid_payload", res.status, "Bitget margin instrument list unavailable");
