@@ -51,8 +51,10 @@ jobs:
           BACKEND_URL: ${{ vars.BACKEND_URL || secrets.BACKEND_URL }}
           INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
           INFURA_API_SECRET: ${{ secrets.INFURA_API_SECRET }}
+          ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
+          ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}
         run: |
-          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL INFURA_API_KEY INFURA_API_SECRET; do
+          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL INFURA_API_KEY INFURA_API_SECRET ETI_GAINZ_WEBHOOK_SECRET ETI_GAINZ_ADMIN_TOKEN; do
             value="${!name}"
             if [ -n "$value" ]; then
               printf '%s' "$value" | npx wrangler secret put "$name"
