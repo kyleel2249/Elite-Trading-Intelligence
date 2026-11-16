@@ -1,16 +1,15 @@
 /**
- * ETI market-data layer (Cloudflare Worker, read-only, no credentials).
+ * ETI market-data layer (Cloudflare Worker, public market data only).
  *
- * - Providers: Binance spot (primary), Bybit spot, OKX spot. All three serve
- *   the same USDT spot pairs, so failover is between genuinely compatible
- *   markets (different venues -> prices can differ slightly; the serving
- *   provider is always reported in response headers).
- * - Alpaca and Liquid are intentionally NOT used here: Alpaca crypto data is
- *   quoted in USD (not USDT) and Liquid has no verified public base URL, so
- *   neither is compatible with these symbols. Execution credentials never
- *   touch this module.
+ * - Binance supplies spot and USDT-margined futures; Bitget supplies spot and
+ *   USDT-, USDC- and coin-margined perpetual markets.
+ * - Bybit and OKX remain compatible spot failover providers for Binance spot.
+ * - Bitget is selected explicitly and is never silently substituted with a
+ *   different exchange. The chart reports its serving venue and product type.
+ * - Alpaca and Liquid are not used for this USDT market-data path. Execution
+ *   credentials never enter this module.
  * - Nothing is fabricated: every payload is validated; invalid or empty data
- *   counts as a provider failure and triggers failover.
+ *   counts as a provider failure and triggers failover where compatible.
  */
 
 export interface MarketEnv {
