@@ -522,7 +522,7 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string):
 export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: string; /** listing venue (omitted for Binance rows from listBinanceSymbols) */ v?: Venue; /** Bitget futures product type */ pt?: BitgetProductType }
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
 const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
-/** The pair list is re-read from Binance at most every 10 minutes per isolate (and shared at the edge); browsers re-request it on the same interval. */
+/** The Binance pair list is re-read at most every 10 minutes per isolate; Bitget spot and futures lists use their own 60-second cache. */
 export const SYMBOL_TTL_MS = 10 * 60 * 1000;
 export const BITGET_SYMBOL_TTL_MS = 60 * 1000;
 const SYMBOL_SOURCES: Record<MarketKind, { hosts: string[]; path: string }> = {
@@ -590,7 +590,7 @@ async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list:
     return { list: j.data, status: res.status, errorClass: null };
   } catch (e) { return { list: null, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" }; }
 }
-/** Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined). Same caching and stale-list behaviour as the Binance list. */
+/** Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined). Uses an independent 60-second cache and the same stale-list safety policy. */
 export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
   const hit = bitgetCache[market];
   if (hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
