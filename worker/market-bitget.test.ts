@@ -217,7 +217,7 @@ test("dashboard: Bitget is the default exchange; merged mode prefers Bitget for 
   els.symbol.value = "XAUUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures");
 });
 
-test("dashboard markup has the exchange selector and loads both venues; Bitget is chart-only for orders", () => {
+test("dashboard exposes Bitget as a live order venue and retains both market-data venues", () => {
   const src = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
   assert.match(src, /id="symVenue"/); assert.match(src, /symbols\?venue=all/); assert.match(src, /Bitget pairs are chart-only/);
 });
