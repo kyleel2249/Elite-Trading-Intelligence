@@ -64,6 +64,10 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   if(reduceOnly&&(!futures||tradeSide!=="close"))return response({ok:false,error:"invalid_reduce_only"},400);
   const quoteAmount=num(body?.quoteAmount);
   const referencePrice=num(body?.referencePrice);
+  const stopPrice=num(body?.plan?.stop), takeProfit=num(body?.plan?.tp1);
+  if(body?.plan&&!futures)return response({ok:false,error:"protective_levels_require_futures"},400);
+  if(Number.isFinite(stopPrice)&&stopPrice>0&&(!(referencePrice>0)||(side==="buy"?stopPrice>=referencePrice:stopPrice<=referencePrice)))return response({ok:false,error:"invalid_stop_loss_direction",message:"For a long order, stop loss must be below entry; for a short order, it must be above entry."},400);
+  if(Number.isFinite(takeProfit)&&takeProfit>0&&(!(referencePrice>0)||(side==="buy"?takeProfit<=referencePrice:takeProfit>=referencePrice)))return response({ok:false,error:"invalid_take_profit_direction",message:"For a long order, take profit must be above entry; for a short order, it must be below entry."},400);
   if((market==="spot"||margin)&&type==="market"&&side==="buy"&&!(quoteAmount>0))return response({ok:false,error:"quote_amount_required",message:"For Bitget market buys, send quoteAmount (the amount of quote currency to spend)."},400);
   const maxNotional=num(env.ETI_BITGET_MAX_NOTIONAL_USDT??"1000");
   const estimatedNotional=(market==="spot"||margin)&&type==="market"&&side==="buy"?quoteAmount:qty*(type==="limit"?price:referencePrice);
