@@ -22,7 +22,7 @@ export function normalizeEngine(v: unknown): GainzEngine | null {
   if (["gainz_v2_alpha", "gainzalgo_v2_alpha", "gainz_algo_v2_alpha", "v2_alpha", "alpha"].includes(s)) return "gainz_v2_alpha";
   return null;
 }
-export function parseSignal(input: unknown, now = Date.now(), maxAgeSeconds = 86400): NormalizedGainzSignal | null {
+export function parseSignal(input: unknown, now = Date.now(), maxAgeSeconds = 86400, minRewardRisk = 0): NormalizedGainzSignal | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   const p = input as Record<string, unknown>;
   const engine = normalizeEngine(p.engine ?? p.indicator ?? p.source);
@@ -32,6 +32,7 @@ export function parseSignal(input: unknown, now = Date.now(), maxAgeSeconds = 86
   const exchange = String(p.exchange ?? p.venue ?? "unknown").trim().toLowerCase().slice(0, 40);
   const market = String(p.market ?? p.marketType ?? "spot").toLowerCase() === "futures" ? "futures" : "spot";
   const rawTime = p.signalTimestamp ?? p.timestamp ?? p.time ?? p.createdAt;
+  if (rawTime === undefined || rawTime === null || rawTime === "") return null;
   const parsedTime = typeof rawTime === "string" && !/^\d+(\.\d+)?$/.test(rawTime) ? Date.parse(rawTime) : Number(rawTime);
   const signalTimestamp = Number.isFinite(parsedTime) ? (parsedTime < 1e12 ? parsedTime * 1000 : parsedTime) : now;
   const entry = finite(p.entry ?? p.entryPrice ?? p.price);
@@ -53,13 +54,12 @@ export function parseSignal(input: unknown, now = Date.now(), maxAgeSeconds = 86
     const reward = direction === "BUY" ? targets[0] - entry : entry - targets[0];
     if (!(risk > 0)) { state = "rejected"; reasons.push("Stop-loss is on the wrong side of entry"); }
     else if (!(reward > 0)) { state = "rejected"; reasons.push("Take-profit is on the wrong side of entry"); }
-    else rewardRisk = reward / risk;
+    else { rewardRisk = reward / risk; if (rewardRisk < minRewardRisk) { state = "rejected"; reasons.push("Reward-to-risk is below the configured ETI minimum"); } }
   }
   if (state === "received") state = "validated";
   const idInput = String(p.signalId ?? p.id ?? "").trim();
-  const id = idInput && /^[A-Za-z0-9_.:-]{1,120}$/.test(idInput)
-    ? idInput
-    : [engine, symbol, timeframe, direction, Math.floor(signalTimestamp)].join(":");
+  const safeId = idInput && /^[A-Za-z0-9_.:-]{1,120}$/.test(idInput) ? idInput : [symbol, timeframe, direction, Math.floor(signalTimestamp)].join(":");
+  const id = engine + ":" + safeId;
   const preset = String(p.preset ?? (engine === "gainz_v2_alpha" ? "alpha" : "unspecified")).toLowerCase().slice(0, 40);
   const score = rewardRisk === null ? 0 : Math.max(0, Math.min(100, Math.round(60 + Math.min(40, rewardRisk * 10))));
   return { id, engine, preset, symbol, exchange, market, direction: direction as Direction, timeframe,

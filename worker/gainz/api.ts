@@ -1,6 +1,7 @@
 import { getMarketData, providerOrder, INTERVALS, type MarketEnv } from "../market.ts";
 import { independentMarketAssessment, parseSignal, evaluateConsensus, type NormalizedGainzSignal } from "./engine.ts";
 import { detectFVG, detectDisplacement } from "../analysis/smc.ts";
+import { handlePerp } from "../perp/routes.ts";
 
 export interface GainzEnv extends MarketEnv {
   ETI_PORTFOLIO_DB?: D1Database;
@@ -55,7 +56,9 @@ export async function handleGainz(req:Request,env:GainzEnv,now=Date.now()):Promi
     const raw=await bodyText(req);if(raw===null)return reply({error:"body_too_large_or_unreadable"},413);
     if(!await hmacOk(env.ETI_GAINZ_WEBHOOK_SECRET,req.headers.get("x-eti-gainz-timestamp")||"",raw,req.headers.get("x-eti-gainz-signature")||""))return reply({error:"invalid_webhook_signature_or_timestamp"},401);
     let p:any;try{p=JSON.parse(raw)}catch{return reply({error:"invalid_json"},400);}
-    const s=parseSignal(p,now);if(!s)return reply({error:"invalid_signal_payload",required:["engine","symbol","direction","timeframe","signalTimestamp"]},400);
+    const cfgRow=await d.prepare("SELECT config_json FROM gainz_config WHERE id=1").first<any>();
+    const cfg={...defaultConfig,...(cfgRow?JSON.parse(cfgRow.config_json):{})};
+    const s=parseSignal(p,now,cfg.maxSignalAgeSeconds,cfg.minimumRewardRisk);if(!s)return reply({error:"invalid_signal_payload",required:["engine","symbol","direction","timeframe","signalTimestamp"]},400);
     const d=db(env);if(!d)return reply({error:"database_not_configured"},503);
     try{if(!await ensureTables(d))return reply({error:"migration_required",migration:"0014_gainz_intelligence.sql"},503);const saved=await persistSignal(d,s);return reply({accepted:!saved.duplicate,duplicate:saved.duplicate,signalId:s.id,state:s.state,consensus:s.consensus,consensusScore:s.consensusScore},saved.duplicate?200:202);}
     catch(e){return reply({error:"signal_persistence_failed",detail:e instanceof Error?e.message:"database error"},503);}
@@ -87,9 +90,39 @@ export async function handleGainz(req:Request,env:GainzEnv,now=Date.now()):Promi
     const c:any={...defaultConfig,...p};
     if(!["manual_approval","analysis_only"].includes(c.executionMode))return reply({error:"invalid_execution_mode"},400);
     if(!Number.isFinite(c.v2Weight)||!Number.isFinite(c.alphaWeight)||c.v2Weight<0||c.alphaWeight<0||c.v2Weight+c.alphaWeight<=0)return reply({error:"invalid_engine_weights"},400);
-    c.v2Weight=Math.min(100,c.v2Weight);c.alphaWeight=Math.min(100,c.alphaWeight);
+    if(!Number.isFinite(c.minimumRewardRisk)||c.minimumRewardRisk<0.1||c.minimumRewardRisk>20)return reply({error:"invalid_minimum_reward_risk"},400);
+    if(!Number.isInteger(c.maxSignalAgeSeconds)||c.maxSignalAgeSeconds<60||c.maxSignalAgeSeconds>86400)return reply({error:"invalid_max_signal_age"},400);
+    c.v2Weight=Math.min(100,c.v2Weight);c.alphaWeight=Math.min(100,c.alphaWeight);c.autoExecute=false;
     await d.prepare("INSERT INTO gainz_config(id,config_json,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at").bind(JSON.stringify(c),now).run();
     return reply({saved:true,config:c,updatedAt:nowIso(now)});
+  }
+
+  if((path==="/api/gainz/execute/preview"||path==="/api/gainz/execute")&&req.method==="POST"){
+    const p=await jsonBody(req);if(!p||typeof p.signalId!=="string")return reply({error:"invalid_execution_request"},400);
+    const row=await d.prepare("SELECT id,engine,symbol,market,direction,signal_timestamp,state,reward_risk FROM gainz_signals WHERE id=?").bind(p.signalId).first<any>();
+    if(!row)return reply({error:"signal_not_found"},404);
+    if(row.state!=="validated")return reply({error:"signal_not_executable",state:row.state},409);
+    const cfgRow=await d.prepare("SELECT config_json FROM gainz_config WHERE id=1").first<any>();
+    const cfg={...defaultConfig,...(cfgRow?JSON.parse(cfgRow.config_json):{})};
+    if(now-Number(row.signal_timestamp)>Number(cfg.maxSignalAgeSeconds)*1000)return reply({error:"signal_expired"},409);
+    if(row.market!=="futures")return reply({error:"futures_signal_required",detail:"This execution bridge routes futures signals through ETI's existing perpetual paper/testnet gateway. Spot signals remain analysis-only."},422);
+    if(Number(row.reward_risk)<Number(cfg.minimumRewardRisk))return reply({error:"reward_risk_below_policy",minimum:cfg.minimumRewardRisk,actual:row.reward_risk},422);
+    const environment=String(p.environment||"perp_paper");
+    if(!["perp_paper","perp_testnet"].includes(environment))return reply({error:"invalid_environment"},400);
+    const quantity=Number(p.quantity),leverage=Number(p.leverage??1),type=String(p.type||"market");
+    if(!(Number.isFinite(quantity)&&quantity>0)||!(Number.isFinite(leverage)&&leverage>=1&&leverage<=150)||!["market","limit"].includes(type))return reply({error:"invalid_order_parameters"},400);
+    const executionToken=env.ETI_EXECUTION_TOKEN;
+    if(!executionToken)return reply({error:"execution_gateway_not_configured"},503);
+    const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(row.id+":"+environment)));
+    const clientOrderId="gz"+[...digest].slice(0,12).map(x=>x.toString(16).padStart(2,"0")).join("");
+    const order={environment,symbol:row.symbol,side:row.direction==="BUY"?"buy":"sell",type,quantity,limitPrice:type==="limit"?Number(p.limitPrice):null,leverage,reduceOnly:false,source:row.engine,clientOrderId};
+    const isPreview=path.endsWith("/preview");
+    if(!isPreview&&p.confirm!==true)return reply({error:"explicit_confirmation_required"},400);
+    const target=isPreview?"/api/perp/preview":"/api/perp/order";
+    const upstream=await handlePerp(new Request("https://eti.internal"+target,{method:"POST",headers:{"authorization":"Bearer "+executionToken,"content-type":"application/json"},body:JSON.stringify(order)}),env as any);
+    const result=await upstream.json().catch(()=>({error:"invalid_execution_response"}));
+    if(!isPreview)await event(d,row.id,"execution_"+(upstream.ok?"submitted":"rejected"),{environment,order,result},now);
+    return reply({ok:upstream.ok,signalId:row.id,engine:row.engine,environment,order,result},upstream.status);
   }
   if(path==="/api/gainz/outcomes"&&req.method==="POST"){
     const p=await jsonBody(req);if(!p||typeof p!=="object"||typeof p.signalId!=="string"||!["win","loss","breakeven","cancelled"].includes(p.outcome))return reply({error:"invalid_outcome"},400);
