@@ -39,6 +39,10 @@ def today():
     return datetime.now(timezone.utc).date()
 
 
+def _iso(s: Optional[str]) -> str:
+    return parse_date(s).isoformat() if s else today().isoformat()
+
+
 def _audit(db, p, action: str, subject, detail: Optional[dict] = None) -> None:
     db.add(ExecAudit(ts=now_iso(), actor=p.actor, role=p.role, action=action, subject=str(subject)[:96], detail=detail or {}))
 
@@ -100,7 +104,7 @@ def list_audit(limit: int = 100) -> list:
 def executive_threshold() -> int:
     raw = (os.getenv("EXEC_EXECUTIVE_APPROVAL_THRESHOLD") or "").strip()
     try:
-        return to_units(raw) if raw else 0
+        return to_units(Decimal(raw)) if raw else 0
     except Exception:
         return 0
 
@@ -156,7 +160,7 @@ def _balances(ledger, d: str, cur: str) -> dict:
 
 def reserve_move(p, ledger, direction: str, units: int, ref: str, date_s: Optional[str], currency: str = "USD") -> dict:
     cur = check_currency(currency)
-    d = parse_date(date_s) if date_s else today().isoformat()
+    d = _iso(date_s)
     ref = (ref or "").strip()
     if not ref:
         raise ValidationError("ref is required")
@@ -178,7 +182,7 @@ def reserve_move(p, ledger, direction: str, units: int, ref: str, date_s: Option
 # ---- payment / withdrawal register ---------------------------------------------------------------------------------------------
 def _cash_like(accts: dict, code: Optional[str]) -> bool:
     a = accts.get(code or "")
-    return bool(a and a.type == "asset" and (a.cash or code == calc.WALLET))
+    return bool(a and a.type == "asset" and a.postable and (a.cash or code == calc.WALLET))
 
 
 def create_request(p, ledger, *, kind: str, payee: str, amount_units: int, due_date: str, currency: str = "USD", description: str = "",
@@ -191,16 +195,16 @@ def create_request(p, ledger, *, kind: str, payee: str, amount_units: int, due_d
         raise ValidationError("payee is required")
     if amount_units <= 0:
         raise ValidationError("amount must be positive")
-    cur, due, dept = check_currency(currency), parse_date(due_date), check_department(department)
+    cur, due, dept = check_currency(currency), parse_date(due_date).isoformat(), check_department(department)
     accts = ledger.accounts()
     doc = None
     if document_id:
-        doc = next((d for d in subledger.list_documents(ledger, "bill", None, "real", cur) if d["document_id"] == document_id), None)
+        doc = next((d for d in subledger.list_documents(ledger, "bill", None, "real", cur) if d["document_id"] == document_id and d["outstanding_units"] > 0), None)
         if doc is None:
-            raise NotFound(f"no open bill {document_id} in {cur}")
+            raise NotFound(f"no outstanding bill {document_id} in {cur}")
     if kind == "expense":
         a = accts.get(expense_account or "")
-        if not (a and a.type == "expense" and a.postable) or not dept:
+        if not (a and a.type == "expense" and a.postable and a.active) or not dept:
             raise ValidationError("expense requests need a postable expense_account and a department")
     if kind == "withdrawal":
         if not _cash_like(accts, from_account):
@@ -289,7 +293,7 @@ def mark_paid(p, ledger, rid: int, ref: str, date_s: Optional[str] = None, cash_
     ref = (ref or "").strip()
     if not ref:
         raise ValidationError("a payment reference is required")
-    d = parse_date(date_s) if date_s else today().isoformat()
+    d = _iso(date_s)
     db = SessionLocal()
     try:
         row = _get(db, rid)
