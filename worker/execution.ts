@@ -93,7 +93,11 @@ export async function authorized(req: Request, env: ExecutionEnv): Promise<boole
 /** Public, secret-free description of how orders are handled. The dashboard renders this verbatim. */
 export function executionStatus(env: ExecutionEnv) {
   const cap = maxQuantity(env);
-  const bitgetConfigured = !!((env.BITGET_API_KEY || env.BITGET_KEY || env.BITGET_ACCESS_KEY) && (env.BITGET_API_SECRET || env.BITGET_SECRET_KEY || env.BITGET_SECRET) && (env.BITGET_API_PASSPHRASE || env.BITGET_PASSPHRASE));
+  const bitgetKey = env.BITGET_API_KEY || env.BITGET_KEY || env.BITGET_ACCESS_KEY;
+  const bitgetSecret = env.BITGET_API_SECRET || env.BITGET_SECRET_KEY || env.BITGET_SECRET;
+  const bitgetPassphrase = env.BITGET_API_PASSPHRASE || env.BITGET_PASSPHRASE;
+  const bitgetMissingCredentials = [!bitgetKey ? "API key" : null, !bitgetSecret ? "API secret" : null, !bitgetPassphrase ? "API passphrase" : null].filter(Boolean);
+  const bitgetConfigured = bitgetMissingCredentials.length === 0;
   return {
     mode: env.ETI_BITGET_LIVE_ENABLED === "true" ? "bitget_live_plus_paper_testnet" : "paper_testnet_only",
     live_trading_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
@@ -101,6 +105,7 @@ export function executionStatus(env: ExecutionEnv) {
     bitget_live_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
     master_execution_token_configured: !!env.ETI_EXECUTION_TOKEN,
     bitget_configured: bitgetConfigured,
+    bitget_missing_credentials: bitgetMissingCredentials,
     bitget_max_leverage: Math.min(150, Math.max(1, Number(env.ETI_BITGET_MAX_LEVERAGE || 150))),
     live_flag_ignored: env.ETI_LIVE_TRADING_ENABLED === "true",
     external_risk_gateway: false,
