@@ -47,16 +47,6 @@ jobs:
           test -n "$ETI_GAINZ_WEBHOOK_SECRET" || (echo "::error::Set ETI_GAINZ_WEBHOOK_SECRET in GitHub Actions secrets"; exit 1)
           test "${#ETI_GAINZ_WEBHOOK_SECRET}" -ge 32 || (echo "::error::ETI_GAINZ_WEBHOOK_SECRET must contain at least 32 characters"; exit 1)
 
-      - name: Validate Bitget live-trading credentials
-        env:
-          BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}
-          BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
-          BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
-        run: |
-          test -n "$BITGET_API_KEY" || (echo "::error::Set BITGET_API_KEY in GitHub Actions secrets"; exit 1)
-          test -n "$BITGET_API_SECRET" || (echo "::error::Set BITGET_API_SECRET in GitHub Actions secrets"; exit 1)
-          test -n "$BITGET_API_PASSPHRASE" || (echo "::error::Set BITGET_API_PASSPHRASE in GitHub Actions secrets"; exit 1)
-
       - name: Sync optional sports Worker secrets from GitHub Actions
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
