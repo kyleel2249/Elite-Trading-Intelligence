@@ -6,14 +6,14 @@ ETI now supports explicitly confirmed Bitget live orders through the master-auth
 
 The order adapter uses Bitget's Classic V2 spot, margin and contract endpoints, matching the existing ETI Bitget account/history connector. If the Bitget account has been upgraded to Unified Trading Account (UTA) and requires V3 order endpoints, do not enable live orders with this Classic V2 adapter; the UTA V3 order and account-mode adapter must be implemented and tested first.
 
-## Required Cloudflare / GitHub Actions secrets
+## Required Worker secrets and optional GitHub Actions sync
 
 - `BITGET_API_KEY` — Bitget API key with trade permission enabled.
 - `BITGET_API_SECRET` — matching API secret.
 - `BITGET_API_PASSPHRASE` — matching API passphrase.
 - `ETI_EXECUTION_TOKEN` — master ETI token required for live order submission.
 
-Create a Bitget API key with **trade permission only**. Keep withdrawal and transfer permissions disabled. Never place API credentials in `wrangler.jsonc`, the browser, or source control. The deploy workflow syncs the three Bitget credentials from GitHub Actions secrets into Worker secrets.
+Create a Bitget API key with **trade permission only**. Keep withdrawal and transfer permissions disabled. Never place API credentials in `wrangler.jsonc`, the browser, or source control. If the matching GitHub Actions secrets are present, the deploy workflow syncs them into Worker secrets. Otherwise, existing Cloudflare Worker secrets are retained; post-deploy readiness verifies that all three are present.
 
 ## Markets and order sizing
 
