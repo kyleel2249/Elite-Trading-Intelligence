@@ -624,7 +624,7 @@ async function submitOrder(side){
  }catch(e){$('orderOutput').textContent='Order submission failed before a response was received: '+e.message+' | Check the audit history before retrying.';pfKick();}
 }
 $('orderType').onchange=()=>{const t=$('orderType').value;$('limitPriceWrap').style.display=t==='limit'?'flex':'none';$('stopPriceWrap').style.display=t==='stop'?'flex':'none';};
-$('orderBroker').onchange=()=>{const b=$('orderBroker').value;if(b!=='eti_paper'&&b!=='bitget'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}if(b==='bitget')authBanner('Bitget live orders require the master ETI_EXECUTION_TOKEN. Paper/testnet session tokens cannot authorise real-money orders.','warn');$('orderTif').value=b==='binance'||b==='bitget'?'gtc':'day';refreshExecutionStatus();if(perpOn())perpLoad();};
+$('orderBroker').onchange=()=>{const b=$('orderBroker').value;if(b!=='eti_paper'&&b!=='bitget'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}if(b==='bitget'){authBanner('Bitget live orders require the master ETI_EXECUTION_TOKEN. Paper/testnet session tokens cannot authorise real-money orders.','warn');$('manualAuth').style.display='grid';}$('orderTif').value=b==='binance'||b==='bitget'?'gtc':'day';refreshExecutionStatus();if(perpOn())perpLoad();};
 $('orderBitgetMarket').onchange=()=>{const f=$('orderBitgetMarket').value.endsWith('futures');$('bitgetLeverageWrap').style.display=f?'':'none';$('bitgetMarginModeWrap').style.display=f?'':'none';};
 /* ===== Chart trading + profit & leverage calculator ===== */
 function drawChartLines(x,g,py,labels){chartLines.forEach(l=>{if(!(l.price>0))return;const y=py(l.price);x.lineWidth=1.2;x.strokeStyle=l.color;x.setLineDash(l.dash||[4,3]);x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.setLineDash([]);labels.push({y:y,t:l.label,c:l.color});});}
@@ -892,7 +892,7 @@ async function loadSymbols(){
  }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any Binance symbol in Order Execution.';}
 }
 function symMarketChanged(){
- SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';symFilters();
+ SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';if(SYM.market==='futures'&&symVenueOf()==='bitget'){const r=SYM.all.find(x=>x[0]===$('symbol').value);if(r&&r[6])$('orderBitgetMarket').value=r[6];else $('orderBitgetMarket').value='usdt-futures';}else if(SYM.market==='margin')$('orderBitgetMarket').value='margin-crossed';else if(SYM.market==='spot')$('orderBitgetMarket').value='spot';symFilters();
  const rows=symRows(),cur=$('symbol').value;let want='';
  if(rows.length&&!rows.some(r=>r[0]===cur)){const d=SYM.market==='metals'?(rows.find(r=>r[1]==='XAU')||rows.find(r=>r[1]==='PAXG')||rows[0]):(rows.find(r=>r[0]==='BTCUSDT')||rows[0]);$('symbol').value=d[0];want=d[0];}
  symRebuild(want);$('orderSymbol').value=$('symbol').value;resetAndLoad();syncOrderMarket();
