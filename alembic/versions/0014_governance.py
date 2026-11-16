@@ -1,15 +1,15 @@
 """Security governance: RBAC principals, tamper-evident audit chain, m-of-n approvals, withdrawal allowlist, limits, fraud alerts.
 
-Revision ID: 0013_governance
-Revises: 0012_accounting
+Revision ID: 0014_governance
+Revises: 0013_executive_centre
 """
 from alembic import op
 import sqlalchemy as sa
 
 from app.governance.models import PG_TRIGGERS, SQLITE_TRIGGERS
 
-revision = "0013_governance"
-down_revision = "0012_accounting"
+revision = "0014_governance"
+down_revision = "0013_executive_centre"
 branch_labels = None
 depends_on = None
 

@@ -1,6 +1,6 @@
 # Security & compliance
 
-Code: `app/governance/*`, API `/api/security/*` (`app/api/governance.py`), page `/security`, migration `0013_governance`,
+Code: `app/governance/*`, API `/api/security/*` (`app/api/governance.py`), page `/security`, migration `0014_governance`,
 tests `tests/test_governance.py` (36). Everything below is implemented and covered by tests unless marked otherwise.
 
 ## Controls
