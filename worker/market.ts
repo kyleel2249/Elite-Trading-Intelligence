@@ -582,7 +582,7 @@ export function bitgetCategory(base: string, quote: string): string {
 }
 async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list: any[] | null; status: number | null; errorClass: string | null }> {
   try {
-    const res = await fetchImpl(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 540 } } as RequestInit);
+    const res = await fetchImpl(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit);
     if (!res.ok) return { list: null, status: res.status, errorClass: classifyStatus(res.status) };
     const j: any = await res.json();
     if (!j || j.code !== "00000" || !Array.isArray(j.data)) return { list: null, status: res.status, errorClass: "invalid_payload" };
@@ -592,7 +592,7 @@ async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list:
 /** Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined). Same caching and stale-list behaviour as the Binance list. */
 export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
   const hit = bitgetCache[market];
-  if (hit && now() - hit.at < SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
+  if (hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
   const attempts: SymbolAttempt[] = [], rows: SymbolRow[] = [];
   const add = (x: any, pt?: BitgetProductType) => {
     const sym = String(x?.symbol ?? ""), b = String(x?.baseCoin ?? "").toUpperCase(), q = String(x?.quoteCoin ?? "").toUpperCase();
