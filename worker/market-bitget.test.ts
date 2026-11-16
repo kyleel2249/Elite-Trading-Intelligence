@@ -56,6 +56,24 @@ test("Bitget spot list: online pairs only, valid symbols only, categorised", asy
   assert.deepEqual(r.rows.map((x) => [x.s, x.c, x.v]), [["BTCUSDT", "crypto", "bitget"], ["PAXGUSDT", "metals", "bitget"], ["TSLAONUSDT", "stocks", "bitget"]]);
 });
 
+test("Bitget pair catalogue refreshes every 60 seconds without changing Binance's 10-minute cache", async () => {
+  _resetSymbolCache(); let calls=0, t=0;
+  const f:any=async()=>{calls++;return ok(SPOT);};
+  const first=await listBitgetSymbols("spot",f,()=>t); assert.equal(first.cached,false); assert.equal(calls,1);
+  const cached=await listBitgetSymbols("spot",f,()=>t+59_000); assert.equal(cached.cached,true); assert.equal(calls,1);
+  const refreshed=await listBitgetSymbols("spot",f,()=>t+60_001); assert.equal(refreshed.cached,false); assert.equal(calls,2);
+  _resetSymbolCache();
+  const real=globalThis.fetch;
+  try{
+    globalThis.fetch=(async(u:any)=>{const url=new URL(String(u));return url.host==="api.bitget.com"?ok(SPOT):new Response(JSON.stringify({symbols:[{symbol:"BTCUSDT",status:"TRADING",baseAsset:"BTC",quoteAsset:"USDT",isSpotTradingAllowed:true}]}));}) as any;
+    const bitget:any=await (await handleMarket(new Request("https://x.test/api/market/symbols?venue=bitget&market=spot"),{})).json();
+    assert.equal(bitget.refreshEverySeconds,60);
+    _resetSymbolCache();
+    const binance:any=await (await handleMarket(new Request("https://x.test/api/market/symbols?venue=binance&market=spot"),{})).json();
+    assert.equal(binance.refreshEverySeconds,600);
+  } finally {globalThis.fetch=real;_resetSymbolCache();}
+});
+
 test("Bitget futures list: perpetuals from all three product types, active only, product type recorded", async () => {
   _resetSymbolCache();
   const r = await listBitgetSymbols("futures", (async (u: any) => ok(contracts(new URL(String(u)).searchParams.get("productType")!))) as any);
