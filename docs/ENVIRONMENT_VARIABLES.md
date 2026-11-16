@@ -51,8 +51,8 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_DUPLICATE_WINDOW_SECONDS` | config | Window in which an identical order is refused as a duplicate. |
 | `ETI_EDGE` | config | Adaptive-edge feature switch for the dashboard. |
 | `ETI_EVENTS_JSON` | config | Inline JSON of scheduled market events for the readiness engine. |
-| `BITGET_API_KEY` | secret | Bitget API key with trade permission enabled and withdrawal permission disabled. Never enable withdrawals. Also accepted: `BITGET_KEY`. |
-| `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY`. |
+| `BITGET_API_KEY` | secret | Bitget API key with trade permission enabled and withdrawal permission disabled. Never enable withdrawals. Also accepted: `BITGET_KEY` and `BITGET_ACCESS_KEY`. |
+| `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY` and `BITGET_SECRET`. |
 | `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
 | `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
 | `ETI_BITGET_LIVE_ENABLED` | config | `true` enables the separately authenticated Bitget live-order adapter. The master ETI execution token, Bitget trade-enabled credentials, explicit order confirmation, kill-switch check, idempotency and notional/leverage limits remain required. |
