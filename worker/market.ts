@@ -523,7 +523,8 @@ export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: 
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
 const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
 /** The pair list is re-read from Binance at most every 10 minutes per isolate (and shared at the edge); browsers re-request it on the same interval. */
-export const SYMBOL_TTL_MS = 10 * 60 * 1000;\nexport const BITGET_SYMBOL_TTL_MS = 60 * 1000;
+export const SYMBOL_TTL_MS = 10 * 60 * 1000;
+export const BITGET_SYMBOL_TTL_MS = 60 * 1000;
 const SYMBOL_SOURCES: Record<MarketKind, { hosts: string[]; path: string }> = {
   spot: { hosts: PROVIDERS.binance.hosts, path: "/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING" },
   futures: { hosts: PROVIDERS.binance_usdm.hosts, path: "/fapi/v1/exchangeInfo" },
