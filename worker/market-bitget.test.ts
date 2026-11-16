@@ -20,14 +20,14 @@ const SPOT = [
 ];
 const contracts = (pt: string) => pt === "USDT-FUTURES"
   ? [
-    { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", symbolType: "perpetual", symbolStatus: "normal" },
-    { symbol: "XAUUSDT", baseCoin: "XAU", quoteCoin: "USDT", symbolType: "perpetual", symbolStatus: "normal" },
-    { symbol: "TSLAUSDT", baseCoin: "TSLA", quoteCoin: "USDT", symbolType: "perpetual", symbolStatus: "normal" },
-    { symbol: "OLDUSDT", baseCoin: "OLD", quoteCoin: "USDT", symbolType: "perpetual", symbolStatus: "off" },
-    { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", symbolType: "delivery", symbolStatus: "normal" },
+    { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", type: "perpetual", status: "online" },
+    { symbol: "XAUUSDT", baseCoin: "XAU", quoteCoin: "USDT", type: "perpetual", status: "online" },
+    { symbol: "TSLAUSDT", baseCoin: "TSLA", quoteCoin: "USDT", type: "perpetual", status: "online" },
+    { symbol: "OLDUSDT", baseCoin: "OLD", quoteCoin: "USDT", type: "perpetual", status: "offline" },
+    { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", type: "delivery", status: "online" },
   ]
-  : pt === "USDC-FUTURES" ? [{ symbol: "BTCPERP", baseCoin: "BTC", quoteCoin: "USDC", symbolType: "perpetual", symbolStatus: "normal" }]
-  : [{ symbol: "BTCUSD", baseCoin: "BTC", quoteCoin: "USD", symbolType: "perpetual", symbolStatus: "normal" }];
+  : pt === "USDC-FUTURES" ? [{ symbol: "BTCPERP", baseCoin: "BTC", quoteCoin: "USDC", type: "perpetual", status: "online" }]
+  : [{ symbol: "BTCUSD", baseCoin: "BTC", quoteCoin: "USD", type: "perpetual", status: "online" }];
 
 test("categories: crypto stays crypto; catalog stocks, tokenised stocks and metals are recognised; unknown tickers are not guessed", () => {
   assert.equal(bitgetCategory("BTC", "USDT"), "crypto");
@@ -52,7 +52,7 @@ test("Bitget spot list: online pairs only, valid symbols only, categorised", asy
   _resetSymbolCache();
   const urls: string[] = [];
   const r = await listBitgetSymbols("spot", (async (u: any) => { urls.push(String(u)); return ok(SPOT); }) as any);
-  assert.deepEqual(urls, ["https://api.bitget.com/api/v2/spot/public/symbols"]);
+  assert.deepEqual(urls, ["https://api.bitget.com/api/v3/market/instruments?category=SPOT"]);
   assert.deepEqual(r.rows.map((x) => [x.s, x.c, x.v]), [["BTCUSDT", "crypto", "bitget"], ["PAXGUSDT", "metals", "bitget"], ["TSLAONUSDT", "stocks", "bitget"]]);
 });
 
@@ -76,7 +76,7 @@ test("Bitget pair catalogue refreshes every 60 seconds without changing Binance'
 
 test("Bitget futures list: perpetuals from all three product types, active only, product type recorded", async () => {
   _resetSymbolCache();
-  const r = await listBitgetSymbols("futures", (async (u: any) => ok(contracts(new URL(String(u)).searchParams.get("productType")!))) as any);
+  const r = await listBitgetSymbols("futures", (async (u: any) => ok(contracts(new URL(String(u)).searchParams.get("category")!))) as any);
   assert.deepEqual(r.rows.map((x) => [x.s, x.c, x.pt]), [["BTCPERP", "crypto", "USDC-FUTURES"], ["BTCUSD", "crypto", "COIN-FUTURES"], ["BTCUSDT", "crypto", "USDT-FUTURES"], ["TSLAUSDT", "stocks", "USDT-FUTURES"], ["XAUUSDT", "metals", "USDT-FUTURES"]]);
 });
 
@@ -94,7 +94,7 @@ test("GET /api/market/symbols?venue=all merges both exchanges; the default respo
   const info = (symbols: any[]) => new Response(JSON.stringify({ symbols }), { status: 200 });
   globalThis.fetch = (async (u: any) => {
     const url = new URL(String(u));
-    if (url.host === "api.bitget.com") return url.pathname.includes("spot") ? ok(SPOT) : ok(contracts(url.searchParams.get("productType")!));
+    if (url.host === "api.bitget.com") return url.searchParams.get("category")==="SPOT" ? ok(SPOT) : ok(contracts(url.searchParams.get("category")!));
     if (url.pathname.includes("fapi")) return info([{ symbol: "BTCUSDT", status: "TRADING", baseAsset: "BTC", quoteAsset: "USDT", contractType: "PERPETUAL" }]);
     return info([{ symbol: "BTCUSDT", status: "TRADING", baseAsset: "BTC", quoteAsset: "USDT", isSpotTradingAllowed: true }]);
   }) as any;
@@ -131,15 +131,15 @@ test("Bitget spot klines, depth, trades and ticker are parsed and validated", as
   globalThis.fetch = (async (u: any) => {
     const url = new URL(String(u)); seen.push(url.pathname + "?" + url.searchParams.toString());
     if (url.pathname.endsWith("/candles")) return ok(Array.from({ length: 5 }, (_, i) => candle(i)).reverse()); // unsorted on purpose
-    if (url.pathname.endsWith("/orderbook")) return ok({ asks: [["101", "2"], ["102", "3"]], bids: [["100", "1"], ["99", "4"]], ts: "1" });
+    if (url.pathname.endsWith("/orderbook")) return ok({ a: [["101", "2"], ["102", "3"]], b: [["100", "1"], ["99", "4"]], ts: "1" });
     if (url.pathname.endsWith("/fills")) return ok([{ tradeId: "1", side: "sell", price: "100.5", size: "0.2", ts: String(T0) }, { tradeId: "2", side: "buy", price: "100.6", size: "0.1", ts: String(T0 + 1) }]);
-    return ok([{ symbol: "BTCUSDT", lastPr: "100.5", high24h: "110", low24h: "90", open: "100", change24h: "0.005", baseVolume: "12", quoteVolume: "1200" }]);
+    return ok([{ symbol: "BTCUSDT", lastPrice: "100.5", highPrice24h: "110", lowPrice24h: "90", openPrice24h: "100", price24hPcnt: "0.005", volume24h: "12", turnover24h: "1200" }]);
   }) as any;
   const k = await getMarketData("klines", { symbol: "BTCUSDT", interval: "15m", limit: 5, venue: "bitget" }, ["binance"]);
   assert.equal(k.provider, "bitget"); assert.equal(k.failover, false);
   const rows = k.data as number[][];
   assert.equal(rows.length, 5); assert.ok(rows[0][0] < rows[4][0], "sorted ascending"); assert.equal(rows[0][5], 10);
-  assert.match(seen[0], /\/api\/v2\/spot\/market\/candles\?symbol=BTCUSDT&granularity=15min&limit=5/);
+  assert.match(seen[0], /\/api\/v3\/market\/candles\?category=SPOT&symbol=BTCUSDT&interval=15m&type=market&limit=5/);
   const d: any = (await getMarketData("depth", { symbol: "BTCUSDT", interval: "1m", limit: 20, venue: "bitget" }, ["binance"])).data;
   assert.equal(d.bids[0][0], 100); assert.equal(d.asks[0][0], 101);
   const t: any = (await getMarketData("trades", { symbol: "BTCUSDT", interval: "1m", limit: 20, venue: "bitget" }, ["binance"])).data;
@@ -153,14 +153,14 @@ test("Bitget futures use the mix endpoints with the right product type", async (
   globalThis.fetch = (async (u: any) => { const url = new URL(String(u)); seen.push(url.pathname + "?" + url.searchParams.toString()); return ok(Array.from({ length: 3 }, (_, i) => candle(i).slice(0, 7))); }) as any;
   const a = await getMarketData("klines", { symbol: "XAUUSDT", interval: "1h", limit: 3, market: "futures", venue: "bitget" }, ["binance"]);
   assert.equal(a.provider, "bitget_mix");
-  assert.match(seen[0], /\/api\/v2\/mix\/market\/candles\?symbol=XAUUSDT&productType=USDT-FUTURES&granularity=1H&limit=3/);
+  assert.match(seen[0], /\/api\/v3\/market\/candles\?category=USDT-FUTURES&symbol=XAUUSDT&interval=1H&type=market&limit=3/);
   await getMarketData("klines", { symbol: "BTCPERP", interval: "1d", limit: 3, market: "futures", venue: "bitget" }, ["binance"]);
-  assert.match(seen[1], /productType=USDC-FUTURES&granularity=1Dutc/);
+  assert.match(seen[1], /category=USDC-FUTURES&symbol=BTCPERP&interval=1D&type=market&limit=3/);
   await getMarketData("klines", { symbol: "BTCUSD", interval: "1m", limit: 3, market: "futures", venue: "bitget", productType: "COIN-FUTURES" }, ["binance"]);
-  assert.match(seen[2], /productType=COIN-FUTURES&granularity=1m/);
-  globalThis.fetch = (async (u: any) => { seen.push(new URL(String(u)).pathname + new URL(String(u)).search); return ok({ asks: [["2", "1"]], bids: [["1", "1"]] }); }) as any;
+  assert.match(seen[2], /category=COIN-FUTURES&symbol=BTCUSD&interval=1m&type=market&limit=3/);
+  globalThis.fetch = (async (u: any) => { seen.push(new URL(String(u)).pathname + new URL(String(u)).search); return ok({ a: [["2", "1"]], b: [["1", "1"]] }); }) as any;
   await getMarketData("depth", { symbol: "XAUUSDT", interval: "1m", limit: 20, market: "futures", venue: "bitget" }, ["binance"]);
-  assert.match(seen.at(-1)!, /merge-depth\?symbol=XAUUSDT&productType=USDT-FUTURES&limit=50/);
+  assert.match(seen.at(-1)!, /orderbook\?category=USDT-FUTURES&symbol=XAUUSDT&limit=20/);
 });
 
 test("Bitget failures are reported as Bitget failures: no fallback to another exchange, no invented data", async () => {
