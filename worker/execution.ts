@@ -88,7 +88,7 @@ export async function authorized(req: Request, env: ExecutionEnv): Promise<boole
 export function executionStatus(env: ExecutionEnv) {
   const cap = maxQuantity(env);
   return {
-    mode: "paper_testnet_only",
+    mode: env.ETI_BITGET_LIVE_ENABLED === "true" ? "bitget_live_plus_paper_testnet" : "paper_testnet_only",
     live_trading_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
     live_trading_available: env.ETI_BITGET_LIVE_ENABLED === "true" && !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE),
     bitget_live_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
