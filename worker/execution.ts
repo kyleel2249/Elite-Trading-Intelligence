@@ -36,6 +36,11 @@ export interface ExecutionEnv {
   BITGET_API_KEY?: string;
   BITGET_API_SECRET?: string;
   BITGET_API_PASSPHRASE?: string;
+  BITGET_KEY?: string;
+  BITGET_ACCESS_KEY?: string;
+  BITGET_SECRET_KEY?: string;
+  BITGET_SECRET?: string;
+  BITGET_PASSPHRASE?: string;
   ETI_BITGET_LIVE_ENABLED?: string;
   ETI_BITGET_MAX_LEVERAGE?: string;
   ETI_BITGET_MAX_NOTIONAL_USDT?: string;
@@ -88,13 +93,14 @@ export async function authorized(req: Request, env: ExecutionEnv): Promise<boole
 /** Public, secret-free description of how orders are handled. The dashboard renders this verbatim. */
 export function executionStatus(env: ExecutionEnv) {
   const cap = maxQuantity(env);
+  const bitgetConfigured = !!((env.BITGET_API_KEY || env.BITGET_KEY || env.BITGET_ACCESS_KEY) && (env.BITGET_API_SECRET || env.BITGET_SECRET_KEY || env.BITGET_SECRET) && (env.BITGET_API_PASSPHRASE || env.BITGET_PASSPHRASE));
   return {
     mode: env.ETI_BITGET_LIVE_ENABLED === "true" ? "bitget_live_plus_paper_testnet" : "paper_testnet_only",
     live_trading_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
-    live_trading_available: env.ETI_BITGET_LIVE_ENABLED === "true" && !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE),
+    live_trading_available: env.ETI_BITGET_LIVE_ENABLED === "true" && bitgetConfigured,
     bitget_live_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
     master_execution_token_configured: !!env.ETI_EXECUTION_TOKEN,
-    bitget_configured: !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE),
+    bitget_configured: bitgetConfigured,
     bitget_max_leverage: Math.min(150, Math.max(1, Number(env.ETI_BITGET_MAX_LEVERAGE || 150))),
     live_flag_ignored: env.ETI_LIVE_TRADING_ENABLED === "true",
     external_risk_gateway: false,
