@@ -99,30 +99,52 @@ export async function handleGainz(req:Request,env:GainzEnv,now=Date.now()):Promi
 
   if((path==="/api/gainz/execute/preview"||path==="/api/gainz/execute")&&req.method==="POST"){
     const p=await jsonBody(req);if(!p||typeof p.signalId!=="string")return reply({error:"invalid_execution_request"},400);
-    const row=await d.prepare("SELECT id,engine,symbol,market,direction,signal_timestamp,state,reward_risk FROM gainz_signals WHERE id=?").bind(p.signalId).first<any>();
+    const row=await d.prepare("SELECT id,engine,symbol,market,direction,signal_timestamp,state,entry,stop_loss,tp1,tp2,tp3,reward_risk FROM gainz_signals WHERE id=?").bind(p.signalId).first<any>();
     if(!row)return reply({error:"signal_not_found"},404);
     if(row.state!=="validated")return reply({error:"signal_not_executable",state:row.state},409);
     const cfgRow=await d.prepare("SELECT config_json FROM gainz_config WHERE id=1").first<any>();
     const cfg={...defaultConfig,...(cfgRow?JSON.parse(cfgRow.config_json):{})};
     if(now-Number(row.signal_timestamp)>Number(cfg.maxSignalAgeSeconds)*1000)return reply({error:"signal_expired"},409);
-    if(row.market!=="futures")return reply({error:"futures_signal_required",detail:"This execution bridge routes futures signals through ETI's existing perpetual paper/testnet gateway. Spot signals remain analysis-only."},422);
+    if(row.market!=="futures")return reply({error:"futures_signal_required",detail:"Spot signals remain analysis-only in this integration."},422);
     if(Number(row.reward_risk)<Number(cfg.minimumRewardRisk))return reply({error:"reward_risk_below_policy",minimum:cfg.minimumRewardRisk,actual:row.reward_risk},422);
+    if(!Number.isFinite(Number(row.stop_loss))||!(Number(row.stop_loss)>0)||![row.tp1,row.tp2,row.tp3].some((x:any)=>Number.isFinite(Number(x))&&Number(x)>0))return reply({error:"protective_levels_missing"},422);
     const environment=String(p.environment||"perp_paper");
-    if(!["perp_paper","perp_testnet"].includes(environment))return reply({error:"invalid_environment"},400);
+    if(environment!=="perp_paper")return reply({error:"testnet_protective_orders_unavailable",detail:"ETI's current Binance futures testnet connector does not implement conditional stop orders. Use perp_paper until exchange-side protective stop support is added."},422);
     const quantity=Number(p.quantity),leverage=Number(p.leverage??1),type=String(p.type||"market");
-    if(!(Number.isFinite(quantity)&&quantity>0)||!(Number.isFinite(leverage)&&leverage>=1&&leverage<=150)||!["market","limit"].includes(type))return reply({error:"invalid_order_parameters"},400);
+    if(!(Number.isFinite(quantity)&&quantity>0)||!(Number.isInteger(leverage)&&leverage>=1&&leverage<=150)||type!=="market")return reply({error:"invalid_order_parameters",detail:"This protected execution path currently requires a market entry and whole-number leverage."},400);
     const executionToken=env.ETI_EXECUTION_TOKEN;
     if(!executionToken)return reply({error:"execution_gateway_not_configured"},503);
     const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(row.id+":"+environment)));
-    const clientOrderId="gz"+[...digest].slice(0,12).map(x=>x.toString(16).padStart(2,"0")).join("");
-    const order={environment,symbol:row.symbol,side:row.direction==="BUY"?"buy":"sell",type,quantity,limitPrice:type==="limit"?Number(p.limitPrice):null,leverage,reduceOnly:false,source:row.engine,clientOrderId};
-    const isPreview=path.endsWith("/preview");
-    if(!isPreview&&p.confirm!==true)return reply({error:"explicit_confirmation_required"},400);
-    const target=isPreview?"/api/perp/preview":"/api/perp/order";
-    const upstream=await handlePerp(new Request("https://eti.internal"+target,{method:"POST",headers:{"authorization":"Bearer "+executionToken,"content-type":"application/json"},body:JSON.stringify(order)}),env as any);
-    const result=await upstream.json().catch(()=>({error:"invalid_execution_response"}));
-    if(!isPreview)await event(d,row.id,"execution_"+(upstream.ok?"submitted":"rejected"),{environment,order,result},now);
-    return reply({ok:upstream.ok,signalId:row.id,engine:row.engine,environment,order,result},upstream.status);
+    const baseId="gz"+[...digest].slice(0,12).map(x=>x.toString(16).padStart(2,"0")).join("");
+    const side=row.direction==="BUY"?"buy":"sell",protectiveSide=side==="buy"?"sell":"buy";
+    const callPerp=async(target:string,order:any)=>{
+      const r=await handlePerp(new Request("https://eti.internal"+target,{method:"POST",headers:{"authorization":"Bearer "+executionToken,"content-type":"application/json"},body:JSON.stringify(order)}),env as any);
+      return {status:r.status,ok:r.ok,data:await r.json().catch(()=>({error:"invalid_execution_response"}))};
+    };
+    const entryOrder={environment,symbol:row.symbol,side,type:"market",quantity,leverage,reduceOnly:false,source:row.engine,clientOrderId:baseId+"en"};
+    if(path.endsWith("/preview")){
+      const preview=await callPerp("/api/perp/preview",entryOrder);
+      return reply({ok:preview.ok,signalId:row.id,engine:row.engine,environment,entry:preview.data,protectionPlan:{stopLoss:Number(row.stop_loss),takeProfits:[row.tp1,row.tp2,row.tp3].filter((x:any)=>Number.isFinite(Number(x))&&Number(x)>0)}},preview.status);
+    }
+    if(p.confirm!==true)return reply({error:"explicit_confirmation_required"},400);
+    const entry=await callPerp("/api/perp/order",entryOrder);
+    if(!entry.ok)return reply({ok:false,stage:"entry",entry},entry.status);
+    const stop=await callPerp("/api/perp/order",{environment,symbol:row.symbol,side:protectiveSide,type:"stop",quantity,stopPrice:Number(row.stop_loss),leverage,reduceOnly:true,source:"gainz_stop_loss",clientOrderId:baseId+"sl"});
+    if(!stop.ok){
+      const close=await callPerp("/api/perp/order",{environment,symbol:row.symbol,side:protectiveSide,type:"market",quantity,leverage,reduceOnly:true,source:"gainz_protection_failure_close",clientOrderId:baseId+"cl"});
+      await event(d,row.id,"execution_protection_failed",{entry:entry.data,stop:stop.data,emergencyClose:close.data},now);
+      return reply({ok:false,stage:"protection",entry:entry.data,stopLoss:stop.data,emergencyClose:close.data,warning:"Stop-loss placement failed. ETI attempted a reduce-only emergency close; verify the position ledger."},502);
+    }
+    const targets=[row.tp1,row.tp2,row.tp3].map(Number).filter(x=>Number.isFinite(x)&&x>0);
+    const takeProfits:any[]=[];let allocated=0;
+    for(let i=0;i<targets.length;i++){
+      const part=i===targets.length-1?quantity-allocated:quantity/targets.length;allocated+=part;
+      const tp=await callPerp("/api/perp/order",{environment,symbol:row.symbol,side:protectiveSide,type:"limit",quantity:part,limitPrice:targets[i],leverage,reduceOnly:true,source:"gainz_take_profit_"+(i+1),clientOrderId:baseId+"tp"+(i+1)});
+      takeProfits.push({target:i+1,price:targets[i],quantity:part,...tp});
+    }
+    const protectionComplete=takeProfits.every(x=>x.ok);
+    await event(d,row.id,"execution_protected",{environment,entry:entry.data,stopLoss:stop.data,takeProfits,protectionComplete},now);
+    return reply({ok:true,signalId:row.id,engine:row.engine,environment,entry:entry.data,stopLoss:stop.data,takeProfits,protectionComplete,warning:protectionComplete?null:"One or more take-profit orders were rejected; the stop-loss is active. Review the futures order ledger immediately."});
   }
   if(path==="/api/gainz/outcomes"&&req.method==="POST"){
     const p=await jsonBody(req);if(!p||typeof p!=="object"||typeof p.signalId!=="string"||!["win","loss","breakeven","cancelled"].includes(p.outcome))return reply({error:"invalid_outcome"},400);
