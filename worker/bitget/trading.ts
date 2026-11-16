@@ -89,7 +89,7 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
       const modeSet=await post(env,"/api/v2/mix/account/set-margin-mode",{symbol,productType,marginCoin,marginMode},deps);
       if(!modeSet.ok){await record("broker_rejected",{stage:"margin_mode",brokerResponse:modeSet.data});return response({ok:false,outcome:"broker_rejected",error:"margin_mode_rejected",detail:modeSet.data,broker_contacted:true},502);}
     }
-    const levSet=await post(env,"/api/v2/mix/account/set-leverage",{symbol,productType,marginCoin,leverage:String(lev)},deps);
+    const leveragePayload={symbol,productType,marginCoin,...(marginMode==="isolated"&&current?.posMode==="hedge_mode"?{longLeverage:String(lev),shortLeverage:String(lev)}:{leverage:String(lev)})};\n    const levSet=await post(env,"/api/v2/mix/account/set-leverage",leveragePayload,deps);
     if(!levSet.ok){await record("broker_rejected",{stage:"leverage",brokerResponse:levSet.data});return response({ok:false,outcome:"broker_rejected",error:"leverage_rejected",detail:levSet.data,broker_contacted:true},502);}
   }
   let path:string,payload:Record<string,unknown>;
