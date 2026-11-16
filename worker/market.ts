@@ -85,7 +85,7 @@ function okxSymbol(symbol: string): string {
 
 const REQUEST_TIMEOUT_MS = 6000;
 import { classify } from "./markets.ts";
-const UA = "ETI-MarketProxy/1.0 (Cloudflare Worker; read-only market data)";
+const UA = "Mozilla/5.0 (compatible; ETI-Market-Data/1.0)";
 
 // ---------------------------------------------------------------- helpers
 
@@ -383,7 +383,7 @@ async function fetchHost(host: string, req: UpstreamRequest): Promise<RawResult>
   const t0 = Date.now();
   try {
     const res = await fetch(url, {
-      headers: { accept: "application/json", "user-agent": UA },
+      headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bitget.com", referer: "https://www.bitget.com/" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       // Cache successes briefly; never cache upstream errors.
       cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": 2, "400-599": 0 } },
