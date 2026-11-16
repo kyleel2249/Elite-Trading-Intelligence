@@ -885,11 +885,11 @@ async function loadSymbols(){
   SYM.all=j.symbols||[];
   try{const mr=await fetch('/api/bitget/margin-pairs',{cache:'no-store'});if(mr.ok){const md=await mr.json();(md.pairs||[]).forEach(p=>{if(p.crossed||p.isolated)SYM.all.push([p.symbol,p.base,p.quote,'margin','crypto','bitget']);});}}catch(e){}
   SYM.at=Date.now();
-  if(SYM.venue==='bitget'&&!SYM.all.some(r=>symV(r)==='bitget')&&SYM.all.length){SYM.venue='';$('symVenue').value='';SYM.warn='Bitget pair list unavailable: showing Binance pairs until it recovers';}
+  if(SYM.venue==='bitget'&&!SYM.all.some(r=>symV(r)==='bitget')){SYM.warn='Bitget pair list unavailable; no other exchange will be substituted.';}
   SYM.warn=(j.warnings||[]).length?'could not refresh '+j.warnings.map(w=>w.market).join(', ')+' list':'';
   Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)SYM.warn=(SYM.warn?SYM.warn+'; ':'')+k+' list is stale';});
   symFilters();symRebuild();
- }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any Binance symbol in Order Execution.';}
+ }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any valid exchange symbol in Order Execution.';}
 }
 function symMarketChanged(){
  SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';if(SYM.market==='margin'&&symVenueOf()!=='bitget'){SYM.venue='bitget';$('symVenue').value='bitget';}if(SYM.market==='futures'&&symVenueOf()==='bitget'){const r=symInfo().row;if(r&&r[6])$('orderBitgetMarket').value=r[6];else $('orderBitgetMarket').value='usdt-futures';}else if(SYM.market==='margin')$('orderBitgetMarket').value='margin-crossed';else if(SYM.market==='spot'&&symVenueOf()==='bitget')$('orderBitgetMarket').value='spot';symFilters();
