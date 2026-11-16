@@ -61,4 +61,5 @@ def init_db() -> None:
     from app.security import auth_models as _auth_models  # noqa: F401  (execution sessions + auth audit)
     from app.futures import models as _futures_models  # noqa: F401  (futures paper simulation tables)
     from app.accounting import models as _accounting_models  # noqa: F401  (double-entry ledger, append-only)
+    from app.executive import models as _executive_models  # noqa: F401  (executive centre: budgets, payment register, reserve policy, audit)
     Base.metadata.create_all(bind=engine)
