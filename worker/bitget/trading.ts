@@ -65,7 +65,7 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   const quoteAmount=num(body?.quoteAmount);
   const referencePrice=num(body?.referencePrice);
   if((market==="spot"||margin)&&type==="market"&&side==="buy"&&!(quoteAmount>0))return response({ok:false,error:"quote_amount_required",message:"For Bitget market buys, send quoteAmount (the amount of quote currency to spend)."},400);
-  const maxNotional=num(env.ETI_BITGET_MAX_NOTIONAL_USDT??"10000");
+  const maxNotional=num(env.ETI_BITGET_MAX_NOTIONAL_USDT??"1000");
   const estimatedNotional=(market==="spot"||margin)&&type==="market"&&side==="buy"?quoteAmount:qty*(type==="limit"?price:referencePrice);
   if(!(Number.isFinite(maxNotional)&&maxNotional>0)||!(estimatedNotional>0)||estimatedNotional>maxNotional)return response({ok:false,error:"notional_limit",message:"Provide a valid reference price and keep estimated order notional within ETI_BITGET_MAX_NOTIONAL_USDT ("+maxNotional+").",estimatedNotional:Number.isFinite(estimatedNotional)?estimatedNotional:null,maxNotional},400);
   if(await kv.get("exec:live:id:"+clientOid))return response({ok:false,error:"duplicate_client_order_id",message:"This clientOrderId is already recorded; check Bitget order history before retrying."},409);
