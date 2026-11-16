@@ -885,8 +885,8 @@ async function loadSymbols(){
   SYM.all=j.symbols||[];
   try{const mr=await fetch('/api/bitget/margin-pairs',{cache:'no-store'});if(mr.ok){const md=await mr.json();(md.pairs||[]).forEach(p=>{if(p.crossed||p.isolated)SYM.all.push([p.symbol,p.base,p.quote,'margin','crypto','bitget']);});}}catch(e){}
   SYM.at=Date.now();
-  if(SYM.venue==='bitget'&&!SYM.all.some(r=>symV(r)==='bitget')){SYM.warn='Bitget pair list unavailable; no other exchange will be substituted.';}
   SYM.warn=(j.warnings||[]).length?'could not refresh '+j.warnings.map(w=>w.market).join(', ')+' list':'';
+  if(SYM.venue==='bitget'&&!SYM.all.some(r=>symV(r)==='bitget'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bitget pair list unavailable; no other exchange will be substituted.';
   Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)SYM.warn=(SYM.warn?SYM.warn+'; ':'')+k+' list is stale';});
   symFilters();symRebuild();
  }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any valid exchange symbol in Order Execution.';}
