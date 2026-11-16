@@ -47,7 +47,7 @@ jobs:
           test -n "$ETI_GAINZ_WEBHOOK_SECRET" || (echo "::error::Set ETI_GAINZ_WEBHOOK_SECRET in GitHub Actions secrets"; exit 1)
           test "${#ETI_GAINZ_WEBHOOK_SECRET}" -ge 32 || (echo "::error::ETI_GAINZ_WEBHOOK_SECRET must contain at least 32 characters"; exit 1)
 
-      - name: Sync optional sports Worker secrets from GitHub Actions
+      - name: Validate Bitget live-trading credentials\n        env:\n          BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}\n          BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}\n          BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}\n        run: |\n          test -n "$BITGET_API_KEY" || (echo "::error::Set BITGET_API_KEY in GitHub Actions secrets"; exit 1)\n          test -n "$BITGET_API_SECRET" || (echo "::error::Set BITGET_API_SECRET in GitHub Actions secrets"; exit 1)\n          test -n "$BITGET_API_PASSPHRASE" || (echo "::error::Set BITGET_API_PASSPHRASE in GitHub Actions secrets"; exit 1)\n\n      - name: Sync optional sports Worker secrets from GitHub Actions
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -59,9 +59,9 @@ jobs:
           INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
           INFURA_API_SECRET: ${{ secrets.INFURA_API_SECRET }}
           ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
-          ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}
+          ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}\n          BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}\n          BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}\n          BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
         run: |
-          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL INFURA_API_KEY INFURA_API_SECRET ETI_GAINZ_WEBHOOK_SECRET ETI_GAINZ_ADMIN_TOKEN; do
+          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL INFURA_API_KEY INFURA_API_SECRET ETI_GAINZ_WEBHOOK_SECRET ETI_GAINZ_ADMIN_TOKEN BITGET_API_KEY BITGET_API_SECRET BITGET_API_PASSPHRASE; do
             value="${!name}"
             if [ -n "$value" ]; then
               printf '%s' "$value" | npx wrangler secret put "$name"
