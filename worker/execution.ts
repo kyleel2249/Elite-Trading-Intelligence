@@ -11,6 +11,7 @@
  * No separately hosted risk service is required.
  */
 import { marketRiskReview } from "./markets.ts";
+import { placeBitgetLiveOrder } from "./bitget/trading.ts";
 import { journalExecution, journalRejection } from "./journal/hooks.ts";
 import { readinessForOrder } from "./readiness/api.ts";
 import { authenticate, can, rateLimit, type EnvScope } from "./auth/session.ts";
@@ -32,6 +33,11 @@ export interface ExecutionEnv {
   ALPACA_DATA_FEED?: string;
   BINANCE_API_KEY?: string;
   BINANCE_SECRET_KEY?: string;
+  BITGET_API_KEY?: string;
+  BITGET_API_SECRET?: string;
+  BITGET_API_PASSPHRASE?: string;
+  ETI_BITGET_LIVE_ENABLED?: string;
+  ETI_BITGET_MAX_LEVERAGE?: string;
   ETI_MAX_ORDER_QUANTITY?: string;
   ETI_KILL_SWITCH?: string;
   /** Seconds in which an identical order from the same actor is refused as an accidental duplicate (default 60, 0 disables). */
@@ -83,8 +89,11 @@ export function executionStatus(env: ExecutionEnv) {
   const cap = maxQuantity(env);
   return {
     mode: "paper_testnet_only",
-    live_trading_enabled: false,
-    live_trading_available: false,
+    live_trading_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
+    live_trading_available: env.ETI_BITGET_LIVE_ENABLED === "true" && !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE),
+    bitget_live_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
+    bitget_configured: !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE),
+    bitget_max_leverage: Math.min(150, Math.max(1, Number(env.ETI_BITGET_MAX_LEVERAGE || 150))),
     live_flag_ignored: env.ETI_LIVE_TRADING_ENABLED === "true",
     external_risk_gateway: false,
     legacy_gateway_config_ignored: legacyGatewayConfigPresent(env),
@@ -201,8 +210,11 @@ export async function handleExecution(req: Request, env: ExecutionEnv, deps: Exe
   const auth = await authenticate(req, env, now);
   if (!auth.master && auth.scopes.size === 0) return reply({ error: "unauthorized", message: "No valid ETI session or execution token. Open the dashboard to start an automatic session." }, 401);
   if (url.pathname === "/api/orders/live") {
-    if (!auth.master) return reply({ error: "live_requires_master_credentials", message: "Sessions can never authorise live orders." }, 403);
-    return reply({ error: "live_trading_disabled", message: "This build has no live execution path. Orders are paper/testnet only and are never routed to a real-money account." }, 423);
+    if (!auth.master) return reply({ error: "live_requires_master_credentials", message: "Live Bitget orders require the master ETI execution token; short-lived paper/testnet sessions cannot authorise real-money orders." }, 403);
+    let liveBody: any;
+    try { liveBody = await req.json(); } catch { return reply({ error: "invalid_json" }, 400); }
+    if (liveBody?.broker !== "bitget") return reply({ error: "live_broker_not_supported", message: "Bitget is the only live exchange adapter enabled here. Alpaca Paper, Binance Spot Testnet and ETI Internal Paper remain separate environments." }, 423);
+    return placeBitgetLiveOrder(env as any, liveBody, deps);
   }
   if (!env.ETI_EXECUTION_LOG) return reply({ error: "audit_log_not_configured", message: "Configure the ETI_EXECUTION_LOG KV binding before submitting orders." }, 503);
   const kv = env.ETI_EXECUTION_LOG as unknown as KVList;
