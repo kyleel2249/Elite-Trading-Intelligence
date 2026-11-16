@@ -1,8 +1,8 @@
 /**
- * ETI execution gateway: PAPER / TESTNET ONLY (Alpaca Paper, Binance Spot Testnet).
+ * ETI execution gateway: ETI Internal Paper, Alpaca Paper, Binance Spot Testnet, and explicitly confirmed Bitget Live.
  *
- * There is no live order path in this build. /api/orders/live exists only to answer 423, and no live broker host or
- * live credential is referenced anywhere in this file. No withdrawal, transfer, funding or wallet endpoints are exposed.
+ * The only live exchange adapter is Bitget Classic V2. Alpaca and Binance remain isolated paper/testnet paths in this gateway.
+ * No withdrawal, transfer, funding or wallet endpoints are exposed.
  *
  * Every order is checked in-process, in this order, before a broker is contacted (see safeguards.ts):
  *   kill switch -> bearer auth -> audit log bound -> valid order -> quantity cap -> broker configured ->
@@ -38,11 +38,12 @@ export interface ExecutionEnv {
   BITGET_API_PASSPHRASE?: string;
   ETI_BITGET_LIVE_ENABLED?: string;
   ETI_BITGET_MAX_LEVERAGE?: string;
+  ETI_BITGET_MAX_NOTIONAL_USDT?: string;
   ETI_MAX_ORDER_QUANTITY?: string;
   ETI_KILL_SWITCH?: string;
   /** Seconds in which an identical order from the same actor is refused as an accidental duplicate (default 60, 0 disables). */
   ETI_DUPLICATE_WINDOW_SECONDS?: string;
-  /** Ignored: this build has no live execution path. A value of "true" is reported as a misconfiguration, never honoured. */
+  /** Global legacy switch is ignored; Bitget live execution is controlled separately by ETI_BITGET_LIVE_ENABLED. */
   ETI_LIVE_TRADING_ENABLED?: string;
   ETI_EXECUTION_LOG?: KVNamespace;
   /** Cloudflare secret used to sign execution sessions (a random key is kept in KV when unset). */
@@ -92,6 +93,7 @@ export function executionStatus(env: ExecutionEnv) {
     live_trading_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
     live_trading_available: env.ETI_BITGET_LIVE_ENABLED === "true" && !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE),
     bitget_live_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
+    master_execution_token_configured: !!env.ETI_EXECUTION_TOKEN,
     bitget_configured: !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE),
     bitget_max_leverage: Math.min(150, Math.max(1, Number(env.ETI_BITGET_MAX_LEVERAGE || 150))),
     live_flag_ignored: env.ETI_LIVE_TRADING_ENABLED === "true",
