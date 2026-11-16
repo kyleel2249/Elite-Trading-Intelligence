@@ -97,7 +97,7 @@ test("HTTP: private routes need the bearer token, status never reveals values, m
   const st = await handleBitget(new Request("https://eti.test/api/bitget/status", { headers: { authorization: "Bearer tok" } }), ENV);
   const body = JSON.stringify(await st.json());
   assert.equal(st.status, 200); assert.doesNotMatch(body, /s3cret|"pp"/); assert.match(body, /BITGET_API_KEY/); assert.match(body, /"readOnly":false/);
-  const pairs = await handleBitget(new Request("https://eti.test/api/bitget/margin-pairs"), {}, { fetchImpl: (async () => ok([{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "1", maxCrossedLeverage: "3", maxIsolatedLeverage: "10" }, { symbol: "x" }])) as any });
+  const pairs = await handleBitget(new Request("https://eti.test/api/bitget/margin-pairs"), { BITGET_API_KEY:"key", BITGET_API_SECRET:"secret", BITGET_API_PASSPHRASE:"pass" }, { fetchImpl: (async(_url:any,init:any) => { assert.ok(init.headers["ACCESS-KEY"]); assert.ok(init.headers["ACCESS-SIGN"]); return ok([{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "1", maxCrossedLeverage: "3", maxIsolatedLeverage: "10" }, { symbol: "x" }]); }) as any });
   assert.equal(pairs.status, 200);
   const pj: any = await pairs.json();
   assert.equal(pj.count, 1); assert.equal(pj.pairs[0].crossed, true);
