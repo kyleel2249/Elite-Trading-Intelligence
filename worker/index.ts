@@ -892,13 +892,13 @@ async function loadSymbols(){
  }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any Binance symbol in Order Execution.';}
 }
 function symMarketChanged(){
- SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';if(SYM.market==='futures'&&symVenueOf()==='bitget'){const r=SYM.all.find(x=>x[0]===$('symbol').value);if(r&&r[6])$('orderBitgetMarket').value=r[6];else $('orderBitgetMarket').value='usdt-futures';}else if(SYM.market==='margin')$('orderBitgetMarket').value='margin-crossed';else if(SYM.market==='spot')$('orderBitgetMarket').value='spot';symFilters();
+ SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';if(SYM.market==='margin'&&symVenueOf()!=='bitget'){SYM.venue='bitget';$('symVenue').value='bitget';}if(SYM.market==='futures'&&symVenueOf()==='bitget'){const r=symInfo().row;if(r&&r[6])$('orderBitgetMarket').value=r[6];else $('orderBitgetMarket').value='usdt-futures';}else if(SYM.market==='margin')$('orderBitgetMarket').value='margin-crossed';else if(SYM.market==='spot'&&symVenueOf()==='bitget')$('orderBitgetMarket').value='spot';symFilters();
  const rows=symRows(),cur=$('symbol').value;let want='';
  if(rows.length&&!rows.some(r=>r[0]===cur)){const d=SYM.market==='metals'?(rows.find(r=>r[1]==='XAU')||rows.find(r=>r[1]==='PAXG')||rows[0]):(rows.find(r=>r[0]==='BTCUSDT')||rows[0]);$('symbol').value=d[0];want=d[0];}
  symRebuild(want);$('orderSymbol').value=$('symbol').value;resetAndLoad();syncOrderMarket();
  perpApplyMode();
  if(symMkt()==='futures')$('orderOutput').textContent='Futures mode: set leverage, then Buy / Long or Sell / Short. Preview shows margin and liquidation price.';
- if(SYM.market==='metals'&&!rows.length)$('symCount').textContent='No metals pairs in the Binance list yet (list unavailable or none listed). Try again shortly.';
+ if(SYM.market==='metals'&&!rows.length)$('symCount').textContent='No metals pairs in the selected exchange list yet (list unavailable or none listed). Try again shortly.';
  etiMarketNote();
 }
 $('symMarket').addEventListener('change',symMarketChanged);
