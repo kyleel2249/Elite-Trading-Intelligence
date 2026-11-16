@@ -3,7 +3,7 @@
  * This module never handles transfers or withdrawals. All orders require master ETI auth,
  * the global kill switch to be off, a unique clientOid, and riskConfirmed=true.
  */
-import { bitgetCreds, bitgetSign } from "./api.ts";
+import { bitgetCreds, bitgetSign, bitgetGetSigned } from "./api.ts";
 
 type BitgetMarket = "spot" | "margin-crossed" | "margin-isolated" | "usdt-futures" | "usdc-futures" | "coin-futures";
 const MARKETS: BitgetMarket[] = ["spot","margin-crossed","margin-isolated","usdt-futures","usdc-futures","coin-futures"];
@@ -81,9 +81,15 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   };
   // Futures account configuration is explicit and confirmed before the order call.
   if(futures){
-    const modeSet=await post(env,"/api/v2/mix/account/set-margin-mode",{symbol,productType,marginCoin,marginMode},deps);
-    if(!modeSet.ok){await record("broker_rejected",{stage:"margin_mode",brokerResponse:modeSet.data});return response({ok:false,outcome:"broker_rejected",error:"margin_mode_rejected",detail:modeSet.data,broker_contacted:true},502);}
-    const levSet=await post(env,"/api/v2/mix/account/set-leverage",{symbol,productType,marginCoin,leverage:String(lev),...(marginMode==="isolated"?{holdSide:side==="buy"?"long":"short"}:{})},deps);
+    // Bitget refuses margin-mode changes while positions/orders exist. Read the current setting first and only mutate it when necessary.
+    let current:any;
+    try { current=await bitgetGetSigned(env as any,"/api/v2/mix/account/account",{symbol,productType,marginCoin},{fetchImpl:deps.fetchImpl,now:deps.now}); }
+    catch(e) { await record("broker_rejected",{stage:"account_config",message:e instanceof Error?e.message:"account lookup failed"}); return response({ok:false,outcome:"broker_rejected",error:"futures_account_config_unavailable",message:"Could not verify the current Bitget futures margin mode; no order was placed."},502); }
+    if(String(current?.marginMode??"").toLowerCase()!==marginMode){
+      const modeSet=await post(env,"/api/v2/mix/account/set-margin-mode",{symbol,productType,marginCoin,marginMode},deps);
+      if(!modeSet.ok){await record("broker_rejected",{stage:"margin_mode",brokerResponse:modeSet.data});return response({ok:false,outcome:"broker_rejected",error:"margin_mode_rejected",detail:modeSet.data,broker_contacted:true},502);}
+    }
+    const levSet=await post(env,"/api/v2/mix/account/set-leverage",{symbol,productType,marginCoin,leverage:String(lev)},deps);
     if(!levSet.ok){await record("broker_rejected",{stage:"leverage",brokerResponse:levSet.data});return response({ok:false,outcome:"broker_rejected",error:"leverage_rejected",detail:levSet.data,broker_contacted:true},502);}
   }
   let path:string,payload:Record<string,unknown>;
