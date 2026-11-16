@@ -553,7 +553,7 @@ export async function listBinanceSymbols(market: MarketKind = "spot", fetchImpl:
 // ------------------------------------------------------------ Bitget pair list
 const bitgetCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
 const BITGET_BASE = "https://api.bitget.com";
-const BITGET_OK_STATUS = new Set(["normal", "listed", "limit_open", "restrictedAPI"]);
+const BITGET_OK_STATUS = new Set(["online", "normal", "listed", "limit_open", "restrictedapi"]);
 /** Category for a Bitget pair, decided by the ETI classifier so the chart, the dropdown and the risk review agree. Catalog-confirmed matches only: an unrecognised ticker stays "crypto" rather than being guessed into a stock. */
 export function bitgetCategory(base: string, quote: string): string {
   if (isMetalPair(base, quote)) return "metals";
@@ -593,7 +593,7 @@ export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: 
   const categories = market === "spot" ? ["SPOT"] : BITGET_PRODUCT_TYPES;
   const parts = await Promise.all(categories.map(async (category) => ({ category, r: await bitgetGet("/api/v3/market/instruments?category=" + category, fetchImpl) })));
   for (const { category, r } of parts) {
-    if (r.list) r.list.filter((x) => x && BITGET_OK_STATUS.has(String(x.status ?? "").toLowerCase())).forEach((x) => add(x, category === "SPOT" ? undefined : category));
+    if (r.list) r.list.filter((x) => x && BITGET_OK_STATUS.has(String(x.status ?? "").toLowerCase()) && (category === "SPOT" || !x.type || String(x.type).toLowerCase() === "perpetual")).forEach((x) => add(x, category === "SPOT" ? undefined : category));
     else attempts.push({ host: BITGET_BASE + " (" + category + ")", status: r.status, errorClass: r.errorClass });
   }
   rows.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : (a.pt ?? "") < (b.pt ?? "") ? -1 : 1));
