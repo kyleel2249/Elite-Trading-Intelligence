@@ -18,7 +18,7 @@ test("Bitget spot market buy sends quote-denominated size and records live execu
 
 test("Bitget futures configures isolated margin and leverage before submitting a futures order",async()=>{
  const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};const calls:any[]=[];
- const r=await placeBitgetLiveOrder(env,orderBody({bitgetMarket:"usdt-futures",side:"sell",quantity:0.02,leverage:25,marginMode:"isolated",marginCoin:"USDT",referencePrice:65000}),{now:()=>1700000000000,fetchImpl:(async(url:any,init:any)=>{calls.push({url,body:JSON.parse(init.body)});return ok();}) as any});
+ const r=await placeBitgetLiveOrder(env,orderBody({bitgetMarket:"usdt-futures",side:"sell",quantity:0.02,leverage:25,marginMode:"isolated",marginCoin:"USDT",referencePrice:65000}),{now:()=>1700000000000,fetchImpl:(async(url:any,init:any)=>{calls.push({url,body:init.body?JSON.parse(init.body):null});return String(url).includes("/mix/account/account?")?new Response(JSON.stringify({code:"00000",data:{marginMode:"isolated"}})):ok();}) as any});
  assert.equal(r.status,201);assert.equal(calls.length,3);
  assert.match(calls[0].url,/set-margin-mode$/);assert.equal(calls[0].body.marginMode,"isolated");
  assert.match(calls[1].url,/set-leverage$/);assert.equal(calls[1].body.leverage,"25");
