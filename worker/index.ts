@@ -609,7 +609,7 @@ async function submitOrder(side){
  if(o.broker==='bitget'){body.bitgetMarket=o.bitgetMarket;body.leverage=o.leverage;body.marginMode=o.marginMode;body.quoteAmount=Number($('orderAmount').value)||((o.side==='buy'&&o.type==='market')?o.quantity*orderRefPrice():undefined);body.referencePrice=o.type==='limit'?o.limitPrice:orderRefPrice();body.loanType=$('orderBitgetLoanType').value;body.tradeSide='open';body.marginCoin=o.bitgetMarket==='usdt-futures'?'USDT':o.bitgetMarket==='usdc-futures'?'USDC':undefined;}
  if(o.type==='limit')body.limitPrice=o.limitPrice;
  if(o.type==='stop')body.stopPrice=o.stopPrice;
- if(side==='buy'||(o.broker==='bitget'&&o.bitgetMarket.endsWith('futures'))){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
+ if((side==='buy'&&o.broker!=='bitget')||(o.broker==='bitget'&&o.bitgetMarket.endsWith('futures'))){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
  $('orderOutput').textContent='Submitting order…';
  try{
   const headers={'content-type':'application/json'};
