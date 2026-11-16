@@ -191,10 +191,10 @@ test("kill switch, auth, wrong method and missing audit log stop the order befor
   assert.equal(world.calls.length, 0, "none of these reached the network"); assert.equal(open.kv.keys("order:").length + open.kv.keys("idem:").length, 0);
 });
 
-test("the live endpoint is locked even with every live switch set, and never touches a broker", async () => {
+test("the live endpoint rejects non-Bitget brokers and never routes them to a live broker", async () => {
   const { env } = mkEnv({ ETI_LIVE_TRADING_ENABLED: "true" });
   const r = await handleExecution(new Request("https://e/api/orders/live", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "x-eti-live-authorization": "anything", "content-type": "application/json" }, body: JSON.stringify({ ...order(), liveConfirmed: true }) }), env);
-  assert.equal(r.status, 423); assert.equal(((await r.json()) as any).error, "live_trading_disabled"); assert.equal(world.calls.length, 0);
+  assert.equal(r.status, 423); assert.equal(((await r.json()) as any).error, "live_broker_not_supported"); assert.equal(world.calls.length, 0);
   assert.equal((await handleExecution(new Request("https://e/api/orders/live", { method: "POST", body: "{}" }), env)).status, 401);
 });
 

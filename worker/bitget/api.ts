@@ -1,6 +1,5 @@
-// Bitget read-only integration: signed account/trade endpoints for spot, margin (cross + isolated) and the three futures product types.
-// READ-ONLY BY CONSTRUCTION: only GET requests to the allowlisted paths below are ever signed. There is no order, transfer or withdrawal path
-// in this file, and the API key you create at Bitget should itself be "read-only" (no trade, no withdraw).
+// Bitget account and history integration for spot, cross/isolated margin and all three futures product types.
+// This module signs only allowlisted GET requests. Explicit live order placement is isolated in trading.ts; no transfer or withdrawal path is exposed.
 import { authorized } from "../execution.ts";
 
 export type BitgetMarket = "spot" | "margin-crossed" | "margin-isolated" | "usdt-futures" | "usdc-futures" | "coin-futures";
@@ -34,7 +33,7 @@ const ALLOWED = new Set([
   "/api/v2/spot/account/assets", "/api/v2/spot/trade/fills", "/api/v2/spot/trade/history-orders",
   "/api/v2/margin/crossed/account/assets", "/api/v2/margin/crossed/fills", "/api/v2/margin/crossed/history-orders",
   "/api/v2/margin/isolated/account/assets", "/api/v2/margin/isolated/fills", "/api/v2/margin/isolated/history-orders",
-  "/api/v2/mix/account/accounts", "/api/v2/mix/order/fills", "/api/v2/mix/order/orders-history", "/api/v2/mix/position/all-position",
+  "/api/v2/mix/account/accounts", "/api/v2/mix/account/account", "/api/v2/mix/order/fills", "/api/v2/mix/order/orders-history", "/api/v2/mix/position/all-position",
 ]);
 
 export class BitgetError extends Error {
@@ -193,7 +192,7 @@ export async function handleBitget(req: Request, env: Record<string, any>, deps:
   const c = bitgetCreds(env);
   if (sub === "/status" && req.method === "GET") {
     return reply({ venue: "bitget", credentials: { complete: c.complete, found: c.found, missing: c.missing }, markets: BITGET_MARKETS, storage: !!env.ETI_EXECUTION_LOG,
-      readOnly: true, note: "Only GET requests to allowlisted account/trade endpoints are signed. No order, transfer or withdrawal endpoint exists in this integration.",
+      readOnly: false, liveTradingEnabled: env.ETI_BITGET_LIVE_ENABLED === "true", note: "Account and history reads use allowlisted GET endpoints. Live orders are accepted only through the master-authenticated /api/orders/live route; transfers and withdrawals are not exposed.",
       marginSymbols: String(env.ETI_BITGET_MARGIN_SYMBOLS ?? "") || null });
   }
   if (!c.complete) return reply({ error: "credentials_missing", missing: c.missing, hint: "Set these Worker secrets; names only are reported." }, 503);

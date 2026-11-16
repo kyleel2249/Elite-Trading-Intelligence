@@ -96,7 +96,7 @@ test("HTTP: private routes need the bearer token, status never reveals values, m
   assert.equal(noAuth.status, 401);
   const st = await handleBitget(new Request("https://eti.test/api/bitget/status", { headers: { authorization: "Bearer tok" } }), ENV);
   const body = JSON.stringify(await st.json());
-  assert.equal(st.status, 200); assert.doesNotMatch(body, /s3cret|"pp"/); assert.match(body, /BITGET_API_KEY/); assert.match(body, /"readOnly":true/);
+  assert.equal(st.status, 200); assert.doesNotMatch(body, /s3cret|"pp"/); assert.match(body, /BITGET_API_KEY/); assert.match(body, /"readOnly":false/);
   const pairs = await handleBitget(new Request("https://eti.test/api/bitget/margin-pairs"), {}, { fetchImpl: (async () => ok([{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "1", maxCrossedLeverage: "3", maxIsolatedLeverage: "10" }, { symbol: "x" }])) as any });
   assert.equal(pairs.status, 200);
   const pj: any = await pairs.json();

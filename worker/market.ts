@@ -1,16 +1,15 @@
 /**
- * ETI market-data layer (Cloudflare Worker, read-only, no credentials).
+ * ETI market-data layer (Cloudflare Worker, public market data only).
  *
- * - Providers: Binance spot (primary), Bybit spot, OKX spot. All three serve
- *   the same USDT spot pairs, so failover is between genuinely compatible
- *   markets (different venues -> prices can differ slightly; the serving
- *   provider is always reported in response headers).
- * - Alpaca and Liquid are intentionally NOT used here: Alpaca crypto data is
- *   quoted in USD (not USDT) and Liquid has no verified public base URL, so
- *   neither is compatible with these symbols. Execution credentials never
- *   touch this module.
+ * - Binance supplies spot and USDT-margined futures; Bitget supplies spot and
+ *   USDT-, USDC- and coin-margined perpetual markets.
+ * - Bybit and OKX remain compatible spot failover providers for Binance spot.
+ * - Bitget is selected explicitly and is never silently substituted with a
+ *   different exchange. The chart reports its serving venue and product type.
+ * - Alpaca and Liquid are not used for this USDT market-data path. Execution
+ *   credentials never enter this module.
  * - Nothing is fabricated: every payload is validated; invalid or empty data
- *   counts as a provider failure and triggers failover.
+ *   counts as a provider failure and triggers failover where compatible.
  */
 
 export interface MarketEnv {
@@ -522,8 +521,9 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string):
 export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: string; /** listing venue (omitted for Binance rows from listBinanceSymbols) */ v?: Venue; /** Bitget futures product type */ pt?: BitgetProductType }
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
 const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
-/** The pair list is re-read from Binance at most every 10 minutes per isolate (and shared at the edge); browsers re-request it on the same interval. */
+/** The Binance pair list is re-read at most every 10 minutes per isolate; Bitget spot and futures lists use their own 60-second cache. */
 export const SYMBOL_TTL_MS = 10 * 60 * 1000;
+export const BITGET_SYMBOL_TTL_MS = 60 * 1000;
 const SYMBOL_SOURCES: Record<MarketKind, { hosts: string[]; path: string }> = {
   spot: { hosts: PROVIDERS.binance.hosts, path: "/api/v3/exchangeInfo?showPermissionSets=false&symbolStatus=TRADING" },
   futures: { hosts: PROVIDERS.binance_usdm.hosts, path: "/fapi/v1/exchangeInfo" },
@@ -582,17 +582,17 @@ export function bitgetCategory(base: string, quote: string): string {
 }
 async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list: any[] | null; status: number | null; errorClass: string | null }> {
   try {
-    const res = await fetchImpl(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 540 } } as RequestInit);
+    const res = await fetchImpl(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit);
     if (!res.ok) return { list: null, status: res.status, errorClass: classifyStatus(res.status) };
     const j: any = await res.json();
     if (!j || j.code !== "00000" || !Array.isArray(j.data)) return { list: null, status: res.status, errorClass: "invalid_payload" };
     return { list: j.data, status: res.status, errorClass: null };
   } catch (e) { return { list: null, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" }; }
 }
-/** Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined). Same caching and stale-list behaviour as the Binance list. */
+/** Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined). Uses an independent 60-second cache and the same stale-list safety policy. */
 export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
   const hit = bitgetCache[market];
-  if (hit && now() - hit.at < SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
+  if (hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
   const attempts: SymbolAttempt[] = [], rows: SymbolRow[] = [];
   const add = (x: any, pt?: BitgetProductType) => {
     const sym = String(x?.symbol ?? ""), b = String(x?.baseCoin ?? "").toUpperCase(), q = String(x?.quoteCoin ?? "").toUpperCase();
@@ -642,7 +642,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     });
     if (rows.length === 0) return jsonResp({ error: "symbols_unavailable", detail: venueQ === "bitget" ? "Bitget did not return its symbol list." : venueQ === "all" ? "Neither Binance nor Bitget returned its symbol list." : "Binance did not return its symbol list.", warnings }, 502);
     return jsonResp({
-      provider: venueQ === "binance" ? "binance" : venueQ, venues, markets, refreshEverySeconds: SYMBOL_TTL_MS / 1000, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
+      provider: venueQ === "binance" ? "binance" : venueQ, venues, markets, refreshEverySeconds: venueQ === "binance" ? SYMBOL_TTL_MS / 1000 : BITGET_SYMBOL_TTL_MS / 1000, refreshIntervalsSeconds: { binance: SYMBOL_TTL_MS / 1000, bitget: BITGET_SYMBOL_TTL_MS / 1000 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
       symbols: rows.map((x) => (venueQ === "binance" ? [x.s, x.b, x.q, x.m, x.c] : [x.s, x.b, x.q, x.m, x.c, x.v, ...(x.pt ? [x.pt] : [])])),
     }, 200, { "cache-control": "public, max-age=60" });
   }

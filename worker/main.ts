@@ -113,7 +113,7 @@ export default {
         if (!history.ok) console.error("sports history sync", history.status, (await history.text()).slice(0, 200));
       })().catch(e => console.error("sports autonomous cycle failed", e instanceof Error ? e.message : e)));
     }
-    if (event.cron === UNIVERSE_CRON && bitgetCreds(env).complete && env.ETI_EXECUTION_LOG) ctx.waitUntil(syncBitget(env).then(() => undefined, e => console.error("bitget sync failed", e instanceof Error ? e.message : e)));
+
     if (event.cron === UNIVERSE_CRON) {
       // Position monitoring for the accounts listed in ETI_MANAGE_ACCOUNTS (comma separated). Closing needs ETI_MANAGE_AUTOCLOSE=true; otherwise report only.
       const accounts = String(env.ETI_MANAGE_ACCOUNTS ?? "").split(",").map((x: string) => x.trim()).filter((x: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(x)).slice(0, 3);
@@ -123,7 +123,7 @@ export default {
       if (env.ETI_UNIVERSE_ENABLED === "true" && env.ETI_EXECUTION_LOG) ctx.waitUntil(runUniverseBatch(env, env.ETI_EXECUTION_LOG, Date.now(), (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday")).then(async b => { const strat = (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday"); const ev = signalAlerts(b.previous, b.newRows ?? [], strat); if (b.universeError) ev.push({ type: "market_data_failure", severity: "warning", title: "Universe refresh failed", detail: b.universeError, dedupeKey: `universe:${new Date().toISOString().slice(0, 13)}` }); await raiseAlerts(env as any, ev); }, e => console.error("universe batch failed", e instanceof Error ? e.message : e))); return; }
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
-      // Bitget trade history (all markets) is pulled on the 5-minute cron below; nothing runs here.
+      if (bitgetCreds(env).complete && env.ETI_EXECUTION_LOG) ctx.waitUntil(syncBitget(env).then(() => undefined, e => console.error("bitget one-minute sync failed", e instanceof Error ? e.message : e)));
       ctx.waitUntil(runJournalCycle(env).then(() => undefined, () => undefined)); // journal backfill (throttled inside) and prediction evaluation
       ctx.waitUntil(runProfitCycle(env as any).then(() => undefined, e => console.error("profit cycle failed", e instanceof Error ? e.message : e))); // recognise confirmed simulated results and allocate (throttled inside)
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills

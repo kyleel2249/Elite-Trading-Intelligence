@@ -51,10 +51,13 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_DUPLICATE_WINDOW_SECONDS` | config | Window in which an identical order is refused as a duplicate. |
 | `ETI_EDGE` | config | Adaptive-edge feature switch for the dashboard. |
 | `ETI_EVENTS_JSON` | config | Inline JSON of scheduled market events for the readiness engine. |
-| `BITGET_API_KEY` | secret | Bitget API key (read-only recommended: no trade, no withdraw). Also accepted: `BITGET_KEY`. |
-| `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY`. |
+| `BITGET_API_KEY` | secret | Bitget API key with trade permission enabled and withdrawal permission disabled. Never enable withdrawals. Also accepted: `BITGET_KEY` and `BITGET_ACCESS_KEY`. |
+| `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY` and `BITGET_SECRET`. |
 | `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
 | `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
+| `ETI_BITGET_LIVE_ENABLED` | config | `true` enables the separately authenticated Bitget live-order adapter. The master ETI execution token, Bitget trade-enabled credentials, explicit order confirmation, kill-switch check, idempotency and notional/leverage limits remain required. |
+| `ETI_BITGET_MAX_LEVERAGE` | config | Maximum allowed Bitget futures leverage (default 150x; capped by ETI at 150x and the exchange's own contract limit). |
+| `ETI_BITGET_MAX_NOTIONAL_USDT` | config | Maximum estimated notional per Bitget live order (default 1,000 quote units; checked against the submitted reference price or market-buy quote amount). |
 | `ETI_BITGET_MARGIN_SYMBOLS` | config | Comma-separated margin pairs whose fills are synced (Bitget margin fills require a symbol), e.g. `BTCUSDT,ETHUSDT`. |
 | `ETI_EVENT_FEED_TOKEN` | secret | Bearer token for ETI_EVENT_FEED_URL. |
 | `ETI_EVENT_FEED_URL` | config | HTTPS JSON event feed for the readiness engine. |
@@ -119,7 +122,9 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_SPORTS_PAPER_BANKROLL_CENTS` | config | Starting balance, in cents, of a **new** sports paper ledger (default 100000 = USD 1,000.00; range 100 to 1,000,000,000). An existing ledger is never changed automatically. |
 | `ETI_SPORTS_PAPER_TOKEN` | secret | Protects the isolated sports paper bankroll, bet ledger and manual history sync. |
 | `ETI_SPORTS_SCAN_INTERVAL_MINUTES` | config | Minimum minutes between scheduled global football odds scans (360 default, min 60). |
-| `ETI_GAINZ_WEBHOOK_SECRET` | secret | HMAC-SHA256 secret for signed TradingView GainzAlgo V2 / V2 Alpha webhook requests. |\n| `ETI_GAINZ_ADMIN_TOKEN` | secret | Optional dedicated bearer token for the GainzAlgo Intelligence Centre; falls back to `ETI_EXECUTION_TOKEN` when absent. |\n| `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
+| `ETI_GAINZ_WEBHOOK_SECRET` | secret | HMAC-SHA256 secret for signed TradingView GainzAlgo V2 / V2 Alpha webhook requests. |
+| `ETI_GAINZ_ADMIN_TOKEN` | secret | Optional dedicated bearer token for the GainzAlgo Intelligence Centre; falls back to `ETI_EXECUTION_TOKEN` when absent. |
+| `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
 | `ETI_SESSION_SECRET_PREVIOUS` | secret | Previous signing secret, accepted during rotation. |
 | `ETI_UNIVERSE_BATCH` | config | Symbols scanned per scheduled universe run. |
 | `ETI_UNIVERSE_ENABLED` | config | Enables the scheduled universe scan. |

@@ -60,8 +60,11 @@ jobs:
           INFURA_API_SECRET: ${{ secrets.INFURA_API_SECRET }}
           ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
           ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}
+          BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}
+          BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
+          BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
         run: |
-          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL INFURA_API_KEY INFURA_API_SECRET ETI_GAINZ_WEBHOOK_SECRET ETI_GAINZ_ADMIN_TOKEN; do
+          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL INFURA_API_KEY INFURA_API_SECRET ETI_GAINZ_WEBHOOK_SECRET ETI_GAINZ_ADMIN_TOKEN BITGET_API_KEY BITGET_API_SECRET BITGET_API_PASSPHRASE; do
             value="${!name}"
             if [ -n "$value" ]; then
               printf '%s' "$value" | npx wrangler secret put "$name"
@@ -73,6 +76,16 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
+
+      - name: Verify Bitget live market and execution readiness
+        shell: bash
+        run: |
+          status="$(curl --silent --show-error --fail https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/execution/status)"
+          printf '%s' "$status" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s);if(x.bitget_live_enabled!==true||x.bitget_configured!==true||x.live_trading_available!==true||x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error(JSON.stringify({bitget_live_enabled:x.bitget_live_enabled,bitget_configured:x.bitget_configured,live_trading_available:x.live_trading_available,master_execution_token_configured:x.master_execution_token_configured,audit_log_configured:x.audit_log_configured}));process.exit(1);}console.log("Bitget live credentials, activation flag, master ETI token and audit storage verified.");});'
+          symbols="$(curl --silent --show-error --fail 'https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/market/symbols?venue=bitget&market=all')"
+          printf '%s' "$symbols" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s);if(!Array.isArray(x.symbols)||x.symbols.length===0||x.refreshEverySeconds>60){console.error(JSON.stringify({count:x.count,refreshEverySeconds:x.refreshEverySeconds,warnings:x.warnings}));process.exit(1);}console.log("Bitget spot and perpetual symbol catalogue verified; refresh interval <= 60 seconds.");});'
+          margin="$(curl --silent --show-error --fail https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/bitget/margin-pairs)"
+          printf '%s' "$margin" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s);if(!Array.isArray(x.pairs)||x.pairs.length===0){console.error("Bitget margin pair catalogue is empty");process.exit(1);}console.log("Bitget margin pair catalogue verified.");});'
 
       - name: Verify live GainzAlgo service, webhook and D1 readiness
         shell: bash
