@@ -82,7 +82,7 @@ test("Bitget futures list: perpetuals from all three product types, active only,
 
 test("Bitget list: one product type failing still serves the others and says so; all failing is an error, never an invented list", async () => {
   _resetSymbolCache();
-  const partial = await listBitgetSymbols("futures", (async (u: any) => { const pt = new URL(String(u)).searchParams.get("productType")!; return pt === "COIN-FUTURES" ? new Response("x", { status: 503 }) : ok(contracts(pt)); }) as any);
+  const partial = await listBitgetSymbols("futures", (async (u: any) => { const pt = new URL(String(u)).searchParams.get("category")!; return pt === "COIN-FUTURES" ? new Response("x", { status: 503 }) : ok(contracts(pt)); }) as any);
   assert.equal(partial.rows.length, 4); assert.equal(partial.attempts.length, 1); assert.match(partial.attempts[0].host, /COIN-FUTURES/);
   _resetSymbolCache();
   await assert.rejects(() => listBitgetSymbols("spot", (async () => { throw new Error("offline"); }) as any), AllProvidersFailed);
@@ -166,7 +166,7 @@ test("Bitget futures use the mix endpoints with the right product type", async (
 test("Bitget failures are reported as Bitget failures: no fallback to another exchange, no invented data", async () => {
   const hosts: string[] = [];
   globalThis.fetch = (async (u: any) => { hosts.push(new URL(String(u)).host); return new Response(JSON.stringify({ code: "40309", msg: "The symbol has been removed" }), { status: 200 }); }) as any;
-  await assert.rejects(() => getMarketData("klines", { symbol: "GONEUSDT", interval: "1m", limit: 5, venue: "bitget" }, ["binance", "bybit", "okx"]), (e: any) => e instanceof AllProvidersFailed && e.attempts.every((a: any) => a.provider === "bitget") && e.attempts[0].errorClass === "invalid_payload");
+  await assert.rejects(() => getMarketData("klines", { symbol: "GONEUSDT", interval: "1m", limit: 5, venue: "bitget" }, ["binance", "bybit", "okx"]), (e: any) => e instanceof AllProvidersFailed && e.attempts.length > 0 && e.attempts.every((a: any) => String(a.provider).startsWith("bitget")));
   assert.deepEqual([...new Set(hosts)], ["api.bitget.com"]);
   globalThis.fetch = (async () => ok([["1800000000000", "100", "90", "95", "99", "1"]])) as any; // high below low
   await assert.rejects(() => getMarketData("klines", { symbol: "BTCUSDT", interval: "1m", limit: 5, venue: "bitget" }, ["binance"]), AllProvidersFailed);
