@@ -92,6 +92,11 @@ async def eti_wallet_page(request: Request):
     return _page(request, "wallet.html")
 
 
+@router.get("/security", response_class=HTMLResponse)
+async def security_compliance_page(request: Request):
+    return _page(request, "security.html")
+
+
 @router.get("/funding", response_class=HTMLResponse)
 async def broker_funding_page(request: Request):
     return _page(request, "funding.html")

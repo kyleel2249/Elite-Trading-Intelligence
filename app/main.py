@@ -205,6 +205,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from app.governance.transport import SecurityHeadersMiddleware  # noqa: E402
+app.add_middleware(SecurityHeadersMiddleware)
+
 app.include_router(knowledge_router)
 app.include_router(backtest_router)
 app.include_router(intelligence_data_router)
@@ -233,6 +236,7 @@ for _module_path, _label in (
     ("app.api.market_symbols", "market_symbols"),
     ("app.api.valuation", "valuation"),
     ("app.api.accounting", "accounting"),
+    ("app.api.governance", "governance"),
 ):
     try:
         _mod = __import__(_module_path, fromlist=["router"])

@@ -31,6 +31,7 @@ from app.chain.txcodec import (decode_address, decode_string, decode_uint, decod
                                selector, sign_1559, sign_legacy)
 from app.config import get_settings
 from app.execution.vault import CredentialVault, VaultError
+from app.governance import gate as gov_gate
 
 logger = logging.getLogger("eti.chain")
 QUOTE_TTL_SECONDS = 120
@@ -355,7 +356,7 @@ class ChainService:
         return prep
 
     # ------------------------------------------------------------------ send
-    async def send(self, quote_id: str, confirm: str) -> dict[str, Any]:
+    async def send(self, quote_id: str, confirm: str, approval_id: Optional[int] = None, actor: str = "system", role: str = "admin") -> dict[str, Any]:
         if confirm != "SEND":
             raise ChainError('confirmation must be the exact word "SEND"', 400)
         q = self._unseal(quote_id)
@@ -367,6 +368,10 @@ class ChainService:
             v = self._violations(net, kind=q["kind"], notional=int(q["notional"]), to=q["to"], extra=q.get("extra") or {})
             if v:
                 raise ChainError("policy no longer allows this: " + "; ".join(v), 403)
+            try:      # security governance: fraud score, role limits, withdrawal allowlist, m-of-n approval bound to this quote
+                gov_gate.enforce_send(self.db, net=net, q=q, approval_id=approval_id, actor=actor, role=role)
+            except gov_gate.GateError as e:
+                raise ChainError(e.message, e.status)
             rpc = await self._checked_rpc(net)
             try:
                 nonce = await rpc.nonce(w.address)
