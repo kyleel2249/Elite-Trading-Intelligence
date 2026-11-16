@@ -1,6 +1,5 @@
-// Bitget read-only integration: signed account/trade endpoints for spot, margin (cross + isolated) and the three futures product types.
-// READ-ONLY BY CONSTRUCTION: only GET requests to the allowlisted paths below are ever signed. There is no order, transfer or withdrawal path
-// in this file, and the API key you create at Bitget should itself be "read-only" (no trade, no withdraw).
+// Bitget account and history integration for spot, cross/isolated margin and all three futures product types.
+// This module signs only allowlisted GET requests. Explicit live order placement is isolated in trading.ts; no transfer or withdrawal path is exposed.
 import { authorized } from "../execution.ts";
 
 export type BitgetMarket = "spot" | "margin-crossed" | "margin-isolated" | "usdt-futures" | "usdc-futures" | "coin-futures";
