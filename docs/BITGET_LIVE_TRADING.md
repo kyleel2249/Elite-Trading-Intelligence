@@ -2,6 +2,10 @@
 
 ETI now supports explicitly confirmed Bitget live orders through the master-authenticated `POST /api/orders/live` endpoint. This is separate from the existing ETI Internal Paper, Alpaca Paper and Binance Spot/Futures Testnet paths.
 
+## Supported Bitget account API mode
+
+The order adapter uses Bitget's Classic V2 spot, margin and contract endpoints, matching the existing ETI Bitget account/history connector. If the Bitget account has been upgraded to Unified Trading Account (UTA) and requires V3 order endpoints, do not enable live orders with this Classic V2 adapter; the UTA V3 order and account-mode adapter must be implemented and tested first.
+
 ## Required Cloudflare / GitHub Actions secrets
 
 - `BITGET_API_KEY` — Bitget API key with trade permission enabled.
