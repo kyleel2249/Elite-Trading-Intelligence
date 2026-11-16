@@ -28,6 +28,7 @@ import { withCommand } from "./command/route.ts";
 import { withSports } from "./sports/route.ts";
 import { withSportsGuard } from "./sports/guard.ts";
 import { withPrecision } from "./precision/route.ts";
+import { withGainz } from "./gainz/route.ts";
 import { runPrecisionCycle } from "./precision/cycle.ts";
 import { withDailyReport } from "./daily/route.ts";
 import { runDailyReportCycle } from "./daily/api.ts";
@@ -73,6 +74,7 @@ const coreLayers: Array<(next: any) => any> = [
   withMarkets,
   withCommand,
   withPrecision,
+  withGainz,
   withDailyReport,
   withPro,
   withWallet,
