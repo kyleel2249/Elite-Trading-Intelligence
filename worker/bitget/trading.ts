@@ -14,7 +14,7 @@ const headers = { "content-type":"application/json; charset=utf-8", "cache-contr
 
 export interface BitgetLiveEnv {
   BITGET_API_KEY?: string; BITGET_API_SECRET?: string; BITGET_API_PASSPHRASE?: string;
-  ETI_BITGET_LIVE_ENABLED?: string; ETI_BITGET_MAX_LEVERAGE?: string; ETI_MAX_ORDER_QUANTITY?: string;
+  ETI_BITGET_LIVE_ENABLED?: string; ETI_BITGET_MAX_LEVERAGE?: string; ETI_BITGET_MAX_NOTIONAL_USDT?: string; ETI_MAX_ORDER_QUANTITY?: string;
   ETI_KILL_SWITCH?: string; ETI_EXECUTION_LOG?: { get(k:string):Promise<string|null>; put(k:string,v:string,o?:any):Promise<void> };
 }
 export interface BitgetLiveDeps { fetchImpl?: typeof fetch; now?:()=>number }
@@ -65,7 +65,7 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   const quoteAmount=num(body?.quoteAmount);
   if((market==="spot"||margin)&&type==="market"&&side==="buy"&&!(quoteAmount>0))return response({ok:false,error:"quote_amount_required",message:"For Bitget market buys, send quoteAmount (the amount of quote currency to spend)."},400);
   if(await kv.get("exec:live:id:"+clientOid))return response({ok:false,error:"duplicate_client_order_id",message:"This clientOrderId is already recorded; check Bitget order history before retrying."},409);
-  const pending={outcome:"unknown",broker:"bitget",environment:"live",mode:"live",symbol,side,type,quantity:qty,clientOrderId:clientOid,market,at,executionSource:source,stage:"pending",brokerContacted:false};
+  const pending={outcome:"unknown",broker:"bitget",environment:"live",mode:"live",symbol,side,type,quantity:qty,referencePrice:Number.isFinite(referencePrice)?referencePrice:null,estimatedNotional,clientOrderId:clientOid,market,at,executionSource:source,stage:"pending",brokerContacted:false};
   // Reserve before any exchange call. Keep an indeterminate reservation if a network response is lost.
   await kv.put("exec:live:id:"+clientOid,"pending",{expirationTtl:90*86400});
   await kv.put("exec:live:rec:"+at+":"+clientOid,json(pending),{expirationTtl:90*86400});
@@ -85,14 +85,14 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   let path:string,payload:Record<string,unknown>;
   if(market==="spot"){
     path="/api/v2/spot/trade/place-order";
-    payload={symbol,side,orderType:type,force,price:type==="limit"?String(price):undefined,size:String(type==="market"&&side==="buy"?quoteAmount:qty),clientOid};
+    payload={symbol,side,orderType:type,force:type==="limit"?force:undefined,price:type==="limit"?String(price):undefined,size:String(type==="market"&&side==="buy"?quoteAmount:qty),clientOid};
   } else if(margin){
     const kind=market==="margin-crossed"?"crossed":"isolated";
     path="/api/v2/margin/"+kind+"/place-order";
-    payload={symbol,side,orderType:type,loanType:["normal","autoLoan","autoRepay","autoLoanAndRepay"].includes(body?.loanType)?body.loanType:"normal",force,price:type==="limit"?String(price):undefined,baseSize:type==="market"&&side==="buy"?undefined:String(qty),quoteSize:type==="market"&&side==="buy"?String(quoteAmount):undefined,clientOid};
+    payload={symbol,side,orderType:type,loanType:["normal","autoLoan","autoRepay","autoLoanAndRepay"].includes(body?.loanType)?body.loanType:"normal",force:type==="limit"?force:undefined,price:type==="limit"?String(price):undefined,baseSize:type==="market"&&side==="buy"?undefined:String(qty),quoteSize:type==="market"&&side==="buy"?String(quoteAmount):undefined,clientOid};
   } else {
     path="/api/v2/mix/order/place-order";
-    payload={symbol,productType,marginMode,marginCoin,size:String(qty),price:type==="limit"?String(price):undefined,side,tradeSide,orderType:type,force,clientOid,reduceOnly:reduceOnly?"YES":"NO",
+    payload={symbol,productType,marginMode,marginCoin,size:String(qty),price:type==="limit"?String(price):undefined,side,tradeSide,orderType:type,force:type==="limit"?force:undefined,clientOid,reduceOnly:reduceOnly?"YES":"NO",
       presetStopLossPrice:body?.plan?.stop?String(body.plan.stop):undefined,presetStopSurplusPrice:body?.plan?.tp1?String(body.plan.tp1):undefined};
   }
   const sent=await post(env,path,payload,deps);
