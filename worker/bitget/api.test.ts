@@ -57,7 +57,7 @@ test("margin needs a symbol; futures use productType; positions only for futures
   await assert.rejects(getFills(ENV, "margin-isolated", {}), (e: any) => e.code === "symbol_required");
   let u = "";
   await getFills(ENV, "coin-futures", {}, { fetchImpl: (async (x: string) => { u = x; return ok({ fillList: [] }); }) as any });
-  assert.match(u, /mix\/order\/fills\?.*productType=coin-futures/);
+  assert.match(u, /mix\/order\/fills\?.*productType=COIN-FUTURES/);
 });
 
 test("sync is idempotent, paginates, covers every market and reports per-market failures", async () => {
@@ -69,7 +69,7 @@ test("sync is idempotent, paginates, covers every market and reports per-market 
     if (u.includes("/margin/isolated/")) return new Response(JSON.stringify({ code: "40014", msg: "no permission" }));
     const t = Date.now() - 1000;
     if (u.includes("/spot/trade/fills")) return ok([{ tradeId: "s1", symbol: "BTCUSDT", orderId: "o", side: "buy", priceAvg: "1", size: "1", amount: "1", feeDetail: { feeCoin: "USDT", totalFee: "0" }, cTime: String(t) }]);
-    if (u.includes("/mix/order/fills")) return ok({ fillList: [{ tradeId: "m-" + u.match(/productType=([a-z-]+)/)![1], symbol: "BTCUSDT", orderId: "o", side: "buy", price: "1", baseVolume: "1", quoteVolume: "1", cTime: String(t) }] });
+    if (u.includes("/mix/order/fills")) return ok({ fillList: [{ tradeId: "m-" + u.match(/productType=([A-Z-]+)/)![1], symbol: "BTCUSDT", orderId: "o", side: "buy", price: "1", baseVolume: "1", quoteVolume: "1", cTime: String(t) }] });
     if (u.includes("/margin/crossed/fills")) return ok({ fills: [{ tradeId: "c1", symbol: "BTCUSDT", orderId: "o", side: "sell", priceAvg: "1", size: "1", amount: "1", cTime: String(t) }] });
     return ok([]);
   }) as any;
