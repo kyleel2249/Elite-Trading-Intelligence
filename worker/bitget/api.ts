@@ -93,11 +93,12 @@ export function normalizeFills(market: BitgetMarket, data: any): Fill[] {
 
 // ----------------------------------------------------------------------------------------------------------------- per-market endpoints
 const isFut = (m: BitgetMarket) => m.endsWith("futures");
+const productTypeParam = (m: BitgetMarket) => m === "usdt-futures" ? "USDT-FUTURES" : m === "usdc-futures" ? "USDC-FUTURES" : "COIN-FUTURES";
 const marginKind = (m: BitgetMarket) => (m === "margin-crossed" ? "crossed" : "isolated");
 export function fillsRequest(market: BitgetMarket, p: { symbol?: string; startTime?: number; endTime?: number; limit?: number }) {
   const limit = Math.min(100, Math.max(1, p.limit ?? 100));
   if (market === "spot") return { path: "/api/v2/spot/trade/fills", params: { symbol: p.symbol, startTime: p.startTime, endTime: p.endTime, limit } };
-  if (isFut(market)) return { path: "/api/v2/mix/order/fills", params: { productType: market, symbol: p.symbol, startTime: p.startTime, endTime: p.endTime, limit } };
+  if (isFut(market)) return { path: "/api/v2/mix/order/fills", params: { productType: productTypeParam(market), symbol: p.symbol, startTime: p.startTime, endTime: p.endTime, limit } };
   return { path: `/api/v2/margin/${marginKind(market)}/fills`, params: { symbol: p.symbol, startTime: p.startTime ?? Date.now() - 7 * 86400_000, endTime: p.endTime, limit } };
 }
 export async function getFills(env: Record<string, any>, market: BitgetMarket, p: { symbol?: string; startTime?: number; endTime?: number; limit?: number }, deps: Deps = {}): Promise<Fill[]> {
@@ -107,18 +108,18 @@ export async function getFills(env: Record<string, any>, market: BitgetMarket, p
 }
 export async function getAssets(env: Record<string, any>, market: BitgetMarket, deps: Deps = {}) {
   if (market === "spot") return bitgetGetSigned(env, "/api/v2/spot/account/assets", {}, deps);
-  if (isFut(market)) return bitgetGetSigned(env, "/api/v2/mix/account/accounts", { productType: market }, deps);
+  if (isFut(market)) return bitgetGetSigned(env, "/api/v2/mix/account/accounts", { productType: productTypeParam(market) }, deps);
   return bitgetGetSigned(env, `/api/v2/margin/${marginKind(market)}/account/assets`, {}, deps);
 }
 export async function getPositions(env: Record<string, any>, market: BitgetMarket, deps: Deps = {}) {
   if (!isFut(market)) throw new BitgetError("not_applicable", null, "positions exist only for futures markets");
   const marginCoin = market === "usdt-futures" ? "USDT" : market === "usdc-futures" ? "USDC" : undefined;
-  return bitgetGetSigned(env, "/api/v2/mix/position/all-position", { productType: market, marginCoin }, deps);
+  return bitgetGetSigned(env, "/api/v2/mix/position/all-position", { productType: productTypeParam(market), marginCoin }, deps);
 }
 export async function getOrders(env: Record<string, any>, market: BitgetMarket, p: { symbol?: string; startTime?: number; endTime?: number; limit?: number }, deps: Deps = {}) {
   const limit = Math.min(100, Math.max(1, p.limit ?? 50));
   if (market === "spot") return bitgetGetSigned(env, "/api/v2/spot/trade/history-orders", { symbol: p.symbol, startTime: p.startTime, endTime: p.endTime, limit }, deps);
-  if (isFut(market)) return bitgetGetSigned(env, "/api/v2/mix/order/orders-history", { productType: market, symbol: p.symbol, startTime: p.startTime, endTime: p.endTime, limit }, deps);
+  if (isFut(market)) return bitgetGetSigned(env, "/api/v2/mix/order/orders-history", { productType: productTypeParam(market), symbol: p.symbol, startTime: p.startTime, endTime: p.endTime, limit }, deps);
   if (!p.symbol) throw new BitgetError("symbol_required", null, "Bitget margin order history needs a symbol");
   return bitgetGetSigned(env, `/api/v2/margin/${marginKind(market)}/history-orders`, { symbol: p.symbol, startTime: p.startTime ?? Date.now() - 7 * 86400_000, endTime: p.endTime, limit }, deps);
 }
