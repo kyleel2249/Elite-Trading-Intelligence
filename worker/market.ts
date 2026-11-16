@@ -189,21 +189,17 @@ export function bitgetProductFor(symbol: string): BitgetProductType {
 function parseBitget(endpoint: Endpoint, j: any, p: Params): unknown {
   if (!j || j.code !== "00000" || j.data === undefined || j.data === null) throw new InvalidPayload("bitget_rejected_" + (j && j.code));
   const d = j.data;
-  if (endpoint === "klines") {
-    return validateKlines(asArray(d, "klines_not_array").map((a) => { const r = asArray(a, "kline_row"); return [num(r[0]), num(r[1]), num(r[2]), num(r[3]), num(r[4]), num(r[5])] as Kline; }), p.limit);
-  }
+  if (endpoint === "klines") return validateKlines(asArray(d, "klines_not_array").map((a) => { const r = asArray(a, "kline_row"); return [num(r[0]), num(r[1]), num(r[2]), num(r[3]), num(r[4]), num(r[5])] as Kline; }), p.limit);
   if (endpoint === "depth") {
     const lv = (x: unknown) => asArray(x, "book_side").map((a) => [num(a[0]), num(a[1])] as [number, number]);
-    return validateDepth({ bids: lv(d.bids), asks: lv(d.asks) });
+    return validateDepth({ bids: lv(d.bids ?? d.b), asks: lv(d.asks ?? d.a) });
   }
-  if (endpoint === "trades") {
-    return validateTrades(asArray(d, "trades_not_array").map((t) => ({ time: num(t.ts), price: num(t.price), qty: num(t.size), isBuyerMaker: String(t.side).toLowerCase() === "sell" })));
-  }
+  if (endpoint === "trades") return validateTrades(asArray(d, "trades_not_array").map((t) => ({ time: num(t.ts), price: num(t.price), qty: num(t.size), isBuyerMaker: String(t.side).toLowerCase() === "sell" })));
   const t = asArray(d, "ticker_list")[0];
   if (!t) throw new InvalidPayload("empty_ticker");
-  const last = num(t.lastPr), open = Number(t.open ?? t.open24h), ch = Number(t.change24h);
-  const pct = Number.isFinite(ch) ? ch * 100 : Number.isFinite(open) && open > 0 ? ((last - open) / open) * 100 : NaN;
-  return validateTicker({ symbol: p.symbol, lastPrice: last, priceChangePercent: num(pct), highPrice: num(t.high24h), lowPrice: num(t.low24h), volume: num(t.baseVolume), quoteVolume: num(t.quoteVolume ?? t.usdtVolume) });
+  const last = num(t.lastPrice ?? t.lastPr), open = Number(t.openPrice24h ?? t.open ?? t.open24h), ratio = Number(t.price24hPcnt), ch = Number(t.change24h);
+  const pct = Number.isFinite(ratio) ? ratio * 100 : Number.isFinite(ch) ? ch * 100 : Number.isFinite(open) && open > 0 ? ((last - open) / open) * 100 : NaN;
+  return validateTicker({ symbol: p.symbol, lastPrice: last, priceChangePercent: num(pct), highPrice: num(t.highPrice24h ?? t.high24h), lowPrice: num(t.lowPrice24h ?? t.low24h), volume: num(t.volume24h ?? t.baseVolume), quoteVolume: num(t.turnover24h ?? t.quoteVolume ?? t.usdtVolume) });
 }
 
 const PROVIDERS: Record<ProviderId, ProviderSpec> = {
@@ -333,29 +329,24 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   bitget: {
     hosts: ["https://api.bitget.com"],
     request(endpoint, p) {
-      if (endpoint === "klines") {
-        const g = BITGET_SPOT_GRAN[p.interval];
-        if (!g) throw new Unsupported("interval");
-        return { path: "/api/v2/spot/market/candles", query: { symbol: p.symbol, granularity: g, limit: String(Math.min(p.limit, 1000)) } };
-      }
-      if (endpoint === "depth") return { path: "/api/v2/spot/market/orderbook", query: { symbol: p.symbol, type: "step0", limit: String(Math.min(p.limit, 150)) } };
-      if (endpoint === "trades") return { path: "/api/v2/spot/market/fills", query: { symbol: p.symbol, limit: String(Math.min(p.limit, 100)) } };
-      return { path: "/api/v2/spot/market/tickers", query: { symbol: p.symbol } };
+      const category = "SPOT";
+      const interval = p.interval.replace(/(\d+)([hd])/i, (_m, n, u) => n + String(u).toUpperCase());
+      if (endpoint === "klines") return { path: "/api/v3/market/candles", query: { category, symbol: p.symbol, interval, type: "market", limit: String(Math.min(p.limit, 1000)) } };
+      if (endpoint === "depth") return { path: "/api/v3/market/orderbook", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 1000)) } };
+      if (endpoint === "trades") return { path: "/api/v3/market/fills", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 100)) } };
+      return { path: "/api/v3/market/tickers", query: { category, symbol: p.symbol } };
     },
     parse: parseBitget,
   },
   bitget_mix: {
     hosts: ["https://api.bitget.com"],
     request(endpoint, p) {
-      const productType = p.productType ?? bitgetProductFor(p.symbol);
-      if (endpoint === "klines") {
-        const g = BITGET_MIX_GRAN[p.interval];
-        if (!g) throw new Unsupported("interval");
-        return { path: "/api/v2/mix/market/candles", query: { symbol: p.symbol, productType, granularity: g, limit: String(Math.min(p.limit, 1000)) } };
-      }
-      if (endpoint === "depth") return { path: "/api/v2/mix/market/merge-depth", query: { symbol: p.symbol, productType, limit: p.limit <= 1 ? "1" : p.limit <= 5 ? "5" : p.limit <= 15 ? "15" : p.limit <= 50 ? "50" : "max" } };
-      if (endpoint === "trades") return { path: "/api/v2/mix/market/fills", query: { symbol: p.symbol, productType, limit: String(Math.min(p.limit, 100)) } };
-      return { path: "/api/v2/mix/market/ticker", query: { symbol: p.symbol, productType } };
+      const category = p.productType ?? bitgetProductFor(p.symbol);
+      const interval = p.interval.replace(/(\d+)([hd])/i, (_m, n, u) => n + String(u).toUpperCase());
+      if (endpoint === "klines") return { path: "/api/v3/market/candles", query: { category, symbol: p.symbol, interval, type: "market", limit: String(Math.min(p.limit, 1000)) } };
+      if (endpoint === "depth") return { path: "/api/v3/market/orderbook", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 1000)) } };
+      if (endpoint === "trades") return { path: "/api/v3/market/fills", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 100)) } };
+      return { path: "/api/v3/market/tickers", query: { category, symbol: p.symbol } };
     },
     parse: parseBitget,
   },
@@ -599,15 +590,11 @@ export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: 
     if (!/^[A-Z0-9]{5,20}$/.test(sym) || !b || !q) return;
     rows.push({ s: sym, b, q, m: market, c: bitgetCategory(b, q), v: "bitget", ...(pt ? { pt } : {}) });
   };
-  if (market === "spot") {
-    const r = await bitgetGet("/api/v2/spot/public/symbols", fetchImpl);
-    if (r.list) r.list.filter((x) => x && x.status === "online").forEach((x) => add(x)); else attempts.push({ host: BITGET_BASE, status: r.status, errorClass: r.errorClass });
-  } else {
-    const parts = await Promise.all(BITGET_PRODUCT_TYPES.map(async (pt) => ({ pt, r: await bitgetGet("/api/v2/mix/market/contracts?productType=" + pt, fetchImpl) })));
-    for (const { pt, r } of parts) {
-      if (r.list) r.list.filter((x) => x && x.symbolType === "perpetual" && BITGET_OK_STATUS.has(String(x.symbolStatus))).forEach((x) => add(x, pt));
-      else attempts.push({ host: BITGET_BASE + " (" + pt + ")", status: r.status, errorClass: r.errorClass });
-    }
+  const categories = market === "spot" ? ["SPOT"] : BITGET_PRODUCT_TYPES;
+  const parts = await Promise.all(categories.map(async (category) => ({ category, r: await bitgetGet("/api/v3/market/instruments?category=" + category, fetchImpl) })));
+  for (const { category, r } of parts) {
+    if (r.list) r.list.filter((x) => x && BITGET_OK_STATUS.has(String(x.status ?? "").toLowerCase())).forEach((x) => add(x, category === "SPOT" ? undefined : category));
+    else attempts.push({ host: BITGET_BASE + " (" + category + ")", status: r.status, errorClass: r.errorClass });
   }
   rows.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : (a.pt ?? "") < (b.pt ?? "") ? -1 : 1));
   if (rows.length) { bitgetCache[market] = { at: now(), rows, host: BITGET_BASE }; return { rows, host: BITGET_BASE, cached: false, stale: false, fetchedAt: now(), attempts }; }
