@@ -34,7 +34,7 @@ const ALLOWED = new Set([
   "/api/v2/spot/account/assets", "/api/v2/spot/trade/fills", "/api/v2/spot/trade/history-orders",
   "/api/v2/margin/crossed/account/assets", "/api/v2/margin/crossed/fills", "/api/v2/margin/crossed/history-orders",
   "/api/v2/margin/isolated/account/assets", "/api/v2/margin/isolated/fills", "/api/v2/margin/isolated/history-orders",
-  "/api/v2/mix/account/accounts", "/api/v2/mix/order/fills", "/api/v2/mix/order/orders-history", "/api/v2/mix/position/all-position",
+  "/api/v2/mix/account/accounts", "/api/v2/mix/account/account", "/api/v2/mix/order/fills", "/api/v2/mix/order/orders-history", "/api/v2/mix/position/all-position",
 ]);
 
 export class BitgetError extends Error {
