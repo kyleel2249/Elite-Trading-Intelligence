@@ -18,7 +18,7 @@ const SPOT = [
   { symbol: "GONEUSDT", baseCoin: "GONE", quoteCoin: "USDT", status: "gone" },
   { symbol: "bad sym", baseCoin: "B", quoteCoin: "S", status: "online" },
 ];
-const contracts = (pt: string) => pt === "usdt-futures"
+const contracts = (pt: string) => pt === "USDT-FUTURES"
   ? [
     { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", symbolType: "perpetual", symbolStatus: "normal" },
     { symbol: "XAUUSDT", baseCoin: "XAU", quoteCoin: "USDT", symbolType: "perpetual", symbolStatus: "normal" },
@@ -26,7 +26,7 @@ const contracts = (pt: string) => pt === "usdt-futures"
     { symbol: "OLDUSDT", baseCoin: "OLD", quoteCoin: "USDT", symbolType: "perpetual", symbolStatus: "off" },
     { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", symbolType: "delivery", symbolStatus: "normal" },
   ]
-  : pt === "usdc-futures" ? [{ symbol: "BTCPERP", baseCoin: "BTC", quoteCoin: "USDC", symbolType: "perpetual", symbolStatus: "normal" }]
+  : pt === "USDC-FUTURES" ? [{ symbol: "BTCPERP", baseCoin: "BTC", quoteCoin: "USDC", symbolType: "perpetual", symbolStatus: "normal" }]
   : [{ symbol: "BTCUSD", baseCoin: "BTC", quoteCoin: "USD", symbolType: "perpetual", symbolStatus: "normal" }];
 
 test("categories: crypto stays crypto; catalog stocks, tokenised stocks and metals are recognised; unknown tickers are not guessed", () => {
@@ -43,9 +43,9 @@ test("categories: crypto stays crypto; catalog stocks, tokenised stocks and meta
 });
 
 test("futures product type is inferred from the contract symbol", () => {
-  assert.equal(bitgetProductFor("BTCUSDT"), "usdt-futures");
-  assert.equal(bitgetProductFor("BTCPERP"), "usdc-futures");
-  assert.equal(bitgetProductFor("BTCUSD"), "coin-futures");
+  assert.equal(bitgetProductFor("BTCUSDT"), "USDT-FUTURES");
+  assert.equal(bitgetProductFor("BTCPERP"), "USDC-FUTURES");
+  assert.equal(bitgetProductFor("BTCUSD"), "COIN-FUTURES");
 });
 
 test("Bitget spot list: online pairs only, valid symbols only, categorised", async () => {
@@ -77,13 +77,13 @@ test("Bitget pair catalogue refreshes every 60 seconds without changing Binance'
 test("Bitget futures list: perpetuals from all three product types, active only, product type recorded", async () => {
   _resetSymbolCache();
   const r = await listBitgetSymbols("futures", (async (u: any) => ok(contracts(new URL(String(u)).searchParams.get("productType")!))) as any);
-  assert.deepEqual(r.rows.map((x) => [x.s, x.c, x.pt]), [["BTCPERP", "crypto", "usdc-futures"], ["BTCUSD", "crypto", "coin-futures"], ["BTCUSDT", "crypto", "usdt-futures"], ["TSLAUSDT", "stocks", "usdt-futures"], ["XAUUSDT", "metals", "usdt-futures"]]);
+  assert.deepEqual(r.rows.map((x) => [x.s, x.c, x.pt]), [["BTCPERP", "crypto", "USDC-FUTURES"], ["BTCUSD", "crypto", "COIN-FUTURES"], ["BTCUSDT", "crypto", "USDT-FUTURES"], ["TSLAUSDT", "stocks", "USDT-FUTURES"], ["XAUUSDT", "metals", "USDT-FUTURES"]]);
 });
 
 test("Bitget list: one product type failing still serves the others and says so; all failing is an error, never an invented list", async () => {
   _resetSymbolCache();
-  const partial = await listBitgetSymbols("futures", (async (u: any) => { const pt = new URL(String(u)).searchParams.get("productType")!; return pt === "coin-futures" ? new Response("x", { status: 503 }) : ok(contracts(pt)); }) as any);
-  assert.equal(partial.rows.length, 4); assert.equal(partial.attempts.length, 1); assert.match(partial.attempts[0].host, /coin-futures/);
+  const partial = await listBitgetSymbols("futures", (async (u: any) => { const pt = new URL(String(u)).searchParams.get("productType")!; return pt === "COIN-FUTURES" ? new Response("x", { status: 503 }) : ok(contracts(pt)); }) as any);
+  assert.equal(partial.rows.length, 4); assert.equal(partial.attempts.length, 1); assert.match(partial.attempts[0].host, /COIN-FUTURES/);
   _resetSymbolCache();
   await assert.rejects(() => listBitgetSymbols("spot", (async () => { throw new Error("offline"); }) as any), AllProvidersFailed);
   _resetSymbolCache();
@@ -104,7 +104,7 @@ test("GET /api/market/symbols?venue=all merges both exchanges; the default respo
   const all: any = await (await handleMarket(new Request("https://x.test/api/market/symbols?venue=all"), {})).json();
   assert.equal(all.provider, "all");
   assert.ok(all.symbols.some((x: any) => x[0] === "TSLAONUSDT" && x[3] === "spot" && x[4] === "stocks" && x[5] === "bitget"));
-  assert.ok(all.symbols.some((x: any) => x[0] === "BTCPERP" && x[3] === "futures" && x[5] === "bitget" && x[6] === "usdc-futures"));
+  assert.ok(all.symbols.some((x: any) => x[0] === "BTCPERP" && x[3] === "futures" && x[5] === "bitget" && x[6] === "USDC-FUTURES"));
   assert.ok(all.symbols.some((x: any) => x[0] === "BTCUSDT" && x[5] === "binance"));
   assert.ok(all.sources.bitget_spot && all.sources.binance_futures);
   const only: any = await (await handleMarket(new Request("https://x.test/api/market/symbols?venue=bitget&market=spot"), {})).json();
@@ -153,14 +153,14 @@ test("Bitget futures use the mix endpoints with the right product type", async (
   globalThis.fetch = (async (u: any) => { const url = new URL(String(u)); seen.push(url.pathname + "?" + url.searchParams.toString()); return ok(Array.from({ length: 3 }, (_, i) => candle(i).slice(0, 7))); }) as any;
   const a = await getMarketData("klines", { symbol: "XAUUSDT", interval: "1h", limit: 3, market: "futures", venue: "bitget" }, ["binance"]);
   assert.equal(a.provider, "bitget_mix");
-  assert.match(seen[0], /\/api\/v2\/mix\/market\/candles\?symbol=XAUUSDT&productType=usdt-futures&granularity=1H&limit=3/);
+  assert.match(seen[0], /\/api\/v2\/mix\/market\/candles\?symbol=XAUUSDT&productType=USDT-FUTURES&granularity=1H&limit=3/);
   await getMarketData("klines", { symbol: "BTCPERP", interval: "1d", limit: 3, market: "futures", venue: "bitget" }, ["binance"]);
-  assert.match(seen[1], /productType=usdc-futures&granularity=1Dutc/);
-  await getMarketData("klines", { symbol: "BTCUSD", interval: "1m", limit: 3, market: "futures", venue: "bitget", productType: "coin-futures" }, ["binance"]);
-  assert.match(seen[2], /productType=coin-futures&granularity=1m/);
+  assert.match(seen[1], /productType=USDC-FUTURES&granularity=1Dutc/);
+  await getMarketData("klines", { symbol: "BTCUSD", interval: "1m", limit: 3, market: "futures", venue: "bitget", productType: "COIN-FUTURES" }, ["binance"]);
+  assert.match(seen[2], /productType=COIN-FUTURES&granularity=1m/);
   globalThis.fetch = (async (u: any) => { seen.push(new URL(String(u)).pathname + new URL(String(u)).search); return ok({ asks: [["2", "1"]], bids: [["1", "1"]] }); }) as any;
   await getMarketData("depth", { symbol: "XAUUSDT", interval: "1m", limit: 20, market: "futures", venue: "bitget" }, ["binance"]);
-  assert.match(seen.at(-1)!, /merge-depth\?symbol=XAUUSDT&productType=usdt-futures&limit=50/);
+  assert.match(seen.at(-1)!, /merge-depth\?symbol=XAUUSDT&productType=USDT-FUTURES&limit=50/);
 });
 
 test("Bitget failures are reported as Bitget failures: no fallback to another exchange, no invented data", async () => {
@@ -175,7 +175,7 @@ test("Bitget failures are reported as Bitget failures: no fallback to another ex
 
 test("HTTP routes accept venue and product type and report the serving provider", async () => {
   globalThis.fetch = (async () => ok(Array.from({ length: 3 }, (_, i) => candle(i)))) as any;
-  const r = await handleMarket(new Request("https://x.test/api/market/klines?symbol=TSLAUSDT&interval=1m&limit=3&market=futures&venue=bitget&pt=usdt-futures"), {});
+  const r = await handleMarket(new Request("https://x.test/api/market/klines?symbol=TSLAUSDT&interval=1m&limit=3&market=futures&venue=bitget&pt=USDT-FUTURES"), {});
   assert.equal(r.status, 200); assert.equal(r.headers.get("x-eti-provider"), "bitget_mix");
   assert.equal(((await r.json()) as any[])[0].length, 6);
   assert.equal((await handleMarket(new Request("https://x.test/api/market/klines?symbol=TSLAUSDT&venue=kraken"), {})).status, 400);
@@ -204,9 +204,9 @@ function clientFns() {
 }
 const ROWS = [
   ["BTCUSDT", "BTC", "USDT", "spot", "crypto", "binance"], ["BTCUSDT", "BTC", "USDT", "spot", "crypto", "bitget"],
-  ["TSLAONUSDT", "TSLAON", "USDT", "spot", "stocks", "bitget"], ["BTCUSDT", "BTC", "USDT", "futures", "crypto", "binance"], ["BTCUSDT", "BTC", "USDT", "futures", "crypto", "bitget", "usdt-futures"],
-  ["TSLAUSDT", "TSLA", "USDT", "futures", "stocks", "bitget", "usdt-futures"], ["BTCPERP", "BTC", "USDC", "futures", "crypto", "bitget", "usdc-futures"],
-  ["XAUUSDT", "XAU", "USDT", "futures", "metals", "bitget", "usdt-futures"], ["PAXGUSDT", "PAXG", "USDT", "spot", "metals", "binance"],
+  ["TSLAONUSDT", "TSLAON", "USDT", "spot", "stocks", "bitget"], ["BTCUSDT", "BTC", "USDT", "futures", "crypto", "binance"], ["BTCUSDT", "BTC", "USDT", "futures", "crypto", "bitget", "USDT-FUTURES"],
+  ["TSLAUSDT", "TSLA", "USDT", "futures", "stocks", "bitget", "USDT-FUTURES"], ["BTCPERP", "BTC", "USDC", "futures", "crypto", "bitget", "USDC-FUTURES"],
+  ["XAUUSDT", "XAU", "USDT", "futures", "metals", "bitget", "USDT-FUTURES"], ["PAXGUSDT", "PAXG", "USDT", "spot", "metals", "binance"],
 ];
 const names = (rows: any[]) => Array.from(rows, (r: any) => String(r[0])).sort();
 test("dashboard: Bitget is the default exchange; merged mode prefers Bitget for shared pairs; Binance is still selectable", () => {
@@ -222,17 +222,17 @@ test("dashboard: Bitget is the default exchange; merged mode prefers Bitget for 
   api.SYM.venue = "binance"; assert.equal(api.mkt(), ""); api.SYM.venue = "";
   els.symbol.value = "TSLAONUSDT"; assert.equal(api.mkt(), "&venue=bitget");
   els.symMarket.value = "futures"; api.SYM.market = "futures";
-  els.symbol.value = "TSLAUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures");
-  els.symbol.value = "BTCPERP"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdc-futures");
-  els.symbol.value = "BTCUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures");
+  els.symbol.value = "TSLAUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=USDT-FUTURES");
+  els.symbol.value = "BTCPERP"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=USDC-FUTURES");
+  els.symbol.value = "BTCUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=USDT-FUTURES");
   api.SYM.venue = "binance"; assert.equal(api.mkt(), "&market=futures"); api.SYM.venue = "";
   api.SYM.venue = "bitget"; api.SYM.at = 2;
-  assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures", "same symbol, Bitget venue selected");
+  assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=USDT-FUTURES", "same symbol, Bitget venue selected");
   assert.equal(api.symRows().length, 4); assert.ok(api.symRows().every((r: any) => r[5] === "bitget"));
   api.SYM.venue = "";
   els.symMarket.value = "metals"; api.SYM.market = "metals"; api.SYM.at = 3;
   assert.deepEqual(names(api.symRows()), ["PAXGUSDT", "XAUUSDT"]);
-  els.symbol.value = "XAUUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=usdt-futures");
+  els.symbol.value = "XAUUSDT"; assert.equal(api.mkt(), "&market=futures&venue=bitget&pt=USDT-FUTURES");
 });
 
 test("dashboard exposes Bitget as a live order venue and retains both market-data venues", () => {
