@@ -22,7 +22,7 @@ test("Bitget futures configures isolated margin and leverage before submitting a
  assert.equal(r.status,201);assert.equal(calls.length,3);
  assert.match(calls[0].url,/set-margin-mode$/);assert.equal(calls[0].body.marginMode,"isolated");
  assert.match(calls[1].url,/set-leverage$/);assert.equal(calls[1].body.leverage,"25");
- assert.match(calls[2].url,/mix\/order\/place-order$/);assert.equal(calls[2].body.productType,"USDT-FUTURES");assert.equal(calls[2].body.marginMode,"isolated");assert.equal(calls[2].body.side,"sell");
+ assert.match(calls[2].url,/mix\/order\/place-order$/);assert.equal(calls[2].body.productType,"usdt-futures");assert.equal(calls[2].body.marginMode,"isolated");assert.equal(calls[2].body.side,"sell");
 });
 
 test("Bitget cross and isolated margin orders use the correct classic V2 endpoint and size units",async()=>{
