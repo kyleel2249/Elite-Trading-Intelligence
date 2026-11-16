@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { placeBitgetLiveOrder } from "./trading.ts";
 
-const baseEnv:any={BITGET_API_KEY:"key",BITGET_API_SECRET:"secret",BITGET_API_PASSPHRASE:"pass",ETI_BITGET_LIVE_ENABLED:"true",ETI_BITGET_MAX_LEVERAGE:"150",ETI_MAX_ORDER_QUANTITY:"100",ETI_EXECUTION_LOG:null};
+const baseEnv:any={BITGET_API_KEY:"key",BITGET_API_SECRET:"secret",BITGET_API_PASSPHRASE:"pass",ETI_BITGET_LIVE_ENABLED:"true",ETI_BITGET_MAX_LEVERAGE:"150",ETI_BITGET_MAX_NOTIONAL_USDT:"10000",ETI_MAX_ORDER_QUANTITY:"100",ETI_EXECUTION_LOG:null};
 function store(){const m=new Map<string,string>();return {m,get:async(k:string)=>m.get(k)??null,put:async(k:string,v:string)=>{m.set(k,v)}};}
 function ok(){return new Response(JSON.stringify({code:"00000",msg:"success",data:{orderId:"bg-order-1",clientOid:"eti1234567890abcdef"}}),{status:200});}
 const orderBody=(overrides:any={})=>({broker:"bitget",bitgetMarket:"spot",symbol:"BTCUSDT",side:"buy",type:"market",quantity:0.01,quoteAmount:100,clientOrderId:"eti1234567890abcdef",riskConfirmed:true,executionSource:{actorType:"manual_user",actorId:"operator",sourceName:"ETI Dashboard"},...overrides});
