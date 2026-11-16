@@ -54,7 +54,7 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   if(futures&&(!Number.isInteger(lev)||lev<1||lev>maxLev))return response({ok:false,error:"invalid_leverage",message:"Leverage must be a whole number from 1x to "+maxLev+"x."},400);
   const marginMode=String(body?.marginMode??"isolated");
   if(futures&&!["crossed","isolated"].includes(marginMode))return response({ok:false,error:"invalid_margin_mode"},400);
-  const productType=market;
+  const productType=market==="usdt-futures"?"USDT-FUTURES":market==="usdc-futures"?"USDC-FUTURES":"COIN-FUTURES";
   const marginCoin=String(body?.marginCoin??(market==="usdt-futures"?"USDT":market==="usdc-futures"?"USDC":symbol.replace(/USD$/,""))).toUpperCase();
   const force=String(body?.timeInForce??"gtc").toLowerCase();
   if(!["gtc","ioc","fok","post_only"].includes(force))return response({ok:false,error:"invalid_time_in_force"},400);
