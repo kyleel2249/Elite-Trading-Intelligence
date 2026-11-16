@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -105,7 +105,7 @@ def sec_expenditure(b: dict, range_key: str) -> dict:
             "by_department": [{"department": d["department"], "total": m(d["total_units"]), "share_pct": float(d["share_pct"])} for d in b["dept"]["departments"]],
             "by_group": [{"group": g["group"], "total": m(sum(a["units"] for a in g["accounts"]))} for g in inc["expenses"]],
             "monthly": [{"month": p, "amount": m(v)} for p, v in sorted(monthly.items())],
-            "unassigned": b["dept"]["unassigned_total"][:-6] if b["dept"]["unassigned_total"] else "0"}
+            "unassigned": m(_u8(b["dept"]["unassigned_total"]))}
 
 
 def sec_trading(b: dict, scope: str) -> dict:
@@ -193,7 +193,7 @@ def sec_system(settings) -> dict:
     try:
         from app.api.command_centre import _collect_statuses
         from app.command_centre import crawler
-        snap = crawler.snapshot(_collect_statuses(), time.time())
+        snap = crawler.snapshot(_collect_statuses(), datetime.now(timezone.utc))
         out["agents"] = [{"id": a.get("id"), "health": a.get("health"), "running": a.get("running")} for a in snap.get("agents", [])]
         out["totals"] = snap.get("totals", {})
     except Exception as e:  # the agent registry is optional context
@@ -205,26 +205,33 @@ def sec_system(settings) -> dict:
 async def paper_section() -> dict:
     try:
         from app.paper import runtime as paper_runtime
-        ex = paper_runtime.get_exchange()
-        v = await ex.account()
+        v = await paper_runtime.get_exchange().account()
         if hasattr(v, "model_dump"):
             v = v.model_dump()
         v = v if isinstance(v, dict) else dict(getattr(v, "__dict__", {}))
     except Exception as e:
         return {"available": False, "reason": f"simulated account unavailable ({type(e).__name__})"}
     f = lambda k: float(v.get(k) or 0)
-    pos = [{k: p.get(k) for k in ("symbol", "qty", "avg_cost", "mark_price", "market_value", "unrealized_pnl")} for p in (v.get("positions") or []) if isinstance(p, dict)]
+    pos = []
+    for p in v.get("positions") or []:
+        if isinstance(p, dict) and p.get("open"):
+            try:
+                unreal = float(p["qty"]) * (float(p["mark_price"]) - float(p["avg_cost"]))
+            except (KeyError, TypeError, ValueError):
+                unreal = None
+            pos.append({"symbol": p.get("symbol"), "qty": p.get("qty"), "avg_cost": p.get("avg_cost"), "mark_price": p.get("mark_price"),
+                        "market_value": p.get("market_value"), "unrealized_pnl": unreal})
     return {"available": True, "simulated": True, "unrealized_pnl": f("unrealized_pnl"), "realized_pnl": f("realized_pnl"), "equity": f("equity"),
             "cash": f("cash"), "starting_cash": f("starting_cash"), "fees_paid": f("fees_paid"), "positions": pos,
             "note": "SIMULATED paper account. It is not company money."}
 
 
 async def blockchain_section(db, settings, book: str) -> dict:
+    import asyncio
     from sqlalchemy import select
     from app.chain.models import ChainTransaction
     from app.chain.networks import NETWORKS, chain_enabled, rpc_url
     from app.chain.service import ChainError, ChainService
-    import asyncio
     if not chain_enabled():
         return {"available": False, "reason": "The on-chain wallet is disabled (CHAIN_ENABLED is not true).", "book_value_usd": book}
     svc = ChainService(db, settings)
@@ -260,7 +267,7 @@ def _neg(s) -> bool:
 
 
 def compose(role: str, b: dict, st: dict, paper: Optional[dict], as_of: date, scope: str, currency: str, range_key: str, settings) -> dict:
-    reqs = [r for r in st["reqs"]]
+    reqs = list(st["reqs"])
     cur_reqs = [r for r in reqs if r["currency"] == currency]
     pol = st["policy"]
     committed = sum(r["amount_units"] for r in cur_reqs if r["status"] == "approved")
@@ -271,7 +278,7 @@ def compose(role: str, b: dict, st: dict, paper: Optional[dict], as_of: date, sc
     S["liquidity"] = calc.liquidity(b["bal_real"], b["accts"], committed, target, b["burn"])
     S["trading_capital"] = {k: S["liquidity"][k] for k in ("trading_capital", "exchange_cash", "open_positions_at_cost")}
     S["trading"] = sec_trading(b, scope)
-    S["unrealized"] = paper or {"available": False, "reason": "not loaded"}
+    S["unrealized"] = paper or {"available": False, "reason": "not loaded for this view"}
     S["expenditure"] = sec_expenditure(b, range_key)
     S["budgets"] = calc.budget_rows(st["budgets"], b["dept_ytd"], as_of)
     S["obligations"] = sec_obligations(b, reqs, currency)
@@ -279,7 +286,7 @@ def compose(role: str, b: dict, st: dict, paper: Optional[dict], as_of: date, sc
     S["forecast"] = calc.forecast(as_of, bal(b["bal_real"], calc.BANK), b["ar"]["documents"], b["ap"]["documents"], cur_reqs, b["burn"])
     S["reserve"] = sec_reserve(b, pol)
     S["controls"] = sec_controls(b, reqs, S["budgets"], calc.position(b["bal_real"]), as_of)
-    S["reconciliation"] = {"runs": [{k: r.get(k) for k in ("id", "kind", "status", "ts", "account", "as_of", "summary")} for r in b["runs"]],
+    S["reconciliation"] = {"runs": [{k: r.get(k) for k in ("id", "kind", "source", "account", "status", "date_from", "date_to", "ran_at")} for r in b["runs"]],
                            "closed_periods": b["closed"], "periods_with_postings": b["periods"]}
     S["audit_log"] = st["audit"]
     S["system"] = sec_system(settings) if role == "operations" else {}
@@ -316,16 +323,18 @@ def compose(role: str, b: dict, st: dict, paper: Optional[dict], as_of: date, sc
     S["alerts"] = sorted([a for a in al if not a["roles"] or role in a["roles"]], key=lambda a: rank[a["severity"]])
 
     # KPI cards ------------------------------------------------------------------------------------------------------------
-    pos, tr, bud, ob, ex = S["position"], S["trading"], S["budgets"], S["obligations"], S["expenditure"]
-    un = S["unrealized"]
-    K = {k.pop("id"): {"id": k.get("_id"), **k} for k in []}
+    pos, tr, bud, ob, ex, un = S["position"], S["trading"], S["budgets"], S["obligations"], S["expenditure"], S["unrealized"]
+    ctl = S["controls"]
     cards = {
         "total_assets": _kpi("total_assets", "Total company assets", pos["total_assets"], sub="all asset accounts, " + tr["label"] + " scope"),
         "total_liabilities": _kpi("total_liabilities", "Total liabilities", pos["total_liabilities"], sub="payables, accruals, taxes"),
         "net_equity": _kpi("net_equity", "Net company equity", pos["net_equity"], tone="neg" if _neg(pos["net_equity"]) else "pos", sub="assets minus liabilities"),
         "trading_capital": _kpi("trading_capital", "Trading capital", liq["trading_capital"], sub="exchange cash + open positions at cost"),
         "realized_trading_profit": _kpi("realized_trading_profit", "Realized trading profits", tr["realized_net"], tone="neg" if _neg(tr["realized_net"]) else "pos", sub=f"{range_key.upper()}, net of fees; all-time {tr['realized_all_time']}", note=tr["label"]),
-        "unrealized_pnl": _kpi("unrealized_pnl", "Unrealized P&L", f"{un['unrealized_pnl']:.2f}" if un.get("available") else None, tone=("neg" if un.get("available") and un["unrealized_pnl"] < 0 else "pos") if un.get("available") else "", sub="SIMULATED paper account" if un.get("available") else (un.get("reason") or "unavailable"), note="No live mark-to-market feed: real positions are carried at cost."),
+        "unrealized_pnl": _kpi("unrealized_pnl", "Unrealized P&L", f"{un['unrealized_pnl']:.2f}" if un.get("available") else None,
+                              tone=("neg" if un["unrealized_pnl"] < 0 else "pos") if un.get("available") else "",
+                              sub="SIMULATED paper account" if un.get("available") else (un.get("reason") or "unavailable"),
+                              note="No live mark-to-market feed: real positions are carried at cost."),
         "available_operating_funds": _kpi("available_operating_funds", "Available operating funds", liq["available_operating"], tone="neg" if _neg(liq["available_operating"]) else "", sub=f"bank {liq['operating_cash']} less approved {liq['committed_payments']}"),
         "emergency_reserves": _kpi("emergency_reserves", "Emergency reserves", res["held"], tone="warn" if res["status"] == "underfunded" else "", sub=f"target {res['target']} ({res['coverage_pct']}%)" if res["coverage_pct"] is not None else "no target set"),
         "departmental_budgets": _kpi("departmental_budgets", "Departmental budgets", bud["total_budget"], sub=f"{bud['total_actual']} spent YTD ({bud['utilisation_pct']}%)" if bud["utilisation_pct"] is not None else "no budgets set"),
@@ -340,10 +349,10 @@ def compose(role: str, b: dict, st: dict, paper: Optional[dict], as_of: date, sc
         "trading_costs": _kpi("trading_costs", "Trading costs", ex["trading_costs"], sub="fees, gas and losses booked as expenses"),
         "pending_approvals": _kpi("pending_approvals", "Awaiting approval", pay["pending"]["count"], kind="count", sub=f"{pay['pending']['total']} {currency}"),
         "overdue_payments": _kpi("overdue_payments", "Overdue payment requests", pay["overdue"]["count"], kind="count", tone="warn" if pay["overdue"]["count"] else "", sub=f"{pay['overdue']['total']} {currency}"),
-        "controls_passed": _kpi("controls_passed", "Controls passed", S["controls"]["passed"], kind="count", tone="pos"),
-        "controls_warn": _kpi("controls_warn", "Control warnings", S["controls"]["warnings"], kind="count", tone="warn" if S["controls"]["warnings"] else ""),
-        "controls_failed": _kpi("controls_failed", "Controls failed", S["controls"]["failed"], kind="count", tone="neg" if S["controls"]["failed"] else ""),
+        "controls_passed": _kpi("controls_passed", "Controls passed", ctl["passed"], kind="count", tone="pos"),
+        "controls_warn": _kpi("controls_warn", "Control warnings", ctl["warnings"], kind="count", tone="warn" if ctl["warnings"] else ""),
+        "controls_failed": _kpi("controls_failed", "Controls failed", ctl["failed"], kind="count", tone="neg" if ctl["failed"] else ""),
         "ledger_entries": _kpi("ledger_entries", "Journal entries", b["entries"], kind="count", sub="hash chain " + ("intact" if ig["ok"] else "BROKEN")),
-        "unbooked_payments": _kpi("unbooked_payments", "Paid but not booked", S["controls"]["unbooked"], kind="count", tone="warn" if S["controls"]["unbooked"] else ""),
+        "unbooked_payments": _kpi("unbooked_payments", "Paid but not booked", ctl["unbooked"], kind="count", tone="warn" if ctl["unbooked"] else ""),
     }
     return {"sections": {k: S[k] for k in ROLE_SECTIONS[role]}, "kpis": [cards[k] for k in KPI_SETS[role]]}
