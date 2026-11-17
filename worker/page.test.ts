@@ -68,3 +68,30 @@ test("dashboard market requests use only the Bybit venue and are accepted by the
     }
   } finally { globalThis.fetch = realFetch; }
 });
+
+test("dashboard serves an installable PWA manifest, root-scoped service worker and app icon", async () => {
+  const { default: app } = await import("./index.ts");
+  const call = (path: string) => app.fetch(new Request("https://x.test" + path), {} as any);
+  const manifestResponse = await call("/manifest.webmanifest");
+  assert.equal(manifestResponse.status, 200);
+  assert.match(manifestResponse.headers.get("content-type") || "", /application\/manifest\+json/);
+  const manifest: any = await manifestResponse.json();
+  assert.equal(manifest.name, "ETI — Elite Trading Intelligence");
+  assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.scope, "/");
+  assert.ok(manifest.icons.some((x: any) => x.src === "/app-icon.svg"));
+  const sw = await call("/sw.js");
+  assert.equal(sw.status, 200);
+  assert.equal(sw.headers.get("service-worker-allowed"), "/");
+  const swText = await sw.text();
+  assert.match(swText, /addEventListener\(["']push["']/);
+  assert.match(swText, /api\\//);
+  const icon = await call("/app-icon.svg");
+  assert.equal(icon.status, 200);
+  assert.match(icon.headers.get("content-type") || "", /image\/svg\+xml/);
+  const html = await (await call("/")).text();
+  assert.match(html, /rel="manifest"/);
+  assert.match(html, /apple-mobile-web-app-capable/);
+  assert.match(html, /eti-install-app/);
+  assert.match(html, /register\(['"]\/sw\.js/);
+});
