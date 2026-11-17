@@ -63,6 +63,7 @@ class BybitAdapter(BrokerAdapter):
             signature = self._signature(timestamp, query)
             headers = {"X-BAPI-API-KEY": self._key, "X-BAPI-SIGN": signature,
                        "X-BAPI-TIMESTAMP": timestamp, "X-BAPI-RECV-WINDOW": "5000"}
+            params = dict(sorted(params.items()))
             status, data = await self.t.request(method, self.base + path, params=params, headers=headers, write=write)
         else:
             payload = json.dumps(body or {}, separators=(",", ":"), ensure_ascii=False)
@@ -80,6 +81,8 @@ class BybitAdapter(BrokerAdapter):
             raise TransientProviderError(f"Bybit temporary failure ({status}/{code})")
         if status in (401, 403) or code in (10003, 10004, 10005, 10007, 10010):
             raise PermanentProviderError(f"Bybit authentication or permission failure ({code})")
+        if code == 110001:
+            return {}
         if status >= 400 or code != 0:
             raise OrderRejectedError(f"Bybit rejected request ({code}): {str(data.get('retMsg', 'rejected'))[:180]}")
         return data.get("result") or {}
@@ -160,6 +163,8 @@ class BybitAdapter(BrokerAdapter):
         targets = self.symbols or [None]
         for symbol in targets:
             params = {"category": self.category, "symbol": symbol}
+            if symbol is None:
+                params["settleCoin"] = "USDT" if self.category == "linear" else "BTC"
             result = await self._request("GET", "/v5/position/list", params)
             for row in result.get("list") or []:
                 size = float(row.get("size") or 0)
