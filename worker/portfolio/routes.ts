@@ -115,7 +115,7 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   if (!post) {
     if (path === "/api/portfolio/reconciliation" && req.method === "GET") {
       if (!isOperator(auth)) return reply({error:"operator_required"},403);
-      try { return reply(await buildCrossExchangeReconciliation(env as any, environment as "internal_paper" | "exchange_testnet", now, deps)); }
+      try { return reply(await buildCrossExchangeReconciliation(env as any, "exchange_testnet", now, deps)); }
       catch(e) { return reply({error:"reconciliation_unavailable",message:e instanceof Error?e.message:"reconciliation_failed"},503); }
     }
     if (path === "/api/portfolio/autonomy" && req.method === "GET") {
