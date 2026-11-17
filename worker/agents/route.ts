@@ -208,7 +208,8 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         const a = applyFilters(ticket, f);
         if (!a.ok) return block([a.reason]);
         ticket = { ...ticket, quantity: a.quantity, limitPrice: a.limitPrice }; adjustments.push(...a.adjustments);
-      } else adjustments.push("Alpaca order filters are not checked by the agent system.");
+      } else if (ticket.broker === "alpaca") adjustments.push("Alpaca order filters are not checked by the agent system.");
+      else adjustments.push("ETI internal paper uses the portfolio ledger and its own cash/position checks; no exchange is contacted.");
       const order = new Request(new URL("/api/orders", request.url).toString(), { method: "POST", headers: { "content-type": "application/json", authorization: request.headers.get("authorization") ?? "" }, body: JSON.stringify(ticket) });
       const res = await handleExecution(order, env);
       const brokerBody = await res.json().catch(() => ({}));
