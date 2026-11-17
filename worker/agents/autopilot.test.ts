@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runAgentAutopilotCycle } from "./autopilot.ts";
+import { readAutopilotConfig, runAgentAutopilotCycle } from "./autopilot.ts";
 
 function memoryKV() {
   const data = new Map<string, string>();
@@ -14,6 +14,15 @@ function memoryKV() {
     data,
   };
 }
+
+test("consolidated autopilot JSON config supplies all strategy and risk settings", () => {
+  const config = readAutopilotConfig({ ETI_AGENT_AUTOPILOT_CONFIG: JSON.stringify({
+    symbols: "BTCUSDT,ETHUSDT", interval: "1h", maxPerCycle: 1, minConfidence: 0.7,
+    minAgreement: 0.75, maxPositions: 2, strategies: "intraday,swing",
+    minStrategyAgreement: 2, minOmniConfidence: 68,
+  }) } as any);
+  assert.deepEqual(config, { symbols: "BTCUSDT,ETHUSDT", interval: "1h", maxPerCycle: 1, minConfidence: 0.7, minAgreement: 0.75, maxPositions: 2, strategies: "intraday,swing", minStrategyAgreement: 2, minOmniConfidence: 68 });
+});
 
 test("autopilot is disabled unless explicitly enabled", async () => {
   const kv = memoryKV();
