@@ -82,7 +82,7 @@ jobs:
           # remain inherited from the previous deployed version.
           npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file"
 
-      - name: Verify Bybit market routes and ETI execution safeguards
+      - name: Verify Bybit routes, Bitget browser adapter and ETI safeguards
         shell: bash
         run: |
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
