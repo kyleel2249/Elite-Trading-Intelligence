@@ -45,3 +45,15 @@ test("fees and slippage are explicit; missing cost inputs are never presented as
   assert.ok(priced.estimatedRoundTripCosts! > 0);
   assert.equal(priced.canSubmitOrder, false);
 });
+
+test("inverse futures require contract value and size risk per contract", () => {
+  const missing = calculateTradePlan({ direction: 1, entry: 50000, stopLoss: 49000, takeProfits: [{ price: 52000 }], equity: 10000, riskFraction: 0.01, contractType: "inverse" });
+  assert.equal(missing.valid, false);
+  assert.equal(missing.quantity, 0);
+  const p = calculateTradePlan({ direction: 1, entry: 50000, stopLoss: 49000, takeProfits: [{ price: 52000, closeFraction: 1 }], equity: 10000, riskFraction: 0.01, contractType: "inverse", contractValue: 1, leverage: 10 });
+  assert.equal(p.valid, true);
+  assert.equal(p.quantityUnit, "contracts");
+  assert.ok(Math.abs(p.plannedStopRisk - p.riskBudget) < 1e-6);
+  assert.equal(p.notional, p.quantity);
+  assert.equal(p.canSubmitOrder, false);
+});
