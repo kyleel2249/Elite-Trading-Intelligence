@@ -1,6 +1,7 @@
 // Bitget account and history integration for spot, cross/isolated margin and all three futures product types.
 // This module signs only allowlisted GET requests. Explicit live order placement is isolated in trading.ts; no transfer or withdrawal path is exposed.
 import { authorized } from "../execution.ts";
+import { bitgetAwareFetch, listBitgetMarginSymbols } from "../market.ts";
 
 export type BitgetMarket = "spot" | "margin-crossed" | "margin-isolated" | "usdt-futures" | "usdc-futures" | "coin-futures";
 export const BITGET_MARKETS: BitgetMarket[] = ["spot", "margin-crossed", "margin-isolated", "usdt-futures", "usdc-futures", "coin-futures"];
@@ -171,15 +172,19 @@ export async function syncAll(env: Record<string, any>, deps: Deps = {}, only?: 
 
 // ----------------------------------------------------------------------------------------------------------------- public margin pair list
 export async function listMarginPairs(deps: Deps = {}) {
-  let res: Response;
-  try { res = await (deps.fetchImpl ?? fetch)(`${BASE}/api/v3/market/instruments?category=MARGIN`, { headers: { accept: "application/json", "user-agent": "Mozilla/5.0 (compatible; ETI-Market-Data/1.0)", origin: "https://www.bitget.com", referer: "https://www.bitget.com/" }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit); }
-  catch { throw new BitgetError("network_error", null, "Bitget margin instrument request failed"); }
-  const j: any = await res.json().catch(() => null);
-  if (!res.ok || !j || j.code !== "00000" || !Array.isArray(j.data)) throw new BitgetError("invalid_payload", res.status, "Bitget margin instrument list unavailable");
-  return j.data.filter((x: any) => /^[A-Z0-9]{5,20}$/.test(String(x?.symbol ?? "")) && String(x.status ?? "").toLowerCase() === "online").map((x: any) => ({
-    symbol: String(x.symbol), base: String(x.baseCoin ?? ""), quote: String(x.quoteCoin ?? ""), status: String(x.status ?? ""),
-    crossed: num(x.maxCrossedLeverage) > 0, isolated: num(x.maxIsolatedLeverage) > 0, maxCrossedLeverage: num(x.maxCrossedLeverage), maxIsolatedLeverage: num(x.maxIsolatedLeverage),
-  }));
+  try {
+    const fetcher: typeof fetch = (input, init) => bitgetAwareFetch(input, init, deps.fetchImpl ?? fetch);
+    const result = await listBitgetMarginSymbols(fetcher, deps.now ?? Date.now);
+    return result.rows.map((x) => ({
+      symbol: x.s, base: x.b, quote: x.q, status: "online",
+      crossed: !!x.marginCrossed, isolated: !!x.marginIsolated,
+      maxCrossedLeverage: x.maxCrossedLeverage ?? 0, maxIsolatedLeverage: x.maxIsolatedLeverage ?? 0,
+      isCrossBorrowable: !!x.marginCrossBorrowable, isIsolatedBaseBorrowable: !!x.marginBaseBorrowable,
+      isIsolatedQuoteBorrowable: !!x.marginQuoteBorrowable,
+    }));
+  } catch (e) {
+    throw new BitgetError("margin_pairs_unavailable", e instanceof Error ? null : null, "Bitget margin instrument list unavailable");
+  }
 }
 
 // ----------------------------------------------------------------------------------------------------------------- HTTP
