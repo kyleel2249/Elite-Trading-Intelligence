@@ -36,6 +36,33 @@ test("signal endpoint calculates market-derived BUY, ATR risk levels and attribu
   if (signal.historicalValidation.sampleCount < 20) assert.equal(signal.historicalValidation.winRate, null);
 });
 
+test("signal endpoint accepts validated browser-supplied Bitget candles without Worker egress", async () => {
+  const candles = series(i => 100 + i * 0.8, 500);
+  const res = await handleSignals(new Request("https://eti.test/api/signals", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", interval: "1h", window: 120, provider: "bitget-browser", market: "futures", candles })
+  }), {});
+  assert.equal(res.status, 200);
+  const signal = await res.json() as any;
+  assert.equal(signal.provider, "bitget-browser");
+  assert.equal(signal.action, "BUY");
+  assert.ok(signal.chart && signal.chart.times.length > 0);
+});
+
+test("signal endpoint rejects malformed or stale browser-supplied candles", async () => {
+  const invalid = await handleSignals(new Request("https://eti.test/api/signals", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", interval: "1h", candles: [[1, 100, 101, 99, 100, 1]] })
+  }), {});
+  assert.equal(invalid.status, 400);
+  const stale = series(i => 100 + i * 0.8, 500).map(r => [Number(r[0]) - 10 * 3600000, ...r.slice(1)]);
+  const staleResponse = await handleSignals(new Request("https://eti.test/api/signals", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", interval: "1h", candles: stale })
+  }), {});
+  assert.equal(staleResponse.status, 503);
+});
+
 test("signal endpoint fails closed when upstream market data is unavailable", async () => {
   globalThis.fetch = (async () => new Response("blocked", { status: 403 })) as typeof fetch;
   const res = await handleSignals(new Request("https://eti.test/api/signals?symbol=BTCUSDT&interval=1h"), {});
