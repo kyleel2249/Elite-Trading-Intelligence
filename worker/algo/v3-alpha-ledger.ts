@@ -5,6 +5,7 @@ import { DEFAULT_WEIGHTS, EXECUTION_TF, TF_SECONDS, TIMEFRAMES, type Strategy, t
 import { evaluateSynchronizedV3Alpha, evaluateAgentGates, monteCarloRisk, thresholdSensitivity, type OutcomeSample } from "./v3-alpha-intelligence.ts";
 import type { V3AlphaResult } from "./v3-alpha.ts";
 import { backtestV3Alpha } from "./v3-alpha-backtest.ts";
+import { backtestV3AlphaMtf } from "./v3-alpha-mtf-backtest.ts";
 
 type DB = { prepare(sql:string): any };
 type Env = MarketEnv & { ETI_PORTFOLIO_DB?: DB };
@@ -72,6 +73,15 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
  if(path==="/api/algo/v3-alpha/track"&&req.method==="POST"){
   if(!(await authorized(req,env as any)))return reply({error:"unauthorized"},401);
   try{return reply({...await trackOpen(db,env,nowMs()),submitsOrder:false});}catch(e){return reply({error:"tracking_failed",message:e instanceof Error?e.message:"unknown"},500);}
+ }
+ if(path==="/api/algo/v3-alpha/mtf-backtest"&&req.method==="GET"){
+  const symbol=(url.searchParams.get("symbol")??"BTCUSDT").toUpperCase(),strategy=(url.searchParams.get("strategy")??"intraday") as Strategy;
+  const feeBps=Number(url.searchParams.get("feeBps")??10),slippageBps=Number(url.searchParams.get("slippageBps")??5),limit=Number(url.searchParams.get("limit")??500);
+  if(!validSymbol(symbol)||!strategies.includes(strategy)||![feeBps,slippageBps,limit].every(Number.isFinite)||feeBps<0||slippageBps<0||feeBps>500||slippageBps>500||!Number.isInteger(limit)||limit<240||limit>1000)return reply({error:"invalid_parameters",limitRange:[240,1000]},400);
+  const required=TIMEFRAMES.filter(tf=>DEFAULT_WEIGHTS[strategy][tf]>0||tf===tfFor(strategy)),candles:Partial<Record<Timeframe,Kline[]>>={},failures:Record<string,string>={};
+  for(const tf of required){try{candles[tf]=(await getMarketData("klines",{symbol,interval:tf,limit},providerOrder(env))).data as Kline[];}catch(e){failures[tf]=e instanceof Error?e.message:"market_data_unavailable";}}
+  if(!candles[tfFor(strategy)])return reply({error:"execution_timeframe_unavailable",failures,submitsOrder:false},503);
+  return reply({symbol,strategy,requestedLimit:limit,failures,report:backtestV3AlphaMtf(candles,{symbol,strategy,feeBps,slippageBps}),submitsOrder:false,liveExecutionAllowed:false});
  }
  if(path==="/api/algo/v3-alpha/intelligence"&&req.method==="GET"){
   const symbol=(url.searchParams.get("symbol")??"BTCUSDT").toUpperCase(),strategy=(url.searchParams.get("strategy")??"intraday") as Strategy;
