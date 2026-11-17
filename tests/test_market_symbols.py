@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.integrations.bybit import BybitClient
 from app.market import binance_hosts as bh
 from app.market import symbols as sym
 from app.market.service import MarketService
@@ -260,3 +261,29 @@ def test_bybit_egress_region_reports_fly_machine_region(client, monkeypatch):
     assert response.json()["egress_region"] == "fra"
     assert response.json()["read_only"] is True
     assert response.json()["account_residency_unchanged"] is True
+
+
+def test_bybit_public_client_retries_secondary_global_host_from_frankfurt(monkeypatch):
+    hosts = []
+
+    def handler(request):
+        hosts.append(request.url.host)
+        if request.url.host == "api.bybit.com":
+            return httpx.Response(403, request=request, text="blocked")
+        return httpx.Response(200, request=request, json={
+            "retCode": 0, "retMsg": "OK",
+            "result": {"category": "spot", "list": [["1", "100", "102", "99", "101", "5"]]},
+        })
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "app.integrations.bybit.client.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    result = asyncio.run(BybitClient(settings()).get_public_payload(
+        "/v5/market/kline",
+        {"category": "spot", "symbol": "BTCUSDT", "interval": "1", "limit": "1"},
+    ))
+    assert result["retCode"] == 0
+    assert hosts == ["api.bybit.com", "api.bytick.com"]
