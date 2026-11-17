@@ -31,7 +31,7 @@ async function post(env:BitgetLiveEnv,path:string,payload:Record<string,unknown>
       const data=await r.json().catch(()=>({message:"Bitget returned invalid JSON"}));
       if(r.ok&&data?.code==="00000")return {ok:true,data:data.data??data};
       last={ok:false,definite:(r.status>=400&&r.status<500&&r.status!==408)||(r.ok&&data?.code!=="00000"&&String(data?.code)!=="40010"),status:r.status||502,data:{httpStatus:r.status,code:data?.code??"bitget_rejected",message:String(data?.msg??data?.message??"Bitget rejected the request").slice(0,240),data:data?.data??null}};
-      if(!(r.status===403&&data?.cloudflare==="block")&&r.status<500)return last;
+      if(!(r.status===403&&data?.cloudflare==="block"))return last;
     } catch(e) { return {ok:false,definite:false,status:0,data:{code:"network_outcome_unknown",message:e instanceof Error?e.message:"network failure"}}; }
   }
   return last??{ok:false,definite:false,status:502,data:{code:"network_outcome_unknown",message:"Bitget API hosts were unavailable"}};
