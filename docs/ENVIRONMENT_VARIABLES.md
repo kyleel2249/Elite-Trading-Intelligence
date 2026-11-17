@@ -37,6 +37,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_ALERT_FROM` | config | Alert sender address (must be allowed by the mail provider). |
 | `ETI_ALERT_MAX_PER_HOUR` | config | Alert rate cap per hour. |
 | `ETI_AGENT_AUTOPILOT_ENABLED` | config | Enables the scheduled multi-agent autopilot. It is restricted to ETI INTERNAL PAPER and never submits live orders. |
+| `ETI_AGENT_AUTOPILOT_CONFIG` | config | Consolidated JSON configuration for symbols, interval, strategy quorum, confidence thresholds, cycle budget and position cap. Used to keep the Worker within the Cloudflare Free 64-variable limit. |
 | `ETI_AGENT_AUTOPILOT_SYMBOLS` | config | Comma-separated symbols evaluated by the agent autopilot. Default: BTCUSDT,ETHUSDT,SOLUSDT. |
 | `ETI_AGENT_AUTOPILOT_INTERVAL` | config | Market timeframe used by the autopilot (default 15m). |
 | `ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE` | config | Maximum symbols evaluated per five-minute cycle (default 2). |
