@@ -132,7 +132,7 @@ def test_public_history_returns_candles_and_names_the_host_that_served_them(clie
         assert path == "/api/v3/klines" and params["symbol"] == "BTCUSDT"
         return KLINES, "https://api1.binance.com"
     monkeypatch.setattr(bh, "get_json", fake)
-    r = client.get("/api/market/public-history", params={"symbol": "btcusdt", "interval": "1h", "limit": 3})
+    r = client.get("/api/market/public-history", params={"provider": "binance", "symbol": "btcusdt", "interval": "1h", "limit": 3})
     assert r.status_code == 200 and r.headers["x-binance-host"] == "api1.binance.com"
     j = r.json()
     assert len(j) == 3 and j[0]["close"] == 1.5 and j[0]["symbol"] == "BTCUSDT" and "data_status" in j[0]
@@ -144,12 +144,12 @@ def test_public_history_error_mapping(client, monkeypatch):
     async def bad(*a, **k):
         raise bh.BinanceBadRequest(400)
     monkeypatch.setattr(bh, "get_json", bad)
-    assert client.get("/api/market/public-history", params={"symbol": "NOPEUSDT"}).status_code == 404
+    assert client.get("/api/market/public-history", params={"provider": "binance", "symbol": "NOPEUSDT"}).status_code == 404
 
     async def blocked(*a, **k):
         raise bh.BinanceUnavailable([("https://api.binance.com", "HTTP 451")])
     monkeypatch.setattr(bh, "get_json", blocked)
-    r = client.get("/api/market/public-history", params={"symbol": "BTCUSDT"})
+    r = client.get("/api/market/public-history", params={"provider": "binance", "symbol": "BTCUSDT"})
     assert r.status_code == 502 and "location" in r.json()["detail"]
 
     async def junk(*a, **k):
