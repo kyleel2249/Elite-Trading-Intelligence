@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -118,7 +119,7 @@ async def bybit_public_market_proxy(
     if category and category not in ("spot", "linear", "inverse"):
         raise HTTPException(status_code=422, detail="Invalid Bybit market category")
     symbol = params.get("symbol")
-    if symbol and not __import__("re").fullmatch(r"[A-Za-z0-9]{2,32}", symbol):
+    if symbol and not re.fullmatch(r"[A-Za-z0-9]{2,32}", symbol):
         raise HTTPException(status_code=422, detail="Invalid Bybit symbol")
     try:
         if "limit" in params:
