@@ -32,6 +32,28 @@ test("Bybit derivatives keep linear and inverse categories separate", async () =
   assert.deepEqual(categories, ["linear", "inverse"]);
 });
 
+test("Bybit margin pairs are filtered from spot instruments and charted through the spot category", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input); urls.push(url);
+    if (url.includes("/instruments-info")) return new Response(JSON.stringify({ retCode: 0, result: { list: [
+      { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "Trading", marginTrading: "both" },
+      { symbol: "ETHUSDT", baseCoin: "ETH", quoteCoin: "USDT", status: "Trading", marginTrading: "none" }
+    ] } }));
+    return new Response(JSON.stringify(bybitKline));
+  }) as any;
+  const symbols = await handleMarket(req("/api/market/symbols?venue=bybit&market=margin"), {});
+  assert.equal(symbols.status, 200);
+  const body = await symbols.json() as any;
+  assert.equal(body.symbols.length, 1);
+  assert.equal(body.symbols[0][0], "BTCUSDT");
+  assert.equal(body.symbols[0][3], "margin");
+  assert.equal(body.categories[0], "spot-margin");
+  const candles = await handleMarket(req("/api/market/klines?venue=bybit&market=margin&symbol=BTCUSDT&interval=1m"), {});
+  assert.equal(candles.status, 200);
+  assert.match(urls[1], /category=spot/);
+});
+
 test("Bitget spot candles, ticker and margin market data use the global public API", async () => {
   const urls: string[] = [];
   globalThis.fetch = (async (input: any) => {
