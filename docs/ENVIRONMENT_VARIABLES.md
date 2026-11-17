@@ -65,7 +65,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `BYBIT_API_KEY` | secret | Bybit V5 account-snapshot API key. Read-only wallet/position snapshot access is sufficient; never grant withdrawals. |
 | `BYBIT_API_SECRET` | secret | Secret paired with BYBIT_API_KEY; used only to sign Bybit V5 read-only account requests. |
 | `BYBIT_ACCOUNT_ENV` | config | `mainnet` (default) or `testnet` host selection for the read-only Bybit account snapshot. |
-| `BITGET_API_KEY` | secret | Bitget API key with trade permission enabled and withdrawal permission disabled. Never enable withdrawals. Also accepted: `BITGET_KEY` and `BITGET_ACCESS_KEY`. |
+| `BITGET_API_KEY` | secret | Bitget API key. Read permission is sufficient for account snapshots; the separate live-order route requires trade permission. Keep withdrawal permission disabled. Also accepted: `BITGET_KEY` and `BITGET_ACCESS_KEY`. |
 | `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY` and `BITGET_SECRET`. |
 | `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
 | `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
