@@ -32,6 +32,8 @@ function validateBrowserKlines(value: unknown, minimum: number): Kline[] | null 
   return rows;
 }
 
+const TIMEFRAME_MS: Record<Timeframe, number> = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "1w": 604_800_000 };
+
 function validateBrowserMarketData(raw: any, strategy: Strategy, market: "spot" | "futures", category: string): SignalInputs | null {
   if (!raw || typeof raw !== "object" || !raw.candles || typeof raw.candles !== "object") return null;
   const required = new Set<Timeframe>([...Object.entries(DEFAULT_WEIGHTS[strategy]).filter(([, weight]) => weight > 0).map(([tf]) => tf as Timeframe), EXECUTION_TF[strategy]]);
@@ -41,6 +43,8 @@ function validateBrowserMarketData(raw: any, strategy: Strategy, market: "spot" 
     if (value === undefined) { if (required.has(tf)) return null; continue; }
     const rows = validateBrowserKlines(value, required.has(tf) ? MIN_TF_CANDLES : 1);
     if (!rows) return null;
+    const age = Date.now() - rows[rows.length - 1][0];
+    if (age < -60_000 || age > TIMEFRAME_MS[tf] * 3) return null;
     candles[tf] = rows;
   }
   let depth: SignalInputs["depth"] = null;
