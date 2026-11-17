@@ -10,6 +10,7 @@
  * Worker answers unknown routes with a JSON 404, exactly as before.
  */
 import { withMotion } from "./ui/motion.ts";
+import { BITGET_CLIENT_JS } from "./ui/bitget-client.ts";
 import { PWA_ICON, PWA_MANIFEST, PWA_SERVICE_WORKER } from "./ui/pwa.ts";
 import { handleExecution } from "./execution.ts";
 import { handlePortfolio } from "./portfolio/routes.ts";
@@ -251,7 +252,7 @@ ${VIZ_HTML}
 </section>
 <p class="muted">Market panels use public exchange data. Order entry submits broker orders only after authenticated preview and explicit confirmation. Market data may be delayed or interrupted. ETI does not request or use withdrawal, transfer, funding, or wallet-management permissions.</p>
 </main>
-<script>
+<script src="/bitget-client.js"></script><script>
 const $=id=>document.getElementById(id);let socket=null, candles=[], book={bids:[],asks:[]}, trades=[];
 const fmt=n=>Number(n).toLocaleString(undefined,{maximumFractionDigits:6});
 function resize(c){const dpr=devicePixelRatio||1, r=c.getBoundingClientRect();c.width=r.width*dpr;c.height=r.height*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);return {x,w:r.width,h:r.height};}
@@ -923,6 +924,7 @@ const page = withMotion(html);
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/bitget-client.js") return new Response(BITGET_CLIENT_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/manifest.webmanifest") return new Response(PWA_MANIFEST, { headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/app-icon.svg") return new Response(PWA_ICON, { headers: { "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/sw.js") return new Response(PWA_SERVICE_WORKER, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-cache", "service-worker-allowed": "/", "x-content-type-options": "nosniff" } });
