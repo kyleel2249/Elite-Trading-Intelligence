@@ -7,7 +7,7 @@ var MIX_GRAN={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4
 var PRODUCT_TYPES=["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"];
 function q(obj){var a=[];Object.keys(obj).forEach(function(k){if(obj[k]!==undefined&&obj[k]!==null&&obj[k]!=="")a.push(encodeURIComponent(k)+"="+encodeURIComponent(String(obj[k])))});return a.join("&")}
 function num(v){var n=Number(v);return Number.isFinite(n)?n:null}
-function goodStatus(x){return ["online","normal","trading","1"].indexOf(String(x||"").toLowerCase())>=0}
+function goodStatus(x){if(x===undefined||x===null||x==="")return true;return ["online","normal","trading","1"].indexOf(String(x).toLowerCase())>=0}
 function truth(v){return v===true||["true","yes","1"].indexOf(String(v==null?"":v).toLowerCase())>=0}
 async function request(pathV3,pathsV2){
  var paths=[];if(pathV3)paths.push({path:pathV3,version:"v3"});(pathsV2||[]).forEach(function(p){paths.push({path:p,version:"v2"})});
