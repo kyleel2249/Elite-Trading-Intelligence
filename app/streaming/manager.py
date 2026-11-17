@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from app.config import Settings, get_settings
 from app.integrations.binance.websocket import BinanceWebSocketManager
+from app.integrations.bybit.websocket import BybitWebSocketManager
 from app.integrations.alpaca.websocket import AlpacaWebSocketManager
 
 logger = logging.getLogger(__name__)
@@ -38,14 +39,17 @@ class StreamHub:
 
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
-        self.binance = BinanceWebSocketManager(testnet=self.settings.binance_testnet_enabled)
+        self.binance = BinanceWebSocketManager(testnet=self.settings.binance_testnet_enabled)  # legacy status only
+        self.bybit = BybitWebSocketManager(category="spot", testnet=False)
         self.alpaca = AlpacaWebSocketManager(self.settings)
         self._started = False
         self.latest_binance: dict[str, Any] = {}
+        self.latest_bybit: dict[str, Any] = {}
         self.latest_alpaca: dict[str, Any] = {}
         # Normalized last quote per SYMBOL (uppercase)
         self.quotes: dict[str, dict[str, Any]] = {}
         self._binance_symbols: set[str] = set()
+        self._bybit_symbols: set[str] = set()
         self._alpaca_symbols: set[str] = set()
         self._sse_queues: list[asyncio.Queue] = []
         self._lock = asyncio.Lock()
@@ -67,6 +71,16 @@ class StreamHub:
                 self._broadcast(q)
 
         self.binance.on_message(_binance_handler)
+
+        def _bybit_handler(msg: dict) -> None:
+            q = self._normalize_bybit(msg)
+            if not q.get("symbol") or not q.get("price"):
+                return
+            self.latest_bybit[q["symbol"]] = msg
+            self.quotes[q["symbol"]] = q
+            self._broadcast(q)
+
+        self.bybit.on_message(_bybit_handler)
         self.alpaca.on_message(_alpaca_handler)
 
     def _broadcast(self, quote: dict[str, Any]) -> None:
@@ -182,6 +196,21 @@ class StreamHub:
             }
         return None
 
+    @staticmethod
+    def _normalize_bybit(msg: dict) -> dict[str, Any]:
+        topic = str(msg.get("topic") or "")
+        sym = str(msg.get("symbol") or topic.rsplit(".", 1)[-1]).upper()
+        try:
+            bid = float(msg.get("bid1Price") or 0)
+            ask = float(msg.get("ask1Price") or 0)
+            last = float(msg.get("lastPrice") or msg.get("p") or 0)
+        except (TypeError, ValueError):
+            return {"symbol": sym, "price": None}
+        return {"provider": "bybit", "symbol": sym, "event": "ticker" if bid and ask else "trade",
+                "price": last or ((bid + ask) / 2 if bid and ask else None), "bid": bid or None,
+                "ask": ask or None, "qty": float(msg.get("v") or 0) or None,
+                "ts": _utcnow().isoformat(), "raw_event": topic}
+
     def get_live(self, symbol: str, provider: Optional[str] = None) -> dict[str, Any]:
         sym = symbol.upper().strip()
         q = self.quotes.get(sym)
@@ -200,6 +229,8 @@ class StreamHub:
                 **q,
             }
         # Fallback: raw caches
+        if provider in (None, "bybit") and sym in self.latest_bybit:
+            return {"status": "ok", "source": "websocket_raw", "fresh": False, **self._normalize_bybit(self.latest_bybit[sym])}
         if provider in (None, "binance") and sym in self.latest_binance:
             n = self._normalize_binance(self.latest_binance[sym])
             if n:
@@ -221,18 +252,9 @@ class StreamHub:
             return
         symbols = [s.lower() for s in (default_symbols or ["btcusdt", "ethusdt"])]
         for s in symbols:
-            self._binance_symbols.add(s.upper())
-        streams = []
-        for s in symbols:
-            streams.extend(
-                [
-                    f"{s}@trade",
-                    f"{s}@bookTicker",
-                    f"{s}@depth20@100ms",
-                ]
-            )
-        self.binance.subscribe(streams)
-        await self.binance.start()
+            self._bybit_symbols.add(s.upper())
+        self.bybit.subscribe([s.upper() for s in symbols])
+        await self.bybit.start()
 
         if self.settings.alpaca_configured:
             for s in ("AAPL", "SPY"):
@@ -243,6 +265,7 @@ class StreamHub:
         logger.info("StreamHub started")
 
     async def stop(self) -> None:
+        await self.bybit.stop()
         await self.binance.stop()
         await self.alpaca.stop()
         self._started = False
@@ -251,13 +274,13 @@ class StreamHub:
     async def subscribe(
         self,
         symbols: list[str],
-        provider: str = "binance",
+        provider: str = "bybit",
     ) -> dict[str, Any]:
         """
         Dynamically add allowlisted symbols.
         Does not place orders — market data only.
         """
-        provider = (provider or "binance").lower()
+        provider = (provider or "bybit").lower()
         accepted: list[str] = []
         rejected: list[dict[str, str]] = []
 
@@ -266,18 +289,15 @@ class StreamHub:
             if not _SYM_RE.match(sym):
                 rejected.append({"symbol": sym, "reason": "invalid_format"})
                 continue
-            if provider == "binance":
+            if provider == "bybit":
                 if sym not in BINANCE_ALLOWLIST:
                     rejected.append({"symbol": sym, "reason": "not_in_allowlist"})
                     continue
-                if sym in self._binance_symbols:
+                if sym in self._bybit_symbols:
                     accepted.append(sym)
                     continue
-                self._binance_symbols.add(sym)
-                low = sym.lower()
-                self.binance.subscribe(
-                    [f"{low}@trade", f"{low}@bookTicker", f"{low}@depth20@100ms"]
-                )
+                self._bybit_symbols.add(sym)
+                self.bybit.subscribe([sym])
                 accepted.append(sym)
             elif provider == "alpaca":
                 if sym not in ALPACA_ALLOWLIST:
@@ -292,15 +312,15 @@ class StreamHub:
             else:
                 rejected.append({"symbol": sym, "reason": "unknown_provider"})
 
-        # Reconnect Binance to pick up new combined streams
-        if provider == "binance" and accepted:
-            await self.binance.reconnect()
+        # Reconnect Bybit after adding public topic subscriptions.
+        if provider == "bybit" and accepted:
+            await self.bybit.reconnect()
 
         return {
             "provider": provider,
             "accepted": accepted,
             "rejected": rejected,
-            "active_binance": sorted(self._binance_symbols),
+            "active_bybit": sorted(self._bybit_symbols),
             "active_alpaca": sorted(self._alpaca_symbols),
             "note": "Market data subscribe only — no trading path",
         }
@@ -308,14 +328,16 @@ class StreamHub:
     def status(self) -> dict[str, Any]:
         return {
             "started": self._started,
+            "bybit": self.bybit.status(),
             "binance": self.binance.status(),
             "alpaca": self.alpaca.status(),
+            "latest_bybit_symbols": list(self.latest_bybit.keys())[:20],
             "latest_binance_symbols": list(self.latest_binance.keys())[:20],
             "latest_alpaca_symbols": list(self.latest_alpaca.keys())[:20],
             "normalized_quotes": list(self.quotes.keys())[:40],
             "sse_listeners": len(self._sse_queues),
             "allowlist": {
-                "binance": sorted(BINANCE_ALLOWLIST),
+                "bybit": sorted(BINANCE_ALLOWLIST),
                 "alpaca": sorted(ALPACA_ALLOWLIST),
             },
         }
