@@ -128,7 +128,10 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
           interval: env.ETI_AGENT_AUTOPILOT_INTERVAL || "15m",
           minConfidence: Number(env.ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE || "0.65"),
           minAgreement: Number(env.ETI_AGENT_AUTOPILOT_MIN_AGREEMENT || "0.65"),
-          maxPositions: Number(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS || "3"), latest,
+          maxPositions: Number(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS || "3"),
+          strategies: String((env as any).ETI_AGENT_AUTOPILOT_STRATEGIES || "scalp,intraday,swing,position").split(",").map((s) => s.trim()).filter(Boolean),
+          minStrategyAgreement: Number((env as any).ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT || "3"),
+          minOmniConfidence: Number((env as any).ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE || "60"), latest,
         });
       }
 
