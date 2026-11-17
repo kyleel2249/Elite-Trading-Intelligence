@@ -1,12 +1,28 @@
 # Bitget integration
 
-## Market data (public, no credentials)
-Spot, USDT-/USDC-/coin-margined perpetual futures: candles, depth, trades, tickers, pair lists (`/api/market/*?venue=bitget`, see `MARKET_DATA.md`).
-Margin pairs: `GET /api/bitget/margin-pairs` (Bitget `margin/currencies`: symbol, base, quote, status, cross / isolated leverage). Margin pairs are
-spot-listed symbols, so their candles use the spot endpoints.
+## Public market data (Cloudflare Workers; no API key)
 
-## Account and trade data (read-only, credentials required)
-Worker secrets (any listed name works; only names are reported, never values):
+ETI's shared chart market API supports Bitget directly from Cloudflare Workers using the global `https://api.bitget.com` REST host. It does not use Fly.io, a paid regional proxy, or exchange credentials for public data.
+
+| Product | Symbol catalogue | Chart data category |
+|---|---|---|
+| Spot | `/api/market/symbols?venue=bitget&market=spot` | `SPOT` |
+| Margin (cross / isolated eligibility) | `/api/market/symbols?venue=bitget&market=margin` | `MARGIN` |
+| USDT-margined perpetual futures | `/api/market/symbols?venue=bitget&market=futures&category=USDT-FUTURES` | `USDT-FUTURES` |
+| USDC-margined futures | same route with `category=USDC-FUTURES` | `USDC-FUTURES` |
+| Coin-margined futures | same route with `category=COIN-FUTURES` | `COIN-FUTURES` |
+
+The common market endpoints accept `venue=bitget`:
+- `GET /api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1m`
+- `GET /api/market/depth?venue=bitget&symbol=BTCUSDT`
+- `GET /api/market/trades?venue=bitget&symbol=BTCUSDT`
+- `GET /api/market/ticker?venue=bitget&symbol=BTCUSDT`
+
+Use `market=futures` and an explicit Bitget futures `category` for derivatives. Use `market=margin` for margin-enabled spot pairs. Spot, margin, USDT, USDC and Coin-M data are never silently substituted for one another. The symbol catalogue is refreshed on a 60-second cache; public REST calls use short cache windows and strict payload validation.
+
+## Account, fills and history
+
+Worker secrets (only credential variable names are ever reported):
 
 | Credential | Names accepted |
 |---|---|
@@ -14,28 +30,28 @@ Worker secrets (any listed name works; only names are reported, never values):
 | API secret | `BITGET_API_SECRET`, `BITGET_SECRET_KEY`, `BITGET_SECRET` |
 | Passphrase | `BITGET_API_PASSPHRASE`, `BITGET_PASSPHRASE` |
 
-All routes except `margin-pairs` need `Authorization: Bearer <ETI_EXECUTION_TOKEN>`. `market` is one of `spot`, `margin-crossed`,
-`margin-isolated`, `usdt-futures`, `usdc-futures`, `coin-futures`.
+All private routes except the public margin catalogue require `Authorization: Bearer <ETI_EXECUTION_TOKEN>`. `market` is one of `spot`, `margin-crossed`, `margin-isolated`, `usdt-futures`, `usdc-futures`, `coin-futures`.
 
 | Route | Returns |
 |---|---|
-| `GET /api/bitget/status` | which credential names were found, markets, storage, read-only flag |
-| `GET /api/bitget/account?market=` | balances / account equity |
-| `GET /api/bitget/positions?market=usdt-futures` | open futures positions |
+| `GET /api/bitget/status` | credential presence (names only), enabled markets and storage readiness |
+| `GET /api/bitget/account?market=` | account balances / equity |
+| `GET /api/bitget/positions?market=usdt-futures` | futures positions |
 | `GET /api/bitget/orders?market=&symbol=` | order history |
-| `GET /api/bitget/fills?market=&symbol=&startTime=&endTime=` | live fills from Bitget, normalised (id, symbol, side, price, qty, quote qty, fee, fee coin, maker/taker, time, realized PnL for futures) |
-| `POST /api/bitget/sync[?market=]` | pulls new fills into KV (`ETI_EXECUTION_LOG`), de-duplicated by fill id, cursor per market |
-| `GET /api/bitget/trades?market=&symbol=` | the stored history written by the sync |
+| `GET /api/bitget/fills?market=&symbol=&startTime=&endTime=` | normalized fills, fees and realized futures PnL |
+| `POST /api/bitget/sync[?market=]` | idempotent fill sync into `ETI_EXECUTION_LOG` |
+| `GET /api/bitget/trades?market=&symbol=` | stored trade history |
+| `GET /api/bitget/margin-pairs` | public margin eligibility and cross/isolated leverage limits |
 
-The 5-minute cron runs the sync for all six markets when credentials and KV are present. First sync looks back `ETI_BITGET_BACKFILL_DAYS` (default 7, max 90).
-Bitget margin endpoints require a symbol, so margin fills are synced only for `ETI_BITGET_MARGIN_SYMBOLS` (comma-separated) or an explicit `symbol` query.
+The 5-minute sync covers all six account market types when credentials and KV storage are configured. Margin fill history needs explicit symbols via `ETI_BITGET_MARGIN_SYMBOLS`.
 
-## Safety
-- Read-only by construction: only GET requests to a 13-path allowlist are signed (`path_not_allowed` otherwise). No order, transfer or withdrawal endpoint exists in the code, and tests assert this.
-- Create the Bitget key with **read-only** permission and, if you use IP whitelisting, whitelist Cloudflare egress or leave it open (Workers have no fixed IP).
-- Bitget error codes are passed through (`bitget_40018` bad key/signature, `bitget_40014` missing permission, `bitget_40019` IP not whitelisted); nothing is converted into an empty success.
+## Execution and regional eligibility
+
+- The existing live-order adapter is separate from public market data. It requires the master ETI execution token, explicit risk confirmation, kill-switch approval, audit KV, quantity/notional limits and futures leverage checks. No transfer or withdrawal route is exposed.
+- Use an API key with only the permissions ETI needs; disable withdrawals. IP allowlisting may require a fixed egress IP, which Cloudflare Workers Free does not provide. Do not enable IP whitelist unless the Worker outbound IP situation is supported by your Bitget account setup.
+- The public API uses Bitget's global host. Hosting the Worker in a Cloudflare location does not alter account registration country, KYC or product permissions. A Ghana-based user must use the actual Bitget account's global/regional entity and the products available to that verified account. ETI will report upstream geo/IP errors instead of masking them.
+- Cloudflare Workers Free is used for this integration; Fly.io is not part of the deployment workflow.
 
 ## Verification status
-Implemented from Bitget's documented v2 REST API and tested against mocked responses (signature verified against an independent HMAC, normalisation of
-all three fill shapes, idempotent sync, error surfacing). It has **not** been run against the live exchange: the build sandbox cannot reach Bitget. After deploying, call `GET /api/bitget/status`, then `GET /api/bitget/account?market=spot` and `POST /api/bitget/sync`; an error code names the exact problem.
-Not built: order placement on Bitget (ETI orders still go to ETI Internal Paper or Binance testnet) and WebSocket streaming (REST polling only).
+
+Automated tests cover request routing, all Bitget public product categories, candle normalization, symbol catalogues, margin catalogue, authentication boundaries and malformed upstream data. Production verification still requires the deployed Worker to reach Bitget from its Cloudflare egress and, for private account routes, valid Bitget credentials and KV configuration.
