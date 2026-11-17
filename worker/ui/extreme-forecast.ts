@@ -1,4 +1,4 @@
-const EXTREME_FORECAST_CSS = `<style id="eti-extreme-forecast-css">
+export const EXTREME_FORECAST_CSS = `<style id="eti-extreme-forecast-css">
 .eti-extreme-forecast{margin:8px 0 10px;padding:12px 14px;border:1px solid rgba(80,150,210,.35);border-radius:10px;background:rgba(9,22,39,.88);color:#e8f1fb;font:12px/1.5 system-ui,sans-serif}
 .eti-extreme-forecast .ef-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
 .eti-extreme-forecast .ef-title{font-size:13px;font-weight:750;letter-spacing:.02em}
@@ -16,7 +16,7 @@ const EXTREME_FORECAST_CSS = `<style id="eti-extreme-forecast-css">
 @media(max-width:720px){.eti-extreme-forecast .ef-grid{grid-template-columns:1fr}.eti-extreme-forecast .ef-value{font-size:15px}}
 </style>`;
 
-const EXTREME_FORECAST_JS = `<script id="eti-extreme-forecast-js">
+export const EXTREME_FORECAST_JS = `<script id="eti-extreme-forecast-js">
 (function(){
 'use strict';
 var cv=document.getElementById('chart'),stack=document.getElementById('stack');
