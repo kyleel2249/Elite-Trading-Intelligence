@@ -123,7 +123,7 @@ function analyze(chartTf,inputs,o){
  }
  var by={};active.forEach(function(z){var b=by[z.timeframe]||(by[z.timeframe]={active:0,bullish:0,bearish:0});b.active++;if(z.direction==='bullish')b.bullish++;else b.bearish++;});
  function pick(zs){return zs.sort(function(a,b){return b.relevance-a.relevance;})[0]||null;}
- var summary={active:active.length,bullishActive:active.filter(function(z){return z.direction==='bullish';}).length,bearishActive:active.filter(function(z){return z.direction==='bearish';}).length,byTimeframe:by,
+ var summary={active:active.length,unfilledActive:active.filter(function(z){return z.status==='fresh';}).length,partiallyFilledActive:active.filter(function(z){return z.status==='partially_mitigated';}).length,bullishActive:active.filter(function(z){return z.direction==='bullish';}).length,bearishActive:active.filter(function(z){return z.direction==='bearish';}).length,byTimeframe:by,
   nearestSupport:pick(active.filter(function(z){return z.direction==='bullish'&&z.lower<=price;})),nearestResistance:pick(active.filter(function(z){return z.direction==='bearish'&&z.upper>=price;})),
   inside:active.filter(function(z){return price>=z.lower&&price<=z.upper;}),confluentZones:active.filter(function(z){return z.confluence.length>0;}).length};
  return {chartTimeframe:chartTf,price:price,atr:atr,zones:shown,totalDetected:all.length,summary:summary,canTriggerTrade:false};
@@ -142,6 +142,7 @@ function curTf(){var e=document.getElementById('interval');return e?e.value:'';}
 function marketKey(){var s=document.getElementById('symbol'),m=(typeof mkt==='function'?mkt():'');return (s?s.value:'')+'|'+m;}
 function higher(tf){var i=ORDER.indexOf(tf);return i<0?[]:ORDER.slice(i+1,i+3);}
 var STATUS={fresh:'fresh',partially_mitigated:'partially mitigated',fully_mitigated:'fully mitigated',invalidated:'invalidated',expired:'expired'};
+function statusLabel(z){return z.status==='fresh'?'UNFILLED':z.status==='partially_mitigated'?'PARTIALLY FILLED':STATUS[z.status].toUpperCase();}
 
 function loadHtf(){
  if(!st.on||typeof getJson!=='function')return;
@@ -206,9 +207,9 @@ function paint(){
   texts.forEach(function(t,idx){
    var z=t.z,bull=z.direction==='bullish',lx=Math.max(t.x0+4,4);
    if(t.x1-lx<60||t.h<12||idx>=8)return;
-   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+(z.mitigationPct&&z.active?' '+z.mitigationPct+'%':'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
+   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+statusLabel(z)+' · '+z.mitigationPct+'% FILLED'+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
    x.fillStyle=hexRgba(t.col,1);x.textAlign='left';x.fillText(head,lx,t.y0+8);
-   if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText('gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · formed @'+price(z.formationPrice),lx,t.y0+20);}
+   if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText('gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · '+price(z.upper)+'–'+price(z.lower)+' · '+new Date(z.formationTime).toLocaleString(),lx,t.y0+20);}
    if(t.h>=34&&t.x1-lx>240){x.textAlign='right';x.fillStyle=hexRgba(t.col,1);x.fillText(price(z.upper),t.x1-5,t.y0+8);x.fillText(price(z.lower),t.x1-5,t.y0+t.h-7);x.textAlign='left';}
   });
   x.textBaseline='alphabetic';x.textAlign='left';
@@ -239,7 +240,7 @@ function renderBar(){
   Array.prototype.forEach.call($f('fvgTfs').querySelectorAll('input'),function(i){i.onchange=function(){st.tf[i.getAttribute('data-tf')]=i.checked;try{drawChart();}catch(_){}};});
  }
  var sm=res?res.summary:null;
- var txt=!st.on?'FVG zones hidden':!sm?'Waiting for candles…':sm.active+' active ('+sm.bullishActive+' bull / '+sm.bearishActive+' bear)'+(sm.confluentZones?' · '+sm.confluentZones+' in multi-timeframe confluence':'')+(sm.inside.length?' · price inside '+sm.inside.length:'');
+ var txt=!st.on?'FVG zones hidden':!sm?'Waiting for candles…':sm.active+' active ('+sm.unfilledActive+' unfilled / '+sm.partiallyFilledActive+' partially filled · '+sm.bullishActive+' bull / '+sm.bearishActive+' bear)'+(sm.confluentZones?' · '+sm.confluentZones+' in multi-timeframe confluence':'')+(sm.inside.length?' · price inside '+sm.inside.length:'');
  if($f('fvgSum').textContent!==txt)$f('fvgSum').textContent=txt;
  var errs=[];higher(tf).forEach(function(h){if(htf.err[h])errs.push(h+' unavailable ('+htf.err[h]+')');});
  var w=errs.length?'Higher-timeframe FVGs: '+errs.join(', '):'';if($f('fvgWarn').textContent!==w)$f('fvgWarn').textContent=w;
@@ -247,7 +248,7 @@ function renderBar(){
  if(ids!==list.getAttribute('data-ids')){
   list.setAttribute('data-ids',ids);
   var zs=res&&st.on?res.zones.filter(visible):[];
-  list.innerHTML='<summary>Zone list ('+zs.length+') — select a zone to inspect it</summary><ul>'+zs.map(function(z){return '<li><button type="button" data-id="'+esc2(z.id)+'">'+esc2(z.timeframe)+' '+(z.direction==='bullish'?'▲':'▼')+' '+esc2(price(z.lower))+'–'+esc2(price(z.upper))+' · '+esc2(STATUS[z.status])+'</button></li>';}).join('')+'</ul>';
+  list.innerHTML='<summary>Zone list ('+zs.length+') — select a zone to inspect it</summary><ul>'+zs.map(function(z){return '<li><button type="button" data-id="'+esc2(z.id)+'">'+esc2(z.timeframe)+' '+(z.direction==='bullish'?'▲':'▼')+' '+esc2(price(z.lower))+'–'+esc2(price(z.upper))+' · '+esc2(statusLabel(z))+' · '+esc2(z.mitigationPct)+'% filled</button></li>';}).join('')+'</ul>';
   Array.prototype.forEach.call(list.querySelectorAll('button'),function(b){b.onclick=function(){select(b.getAttribute('data-id'));};});
  }
 }
@@ -260,8 +261,8 @@ function select(id){
  panel.hidden=false;
  panel.innerHTML='<strong style="color:'+esc2(bull?st.bull:st.bear)+'">FVG '+(bull?'▲ bullish':'▼ bearish')+' · '+esc2(z.timeframe)+(z.timeframe===curTf()?'':' (higher timeframe)')+'</strong> <button type="button" id="fvgClose" aria-label="Close zone details">Close</button><dl>'
   +dt('Upper',price(z.upper))+dt('Lower',price(z.lower))+dt('Midpoint (CE)',price(z.mid))+dt('Gap size',price(z.sizeAbs)+' · '+z.sizePct+'% · '+z.sizeAtr+' ATR')
-  +dt('Formation price',price(z.formationPrice))+dt('Formed',new Date(z.formationTime).toLocaleString())+dt('Status',STATUS[z.status]+(z.active?' (active)':''))
-  +dt('Mitigation',z.mitigationPct+'%'+(z.active&&z.mitigationPct?' — unfilled '+price(z.remainingLower)+'–'+price(z.remainingUpper):''))
+  +dt('Formation price',price(z.formationPrice))+dt('Formed',new Date(z.formationTime).toLocaleString())+dt('Status',statusLabel(z)+(z.active?' (active)':''))
+  +dt('Filled',z.mitigationPct+'%')+dt('Unfilled portion',z.active?price(z.remainingLower)+'–'+price(z.remainingUpper)+' ('+(100-z.mitigationPct)+'% remaining)':'none — zone resolved')
   +dt('Touches',z.touches+(z.ceTouched?' (midpoint reached)':''))+dt('Age',z.ageBars+' bars')+dt('Strength',z.strength+'/100')+dt('Freshness',Math.round(z.freshness*100)+'%')
   +dt('Displacement',z.displacementAtr+' ATR body')+dt('Volume vs average',z.volumeRatio+'×')
   +dt('Confluence',z.confluence.length?z.confluence.map(function(c){return c.timeframe+' ('+c.overlapPct+'% overlap)';}).join(', '):'none')
