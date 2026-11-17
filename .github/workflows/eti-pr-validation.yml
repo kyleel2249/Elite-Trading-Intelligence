@@ -1,0 +1,35 @@
+name: ETI Pull Request Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - "app/**"
+      - "migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - "wrangler.jsonc"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eti-pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run full ETI validation suite
+        run: npm run check
