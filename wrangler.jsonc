@@ -7,9 +7,6 @@
   },
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
-  "placement": {
-    "region": "aws:eu-central-1"
-  },
   "observability": {
     "enabled": true
   },
@@ -51,6 +48,7 @@
     "ETI_RISK_MAX_DRAWDOWN": "0.1",
     "PAPER_AUTOPILOT": "true",
     "MARKET_PROVIDER_ORDER": "bybit",
+    "BYBIT_MARKET_DATA_ORIGIN": "https://eti-trading-intelligence.fly.dev",
     "SEC_USER_AGENT": "ETI (Elite Trading Intelligence; contact: davinatirzah@gmail.com)"
   },
   "d1_databases": [
