@@ -20,7 +20,7 @@ from app.market.service import MarketService
 logger = logging.getLogger("eti.market_symbols")
 router = APIRouter(tags=["market-symbols"])
 
-Provider = Literal["binance", "bitget", "alpaca", "oanda", "twelvedata"]
+Provider = Literal["bybit", "binance", "bitget", "alpaca", "oanda", "twelvedata"]
 
 
 async def _source(provider: str, settings: Settings, refresh: bool):
@@ -31,7 +31,7 @@ async def _source(provider: str, settings: Settings, refresh: bool):
 
 @router.get("/api/market/symbols")
 async def list_symbols(
-    provider: Literal["binance", "bitget", "alpaca", "oanda", "twelvedata", "all"] = "all",
+    provider: Literal["bybit", "binance", "bitget", "alpaca", "oanda", "twelvedata", "all"] = "all",
     q: str = Query("", max_length=32),
     quote: str = Query("", max_length=12),
     exchange: str = Query("", max_length=12, description="Filter by exchange / MIC, e.g. XETR or FOREX"),
@@ -41,13 +41,13 @@ async def list_symbols(
     refresh: bool = False,
     settings: Settings = Depends(get_settings),
 ):
-    """Tradable pairs/instruments: Binance and Bitget spot (public), US stocks (Alpaca keys), forex/CFDs (OANDA keys),
+    """Tradable pairs/instruments: Bybit spot and perpetuals (public), US stocks (Alpaca keys), forex/CFDs (OANDA keys),
     non-US stocks and forex pairs (Twelve Data key). Each source reports ok / stale / unavailable / not_configured.
-    The Binance and Bitget lists re-sync every minute in the background (started on first use) and expire after 60 s on
+    The Bybit and other enabled lists re-sync every minute in the background (started on first use) and expire after 60 s on
     read, so newly listed pairs appear within about a minute. `refresh=true` forces a re-read (rate limited);
     `new_only=true` shows only pairs this server first saw after its first load of that exchange."""
     sym_mod.ensure_sync_started(settings)
-    wanted = ["binance", "bitget", "alpaca", "oanda", "twelvedata"] if provider == "all" else [provider]
+    wanted = ["bybit", "alpaca", "oanda", "twelvedata"] if provider == "all" else [provider]
     items, sources = [], {}
     for p in wanted:
         rows, meta = await _source(p, settings, refresh)
@@ -63,7 +63,7 @@ async def list_symbols(
 
 @router.get("/api/market/symbols/sync-status")
 async def symbols_sync_status(settings: Settings = Depends(get_settings)):
-    """State of the one-minute Binance/Bitget pair sync (runs, last run, last error, baseline providers)."""
+    """State of the one-minute Bybit pair sync (runs, last run, last error, baseline providers)."""
     sym_mod.ensure_sync_started(settings)
     return sym_mod.sync_status()
 
@@ -84,16 +84,18 @@ async def public_history(
     symbol: str = Query(..., pattern=r"^[A-Za-z0-9:/._-]{1,32}$"),
     interval: str = Query("1h", pattern=r"^[0-9]{1,2}[smhdwM]$"),
     limit: int = Query(100, ge=1, le=1000),
-    provider: Provider = "binance",
+    provider: Provider = "bybit",
     settings: Settings = Depends(get_settings),
 ):
     """Candles for any listed market, read-only. Binance uses Binance's public production market-data API (official global
     hosts with failover) so any listed pair can be charted even when ETI's trading client points at the testnet. Other
     markets use their own provider; ones that need credentials answer 503 when those are not configured."""
     sym = symbol.upper()
-    if provider in ("binance", "bitget") and not sym.isalnum():
+    if provider in ("bybit", "binance", "bitget") and not sym.isalnum():
         raise HTTPException(status_code=422, detail="symbol must be letters and digits, e.g. BTCUSDT")
     try:
+        if provider == "bybit":
+            return _normalise_service(await MarketService(settings).get_history("bybit", sym, interval=interval, limit=limit), response, "bybit")
         if provider == "binance":
             try:
                 rows, host = await bh.get_json("/api/v3/klines", {"symbol": sym, "interval": interval, "limit": limit})
