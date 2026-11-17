@@ -19,6 +19,6 @@ export async function handleAlgoSignal(req: Request, env: MarketEnv): Promise<Re
     // Flat compatibility view of the same decision.
     action: actionable ? r.decision : "HOLD",
     classification: r.validation?.classification ?? (r.decision === "DATA_UNRELIABLE" ? "REJECTED" : "HOLD"),
-    entry: r.entryZone ? (r.entryZone[0] + r.entryZone[1]) / 2 : null, riskReward: r.riskRewardToTP3 ?? null, tradeable: actionable,
+    entry: r.entryZone ? (r.entryZone[0] + r.entryZone[1]) / 2 : null, riskReward: r.riskRewardToTP3 ?? null, tradeable: actionable && (r.tradeable !== false), submitsOrder: false,
     signalPath: "omnisignal: engines -> fusion -> independent validation" });
 }
