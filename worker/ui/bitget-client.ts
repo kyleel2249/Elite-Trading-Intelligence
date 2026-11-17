@@ -105,6 +105,7 @@ async function symbols(kind){
   }else rows.push.apply(rows,instrumentRows(data,j.market,j.pt));
  });
  var seen={};rows=rows.filter(function(r){var key=r[0]+"|"+(r[6]||"")+"|"+r[3];if(seen[key])return false;seen[key]=1;return true}).sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0});
+ if(kind==="margin"&&!rows.length)warnings.push("Bitget returned no margin-eligible pairs for the selected account/product region");
  if(!rows.length&&warnings.length)throw new Error("Bitget catalogue unavailable: "+warnings.join("; "));
  return {data:{symbols:rows,warnings:warnings},provider:"bitget-browser",failover:false};
 }
