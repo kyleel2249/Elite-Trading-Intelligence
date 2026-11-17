@@ -232,9 +232,8 @@ class BybitAdapter(BrokerAdapter):
         return None
 
     async def cancel_order(self, symbol, client_order_id, provider_order_id):
-        payload = {"category": self.category, "symbol": symbol.upper(), "orderLinkId": client_order_id}
-        if provider_order_id:
-            payload["orderId"] = provider_order_id
+        payload = {"category": self.category, "symbol": symbol.upper()}
+        payload["orderId" if provider_order_id else "orderLinkId"] = provider_order_id or client_order_id
         await self._request("POST", "/v5/order/cancel", body=payload, write=True)
 
     async def list_open_orders(self):
