@@ -18,7 +18,7 @@ export interface AgentAutopilotEnv extends ExecutionEnv {
   ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE?: string;
   ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE?: string;
   ETI_AGENT_AUTOPILOT_MIN_AGREEMENT?: string;
-  ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string;
+  ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string;\n  ETI_AGENT_AUTOPILOT_STRATEGIES?: string;\n  ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT?: string;\n  ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE?: string;
 }
 type App = { fetch(request: Request, env: any): Promise<Response> | Response };
 const ALLOWED_INTERVALS = new Set(["5m", "15m", "30m", "1h", "4h", "1d"]);
@@ -68,8 +68,8 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
   const maxPerCycle = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE, 2, 1, 10));
   const minConfidence = envNum(env.ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE, 0.65, 0.5, 0.95);
   const minAgreement = envNum(env.ETI_AGENT_AUTOPILOT_MIN_AGREEMENT, 0.65, 0.5, 0.95);
-  const maxPositions = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS, 3, 1, 10));
-  if (!symbols.length) return { ...disabled, skipped: "no_valid_symbols" };
+  const maxPositions = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS, 3, 1, 10));\n  const strategies = [...new Set(String(env.ETI_AGENT_AUTOPILOT_STRATEGIES || "scalp,intraday,swing,position").split(",").map(s => s.trim().toLowerCase()).filter(s => ["scalp", "intraday", "swing", "position"].includes(s)))];\n  const minStrategyAgreement = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT, 3, 1, 4));\n  const minOmniConfidence = envNum(env.ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE, 60, 40, 95);
+  if (!symbols.length) return { ...disabled, skipped: "no_valid_symbols" };\n  if (!strategies.length || minStrategyAgreement > strategies.length) return { ...disabled, skipped: "invalid_strategy_configuration" };
 
   const store = openStore(env as any, "internal_paper");
   if (!store) return { ...disabled, skipped: "portfolio_storage_missing" };
@@ -102,12 +102,30 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
         },
       };
       const headers = { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "content-type": "application/json" };
+      const expectedAction = account.positionQuantity > 0 ? "SELL" : "BUY";
+      // Omnisignal runs the existing Swift + GainzAlgo engines, FVG, liquidity, flow,
+      // multi-timeframe and validation stack independently for each configured strategy.
+      const strategyResults: any[] = [];
+      for (const strategy of strategies) {
+        try {
+          const u = "https://eti.internal/api/omnisignal?symbol=" + encodeURIComponent(symbol) + "&strategy=" + encodeURIComponent(strategy) + "&engines=swift,gainz&venue=bybit&market=spot";
+          const response = await app.fetch(new Request(u), env);
+          const result: any = await response.json().catch(() => ({}));
+          strategyResults.push({ strategy, httpStatus: response.status, decision: result.decision || "DATA_UNRELIABLE", tradeable: result.tradeable === true, confidence: Number(result.confidence || 0), hardFailures: result.validation?.hardFailures || [], error: result.error || null });
+        } catch (e) {
+          strategyResults.push({ strategy, httpStatus: 0, decision: "DATA_UNRELIABLE", tradeable: false, confidence: 0, hardFailures: ["provider_request_failed"], error: e instanceof Error ? e.message : "unknown_error" });
+        }
+      }
+      const alignedStrategies = strategyResults.filter(x => x.httpStatus >= 200 && x.httpStatus < 300 && x.tradeable && x.decision === expectedAction && x.confidence >= minOmniConfidence && x.hardFailures.length === 0);
+      if (alignedStrategies.length < minStrategyAgreement) {
+        outcomes.push({ symbol, status: "no_trade", action: expectedAction, reason: "omnisignal_strategy_consensus_not_met", alignedStrategies: alignedStrategies.length, required: minStrategyAgreement, strategies: strategyResults });
+        continue;
+      }
       const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(body) }), env);
       const analysis: any = await preflight.json().catch(() => ({}));
       const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
-      const expectedAction = account.positionQuantity > 0 ? "SELL" : "BUY";
       if (!preflight.ok || decision?.action !== expectedAction || confidence < minConfidence || agreement < minAgreement || analysis.risk?.approved !== true || ["high", "critical"].includes(analysis.security?.severity)) {
-        outcomes.push({ symbol, status: "no_trade", action: decision?.action || "NO_TRADE", confidence, agreement, reason: !preflight.ok ? "analysis_unavailable" : decision?.vetoedBy || "autopilot_entry_thresholds_or_risk_not_met", vetoes: analysis.risk?.vetoes || [], security: analysis.security?.severity || "unknown" });
+        outcomes.push({ symbol, status: "no_trade", action: decision?.action || "NO_TRADE", confidence, agreement, reason: !preflight.ok ? "analysis_unavailable" : decision?.vetoedBy || "agent_consensus_or_risk_not_met", vetoes: analysis.risk?.vetoes || [], security: analysis.security?.severity || "unknown", strategies: strategyResults });
         continue;
       }
       if (expectedAction === "BUY" && activePositions.length + pendingEntryCount + submitted >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions" }); continue; }
@@ -119,7 +137,7 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const result: any = await response.json().catch(() => ({}));
       if (response.status >= 200 && response.status < 300 && result.ok) {
         submitted++;
-        outcomes.push({ symbol, status: "paper_order_submitted", action: result.decision?.action, confidence, agreement, broker: "eti_paper", simulated: true, order: result.broker?.order ?? result.broker?.fill ?? null });
+        outcomes.push({ symbol, status: "paper_order_submitted", action: result.decision?.action, confidence, agreement, alignedStrategies: alignedStrategies.length, strategies: strategyResults, broker: "eti_paper", simulated: true, order: result.broker?.order ?? result.broker?.fill ?? null });
       } else {
         outcomes.push({ symbol, status: response.status === 409 ? "risk_veto_or_no_trade" : "blocked", httpStatus: response.status, error: result.error || result.reason || "agent_execution_rejected", reasons: result.reasons || result.risk?.vetoes || [] });
       }
@@ -129,7 +147,7 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       await env.ETI_EXECUTION_LOG.put(claim, "complete", { expirationTtl: 60 * 60 * 24 * 3 }).catch(() => undefined);
     }
   }
-  const summary = { ...disabled, at: new Date(now).toISOString(), interval, symbols, submitted, evaluated: outcomes.length, outcomes, policy: { minConfidence, minAgreement, maxPositions, maxPerCycle, noPyramiding: true, riskManagerVetoBinding: true } };
+  const summary = { ...disabled, at: new Date(now).toISOString(), interval, symbols, submitted, evaluated: outcomes.length, outcomes, policy: { minConfidence, minAgreement, minOmniConfidence, strategies, minStrategyAgreement, maxPositions, maxPerCycle, noPyramiding: true, riskManagerVetoBinding: true } };
   await env.ETI_EXECUTION_LOG.put("agent-autopilot:last", json(summary), { expirationTtl: 60 * 60 * 24 * 30 });
   return summary;
 }
