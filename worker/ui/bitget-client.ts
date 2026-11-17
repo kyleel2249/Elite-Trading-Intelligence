@@ -50,6 +50,7 @@ async function candles(opts){
   var remaining=limit-rows.length,oldest=rows[0][0],history="/api/v2/mix/market/history-candles?"+q({symbol:symbol,productType:category,granularity:paths.gran,limit:Math.min(200,remaining),endTime:Math.max(1,oldest-1)});
   try{var older=await request(null,[history]);rows=parseCandles(older.data).concat(rows).sort(function(a,b){return a[0]-b[0]})}catch(e){}
  }
+ if(!rows.length)throw new Error("Bitget returned no candle rows");
  const latest=rows[rows.length-1],tfMs={"1m":60000,"3m":180000,"5m":300000,"15m":900000,"30m":1800000,"1h":3600000,"4h":14400000,"6h":21600000,"12h":43200000,"1d":86400000,"1w":604800000}[interval],age=Date.now()-latest[0];
  if(age < -60000 || age > tfMs*3)throw new Error("Bitget "+interval+" candles are stale ("+Math.round(age/1000)+"s old)");
  return rows.slice(-limit);
