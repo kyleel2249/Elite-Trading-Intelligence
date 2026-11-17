@@ -68,6 +68,26 @@ async def symbols_sync_status(settings: Settings = Depends(get_settings)):
     return sym_mod.sync_status()
 
 
+@router.get("/api/market/bybit/derivatives-context")
+async def bybit_derivatives_context(
+    symbol: str = Query(..., pattern=r"^[A-Za-z0-9]{2,32}$"),
+    category: Literal["linear", "inverse"] = "linear",
+    interval: Literal["5min", "15min", "30min", "1h", "4h", "1d"] = "1h",
+    limit: int = Query(50, ge=1, le=200),
+    settings: Settings = Depends(get_settings),
+):
+    """Latest funding rate and chronological open-interest observations for a Bybit perpetual contract."""
+    try:
+        return await MarketService(settings).get_derivatives_context(
+            symbol=symbol, category=category, interval=interval, limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.warning("Bybit derivatives context failed: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=502, detail="Bybit derivatives context failed upstream")
+
+
 @router.get("/api/market/binance-hosts")
 async def binance_hosts_status():
     """Which official Binance hosts ETI uses for public data, which one last worked and what the last failures were."""
