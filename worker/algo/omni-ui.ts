@@ -209,8 +209,13 @@ function analyse(){
  var q=params();if(!/^[A-Z0-9]{5,20}$/.test(q.symbol)){setStatus("Symbol must be 5-20 letters or digits, e.g. BTCUSDT",true);return Promise.resolve()}
  if(!q.engines.length){setStatus("Enable at least one engine",true);return Promise.resolve()}
  if(state.busy)return Promise.resolve();state.busy=true;$("refresh").disabled=true;setStatus("Analysing "+q.symbol+"…");
- return api("/api/omnisignal",{method:"POST",body:q}).then(function(r){
-  if(r.ok&&r.body&&r.body.fusion){renderAll(r.body);setStatus("Updated "+new Date().toLocaleTimeString()+" - "+q.symbol+" "+q.strategy)}
+ var prepare=Promise.resolve();
+ if(q.venue==="bitget"){
+  if(!window.ETIBitget)prepare=Promise.reject(new Error("Bitget browser adapter did not load"));
+  else prepare=window.ETIBitget.loadSignalInputs({symbol:q.symbol,strategy:q.strategy,market:q.market,category:q.category}).then(function(marketData){q.marketData=marketData;setStatus("Bitget browser feed loaded; running ETI analysis…")});
+ }
+ return prepare.then(function(){return api("/api/omnisignal",{method:"POST",body:q})}).then(function(r){
+  if(r.ok&&r.body&&r.body.fusion){renderAll(r.body);setStatus("Updated "+new Date().toLocaleTimeString()+" - "+q.symbol+" "+q.strategy+(q.venue==="bitget"?" · Bitget browser feed":""))}
   else{clearAll(r.body&&r.body.error?"Market data unavailable ("+r.body.error+"). No stale values are shown.":"Request failed (HTTP "+r.status+")");setStatus("Analysis failed",true)}
  }).catch(function(e){clearAll("Network error: "+e.message);setStatus("Analysis failed",true)}).then(function(){state.busy=false;$("refresh").disabled=false})}
 
