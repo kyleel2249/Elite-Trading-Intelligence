@@ -111,3 +111,13 @@ test("HTTP: private routes need the bearer token, status never reveals values, m
   assert.equal(bad.status, 400);
   assert.equal(BITGET_MARKETS.length, 6);
 });
+
+test("open orders cover spot, futures and symbol-scoped margin with remaining quantities",async()=>{
+ const {getOpenOrders}=await import("./api.ts");const urls:string[]=[];
+ const fetchImpl=(async(u:string)=>{urls.push(u);const path=new URL(u).pathname;const row=path.includes("/margin/")?{orderId:"m1",symbol:"BTCUSDT",baseSize:"2",size:"0.5",side:"buy",status:"live"}:{orderId:"o1",symbol:"BTCUSDT",qty:"1",cumExecQty:"0.25",side:"buy",orderStatus:"live"};return ok({orderList:[row]});}) as any;
+ const spot=await getOpenOrders(ENV,"spot",[],{fetchImpl,now:()=>1700000000000});
+ const fut=await getOpenOrders(ENV,"usdt-futures",[],{fetchImpl,now:()=>1700000000000});
+ const margin=await getOpenOrders(ENV,"margin-crossed",["BTCUSDT"],{fetchImpl,now:()=>1700000000000});
+ assert.equal(spot[0].leavesQty,0.75);assert.equal(fut[0].leavesQty,0.75);assert.equal(margin[0].qty,2);assert.equal(margin[0].leavesQty,1.5);
+ assert.match(urls[0],/spot\/trade\/unfilled-orders/);assert.match(urls[1],/mix\/order\/orders-pending/);assert.match(urls[2],/margin\/crossed\/open-orders/);assert.match(urls[2],/startTime=1699395200000/);
+});
