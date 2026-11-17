@@ -15,6 +15,8 @@ The Agent Intelligence Center contains twelve structured specialist agents: Comm
 
 ## Default deployment configuration
 
+Cloudflare deployment uses `ETI_AGENT_AUTOPILOT_ENABLED=true` and one consolidated `ETI_AGENT_AUTOPILOT_CONFIG` JSON variable to remain within the Workers Free plan's 64-variable ceiling. The Worker still accepts individual `ETI_AGENT_AUTOPILOT_*` overrides for local/testing environments.
+
 | Setting | Default |
 |---|---|
 | Enabled | true |
