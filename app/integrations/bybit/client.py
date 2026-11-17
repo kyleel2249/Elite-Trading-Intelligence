@@ -24,14 +24,33 @@ class BybitClient(BaseProvider):
         # Public market data is available without API credentials.
         return True
 
-    async def _get(self, path: str, params: dict[str, Any]):
+    async def get_public_payload(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Fetch an allow-listed public V5 endpoint from the Frankfurt backend egress."""
+        allowed = {
+            "/v5/market/time", "/v5/market/instruments-info", "/v5/market/kline",
+            "/v5/market/orderbook", "/v5/market/recent-trade", "/v5/market/tickers",
+            "/v5/market/funding/history", "/v5/market/open-interest",
+        }
+        if path not in allowed:
+            raise ValueError("Bybit public endpoint is not allow-listed")
+        last_error: Optional[Exception] = None
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(self.base_url + path, params=params, headers={"accept": "application/json"})
-        response.raise_for_status()
-        body = response.json()
-        if not isinstance(body, dict) or body.get("retCode") != 0 or not isinstance(body.get("result"), dict):
-            code = body.get("retCode") if isinstance(body, dict) else "invalid"
-            raise RuntimeError(f"Bybit V5 rejected public market request ({code})")
+            for host in (self.base_url, "https://api.bytick.com"):
+                try:
+                    response = await client.get(host + path, params=params, headers={"accept": "application/json"})
+                    response.raise_for_status()
+                    body = response.json()
+                    if not isinstance(body, dict) or "retCode" not in body or not isinstance(body.get("result"), dict):
+                        raise RuntimeError("Bybit V5 returned a malformed public payload")
+                    if body.get("retCode") != 0:
+                        raise RuntimeError(f"Bybit V5 rejected public market request ({body.get('retCode')})")
+                    return body
+                except Exception as exc:
+                    last_error = exc
+        raise RuntimeError(f"Bybit public market request failed ({type(last_error).__name__ if last_error else 'unknown'})") from None
+
+    async def _get(self, path: str, params: dict[str, Any]):
+        body = await self.get_public_payload(path, params)
         return body["result"]
 
     async def health(self) -> dict[str, Any]:
