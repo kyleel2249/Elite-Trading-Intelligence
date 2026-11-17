@@ -30,7 +30,8 @@ test("portfolio fragments are safe to embed in the dashboard template (no backti
 test("dashboard ships the 3D motion layer: reduced-motion safe, no external scripts, tilt skips the order panel", async () => {
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
   assert.match(html, /id="eti-motion"/); assert.match(html, /prefers-reduced-motion/); assert.match(html, /execpanel'\)\)return/);
-  assert.doesNotMatch(html, /<script[^>]+src=/i, "no external script is loaded");
+  assert.match(html, /<script[^>]+src="\/bitget-client\.js"/i, "the same-origin Bitget adapter is loaded");
+  assert.doesNotMatch(html, /<script[^>]+src="https?:\/\//i, "no third-party script is loaded");
 });
 
 test("/elite is served, loads no external script, and carries none of the reference image's sample figures", async () => {
@@ -41,31 +42,30 @@ test("/elite is served, loads no external script, and carries none of the refere
 });
 
 // Regression: the dashboard explicitly loads Bybit and Bitget catalogs and routes chart requests to the selected venue/product.
-test("dashboard market requests support Bybit and Bitget spot, margin and futures", async () => {
+test("dashboard supports Bybit Worker routes and Bitget browser-direct spot, margin and futures", async () => {
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
   assert.match(html, /venue=bybit/);
-  assert.match(html, /venue=bitget/);
   assert.match(html, /market=margin/);
   assert.match(html, /usdt-futures/);
   assert.match(html, /Bitget \(spot, margin &amp; futures\)/);
+  assert.match(html, /window\.ETIBitget\.symbols\('all'\)/);
+  assert.match(html, /window\.ETIBitget\.symbols\('margin'\)/);
+  assert.match(html, /window\.ETIBitget\.marketData/);
+  assert.match(html, /bitget-browser/);
   assert.match(html, /function mkt\(\)\{[^}]*venue=/);
   assert.match(html, /const SYM=\{all:\[\],market:'spot',venue:'bybit'/);
 
   const { handleMarket } = await import("./market.ts");
-  const realFetch = globalThis.fetch, now = Date.now();
+  const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: any) => {
     const u = new URL(String(input));
-    if (u.hostname === "api.bitget.com") return new Response(JSON.stringify({ code: "00000", data: [[String(now), "100", "103", "99", "102", "12"]] }));
-    if (u.pathname === "/v5/market/kline") return new Response(JSON.stringify({ retCode: 0, result: { list: [[String(now), "100", "103", "99", "102", "12", "0"]] } }));
+    if (u.pathname === "/v5/market/kline") return new Response(JSON.stringify({ retCode: 0, result: { list: [[String(Date.now()), "100", "103", "99", "102", "12", "0"]] } }));
     return new Response(JSON.stringify({ retCode: 0, result: { list: [], nextPageCursor: "" } }));
   }) as typeof fetch;
   try {
     const call = (path: string) => handleMarket(new Request("https://x.test" + path), {} as any);
     assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
     assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5&market=futures")).status, 200);
-    assert.equal((await call("/api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
-    assert.equal((await call("/api/market/klines?venue=bitget&market=margin&symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
-    assert.equal((await call("/api/market/klines?venue=bitget&market=futures&category=USDT-FUTURES&symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
     for (const bad of ["venue=all", "venue=binance"]) {
       assert.equal((await call("/api/market/symbols?" + bad)).status, 400, bad);
       assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&" + bad)).status, 400, bad);
