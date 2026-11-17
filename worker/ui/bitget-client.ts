@@ -30,7 +30,7 @@ function parseCandles(data){
  return (Array.isArray(data)?data:[]).map(function(r){
   if(!Array.isArray(r))return null;
   var row=[millis(r[0]),num(r[1]),num(r[2]),num(r[3]),num(r[4]),num(r[5])];
-  return row.every(function(x){return x!==null})&&row[0]>0&&row[1]>0&&row[2]>=row[3]&&row[3]>0&&row[5]>=0?row:null;
+  return row.every(function(x){return x!==null})&&row[0]>0&&row[1]>0&&row[2]>=Math.max(row[1],row[4])&&row[3]<=Math.min(row[1],row[4])&&row[2]>=row[3]&&row[3]>0&&row[5]>=0?row:null;
  }).filter(Boolean).sort(function(a,b){return a[0]-b[0]});
 }
 function candleRequest(symbol,interval,limit,market,category){
