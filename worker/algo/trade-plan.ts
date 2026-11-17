@@ -69,6 +69,8 @@ export function calculateTradePlan(input: TradePlanInput): TradePlan {
   const fractionTotal = fractions.reduce((a, b) => a + b, 0);
   if (fractions.some(f => !Number.isFinite(f) || f <= 0 || f > 1) || fractionTotal > 1.000001) blockers.push("Take-profit close fractions must be positive and total no more than 100%");
   if (!costsConfigured) notes.push("Fees and slippage were not supplied; net reward/risk is not estimated");
+  notes.push("Margin is an estimate only; exchange maintenance tiers, liquidation fees, funding payments and borrow interest are excluded.");
+  if (contractType === "inverse" && finitePositive(contractValue)) notes.push("Inverse sizing uses quote-currency contract value; estimated margin is a quote-currency equivalent, not the coin collateral amount.");
   if (blockers.length) return {
     valid: false, canSubmitOrder: false, direction, entry, stopLoss, quantity: 0, quantityUnit: contractType === "inverse" ? "contracts" : "base_units", notional: 0, riskBudget,
     plannedStopRisk: 0, remainingRiskBudget: riskBudget, riskPerUnit: Number.isFinite(riskPerUnit) ? riskPerUnit : 0,
