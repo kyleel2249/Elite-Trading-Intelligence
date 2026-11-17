@@ -159,7 +159,20 @@ class BybitAdapter(BrokerAdapter):
 
     async def get_positions(self):
         if self.category == "spot":
-            return []
+            if not self.symbols:
+                return []
+            result = await self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
+            accounts = result.get("list") or []
+            coins = {str(c.get("coin") or "").upper(): float(c.get("walletBalance") or 0)
+                     for c in (accounts[0].get("coin") or [])} if accounts else {}
+            out = []
+            for symbol in self.symbols:
+                base = next((symbol[:-len(q)] for q in ("USDT", "USDC", "BTC", "ETH", "USD") if symbol.endswith(q)), "")
+                qty = coins.get(base, 0.0)
+                if qty > 0:
+                    quote = await self.get_quote(symbol)
+                    out.append(BrokerPosition(symbol, qty, 0.0, quote.mid))
+            return out
         out = []
         targets = self.symbols or [None]
         for symbol in targets:
