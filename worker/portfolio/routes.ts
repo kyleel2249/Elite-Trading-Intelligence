@@ -80,6 +80,8 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   const environment = (ENVIRONMENTS as string[]).includes(asked || "") ? asked as Environment : (auth.master || auth.scopes.has("paper") ? "internal_paper" : "exchange_testnet");
   const need = scopeOf(environment);
   if (need && !can(auth, need)) return reply({ error: "environment_scope_mismatch", required_session: need, environment, message: "This view needs an " + LABEL[environment].toUpperCase() + " session. Sessions are isolated per environment." }, 403);
+  if (path === "/api/portfolio/manager" && req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+  if (path === "/api/portfolio/manager" && environment === "live") return reply({ environment, disabled: true, mode: "read_only_disabled", executionEnabled: false, message: "Live portfolio management is disabled; no live account data or orders are accessed." }, 423);
   if (environment === "live") return reply(post ? { error: "live_disabled", message: "Live trading is disabled; there is nothing to change." } : await buildState(env, deps, "live", now), post ? 423 : 200);
   if (!storageConfigured(env)) return reply({ error: "storage_not_configured", message: "Bind the ETI_PORTFOLIO_DB D1 database (preferred) or the ETI_EXECUTION_LOG KV namespace to store the portfolio." }, 503);
 
