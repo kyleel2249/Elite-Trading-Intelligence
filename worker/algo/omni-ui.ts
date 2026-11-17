@@ -55,7 +55,7 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <label>Symbol<input type="text" id="symbol" value="BTCUSDT" maxlength="20" pattern="[A-Za-z0-9]{5,20}" required></label>
 <label>Strategy<select id="strategy"><option value="scalp">Scalp</option><option value="intraday" selected>Intraday</option><option value="swing">Swing</option><option value="position">Position</option></select></label>
 <label>Venue / Market<select id="market"><option value="bybit:linear" selected>Bybit Linear Futures</option><option value="bybit:inverse">Bybit Inverse Futures</option><option value="bybit:spot">Bybit Spot</option><option value="bitget:USDT-FUTURES">Bitget USDT Futures</option><option value="bitget:USDC-FUTURES">Bitget USDC Futures</option><option value="bitget:COIN-FUTURES">Bitget Coin Futures</option><option value="bitget:SPOT">Bitget Spot</option></select></label>
-<label>Account equity (optional)<input type="number" id="equity" min="0" step="any" placeholder="For position sizing"></label>
+<label>Account equity (quote currency)<input type="number" id="equity" min="0" step="any" placeholder="e.g. 10000 USDT / USD"></label>
 <label>Risk %<input type="number" id="risk" min="0.01" max="5" step="0.01" value="1"></label>
 <label>Leverage<input type="number" id="leverage" min="1" max="100" step="1" value="1"></label>
 <label>Fee bps<input type="number" id="fee" min="0" max="500" step="0.1" placeholder="Optional"></label>
@@ -124,7 +124,7 @@ function renderDecision(p){
  if(f.rejectedEngine)box.appendChild(note("Disagreement: "+f.rejectedEngine.engine+" was rejected. "+f.rejectedEngine.reason,"warn"));
  var dis=/SWIFT_.*_GAINZ_/.test(f.agreement||"");if(dis&&!f.rejectedEngine)box.appendChild(note("Engines disagree and independent evidence was not decisive, so ETI stands aside.","warn"));
  var det=el("details",null,el("summary",{text:"Why (decision trail)"}),list(p.reasons,"No reasons recorded"));box.appendChild(det);
- var dq=p.dataQuality||{};box.appendChild(el("div",{class:"muted small",text:"Provider: "+(dq.provider||"–")+" | timeframes loaded: "+((dq.timeframesLoaded||[]).join(", ")||"–")+" | order book: "+(dq.orderBook||"–")+" | cross-provider check: "+(dq.providerCrossCheck||"–")}));
+ var dq=p.dataQuality||{};box.appendChild(el("div",{class:"muted small",text:"Provider: "+(dq.provider||"–")+" | market: "+(dq.venue||"–")+" "+(dq.category||"")+" | timeframes loaded: "+((dq.timeframesLoaded||[]).join(", ")||"–")+" | order book: "+(dq.orderBook||"–")+" | cross-provider check: "+(dq.providerCrossCheck||"–")}));
  put("decision-body",box)}
 
 function renderEngine(id,e){
@@ -189,7 +189,7 @@ function renderTradePlan(p){
  var box=el("div");box.appendChild(kv([["Plan status",t.valid?"valid":"blocked",t.valid?"bull":"bear"],["Quantity",num(t.quantity,6)+" "+(t.quantityUnit==="contracts"?"contracts":"base units")],["Notional",fmt(t.notional)],["Risk budget",fmt(t.riskBudget)],["Planned stop risk",fmt(t.plannedStopRisk)],["Remaining risk",fmt(t.remainingRiskBudget)],["Margin estimate",fmt(t.estimatedMargin)],["Leverage",t.leverage+"x"],["Round-trip costs",t.estimatedRoundTripCosts==null?"not supplied":fmt(t.estimatedRoundTripCosts)],["Gross R to final target",t.grossRewardRiskToFinalTarget==null?"–":num(t.grossRewardRiskToFinalTarget,2)+"R"],["Net R",t.netRewardRiskToFinalTarget==null?"not estimated":num(t.netRewardRiskToFinalTarget,2)+"R"]]));
  if(t.targets&&t.targets.length)box.appendChild(paperTable(["Target","Price","Close %","Gross P&L","R"],t.targets.map(function(x){return [x.label,fmt(x.price),num(x.closeFraction*100,1)+"%",fmt(x.grossProfit),num(x.rewardRisk,2)+"R"]})));
  if(t.blockers&&t.blockers.length)box.appendChild(note(t.blockers.join("; "),"bad"));if(t.notes&&t.notes.length)box.appendChild(list(t.notes));
- box.appendChild(note("Position-sizing calculation only. This endpoint cannot submit orders.","ok"));put("trade-plan",box)
+ box.appendChild(note("Position-sizing calculation only. This endpoint cannot submit orders. Use quote-currency equity. Exchange maintenance tiers, funding payments, borrow interest and liquidation fees are excluded.","ok"));put("trade-plan",box)
 }
 function renderElite(p){
  var e=p.elite;if(!e){put("elite",el("div",{class:"muted",text:"Elite Trader assessment runs only when the engines propose a trade."}));return}
