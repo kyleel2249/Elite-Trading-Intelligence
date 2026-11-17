@@ -20,7 +20,7 @@ Each has its own event stream (`pf:<env>:*` in `ETI_EXECUTION_LOG`) and its own 
 - Reconcile: internal = recompute cash/quantities from fills; testnet = compare with Binance `/api/v3/account` or Alpaca `/v2/account` + `/v2/positions`.
 
 ## API (all authenticated per environment)
-`GET /api/portfolio/state?environment=`, `GET /api/portfolio/history?environment=&symbol=&strategy=&result=&from=&to=&source=[&format=csv]`, `POST /api/portfolio/cancel|plan|sync|reconcile`. `/api/orders` accepts `type: "stop"` (sell, internal paper), `stopPrice`, and `plan: {stop, tp1, tp2, tp3}`; a limit/stop order that is not immediately marketable now rests (HTTP 202) instead of being refused.
+`GET /api/portfolio/state?environment=`, `GET /api/portfolio/history?environment=&symbol=&strategy=&result=&from=&to=&source=[&format=csv]`, `POST /api/portfolio/cancel|plan|sync|reconcile`. `GET /api/portfolio/manager?environment=` returns risk-first strategy allocation recommendations, sample-size-qualified performance, ledger venue exposure and readiness warnings. It is read-only and never places orders. `/api/orders` accepts `type: "stop"` (sell, internal paper), `stopPrice`, and `plan: {stop, tp1, tp2, tp3}`; a limit/stop order that is not immediately marketable now rests (HTTP 202) instead of being refused.
 
 ## Matching (internal paper)
 Cron (every minute) walks closed 1m bars after each order's creation: buy limit fills when low <= limit, sell limit when high >= limit, sell stop when low <= stop (gap-aware prices). A bar touching both stop and TP counts as the stop. Day orders expire at 00:00 UTC, IOC orders expire unfilled. When nothing is active and no event arrived, the cycle costs one KV read.
@@ -52,3 +52,12 @@ Futures orders use a separate event-sourced ledger (`worker/perp/`), stored unde
 - **Testnet (`perp_testnet`):** needs `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_SECRET_KEY`. Isolated margin and leverage are set before each order; fills and fees are recorded only from `userTrades`. Stop orders are not supported there. `/api/perp/sync` reconciles positions against the exchange. Tested with a mocked exchange only, not against the live testnet.
 - **Routes:** `/api/perp/{config,state,preview,order,close,cancel,sync}`; sessions are scoped paper to `perp_paper`, testnet to `perp_testnet`. The kill switch blocks new exposure but never reduce-only orders or cancels.
 - Not supported: COIN-M contracts, hedge mode, cross margin, funding payments.
+
+
+## AI Portfolio Manager
+
+GET /api/portfolio/manager?environment=internal_paper is an authenticated, read-only allocation advisory. It scores the four managed strategies from up to 60 most recent closed trades per strategy using net expectancy, profit factor, sample reliability and drawdown. Strategies need at least 20 closed trades, positive net expectancy and a profit factor of at least 1.15 before receiving a recommended allocation. Eligible strategies share a maximum 50% deployment budget, with a 35% per-strategy cap; remaining capital stays unallocated/reserved.
+
+The response includes current ledger equity, cash, position exposure, estimated open risk, venue exposure recorded in the selected ledger, stale marks, missing protective stops and ledger anomalies. Missing/stale account information is never guessed into available capital. Venue exposure is limited to fills recorded in that ledger; it is not a live Bybit/Bitget account-balance aggregator.
+
+This service is advisory only: executionEnabled, live orders, leverage and automatic reallocation remain disabled. It does not call exchange order endpoints or modify the portfolio.
