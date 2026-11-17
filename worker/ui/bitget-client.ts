@@ -57,7 +57,7 @@ async function candles(opts){
 }
 function parseDepth(data){
  var d=data||{},b=(d.bids||[]).map(function(x){return [num(x[0]),num(x[1])]}).filter(function(x){return x[0]!==null&&x[1]!==null&&x[0]>0&&x[1]>0}),a=(d.asks||[]).map(function(x){return [num(x[0]),num(x[1])]}).filter(function(x){return x[0]!==null&&x[1]!==null&&x[0]>0&&x[1]>0});
- return {bids:b,asks:a,timestamp:Date.now()};
+ return {bids:b,asks:a,timestamp:millis(d.ts||d.timestamp||d.time)||Date.now()};
 }
 function parseTrades(data){
  return (Array.isArray(data)?data:[]).map(function(t){
