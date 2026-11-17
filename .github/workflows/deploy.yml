@@ -48,13 +48,7 @@ jobs:
           test -n "$ETI_GAINZ_WEBHOOK_SECRET" || (echo "::error::Set ETI_GAINZ_WEBHOOK_SECRET in GitHub Actions secrets"; exit 1)
           test "${#ETI_GAINZ_WEBHOOK_SECRET}" -ge 32 || (echo "::error::ETI_GAINZ_WEBHOOK_SECRET must contain at least 32 characters"; exit 1)
 
-      - name: Deploy to Cloudflare Workers
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy
-
-      - name: Sync optional sports Worker secrets from GitHub Actions
+      - name: Deploy to Cloudflare Workers with versioned secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -71,12 +65,22 @@ jobs:
           BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
           BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
         run: |
-          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY BACKEND_URL INFURA_API_KEY INFURA_API_SECRET ETI_GAINZ_WEBHOOK_SECRET ETI_GAINZ_ADMIN_TOKEN BITGET_API_KEY BITGET_API_SECRET BITGET_API_PASSPHRASE; do
-            value="${!name}"
-            if [ -n "$value" ]; then
-              printf '%s' "$value" | npx wrangler secret put "$name"
-            fi
-          done
+          set -euo pipefail
+          secrets_file="/tmp/eti-worker-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          node <<'NODE'
+          const fs = require("node:fs");
+          const names = [
+            "ODDSPAPI_API_KEY", "ETI_SPORTS_PAPER_TOKEN", "ODDS_API_KEY", "BACKEND_URL",
+            "INFURA_API_KEY", "INFURA_API_SECRET", "ETI_GAINZ_WEBHOOK_SECRET", "ETI_GAINZ_ADMIN_TOKEN",
+            "BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_API_PASSPHRASE"
+          ];
+          const secrets = Object.fromEntries(names.filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
+          fs.writeFileSync("/tmp/eti-worker-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
+          NODE
+          # Deploy code and the full optional-secret set in one version. Secrets omitted here
+          # remain inherited from the previous deployed version.
+          npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file"
 
       - name: Verify Bybit market routes and ETI execution safeguards
         shell: bash
