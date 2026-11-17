@@ -39,10 +39,11 @@ Testnet is the only recommended initial environment. Live execution requires a s
 
 ## Market data region and live streams
 
-- Cloudflare's ETI market-data Worker is explicitly placed near AWS Frankfurt (`aws:eu-central-1`) so public Bybit REST requests do not originate from the US-based GitHub Actions runner region that produced HTTP 403 responses.
-- Check the live Worker execution location with `GET /api/market/region`; a successful regional placement reports a Cloudflare `cf-placement` value ending in `-FRA`.
-- The Python FastAPI origin remains in Fly.io Frankfurt (`fra`), outside Bybit's documented US and mainland-China IP blocks. It remains there to avoid adding cross-region latency to its existing PostgreSQL connection.
-- ETI uses Bybit's global REST hosts (`api.bytick.com`, `api.bybit.com`) and global public WebSocket hosts for the Ghana-registered international account. Dedicated regional API domains must only be used when Bybit says the user's own account is registered on that regional site; server placement does not change account residency.
+- Cloudflare serves ETI at the edge, but all Bybit public REST requests from the Worker are forwarded to the FastAPI market-data proxy hosted in Fly.io Frankfurt (`fra`). This prevents the US-based GitHub Actions runner or a US Cloudflare edge from directly contacting Bybit.
+- The proxy only permits Bybit V5 public market endpoints: server time, instruments, klines, order books, recent trades, tickers, funding history and open interest. It cannot proxy private account or order endpoints.
+- Check the actual upstream egress region with `GET /api/market/region`; a healthy response reports `transport=regional-fastapi-proxy` and `egress_region=fra`.
+- The proxy uses the global Bybit REST hosts (`api.bybit.com` and `api.bytick.com`) from Frankfurt. The Ghana-registered international account continues using its proper global API entitlement. Dedicated regional API domains must only be used when required by the user's actual account registration site; server placement does not change account residency.
+- The Python stream hub also runs from the Fly.io origin and maintains separate public WebSocket connections for Spot, Linear and Inverse.
 - REST snapshots/history use the Bybit V5 public market endpoints.
 - Instruments use /v5/market/instruments-info with pagination for linear/inverse.
 - Public WebSockets: wss://stream.bybit.com/v5/public/spot, /linear, and /inverse.
@@ -55,9 +56,6 @@ Testnet is the only recommended initial environment. Live execution requires a s
 - Add a live subscription (requires the ETI API key): `POST /api/stream/subscribe` with `{"provider":"bybit","category":"linear","symbols":["BTCUSDT"]}`.
 - Stream status: `GET /api/stream/status`; category-specific connection and subscription state appears under `bybit_categories`.
 - Derivatives context: `GET /api/market/bybit/derivatives-context?symbol=BTCUSDT&category=linear&interval=1h&limit=50` returns the latest funding rate, chronological open-interest observations and the latest open-interest change. The endpoint is public and read-only.
-
-Private WebSocket order/fill streaming is not enabled in this change; execution status is reconciled through authenticated REST reads. Do not assume an account stream is connected just because public prices are streaming.
-
 ## Important limitations
 
 - Options are not enabled in ETI's trading adapter in this release.
