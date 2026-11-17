@@ -17,6 +17,7 @@ export interface MarketsSettings {
   oanda_api_token?: string | null; oanda_account_id?: string | null;
   alpaca_api_key?: string | null; alpaca_secret_key?: string | null;
   binance_api_key?: string | null; binance_secret_key?: string | null;
+  bybit_api_key?: string | null; bybit_api_secret?: string | null;
 }
 export type Json = any;
 
@@ -24,7 +25,7 @@ const G = generated as Json;
 const REG = G.registry;
 const SESSIONS: Record<string, Json> = G.sessions;
 const PROFILES: Record<string, Json> = G.profiles;
-const CAPS: Record<string, Json> = G.capabilities;
+const CAPS: Record<string, Json> = { ...G.capabilities, bybit: { name: "bybit", asset_classes: ["crypto"], us_stocks_only: false, data: true, execution: true, environments: ["paper", "live"], notes: "Bybit V5 spot, spot margin, linear and inverse perpetuals; testnet first." } };
 const set = (a: string[]) => new Set<string>(a);
 const FX_MAJOR_CCY = set(REG.fx_major_ccy), FX_ALL_CCY = set(REG.fx_all_ccy), FX_MAJOR_PAIRS = set(REG.fx_major_pairs);
 const STABLE_QUOTES = set(REG.stable_quotes), STABLECOINS = set(REG.stablecoins), CRYPTO_BASE_SKIP = set(REG.crypto_base_skip);
@@ -390,7 +391,7 @@ export function classify(symbol: string, providerHint?: string | null): Instrume
   if (split) {
     const [base, quote] = split;
     if (knownCryptoBase(base)) return cryptoInstrument(base, quote, "catalog", s);
-    if (STABLE_QUOTES.has(quote) || hint === "binance") return cryptoInstrument(base, quote, STABLE_QUOTES.has(quote) ? "pattern" : "heuristic", s);
+    if (STABLE_QUOTES.has(quote) || (hint === "binance" || hint === "bybit")) return cryptoInstrument(base, quote, STABLE_QUOTES.has(quote) ? "pattern" : "heuristic", s);
   }
   if (s.includes(".")) {
     const i = s.lastIndexOf("."), tk = s.slice(0, i), suf = s.slice(i + 1);
@@ -460,10 +461,11 @@ export function setupStatus(provider: string, s: MarketsSettings = {}): Json {
   const p = provider.toLowerCase();
   if (p === "oanda") { const missing = [["OANDA_API_TOKEN", s.oanda_api_token], ["OANDA_ACCOUNT_ID", s.oanda_account_id]].filter(([, v]) => !v).map(([n]) => n); return { configured: !missing.length, missing }; }
   if (p === "alpaca") { const missing = [["ALPACA_API_KEY", s.alpaca_api_key], ["ALPACA_SECRET_KEY", s.alpaca_secret_key]].filter(([, v]) => !v).map(([n]) => n); return { configured: !missing.length, missing }; }
-  if (p === "binance") {
-    const has = !!(s.binance_api_key && s.binance_secret_key);
-    return { configured: true, missing: [], note: has ? null : "public data and simulated paper fills work without keys; real testnet/live orders need BINANCE_API_KEY and BINANCE_SECRET_KEY" };
+  if (p === "bybit") {
+    const has = !!(s.bybit_api_key && s.bybit_api_secret);
+    return { configured: true, missing: [], note: has ? null : "public market data works without keys; private account access and testnet/live orders need BYBIT_API_KEY and BYBIT_API_SECRET" };
   }
+  if (p === "binance") return { configured: false, missing: [], note: "Binance is retired from ETI crypto routes." };
   return { configured: false, missing: [] };
 }
 function executionProxy(i: Instrument): [string, string] | null {
@@ -475,7 +477,7 @@ function executionProxy(i: Instrument): [string, string] | null {
 }
 export function routesFor(i: Instrument, s: MarketsSettings = {}): Json[] {
   const routes: Json[] = [], ac = i.asset_class;
-  if (ac === "crypto") routes.push({ provider: "binance", symbol: i.symbol, kind: "direct", session_id: "crypto_24x7", environments: [...CAPS.binance.environments], note: "Spot order via TradingService; the pair must exist on Binance spot." });
+  if (ac === "crypto") routes.push({ provider: "bybit", symbol: i.symbol, kind: "direct", session_id: "crypto_24x7", environments: [...CAPS.bybit.environments], note: "Bybit V5 spot or derivative instrument; execution uses the risk-gated Bybit account." });
   else if (ac === "stock" && i.region === "US") routes.push({ provider: "alpaca", symbol: i.symbol, kind: "direct", session_id: "us_equity", environments: [...CAPS.alpaca.environments], note: "Whole-share day orders via TradingService." });
   else if (ac === "option") routes.push({ provider: "alpaca", symbol: i.symbol, kind: "direct", session_id: "us_equity", environments: [...CAPS.alpaca.environments],
     note: "US equity option via Alpaca (whole contracts, day orders). Requires an options-approved account; prefer limit orders - option spreads are wide." });
