@@ -619,6 +619,7 @@ async function refreshExecutionHistory(){
 }
 async function submitOrder(side){
  const o=selectedOrder();o.side=side;window.etiSelectedSide=side;
+ if(o.broker==='bitget'&&!(executionStatus&&executionStatus.bitget_egress_verified)){$('orderOutput').textContent='Bitget live execution is paused. Bitget blocks ETI Cloudflare Worker egress for public REST, and private order connectivity has not been verified. No order was sent. Public market data continues through the browser-direct feed. Keep API secrets on Cloudflare; never move them into the browser.';return;}
  const problem=orderValidation(o);if(problem){$('orderOutput').textContent=problem;return;}
  if(executionStatus&&executionStatus.kill_switch){$('orderOutput').textContent='Execution blocked: emergency kill switch is active.';return;}
  renderPreview(o);
