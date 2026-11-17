@@ -31,7 +31,7 @@ Examples:
 - Bitget: `/api/market/symbols?venue=bitget&market=all` (spot plus all three futures product types).
 - Bitget margin: `/api/market/symbols?venue=bitget&market=margin`.
 
-Bitget's catalogue refreshes every 60 seconds and identifies the futures product type in the seventh symbol-array field. Margin eligibility is sourced from Bitget's MARGIN instrument catalogue, not inferred from spot listings.
+Bitget's catalogue refreshes every 60 seconds and identifies the futures product type in the seventh symbol-array field; contract type distinguishes perpetual from delivery futures. Margin eligibility, cross/isolated availability and leverage limits are sourced from Bitget's MARGIN instrument catalogue, not inferred from spot listings.
 
 ## Validation and availability
 
@@ -39,7 +39,7 @@ OHLCV rows are validated for finite positive prices, valid high/low bounds, non-
 
 ## Regional eligibility
 
-Cloudflare Workers Free does not provide a fixed outbound IP or a guaranteed Ghana egress location. The public APIs use the exchanges' global hosts. A user's account country, KYC status, account entity, product permissions and API-key IP rules remain controlled by the exchange. ETI does not spoof location or bypass geographic restrictions. If an exchange rejects Cloudflare's outbound IP, the free Worker architecture cannot guarantee an alternate country egress; the error is reported clearly.
+The Worker uses Cloudflare's free placement hint targeting the data centre nearest GCP `europe-west1` (Belgium), rather than the US edge location that returned Bybit 403 responses. Cloudflare still controls the exact data centre and outbound IP; no fixed IP or exact-country guarantee is provided. The public APIs use the exchanges' global hosts. Account country, KYC status, account entity, product permissions and API-key IP rules remain controlled by the exchange. ETI does not spoof location or bypass geographic restrictions.
 
 ## Cost and deployment
 
