@@ -85,7 +85,7 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <form class="bar" id="paper-auth" autocomplete="off"><label>Paper API token (kept in memory only, never stored)<input type="password" id="token" autocomplete="off" spellcheck="false"></label><button type="submit">Connect</button><button type="button" id="p-eval">Evaluate (analyse only)</button><button type="button" id="p-open" class="primary">Evaluate &amp; open paper position</button><button type="button" id="p-tick">Tick position</button><button type="button" id="p-kill" class="danger">Engage kill switch</button></form>
 <div id="paper-body" class="muted">Enter the paper API token to load simulated positions, performance and the audit trail.</div></section>
 <section class="card s12"><h2>Not available yet (nothing here is simulated)</h2><div class="small muted">Strategy optimisation and model rollback, real-time alerts, exchange testnet execution, Elite Trader database inputs to fusion. Confidence is an evidence score, not a probability of profit.</div></section>
-</div><p class="small muted">Analytical research tool, not financial advice. Simulated results do not guarantee future results.</p></div><script src="/omnisignal.js"></script></body></html>`;
+</div><p class="small muted">Analytical research tool, not financial advice. Simulated results do not guarantee future results.</p></div><script src="/bitget-client.js"></script><script src="/omnisignal.js"></script></body></html>`;
 
 export const OMNI_JS = String.raw`(function(){
 "use strict";
