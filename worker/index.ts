@@ -992,7 +992,7 @@ export default {
       return handleMarket(request, _env);
     }
     if (url.pathname === "/__eti/status" || url.pathname === "/api/system/health") {
-      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Bybit V5 Worker REST plus Bitget browser-direct public feed (Cloudflare Worker egress is blocked by Bitget)", time: new Date().toISOString() });
+      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Bybit V5 Worker REST plus Bitget browser-direct public feed (Cloudflare Worker egress is blocked by Bitget)", market_data_transport: { bybit: "cloudflare-worker-rest", bitget: "browser-direct-rest", bitget_live_orders: "gated-until-private-egress-verified" }, time: new Date().toISOString() });
     }
     if (url.pathname === "/") {
       return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
