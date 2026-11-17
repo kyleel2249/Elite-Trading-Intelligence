@@ -7,6 +7,7 @@ var MIX_GRAN={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4
 var PRODUCT_TYPES=["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"];
 function q(obj){var a=[];Object.keys(obj).forEach(function(k){if(obj[k]!==undefined&&obj[k]!==null&&obj[k]!=="")a.push(encodeURIComponent(k)+"="+encodeURIComponent(String(obj[k])))});return a.join("&")}
 function num(v){var n=Number(v);return Number.isFinite(n)?n:null}
+function millis(v){var n=num(v);return n===null?null:n<1e12?n*1000:n}
 function goodStatus(x){if(x===undefined||x===null||x==="")return true;return ["online","normal","trading","1"].indexOf(String(x).toLowerCase())>=0}
 function truth(v){return v===true||["true","yes","1"].indexOf(String(v==null?"":v).toLowerCase())>=0}
 async function request(pathV3,pathsV2){
@@ -28,7 +29,7 @@ async function request(pathV3,pathsV2){
 function parseCandles(data){
  return (Array.isArray(data)?data:[]).map(function(r){
   if(!Array.isArray(r))return null;
-  var row=[num(r[0]),num(r[1]),num(r[2]),num(r[3]),num(r[4]),num(r[5])];
+  var row=[millis(r[0]),num(r[1]),num(r[2]),num(r[3]),num(r[4]),num(r[5])];
   return row.every(function(x){return x!==null})&&row[0]>0&&row[1]>0&&row[2]>=row[3]&&row[3]>0&&row[5]>=0?row:null;
  }).filter(Boolean).sort(function(a,b){return a[0]-b[0]});
 }
@@ -49,6 +50,8 @@ async function candles(opts){
   var remaining=limit-rows.length,oldest=rows[0][0],history="/api/v2/mix/market/history-candles?"+q({symbol:symbol,productType:category,granularity:paths.gran,limit:Math.min(200,remaining),endTime:Math.max(1,oldest-1)});
   try{var older=await request(null,[history]);rows=parseCandles(older.data).concat(rows).sort(function(a,b){return a[0]-b[0]})}catch(e){}
  }
+ const latest=rows[rows.length-1],tfMs={"1m":60000,"3m":180000,"5m":300000,"15m":900000,"30m":1800000,"1h":3600000,"4h":14400000,"6h":21600000,"12h":43200000,"1d":86400000,"1w":604800000}[interval],age=Date.now()-latest[0];
+ if(age < -60000 || age > tfMs*3)throw new Error("Bitget "+interval+" candles are stale ("+Math.round(age/1000)+"s old)");
  return rows.slice(-limit);
 }
 function parseDepth(data){
@@ -57,14 +60,14 @@ function parseDepth(data){
 }
 function parseTrades(data){
  return (Array.isArray(data)?data:[]).map(function(t){
-  if(Array.isArray(t))return {T:num(t[0])||0,m:String(t[3]||"").toLowerCase()==="sell",p:String(t[1]||""),q:String(t[2]||"")};
-  return {T:num(t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.side||"").toLowerCase()==="sell",p:String(t.price||t.fillPrice||""),q:String(t.size||t.baseVolume||t.qty||"")};
+  if(Array.isArray(t))return {T:millis(t[0])||0,m:String(t[3]||"").toLowerCase()==="sell",p:String(t[1]||""),q:String(t[2]||"")};
+  return {T:millis(t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.side||"").toLowerCase()==="sell",p:String(t.price||t.fillPrice||""),q:String(t.size||t.baseVolume||t.qty||"")};
  }).filter(function(t){return t.T>0&&Number(t.p)>0&&Number(t.q)>0}).sort(function(a,b){return b.T-a.T}).slice(0,100);
 }
 function parseTicker(data){
  var t=Array.isArray(data)?data[0]:(data||{}),last=num(t.lastPr||t.lastPrice),open=num(t.open||t.open24h||t.openPrice24h),pct=num(t.priceChangePercent||t.change24h);
  if(pct!==null)pct=pct*100;else pct=open&&last!==null?(last-open)/open*100:0;
- return {lastPrice:last,highPrice:num(t.highPrice24h||t.high24h),lowPrice:num(t.lowPrice24h||t.low24h),volume:num(t.baseVolume||t.volume24h||t.baseVol),quoteVolume:num(t.quoteVolume||t.turnover24h||t.usdtVolume),priceChangePercent:pct,fundingRate:num(t.fundingRate),openInterest:num(t.openInterest||t.holdingAmount),timestamp:num(t.ts||t.timestamp||t.time)||Date.now()};
+ return {lastPrice:last,highPrice:num(t.highPrice24h||t.high24h),lowPrice:num(t.lowPrice24h||t.low24h),volume:num(t.baseVolume||t.volume24h||t.baseVol),quoteVolume:num(t.quoteVolume||t.turnover24h||t.usdtVolume),priceChangePercent:pct,fundingRate:num(t.fundingRate),openInterest:num(t.openInterest||t.holdingAmount),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
 }
 async function context(opts){
  var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=market==="futures"?(opts.category||"USDT-FUTURES"):"SPOT",futures=market==="futures",depthLimit=Math.max(5,Math.min(100,Number(opts.depthLimit)||20)),tradeLimit=Math.max(1,Math.min(100,Number(opts.tradeLimit)||50));
