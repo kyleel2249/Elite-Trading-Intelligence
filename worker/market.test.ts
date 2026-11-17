@@ -68,3 +68,34 @@ test("Bybit market region endpoint reports Cloudflare Frankfurt placement withou
   assert.equal(body.placement_verified, true);
   assert.equal(body.account_residency_is_not_changed, true);
 });
+
+
+test("Bybit REST market requests are sent through the configured Frankfurt egress origin", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify(kline));
+  }) as any;
+  const response = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m"), {
+    BYBIT_MARKET_DATA_ORIGIN: "https://market-egress.example",
+  });
+  assert.equal(response.status, 200);
+  assert.equal(new URL(urls[0]).hostname, "market-egress.example");
+  assert.match(urls[0], /\/api\/market\/bybit\/proxy\/kline/);
+  assert.match(urls[0], /category=spot/);
+});
+
+test("Bybit market region diagnostic verifies the actual Frankfurt backend egress", async () => {
+  globalThis.fetch = (async (input: any) => {
+    assert.equal(String(input), "https://market-egress.example/api/market/bybit/region");
+    return new Response(JSON.stringify({ provider: "bybit", egress_region: "fra" }));
+  }) as any;
+  const response = await handleMarket(req("/api/market/region"), {
+    BYBIT_MARKET_DATA_ORIGIN: "https://market-egress.example",
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.transport, "regional-fastapi-proxy");
+  assert.equal(body.egress_region, "fra");
+  assert.equal(body.region_verified, true);
+});
