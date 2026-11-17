@@ -472,13 +472,13 @@ async function load(){
    if(seq!==reqSeq)return;
    candles=direct.candles;book=direct.depth||{bids:[],asks:[]};trades=direct.trades||[];provider='bitget-browser';lastGoodAt=Date.now();lastGoodKey=key;
    const problems=Object.keys(direct.failures||{}).map(k=>k+': '+direct.failures[k]);
-   const ticker=direct.ticker||{};$('volume').textContent=fmt(ticker.volume);const change=Number(ticker.priceChangePercent||0);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';
+   const ticker=direct.ticker||{},feedLabel=SYM.market==='margin'?'MARGIN (spot book)':' '+category;$('volume').textContent=fmt(ticker.volume);const change=Number(ticker.priceChangePercent||0);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';
    drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());
-   $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent='Bitget browser-direct ('+category+')';
+   $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent='Bitget browser-direct ('+feedLabel.trim()+')';
    failCount=0;setStale(problems.length?'Partial Bitget context — '+problems[0].slice(0,140):'');
    const signalBar=Number(candles.at(-1)[0]);if(!sig||sig.provider!=='bitget-browser'||bitgetSignalBar!==signalBar){bitgetSignalBar=signalBar;loadSignal();}
    $('stamp').textContent='Updated '+new Date().toLocaleTimeString()+' via Bitget browser connection';
-   setConn('Bitget direct browser REST feed connected ('+category+')',problems.length?'#f59e0b':'#21d69a');
+   setConn('Bitget direct browser REST feed connected ('+feedLabel.trim()+')',problems.length?'#f59e0b':'#21d69a');
    if(socket){socket.onclose=null;socket.close();socket=null;}
    schedule(5000);return;
   }
