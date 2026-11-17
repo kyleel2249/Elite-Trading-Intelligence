@@ -142,7 +142,7 @@ export function riskReport(r: RiskDecision | null, now: number): AgentReport {
 
 // ------------------------------------------------------ 10. EXECUTION SPECIALIST
 export interface ExecutionSource { actorType: "manual_user" | "strategy" | "system" | "automation"; actorId: string; sourceName: string; strategyId?: string | null; signalId?: string | null; triggerReason?: string | null }
-export interface OrderTicket { broker: "alpaca" | "binance"; symbol: string; side: "buy" | "sell"; type: "limit"; quantity: number; limitPrice: number; timeInForce: "gtc"; clientOrderId: string; riskConfirmed: true; executionSource: ExecutionSource }
+export interface OrderTicket { broker: "alpaca" | "binance" | "eti_paper"; symbol: string; side: "buy" | "sell"; type: "limit"; quantity: number; limitPrice: number; timeInForce: "gtc"; clientOrderId: string; riskConfirmed: true; executionSource: ExecutionSource; plan?: { stop: number; tp1: number; tp2: number; tp3: number } }
 export interface ExecutionRequest { broker?: string; clientOrderId?: string; riskConfirmed?: boolean; executionSource?: ExecutionSource }
 export interface ExecutionReview { schema: "eti.execution.review/1"; requested: boolean; eligible: boolean; mode: "paper_testnet_only"; blockers: string[]; warnings: string[]; ticket: OrderTicket | null }
 
@@ -157,7 +157,7 @@ export function prepareTicket(a: {
   const blockers: string[] = [], warnings: string[] = ["Exchange lot-size, tick-size and minimum-notional filters are not checked here; the broker may still reject the order."];
   if (a.action === "NO_TRADE" || !a.proposal) blockers.push("no_trade_decision");
   if (!a.risk?.approved || !a.risk.sizing) blockers.push("risk_not_approved");
-  if (q.broker !== "alpaca" && q.broker !== "binance") blockers.push("unsupported_broker");
+  if (q.broker !== "alpaca" && q.broker !== "binance" && q.broker !== "eti_paper") blockers.push("unsupported_broker");
   if (q.broker === "alpaca" && a.proposal?.symbol.endsWith("USDT")) blockers.push("alpaca_symbol_mismatch");
   if (typeof q.clientOrderId !== "string" || !/^[A-Za-z0-9_-]{8,36}$/.test(q.clientOrderId)) blockers.push("client_order_id_required");
   if (q.riskConfirmed !== true) blockers.push("risk_confirmation_required");
@@ -173,7 +173,7 @@ export function prepareTicket(a: {
   if (!(qty > 0)) blockers.push("zero_quantity");
   if (blockers.length || !a.proposal) return { ...base, requested: true, eligible: false, blockers, warnings, ticket: null };
   const src = q.executionSource ?? { actorType: "strategy" as const, actorId: "eti-commander", sourceName: "ETI Multi-Agent Commander", strategyId: null, signalId: a.decisionId, triggerReason: "Commander consensus approved by Risk Manager" };
-  return { ...base, requested: true, eligible: true, blockers: [], warnings, ticket: { broker: q.broker as "alpaca" | "binance", symbol: a.proposal.symbol, side: a.proposal.side, type: "limit", quantity: qty, limitPrice: a.proposal.entry, timeInForce: "gtc", clientOrderId: q.clientOrderId as string, riskConfirmed: true, executionSource: src } };
+  return { ...base, requested: true, eligible: true, blockers: [], warnings, ticket: { broker: q.broker as "alpaca" | "binance" | "eti_paper", symbol: a.proposal.symbol, side: a.proposal.side, type: "limit", quantity: qty, limitPrice: a.proposal.entry, timeInForce: "gtc", clientOrderId: q.clientOrderId as string, riskConfirmed: true, executionSource: src, ...(q.broker === "eti_paper" && a.proposal.side === "buy" ? { plan: { stop: a.proposal.stop, tp1: a.proposal.targets[0], tp2: a.proposal.targets[1], tp3: a.proposal.targets[2] } } : {}) } };
 }
 
 export function executionReport(e: ExecutionReview, now: number): AgentReport {
