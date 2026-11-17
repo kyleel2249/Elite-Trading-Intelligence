@@ -95,7 +95,7 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
   }
   const snapshot=evaluateSynchronizedV3Alpha({symbol,strategy,candles,now:nowMs()});
   const q=await db.prepare("SELECT strategy,regime,score,outcome,outcome_r,signal_time,entry,stop_loss FROM eti_v3_alpha_signals WHERE outcome IN ('win','loss') ORDER BY signal_time ASC LIMIT 2000").all();
-  const samples=(q.results??[]) as OutcomeSample[];
+  const samples=(q.results??[]).map((x:any)=>({...x,score:Number(x.score),outcome_r:Number(x.outcome_r),signal_time:Number(x.signal_time)})) as OutcomeSample[];
   const strategySamples=samples.filter(x=>x.strategy===strategy);
   const regimeSamples=snapshot.signal.regime==="unknown"?strategySamples:strategySamples.filter(x=>x.regime===snapshot.signal.regime);
   const riskSamples=regimeSamples.length>=30?regimeSamples:strategySamples;
