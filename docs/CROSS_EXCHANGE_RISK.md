@@ -21,3 +21,9 @@ The operator-only endpoints GET/POST /api/portfolio/exchange-activity read and r
 A failed market fetch does not erase the last successfully observed open-order snapshot for that market. Partial results are labelled and stale market scopes are returned. Bitget margin symbol discovery must be configured with ETI_BITGET_MARGIN_SYMBOLS (comma-separated symbols) because margin history and open-order endpoints are symbol-scoped.
 
 The activity journal is intentionally separate from the long-only spot portfolio fold. Futures hedge-mode, reduce-only, inverse-contract, and margin borrow/repay semantics are retained as raw normalized venue activity and are not converted into position/cash events. Exchange fills are matched to ETI orders by venue, broker order ID, client order ID or order ID; unmatched activity is surfaced for operator review. This avoids fabricating holdings or P&L. Live environment sync remains disabled.
+
+## Verified gross exposure calculation
+
+When the latest activity journal is no older than six minutes and every Bybit category and Bitget product scope reports a complete successful sync, ETI calculates gross USD exposure from valued Bybit and Bitget spot assets, Bybit position values, valued Bitget USDT/USDC futures positions, and remaining open-order notional. Bybit inverse open orders use the exchange-reported leavesValue; Bitget coin-margined futures exposure is withheld until a trusted contract-value conversion is available. Unpriced assets, missing marks, unpriced market orders, margin liabilities, stale scopes and partial product snapshots withhold both verified exposure and deployable capital.
+
+The 50% reserve / 50% maximum deployment envelope is calculated only after both combined available capital and gross exposure are verified. This is a conservative gross exposure measure, not net delta or liquidation-adjusted exposure.
