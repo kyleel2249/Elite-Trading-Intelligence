@@ -36,7 +36,7 @@ def build_adapter(provider: str, credentials: dict, environment: str, symbols=()
     if p == "alpaca":
         return AlpacaAdapter(credentials["api_key"], credentials["secret_key"], paper=not live)
     if p == "bybit":
-        return BybitAdapter(credentials["api_key"], credentials["secret_key"], testnet=not live, symbols=symbols,
+        return BybitAdapter(credentials["api_key"], credentials["api_secret"], testnet=not live, symbols=symbols,
                             category=credentials.get("category", "spot"))
     if p == "binance":
         return BinanceAdapter(credentials["api_key"], credentials["secret_key"], testnet=not live, symbols=symbols)
