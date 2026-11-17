@@ -11,7 +11,7 @@ Production-oriented multi-asset trading intelligence platform with a named elite
 git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
 cd Elite-Trading-Intelligence
 cp .env.example .env
-# Optional: add Alpaca / Binance keys to .env
+# Optional: add Bybit testnet / Alpaca keys to .env
 docker compose up --build
 ```
 
@@ -96,6 +96,10 @@ curl -X POST localhost:8000/api/trading/order \
   **FastAPI origin** (Docker/host). Optional Cloudflare Worker only proxies to `BACKEND_URL`
   (see `docs/CLOUDFLARE.md`); it does not run the Python app or hold broker secrets.
 - **Live orders** are refused (HTTP 403) on any deployment without an `API_KEY`.
+
+## Bybit integration
+
+ETI uses Bybit V5 for crypto spot, opt-in spot margin, linear perpetuals and inverse perpetuals. Configure testnet credentials server-side and keep live trading disabled until testnet verification and reconciliation checks pass. Setup, API scopes, account categories and limitations are documented in [docs/BYBIT.md](docs/BYBIT.md).
 
 ## Safety
 
@@ -193,10 +197,7 @@ The Worker serves:
 - Recent executed trades with timestamps and side.
 - Connection status and update timestamps.
 
-The current market-data adapter uses Binance's public REST API for initial snapshots and
-public WebSocket streams for live updates. It is read-only and does not require exchange
-credentials. Exchange connectivity, browser networking, public API limits and stream
-availability apply. The interface must not represent stale or disconnected data as live.
+The current crypto market-data adapter uses Bybit V5 REST for snapshots, history and instrument discovery, with public WebSocket ticker/trade streams for live updates. Spot, linear and inverse perpetual products are selectable; spot margin shares the spot feed. Public data does not require exchange credentials. Private Bybit execution is handled by the FastAPI execution engine and starts on testnet with ETI risk controls. See [docs/BYBIT.md](docs/BYBIT.md). Exchange connectivity, account eligibility, public API limits and stream availability apply; stale or disconnected data must never be presented as live.
 
 ## Trade / no-trade intelligence: ETI Market Readiness Engine
 
