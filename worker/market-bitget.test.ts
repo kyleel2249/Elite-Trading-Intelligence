@@ -43,6 +43,19 @@ test("Bitget spot and three futures product catalogues are separately discovered
   assert.deepEqual(cats, ["SPOT", "USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"]);
 });
 
+test("Bitget Coin-M delivery contracts are included in the instrument catalogue", async () => {
+  const fetcher: any = async (url: string) => {
+    const category = new URL(url).searchParams.get("category") || "";
+    const isCoin = category === "COIN-FUTURES";
+    return new Response(JSON.stringify({ code: "00000", data: [{
+      symbol: isCoin ? "BTCUSD" : "BTCUSDT", baseCoin: "BTC", quoteCoin: isCoin ? "USD" : "USDT",
+      status: "online", type: isCoin ? "delivery" : "perpetual"
+    }] }));
+  };
+  const futures = await listBitgetSymbols("futures", fetcher);
+  assert.ok(futures.rows.some(row => row.pt === "COIN-FUTURES" && row.contractType === "delivery"));
+});
+
 test("Bitget chart route accepts only supported category names and does not route to Bybit", async () => {
   const urls: string[] = [];
   globalThis.fetch = (async (input: string) => {
