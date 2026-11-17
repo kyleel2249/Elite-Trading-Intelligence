@@ -99,10 +99,6 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
           positionQuantity: account.positionQuantity, dailyPnlPct: account.dailyPnlPct,
           drawdownPct: account.drawdownPct, openRiskPct: account.openRiskPct,
         },
-        execution: {
-          broker: "eti_paper", clientOrderId, riskConfirmed: true,
-          executionSource: { actorType: "automation", actorId: "eti-multi-agent-autopilot", sourceName: "ETI Multi-Agent Autopilot", strategyId: "commander-consensus", signalId: clientOrderId, triggerReason: "Scheduled multi-agent consensus; internal paper only" },
-        },
       };
       const headers = { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "content-type": "application/json" };
       const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(body) }), env);
