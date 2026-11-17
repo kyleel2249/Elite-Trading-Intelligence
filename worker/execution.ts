@@ -42,6 +42,7 @@ export interface ExecutionEnv {
   BITGET_SECRET?: string;
   BITGET_PASSPHRASE?: string;
   ETI_BITGET_LIVE_ENABLED?: string;
+  ETI_BITGET_EGRESS_VERIFIED?: string;
   ETI_BITGET_MAX_LEVERAGE?: string;
   ETI_BITGET_MAX_NOTIONAL_USDT?: string;
   ETI_MAX_ORDER_QUANTITY?: string;
@@ -99,10 +100,11 @@ export function executionStatus(env: ExecutionEnv) {
   const bitgetMissingCredentials = [!bitgetKey ? "API key" : null, !bitgetSecret ? "API secret" : null, !bitgetPassphrase ? "API passphrase" : null].filter(Boolean);
   const bitgetConfigured = bitgetMissingCredentials.length === 0;
   return {
-    mode: env.ETI_BITGET_LIVE_ENABLED === "true" ? "bitget_live_plus_paper_testnet" : "paper_testnet_only",
+    mode: env.ETI_BITGET_LIVE_ENABLED === "true" && env.ETI_BITGET_EGRESS_VERIFIED === "true" ? "bitget_live_plus_paper_testnet" : "paper_testnet_only",
     live_trading_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
-    live_trading_available: env.ETI_BITGET_LIVE_ENABLED === "true" && bitgetConfigured,
+    live_trading_available: env.ETI_BITGET_LIVE_ENABLED === "true" && bitgetConfigured && env.ETI_BITGET_EGRESS_VERIFIED === "true",
     bitget_live_enabled: env.ETI_BITGET_LIVE_ENABLED === "true",
+    bitget_egress_verified: env.ETI_BITGET_EGRESS_VERIFIED === "true",
     master_execution_token_configured: !!env.ETI_EXECUTION_TOKEN,
     bitget_configured: bitgetConfigured,
     bitget_missing_credentials: bitgetMissingCredentials,
