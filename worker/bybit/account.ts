@@ -78,7 +78,7 @@ export async function loadBybitAccountSnapshot(env: BybitAccountEnv, deps: Bybit
 }
 
 export interface BybitExecutionRow { id:string; orderId:string; clientOrderId:string; category:string; symbol:string; side:string; qty:number; price:number; fee:number|null; feeCoin:string|null; at:number; execType:string|null }
-export interface BybitOpenOrderRow { orderId:string; clientOrderId:string; category:string; symbol:string; side:string; qty:number; leavesQty:number; price:number|null; status:string; updatedAt:number }
+export interface BybitOpenOrderRow { orderId:string; clientOrderId:string; category:string; symbol:string; side:string; qty:number; leavesQty:number; price:number|null; leavesValue:number|null; status:string; updatedAt:number }
 const rowNum=(v:unknown):number|null=>v===null||v===undefined||v===""?null:Number.isFinite(Number(v))?Number(v):null;
 /** Read-only execution history, paginated by Bybit cursor. */
 export async function getBybitExecutions(env:BybitAccountEnv,category:"spot"|"linear"|"inverse",deps:BybitAccountDeps={},startTime?:number):Promise<BybitExecutionRow[]> {
@@ -97,7 +97,7 @@ export async function getBybitOpenOrders(env:BybitAccountEnv,category:"spot"|"li
  for(let page=0;page<5;page++){
   const p:Record<string,string>={category,openOnly:"0",limit:"50"};if(cursor)p.cursor=cursor;
   const data=await signedGet(env,"/v5/order/realtime",p,deps),list=Array.isArray(data.list)?data.list:[];
-  for(const x of list){const qty=rowNum(x.qty),leaves=rowNum(x.leavesQty),updated=rowNum(x.updatedTime);if(!x.orderId||!x.symbol||qty===null)continue;out.push({orderId:String(x.orderId),clientOrderId:String(x.orderLinkId??""),category,symbol:String(x.symbol),side:String(x.side??"").toLowerCase(),qty,leavesQty:leaves??Math.max(0,qty-(rowNum(x.cumExecQty)??0)),price:rowNum(x.price),status:String(x.orderStatus??"unknown"),updatedAt:updated??0});}
+  for(const x of list){const qty=rowNum(x.qty),leaves=rowNum(x.leavesQty),updated=rowNum(x.updatedTime);if(!x.orderId||!x.symbol||qty===null)continue;out.push({orderId:String(x.orderId),clientOrderId:String(x.orderLinkId??""),category,symbol:String(x.symbol),side:String(x.side??"").toLowerCase(),qty,leavesQty:leaves??Math.max(0,qty-(rowNum(x.cumExecQty)??0)),price:rowNum(x.price),leavesValue:rowNum(x.leavesValue),status:String(x.orderStatus??"unknown"),updatedAt:updated??0});}
   cursor=data.nextPageCursor?String(data.nextPageCursor):"";if(!cursor||list.length===0)break;
  }
  return out;
