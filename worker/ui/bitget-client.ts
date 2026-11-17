@@ -1,9 +1,9 @@
 export const BITGET_CLIENT_JS = String.raw`(function(){
 "use strict";
 var HOSTS=["https://api.bitget.com","https://capi.bitget.com"];
-var V3_INTERVAL={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D"};
-var SPOT_GRAN={"1m":"1min","3m":"3min","5m":"5min","15m":"15min","30m":"30min","1h":"1h","4h":"4h","6h":"6Hutc","12h":"12Hutc","1d":"1Dutc"};
-var MIX_GRAN={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1Dutc"};
+var V3_INTERVAL={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D","1w":"1W"};
+var SPOT_GRAN={"1m":"1min","3m":"3min","5m":"5min","15m":"15min","30m":"30min","1h":"1h","4h":"4h","6h":"6Hutc","12h":"12Hutc","1d":"1Dutc","1w":"1Wutc"};
+var MIX_GRAN={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1Dutc","1w":"1Wutc"};
 var PRODUCT_TYPES=["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"];
 function q(obj){var a=[];Object.keys(obj).forEach(function(k){if(obj[k]!==undefined&&obj[k]!==null&&obj[k]!=="")a.push(encodeURIComponent(k)+"="+encodeURIComponent(String(obj[k])))});return a.join("&")}
 function num(v){var n=Number(v);return Number.isFinite(n)?n:null}
@@ -109,7 +109,7 @@ async function symbols(kind){
  return {data:{symbols:rows,warnings:warnings},provider:"bitget-browser",failover:false};
 }
 async function loadSignalInputs(opts){
- var intervals=["1m","3m","5m","15m","30m","1h","4h","1d"],entries=await Promise.all(intervals.map(async function(iv){return [iv,await candles({symbol:opts.symbol,interval:iv,limit:300,market:opts.market,category:opts.category})]})),candleMap={};
+ var intervals=["1m","5m","15m","30m","1h","4h","1d","1w"],entries=await Promise.all(intervals.map(async function(iv){return [iv,await candles({symbol:opts.symbol,interval:iv,limit:300,market:opts.market,category:opts.category})]})),candleMap={};
  entries.forEach(function(x){candleMap[x[0]]=x[1]});
  var x=await context(opts);
  return {candles:candleMap,depth:x.depth,derivatives:x.derivatives,provider:"bitget-browser",market:opts.market,category:opts.category,failures:x.failures};
