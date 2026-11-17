@@ -523,7 +523,7 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string, 
   return body;
 }
 
-export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: string; /** listing venue (omitted for Binance rows from listBinanceSymbols) */ v?: Venue; /** Bitget futures product type */ pt?: BitgetProductType }
+export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: string; /** listing venue */ v?: Venue; /** Bitget futures product type */ pt?: BitgetProductType; /** Bybit spot margin eligibility */ marginTrading?: string }
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
 const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
 /** The Binance pair list is re-read at most every 10 minutes per isolate; Bitget spot and futures lists use their own 60-second cache. */
@@ -667,7 +667,7 @@ export async function listBybitSymbols(market: MarketKind = "spot", fetchImpl: t
       const sym = String(x?.symbol ?? ""), b = String(x?.baseCoin ?? "").toUpperCase(), q = String(x?.quoteCoin ?? "").toUpperCase();
       if (x?.status !== "Trading" || !/^[A-Z0-9]{5,24}$/.test(sym) || !b || !q) continue;
       if (cat !== "spot" && !/Perpetual/i.test(String(x.contractType ?? ""))) continue;
-      rows.push({ s: sym, b, q, m: market, c: isMetalPair(b, q) ? "metals" : cat === "spot" ? bitgetCategory(b, q) : "crypto" });
+      rows.push({ s: sym, b, q, m: market, c: isMetalPair(b, q) ? "metals" : cat === "spot" ? bitgetCategory(b, q) : "crypto", ...(cat === "spot" ? { marginTrading: String(x.marginTrading ?? "none").toLowerCase() } : {}) });
     }
     cursor = String(result.nextPageCursor ?? "");
     if (!cursor || cat === "spot") break;
@@ -702,14 +702,13 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     const categoryQ = url.searchParams.get("category") || "";
     const rows: SymbolRow[] = [], sources: Record<string, unknown> = {}, warnings: unknown[] = [];
     if (venueQ === "bybit") {
-      if (want === "margin") return jsonResp({ error: "unsupported_market", venue: "bybit", allowed: ["spot", "futures", "all"] }, 400);
       const jobs = want === "all" ? [{ m: "spot" as MarketKind, c: "spot" as const }, { m: "futures" as MarketKind, c: "linear" as const }, { m: "futures" as MarketKind, c: "inverse" as const }]
         : [{ m: want as MarketKind, c: (categoryQ || (want === "futures" ? "linear" : "spot")) as "spot" | "linear" | "inverse" }];
       if (jobs.some(j => (j.m === "spot") !== (j.c === "spot"))) return jsonResp({ error: "invalid_category" }, 400);
       const settled = await Promise.allSettled(jobs.map(({ m, c }) => listBybitSymbols(m, marketFetch, Date.now, c)));
       settled.forEach((r, i) => {
         const key = jobs[i].c;
-        if (r.status === "fulfilled") { rows.push(...r.value.rows.map(x => ({ ...x, v: "bybit" as const }))); sources[key] = { host: r.value.host.replace("https://", ""), count: r.value.rows.length, fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale }; }
+        if (r.status === "fulfilled") { const eligible = want === "margin" ? r.value.rows.filter(x => x.marginTrading && x.marginTrading !== "none") : r.value.rows; rows.push(...eligible.map(x => ({ ...x, v: "bybit" as const }))); sources[key] = { host: r.value.host.replace("https://", ""), count: eligible.length, fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale }; }
         else warnings.push({ market: key, venue: "bybit", error: "unavailable" });
       });
     } else if (want === "margin") {
@@ -726,10 +725,10 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     }
     if (!rows.length) return jsonResp({ error: "symbols_unavailable", detail: venueQ + " did not return the requested instrument list.", warnings }, 502);
     const categories = venueQ === "bybit" ? (want === "all" ? ["spot", "linear", "inverse"] : [categoryQ || (want === "futures" ? "linear" : "spot")])
-      : want === "margin" ? ["MARGIN"] : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
+      : want === "margin" ? (venueQ === "bybit" ? ["spot-margin"] : ["MARGIN"]) : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
-      symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : [])]) }, 200, { "cache-control": "public, max-age=45" });
+      symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : []), ...(x.marginTrading ? [x.marginTrading] : [])]) }, 200, { "cache-control": "public, max-age=45" });
   }
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";
@@ -739,7 +738,6 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   if (!["spot", "futures", "margin"].includes(marketInput)) return jsonResp({ error: "invalid_market", allowed: ["spot", "futures", "margin"] }, 400);
   const venueParam = url.searchParams.get("venue") || "bybit";
   if (venueParam !== "bybit" && venueParam !== "bitget") return jsonResp({ error: "unsupported_venue", allowed: ["bybit", "bitget"] }, 400);
-  if (venueParam === "bybit" && marketInput === "margin") return jsonResp({ error: "unsupported_market", venue: "bybit", note: "Bybit spot-margin market data uses category=spot and account-specific margin eligibility." }, 400);
   const marketParam: MarketKind = marketInput === "futures" ? "futures" : "spot";
   const categoryParam = url.searchParams.get("category") || (venueParam === "bitget" ? (marketInput === "margin" ? "MARGIN" : marketInput === "futures" ? bitgetProductFor(symbol) : "SPOT") : (marketInput === "futures" ? "linear" : "spot"));
   if (venueParam === "bybit" && (!(["spot", "linear", "inverse"] as string[]).includes(categoryParam) || (marketParam === "spot" && categoryParam !== "spot") || (marketParam === "futures" && categoryParam === "spot")))
