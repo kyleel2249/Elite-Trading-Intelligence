@@ -666,7 +666,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       service: "eti-bybit-market-data",
       configured_region: "aws:eu-central-1",
       placement,
-      placement_verified: typeof placement === "string" && placement.endsWith("-CPT"),
+      placement_verified: typeof placement === "string" && placement.endsWith("-FRA"),
       provider_hosts: PROVIDERS.bybit.hosts.map(host => host.replace("https://", "")),
       account_residency_is_not_changed: true,
     }, 200, { "cache-control": "no-store" });
