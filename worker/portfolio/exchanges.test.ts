@@ -7,8 +7,10 @@ const env = {
   BITGET_API_KEY: "test-bitget-key", BITGET_API_SECRET: "test-bitget-secret",
   BITGET_API_PASSPHRASE: "test-passphrase",
 };
+const fetchCalls: string[] = [];
 function mockFetch(input: RequestInfo | URL) {
-  const url = new URL(String(input));
+  const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const url = new URL(raw); fetchCalls.push(url.pathname);
   if (url.hostname.includes("bybit")) {
     if (url.pathname.endsWith("/wallet-balance")) return Promise.resolve(new Response(JSON.stringify({ retCode: 0, result: { list: [{ totalEquity: "1250.50", totalAvailableBalance: "900.25", coin: [{ coin: "USDT", walletBalance: "1200", availableToWithdraw: "900", usdValue: "1200" }] }] } })));
     return Promise.resolve(new Response(JSON.stringify({ retCode: 0, result: { list: [] } })));
@@ -30,6 +32,7 @@ test("exchange snapshot reports Bybit and separate Bitget product accounts witho
   assert.equal(bybit.equityUsd, 1250.5);
   assert.equal(bybit.assets[0].coin, "USDT");
   assert.equal(bitget.markets.length, 6);
+  assert.equal(bitget.markets[0].status, "connected", JSON.stringify({ markets: bitget.markets, fetchCalls }));
   assert.equal(bitget.markets.find((m: any) => m.market === "spot").assets[0].coin, "USDT");
   assert.equal(bitget.markets.find((m: any) => m.market === "usdt-futures").assets[0].equity, 300);
   assert.ok(snapshot.limitations.some(x => x.includes("shared collateral")));
