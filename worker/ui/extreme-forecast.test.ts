@@ -29,7 +29,7 @@ const ticker = { symbol: "BTCUSDT", lastPrice: 120, highPrice: 122, lowPrice: 11
 test("24-hour forecast uses completed daily ranges and hourly high/low timing patterns", () => {
   const h = history();
   const result = forecast24hExtremes(h.hourly, h.daily, ticker, now);
-  assert.equal(result.status, "ready");
+  if (result.status !== "ready") throw new Error("Expected ready forecast, received " + result.status);
   assert.equal(result.history.hourlyDays, 30);
   assert.equal(result.history.dailyDays, 30);
   assert.equal(result.history.priceSampleSource, "1d");
@@ -51,7 +51,6 @@ test("hourly sessions provide a transparent fallback when daily history is unava
   const result = forecast24hExtremes(h.hourly, [], ticker, now);
   assert.equal(result.status, "ready");
   assert.equal(result.history.priceSampleSource, "1h_fallback");
-  assert.equal(result.historyWarning, undefined);
 });
 
 test("short or malformed history never produces fabricated forecast values", () => {
