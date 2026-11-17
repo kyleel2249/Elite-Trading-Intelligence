@@ -1,7 +1,7 @@
 /**
- * ETI public market-data layer. Bybit and Bitget REST feeds run directly from
- * Cloudflare Workers without a paid regional proxy or public-market API keys.
- * Venue selection is explicit; data is never silently substituted cross-exchange.
+ * ETI public market-data layer. Bybit REST runs from Cloudflare Workers; Bitget public REST
+ * uses the browser-direct adapter because Bitget blocks Cloudflare Worker egress. No paid relay
+ * or public-market API keys are required. Venue selection is explicit and never cross-substituted.
  */
 
 export interface MarketEnv { MARKET_PROVIDER_ORDER?: string }
@@ -838,10 +838,10 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   const endpoint = url.pathname.slice("/api/market/".length);
   const marketFetch = (input: RequestInfo | URL, init?: RequestInit) => bitgetAwareFetch(input, init, fetch);
   if (endpoint === "region") return jsonResp({
-    service: "eti-public-market-data", transport: "cloudflare-worker-direct", placementHint: "gcp:europe-west1",
+    service: "eti-public-market-data", transport: "bybit-worker-rest+bitget-browser-direct", placementHint: "gcp:europe-west1",
     providers: { bybit: PROVIDERS.bybit.hosts, bitget: PROVIDERS.bitget.hosts },
     fixedEgressIp: false, accountResidencyIsNotChanged: true,
-    note: "Exchange account permissions follow the verified account registration country; Worker location does not change account eligibility."
+    note: "Bybit REST uses the Worker. Bitget public REST is fetched from the user browser because Bitget blocks Cloudflare Worker egress. Worker placement does not change exchange account-country eligibility."
   });
   if (endpoint === "symbols") {
     const want = url.searchParams.get("market") || "all";
