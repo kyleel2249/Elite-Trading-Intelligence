@@ -90,8 +90,9 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
   const slot = Math.floor(now / 300_000);
   const outcomes: any[] = [];
   let submitted = 0;
-  for (const symbol of symbols) {
-    if (outcomes.length >= maxPerCycle) break;
+  const startIndex = (slot * maxPerCycle) % symbols.length;
+  const scheduledSymbols = symbols.map((_, i) => symbols[(startIndex + i) % symbols.length]).slice(0, maxPerCycle);
+  for (const symbol of scheduledSymbols) {
     const claim = "agent-autopilot:slot:" + symbol + ":" + interval + ":" + slot;
     if (await env.ETI_EXECUTION_LOG.get(claim)) { outcomes.push({ symbol, status: "skipped", reason: "already_processed_this_slot" }); continue; }
     // Claim before analysis; a duplicate cron delivery must not submit a second order.
