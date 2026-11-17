@@ -9,9 +9,6 @@ type Env = Record<string,any>;
 type ActivityFill = { key:string; venue:"bybit"|"bitget"; market:string; id:string; orderId:string; clientOrderId:string; symbol:string; side:string; qty:number; price:number; fee:number|null; feeCoin:string|null; at:number; realizedPnl:number|null };
 type ActivityOrder = { key:string; venue:"bybit"|"bitget"; market:string; orderId:string; clientOrderId:string; symbol:string; side:string; qty:number; leavesQty:number; price:number|null; status:string; updatedAt:number };
 type ActivityState = { schema:"eti.exchange-activity/1"; syncedAt:number; fills:ActivityFill[]; openOrders:ActivityOrder[]; syncs:any[] };
-const num=(v:unknown):number|null=>v===null||v===undefined||v===""?null:Number.isFinite(Number(v))?Number(v):null;
-const clean=(v:unknown)=>String(v??"").slice(0,120);
-const rows=(v:any):any[]=>Array.isArray(v)?v:[];
 export function mergeActivityFills(existing:ActivityFill[],incoming:ActivityFill[]){
  const byKey=new Map<string,ActivityFill>();for(const f of existing)byKey.set(f.key,f);for(const f of incoming)if(!byKey.has(f.key))byKey.set(f.key,f);
  return [...byKey.values()].sort((a,b)=>a.at-b.at).slice(-12000);
@@ -25,7 +22,7 @@ const marginSymbols=(env:Env)=>String(env.ETI_BITGET_MARGIN_SYMBOLS??"").split("
 export async function syncExchangeActivity(env:Env,environment:"internal_paper"|"exchange_testnet",now:number,deps:{fetchImpl?:typeof fetch}={}){
  const st=openStore(env,environment);if(!st)throw new Error("portfolio_storage_unavailable");
  const previous=await st.kvGet<ActivityState>("exchange_activity",{schema:"eti.exchange-activity/1",syncedAt:0,fills:[],openOrders:[],syncs:[]});
- const incoming:ActivityFill[]=[],seen=new Set(previous.fills.map(x=>x.key)),openOrders:ActivityOrder[]=[],results:any[]=[];
+ const incoming:ActivityFill[]=[],seen=new Set(previous.fills.map(x=>x.key)),openOrders:ActivityOrder[]=[],freshOrderScopes=new Set<string>(),results:any[]=[];
  const since=Math.max(0,now-7*86400_000),fetchDeps={now:()=>now,fetchImpl:deps.fetchImpl};
  const bybitConfigured=!!(env.BYBIT_API_KEY?.trim()&&env.BYBIT_API_SECRET?.trim());
  if(bybitConfigured){
