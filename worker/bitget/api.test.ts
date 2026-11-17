@@ -126,3 +126,11 @@ test("open orders cover spot, futures and symbol-scoped margin with remaining qu
  assert.equal(spot[0].leavesQty,0.75);assert.equal(fut[0].leavesQty,0.75);assert.equal(margin[0].qty,2);assert.equal(margin[0].leavesQty,1.5);
  assert.match(urls[0],/spot\/trade\/unfilled-orders/);assert.match(urls[1],/mix\/order\/orders-pending/);assert.match(urls[2],/margin\/crossed\/open-orders/);assert.match(urls[2],/startTime=1699395200000/);
 });
+
+test("margin open-order monitoring has no fixed 20-symbol truncation",async()=>{
+ const {getOpenOrders}=await import("./api.ts");const requested:string[]=[];
+ const symbols=Array.from({length:27},(_,i)=>"PAIR"+String(i).padStart(2,"0")+"USDT");
+ const fetchImpl=(async(u:string)=>{requested.push(new URL(u).searchParams.get("symbol")||"");return ok({orderList:[]});}) as any;
+ const result=await getOpenOrders(ENV,"margin-crossed",symbols,{fetchImpl,now:()=>1700000000000});
+ assert.equal(result.length,0);assert.equal(requested.length,27);assert.deepEqual(requested,symbols);
+});
