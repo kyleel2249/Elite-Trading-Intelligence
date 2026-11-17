@@ -457,7 +457,7 @@ const summary = (attempts: Attempt[]) => attempts.map((a) => a.provider + ":" + 
 
 let diagCache: { at: number; body: unknown } | null = null;
 
-async function runDiagnostics(env: MarketEnv, symbol: string, interval: string): Promise<unknown> {
+async function runDiagnostics(env: MarketEnv, symbol: string, interval: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
   if (diagCache && Date.now() - diagCache.at < 10_000) return diagCache.body;
   const params: Params = { symbol, interval, limit: 5, category: "spot" };
   const order: ProviderId[] = ["bybit"];
@@ -469,7 +469,7 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string):
       return { provider: id, connectionStatus: "unsupported_for_request", hosts: [], detail: e instanceof Error ? e.message : "unsupported" };
     }
     const hosts = await Promise.all(spec.hosts.map(async (host) => {
-      const raw = await fetchHost(host, req);
+      const raw = await fetchHost(host, req, fetchImpl);
       let candles = 0, lastOpen: number | null = null, errorClass = raw.errorClass;
       if (!errorClass) {
         try {
@@ -658,21 +658,69 @@ export async function listBybitSymbols(market: MarketKind = "spot", fetchImpl: t
   throw new AllProvidersFailed(attempts.map(a => ({ provider: "bybit", host: a.host, status: a.status, ok: false, errorClass: a.errorClass ?? "empty_symbols", latencyMs: 0 })));
 }
 
+const BYBIT_PROXY_PATHS: Record<string, string> = {
+  "/v5/market/time": "time",
+  "/v5/market/instruments-info": "instruments-info",
+  "/v5/market/kline": "kline",
+  "/v5/market/orderbook": "orderbook",
+  "/v5/market/recent-trade": "recent-trade",
+  "/v5/market/tickers": "tickers",
+  "/v5/market/funding/history": "funding-history",
+  "/v5/market/open-interest": "open-interest",
+};
+
+function bybitMarketOrigin(env: MarketEnv): URL {
+  const configured = env.BYBIT_MARKET_DATA_ORIGIN || env.BACKEND_URL || "https://eti-trading-intelligence.fly.dev";
+  const origin = new URL(configured);
+  if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) {
+    throw new Error("BYBIT_MARKET_DATA_ORIGIN must be an HTTPS origin without credentials or path");
+  }
+  return origin;
+}
+
+/** Route Bybit REST calls through the ETI Frankfurt origin; all other fetches remain untouched. */
+function bybitRegionalFetch(env: MarketEnv): typeof fetch {
+  let origin: URL;
+  try { origin = bybitMarketOrigin(env); }
+  catch { return (async () => new Response(JSON.stringify({ error: "bybit_market_origin_invalid" }), { status: 503, headers: baseHeaders })) as typeof fetch; }
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const source = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(String(input));
+    if (!["api.bybit.com", "api.bytick.com"].includes(source.hostname)) return fetch(input, init);
+    const endpoint = BYBIT_PROXY_PATHS[source.pathname];
+    if (!endpoint) return new Response(JSON.stringify({ error: "bybit_endpoint_not_allowlisted" }), { status: 404, headers: baseHeaders });
+    const target = new URL("/api/market/bybit/proxy/" + endpoint, origin);
+    target.search = source.search;
+    const headers = new Headers(init?.headers);
+    headers.set("accept", "application/json");
+    return fetch(target.toString(), { ...init, headers });
+  }) as typeof fetch;
+}
+
 export async function handleMarket(request: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "access-control-allow-methods": "GET,OPTIONS" } });
   if (request.method !== "GET") return jsonResp({ error: "method_not_allowed" }, 405);
   const endpoint = url.pathname.slice("/api/market/".length);
+  const bybitFetch = bybitRegionalFetch(env);
   if (endpoint === "region") {
-    const placement = request.headers.get("cf-placement");
-    return jsonResp({
-      service: "eti-bybit-market-data",
-      configured_region: "aws:eu-central-1",
-      placement,
-      placement_verified: typeof placement === "string" && placement.endsWith("-FRA"),
-      provider_hosts: PROVIDERS.bybit.hosts.map(host => host.replace("https://", "")),
-      account_residency_is_not_changed: true,
-    }, 200, { "cache-control": "no-store" });
+    try {
+      const origin = bybitMarketOrigin(env);
+      const upstream = await fetch(new URL("/api/market/bybit/region", origin).toString(), { headers: { accept: "application/json" } });
+      const details = await upstream.json().catch(() => ({})) as Record<string, unknown>;
+      const egressRegion = String(details.egress_region || "unknown").toLowerCase();
+      const verified = upstream.ok && egressRegion === "fra";
+      return jsonResp({
+        service: "eti-bybit-market-data",
+        transport: "regional-fastapi-proxy",
+        origin: origin.host,
+        egress_region: egressRegion,
+        region_verified: verified,
+        provider_hosts: PROVIDERS.bybit.hosts.map(host => host.replace("https://", "")),
+        account_residency_is_not_changed: true,
+      }, verified ? 200 : 503, { "cache-control": "no-store" });
+    } catch {
+      return jsonResp({ error: "bybit_regional_egress_unavailable", expected_region: "fra" }, 503);
+    }
   }
   if (endpoint === "symbols") {
     const want = url.searchParams.get("market") || "all";
@@ -687,7 +735,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       : [{ m: want as MarketKind, c: (categoryQ || (want === "futures" ? "linear" : "spot")) as "spot" | "linear" | "inverse" }];
     if (jobs.some(j => (j.m === "spot") !== (j.c === "spot"))) return jsonResp({ error: "invalid_category" }, 400);
     const venues = ["bybit"];
-    const settled = await Promise.allSettled(jobs.map(({ m, c }) => listBybitSymbols(m, fetch, Date.now, c)));
+    const settled = await Promise.allSettled(jobs.map(({ m, c }) => listBybitSymbols(m, bybitFetch, Date.now, c)));
     const rows: SymbolRow[] = [], sources: Record<string, unknown> = {}, warnings: unknown[] = [];
     settled.forEach((r, i) => {
       const { m, c } = jobs[i], key = c;
@@ -717,7 +765,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   const ptParam = url.searchParams.get("pt");
   if (ptParam !== null) return jsonResp({ error: "unsupported_parameter", parameter: "pt" }, 400);
 
-  if (endpoint === "diag") return jsonResp(await runDiagnostics(env, symbol, interval));
+  if (endpoint === "diag") return jsonResp(await runDiagnostics(env, symbol, interval, bybitFetch));
   if (endpoint === "providers") {
     return jsonResp({
       order: providerOrder(env),
@@ -737,7 +785,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
 
   const order: ProviderId[] = ["bybit"];
   try {
-    const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw), market: marketParam as MarketKind, category: categoryParam as "spot" | "linear" | "inverse" }, order);
+    const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw), market: marketParam as MarketKind, category: categoryParam as "spot" | "linear" | "inverse" }, order, bybitFetch);
     const data = endpoint === "klines" && Array.isArray(r.data) ? (r.data as Kline[]).map(k => k.slice(0, 6)) : r.data; // public contract stays 6 columns; taker volume is internal
     return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
   } catch (e) {
