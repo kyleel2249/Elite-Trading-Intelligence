@@ -36,11 +36,12 @@ class BybitAdapter(BrokerAdapter):
     supports_order_book = True
 
     def __init__(self, api_key: str, secret: str, *, testnet: bool = True, symbols=(),
-                 category: str = "spot", transport=None, clock_ms=lambda: int(time.time() * 1000)):
+                 category: str = "spot", margin_enabled: bool = False, transport=None, clock_ms=lambda: int(time.time() * 1000)):
         if category not in ("spot", "linear", "inverse"):
             raise ValueError("Bybit category must be spot, linear or inverse")
         self.environment = "paper" if testnet else "live"
         self.testnet, self.category = testnet, category
+        self.margin_enabled = bool(margin_enabled) and category == "spot"
         self.base = "https://api-testnet.bybit.com" if testnet else "https://api.bybit.com"
         self._key, self._secret = api_key, secret.encode()
         self.symbols = [str(s).upper() for s in symbols]
@@ -191,6 +192,7 @@ class BybitAdapter(BrokerAdapter):
                        "orderType": "Market", "qty": _fmt(qty), "orderLinkId": client_order_id}
             if self.category == "spot":
                 payload["marketUnit"] = "baseCoin"
+                payload["isLeverage"] = 1 if self.margin_enabled else 0
         else:
             payload = {"category": self.category, "symbol": symbol.upper(), "side": "Buy" if side == Side.BUY else "Sell",
                        "orderType": "Limit", "qty": _fmt(qty), "price": _fmt(limit_price),
@@ -200,6 +202,8 @@ class BybitAdapter(BrokerAdapter):
             payload["positionIdx"] = 0
         elif reduce_only:
             raise OrderRejectedError("reduce_only is not supported for spot orders")
+        elif self.category == "spot":
+            payload["isLeverage"] = 1 if self.margin_enabled else 0
         result = await self._request("POST", "/v5/order/create", body=payload, write=True)
         if not result.get("orderId"):
             raise UnknownOutcomeError("Bybit accepted no verifiable order id; reconcile before retrying")
