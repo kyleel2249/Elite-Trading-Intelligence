@@ -18,9 +18,9 @@ export function reconcileCrossExchange(snapshot: any, ledger: any, now: number, 
  const bybit=venues.find((v:any)=>v.venue==="bybit"),bitget=venues.find((v:any)=>v.venue==="bitget");
  const fresh=Number.isFinite(snapshot?.generatedAt)&&now-snapshot.generatedAt>=0&&now-snapshot.generatedAt<=maxAgeMs;
  if(!fresh)problems.push("exchange_snapshot_stale_or_invalid");
- for(const v of [bybit,bitget])if(!v||!["connected","partial"].includes(v.status))problems.push((v?.venue??"exchange")+"_account_unavailable");
+ for(const v of [bybit,bitget])if(!v||v.status!=="connected")problems.push((v?.venue??"exchange")+"_account_snapshot_incomplete_or_unavailable");
  if(bitget?.status==="partial")warnings.push("bitget_product_snapshot_partial");
- const exchange=exchangePositions(snapshot),internal=Object.values(ledger?.positions??{}).map((p:any)=>({venue:String(p.venue??"").toLowerCase(),symbol:norm(p.symbol),side:side(p.side),qty:qty(p.qty)}));
+ const exchange=exchangePositions(snapshot),internal=Object.values(ledger?.positions??{}).map((p:any)=>({venue:String(p.venue??"").toLowerCase(),symbol:norm(p.symbol),side:side(p.direction??p.side),qty:qty(p.qty)}));
  const comparisons:any[]=[],keys=new Set([...exchange.map(p=>p.venue+"|"+p.symbol+"|"+p.side),...internal.filter(p=>["bybit","bitget"].includes(p.venue)).map(p=>p.venue+"|"+p.symbol+"|"+p.side)]);
  for(const key of keys){const [venue,symbol,direction]=key.split("|"),ex=exchange.filter(p=>p.venue===venue&&p.symbol===symbol&&p.side===direction),le=internal.filter(p=>p.venue===venue&&p.symbol===symbol&&p.side===direction),externalQty=ex.reduce((s,p)=>s+p.qty,0),ledgerQty=le.reduce((s,p)=>s+p.qty,0),delta=externalQty-ledgerQty,match=Math.abs(delta)<=Math.max(1e-10,Math.max(externalQty,ledgerQty)*1e-8);comparisons.push({venue,symbol,side:direction,exchangeQty:externalQty,ledgerQty,delta,status:match?"matched":"mismatch"});if(!match)problems.push("position_mismatch:"+venue+":"+symbol+":"+direction);}
  let verifiedAvailableUsd:number|null=null;
