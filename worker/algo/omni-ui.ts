@@ -54,6 +54,12 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <form class="bar" id="controls" autocomplete="off">
 <label>Symbol<input type="text" id="symbol" value="BTCUSDT" maxlength="20" pattern="[A-Za-z0-9]{5,20}" required></label>
 <label>Strategy<select id="strategy"><option value="scalp">Scalp</option><option value="intraday" selected>Intraday</option><option value="swing">Swing</option><option value="position">Position</option></select></label>
+<label>Venue / Market<select id="market"><option value="bybit:linear" selected>Bybit Linear Futures</option><option value="bybit:inverse">Bybit Inverse Futures</option><option value="bybit:spot">Bybit Spot</option><option value="bitget:USDT-FUTURES">Bitget USDT Futures</option><option value="bitget:USDC-FUTURES">Bitget USDC Futures</option><option value="bitget:COIN-FUTURES">Bitget Coin Futures</option><option value="bitget:SPOT">Bitget Spot</option></select></label>
+<label>Account equity (optional)<input type="number" id="equity" min="0" step="any" placeholder="For position sizing"></label>
+<label>Risk %<input type="number" id="risk" min="0.01" max="5" step="0.01" value="1"></label>
+<label>Leverage<input type="number" id="leverage" min="1" max="100" step="1" value="1"></label>
+<label>Fee bps<input type="number" id="fee" min="0" max="500" step="0.1" placeholder="Optional"></label>
+<label>Slippage bps<input type="number" id="slippage" min="0" max="500" step="0.1" placeholder="Optional"></label>
 <label class="inline"><input type="checkbox" id="e-swift" checked> Swift-inspired</label>
 <label class="inline"><input type="checkbox" id="e-gainz" checked> Gainz-inspired</label>
 <label>Auto-refresh<select id="auto"><option value="0">Off</option><option value="30">30 s</option><option value="60" selected>60 s</option><option value="120">120 s</option></select></label>
@@ -69,6 +75,8 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <section class="card s12"><h2>Eight-timeframe matrix</h2><div id="matrix" class="scroll muted">–</div></section>
 <section class="card s6"><h2>Momentum, EMA, volatility, breakout</h2><div id="indicators" class="muted">–</div></section>
 <section class="card s6"><h2>Liquidity and order book</h2><div id="liquidity" class="muted">–</div></section>
+<section class="card s6"><h2>Funding and open interest</h2><div id="derivatives" class="muted">–</div></section>
+<section class="card s6"><h2>Structured trade plan</h2><div id="trade-plan" class="muted">Add account equity to calculate position size. No order is submitted.</div></section>
 <section class="card s12" id="universe"><h2>Universe scan (all liquid USDT pairs)</h2><div class="bar"><button type="button" id="uni-go">Load universe leaderboard</button></div><div id="uni-body" class="muted">Shows the stored, rolling scan of the whole liquid universe with coverage and data age. Rows older than the staleness limit are not ranked.</div></section>
 <section class="card s12"><h2>Elite Trader research</h2><div id="elite" class="muted">–</div></section>
 <section class="card s12" id="scanner"><h2>Opportunity scanner and leaderboard</h2><form class="bar" id="scan-form" autocomplete="off"><label>Symbols (up to 4, comma separated)<input type="text" id="scan-symbols" value="BTCUSDT,ETHUSDT,SOLUSDT" maxlength="80" style="width:280px"></label><button type="submit" id="scan-go">Scan</button></form><div id="scan-body" class="muted">Ranks by evidence quality (validator score, reward/risk, liquidity), not by predicted profit. HOLD and REJECTED are valid outcomes and are not ranked.</div></section>
@@ -170,6 +178,18 @@ function renderLiquidity(p){
  if(l.largeOrders&&l.largeOrders.length)box.appendChild(el("details",null,el("summary",{text:"Large resting orders ("+l.largeOrders.length+")"}),list(l.largeOrders.map(function(o){return JSON.stringify(o)}))));
  box.appendChild(el("div",{class:"small muted",text:l.caveat}));put("liquidity",box)}
 
+function renderDerivatives(p){
+ var d=p.derivatives;if(!d){put("derivatives",el("div",{class:"muted",text:"Choose a futures market to load funding-rate and open-interest context."}));return}
+ var box=el("div");box.appendChild(kv([["Status",d.status],["Funding",d.fundingPercent==null?"–":num(d.fundingPercent,4)+"%"],["Funding bias",String(d.fundingBias||"unknown").replace(/_/g," ")],["Crowding",String(d.crowding||"unknown").replace(/_/g," ")],["Open interest",fmt(d.openInterest)],["OI change",d.openInterestChangePct==null?"–":num(d.openInterestChangePct,2)+"%"],["Snapshot age",d.ageMs==null?"–":Math.round(d.ageMs/1000)+" s"],["Source",d.source||"–"]]));
+ if(d.notes&&d.notes.length)box.appendChild(list(d.notes));put("derivatives",box)
+}
+function renderTradePlan(p){
+ var t=p.tradePlan;if(!t){put("trade-plan",el("div",{class:"muted",text:"No position sizing calculated. Enter account equity; trade levels remain available without it."}));return}
+ var box=el("div");box.appendChild(kv([["Plan status",t.valid?"valid":"blocked",t.valid?"bull":"bear"],["Quantity",num(t.quantity,6)],["Notional",fmt(t.notional)],["Risk budget",fmt(t.riskBudget)],["Planned stop risk",fmt(t.plannedStopRisk)],["Remaining risk",fmt(t.remainingRiskBudget)],["Margin estimate",fmt(t.estimatedMargin)],["Leverage",t.leverage+"x"],["Round-trip costs",t.estimatedRoundTripCosts==null?"not supplied":fmt(t.estimatedRoundTripCosts)],["Gross R to final target",t.grossRewardRiskToFinalTarget==null?"–":num(t.grossRewardRiskToFinalTarget,2)+"R"],["Net R",t.netRewardRiskToFinalTarget==null?"not estimated":num(t.netRewardRiskToFinalTarget,2)+"R"]]));
+ if(t.targets&&t.targets.length)box.appendChild(paperTable(["Target","Price","Close %","Gross P&L","R"],t.targets.map(function(x){return [x.label,fmt(x.price),num(x.closeFraction*100,1)+"%",fmt(x.grossProfit),num(x.rewardRisk,2)+"R"]})));
+ if(t.blockers&&t.blockers.length)box.appendChild(note(t.blockers.join("; "),"bad"));if(t.notes&&t.notes.length)box.appendChild(list(t.notes));
+ box.appendChild(note("Position-sizing calculation only. This endpoint cannot submit orders.","ok"));put("trade-plan",box)
+}
 function renderElite(p){
  var e=p.elite;if(!e){put("elite",el("div",{class:"muted",text:"Elite Trader assessment runs only when the engines propose a trade."}));return}
  if(!e.available){put("elite",el("div",{class:"muted",text:e.reason||"Unavailable"}));return}
@@ -180,15 +200,15 @@ function renderElite(p){
  box.appendChild(el("div",{class:"small muted",text:"Investor disclosures: "+e.disclosures.reason}));
  box.appendChild(el("div",{class:"small muted",text:e.limitations}));put("elite",box)}
 
-function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p);renderElite(p)}
-function clearAll(msg){["decision-body","swift-body","gainz-body","evidence","validation","matrix","indicators","liquidity","elite"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
+function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p);renderDerivatives(p);renderTradePlan(p);renderElite(p)}
+function clearAll(msg){["decision-body","swift-body","gainz-body","evidence","validation","matrix","indicators","liquidity","derivatives","trade-plan","elite"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
 
-function params(){var sym=$("symbol").value.trim().toUpperCase();var eng=[];if($("e-swift").checked)eng.push("swift");if($("e-gainz").checked)eng.push("gainz");return {symbol:sym,strategy:$("strategy").value,engines:eng}}
+function params(){var sym=$("symbol").value.trim().toUpperCase();var eng=[];if($("e-swift").checked)eng.push("swift");if($("e-gainz").checked)eng.push("gainz");var parts=$("market").value.split(":");var venue=parts[0],category=parts[1],market=(category==="spot"||category==="SPOT")?"spot":"futures";var equityText=$("equity").value.trim();return {symbol:sym,strategy:$("strategy").value,engines:eng,venue:venue,market:market,category:category,equity:equityText?Number(equityText):undefined,riskFraction:equityText?Number($("risk").value)/100:undefined,leverage:Number($("leverage").value)||1,feeBps:$("fee").value.trim()?Number($("fee").value):undefined,slippageBps:$("slippage").value.trim()?Number($("slippage").value):undefined}}
 function analyse(){
  var q=params();if(!/^[A-Z0-9]{5,20}$/.test(q.symbol)){setStatus("Symbol must be 5-20 letters or digits, e.g. BTCUSDT",true);return Promise.resolve()}
  if(!q.engines.length){setStatus("Enable at least one engine",true);return Promise.resolve()}
  if(state.busy)return Promise.resolve();state.busy=true;$("refresh").disabled=true;setStatus("Analysing "+q.symbol+"…");
- return api("/api/omnisignal?symbol="+encodeURIComponent(q.symbol)+"&strategy="+q.strategy+"&engines="+q.engines.join(",")).then(function(r){
+ return api("/api/omnisignal",{method:"POST",body:q}).then(function(r){
   if(r.ok&&r.body&&r.body.fusion){renderAll(r.body);setStatus("Updated "+new Date().toLocaleTimeString()+" - "+q.symbol+" "+q.strategy)}
   else{clearAll(r.body&&r.body.error?"Market data unavailable ("+r.body.error+"). No stale values are shown.":"Request failed (HTTP "+r.status+")");setStatus("Analysis failed",true)}
  }).catch(function(e){clearAll("Network error: "+e.message);setStatus("Analysis failed",true)}).then(function(){state.busy=false;$("refresh").disabled=false})}
