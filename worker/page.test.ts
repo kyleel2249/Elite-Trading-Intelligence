@@ -40,20 +40,22 @@ test("/elite is served, loads no external script, and carries none of the refere
   assert.doesNotMatch(html, /risk[-_ ]?gateway/i);
 });
 
-// Regression: Bybit is the only market-data venue, so the dashboard must never ask the market API for another one
-// (it used to request venue=all and venue=bitget, which the API rejects with 400 unsupported_venue).
-test("dashboard market requests use only the Bybit venue and are accepted by the market API", async () => {
+// Regression: the dashboard explicitly loads Bybit and Bitget catalogs and routes chart requests to the selected venue/product.
+test("dashboard market requests support Bybit and Bitget spot, margin and futures", async () => {
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
-  const marketCalls = html.match(/\/api\/market\/(?:symbols|klines)\?[^'"`)]*/g) ?? [];
-  assert.ok(marketCalls.length >= 2, "dashboard should request the pair list and candles");
-  for (const call of marketCalls) assert.doesNotMatch(call, /venue=(?!bybit\b)/, "non-Bybit venue requested: " + call);
-  assert.doesNotMatch(html.match(/function mkt\(\)\{[^}]*\}/)?.[0] ?? "", /venue|[?&]pt=/, "chart requests must not carry a venue or product type");
+  assert.match(html, /venue=bybit/);
+  assert.match(html, /venue=bitget/);
+  assert.match(html, /market=margin/);
+  assert.match(html, /usdt-futures/);
+  assert.match(html, /Bitget \(spot, margin &amp; futures\)/);
+  assert.match(html, /function mkt\(\)\{[^}]*venue=/);
   assert.match(html, /const SYM=\{all:\[\],market:'spot',venue:'bybit'/);
 
   const { handleMarket } = await import("./market.ts");
   const realFetch = globalThis.fetch, now = Date.now();
   globalThis.fetch = (async (input: any) => {
     const u = new URL(String(input));
+    if (u.hostname === "api.bitget.com") return new Response(JSON.stringify({ code: "00000", data: [[String(now), "100", "103", "99", "102", "12"]] }));
     if (u.pathname === "/v5/market/kline") return new Response(JSON.stringify({ retCode: 0, result: { list: [[String(now), "100", "103", "99", "102", "12", "0"]] } }));
     return new Response(JSON.stringify({ retCode: 0, result: { list: [], nextPageCursor: "" } }));
   }) as typeof fetch;
@@ -61,8 +63,10 @@ test("dashboard market requests use only the Bybit venue and are accepted by the
     const call = (path: string) => handleMarket(new Request("https://x.test" + path), {} as any);
     assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
     assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5&market=futures")).status, 200);
-    assert.notEqual((await call("/api/market/symbols?venue=bybit")).status, 400);
-    for (const bad of ["venue=all", "venue=bitget", "venue=binance"]) {
+    assert.equal((await call("/api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
+    assert.equal((await call("/api/market/klines?venue=bitget&market=margin&symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
+    assert.equal((await call("/api/market/klines?venue=bitget&market=futures&category=USDT-FUTURES&symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
+    for (const bad of ["venue=all", "venue=binance"]) {
       assert.equal((await call("/api/market/symbols?" + bad)).status, 400, bad);
       assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&" + bad)).status, 400, bad);
     }

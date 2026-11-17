@@ -7,10 +7,6 @@ on:
     paths:
       - "worker/**"
       - "app/**"
-      - "fly.toml"
-      - "Dockerfile"
-      - "requirements.txt"
-      - "pyproject.toml"
       - "wrangler.jsonc"
       - "migrations/**"
       - "package.json"
@@ -36,15 +32,6 @@ jobs:
         run: npm ci
       - name: Run full Worker, security and type checks
         run: npm run check
-      - name: Deploy Frankfurt FastAPI origin for Bybit market egress
-        uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Deploy FastAPI backend to Fly.io Frankfurt
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          test -n "$FLY_API_TOKEN" || (echo "::error::Set FLY_API_TOKEN in GitHub Actions secrets to deploy the Frankfurt Bybit egress service"; exit 1)
-          flyctl deploy --remote-only --config fly.toml
-
       - name: Apply pending D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -96,15 +83,15 @@ jobs:
         run: |
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
           failed=0
-          region_response="$(curl --silent --show-error --fail "$base/api/market/region")" || { echo "::error::Could not read the Bybit market execution region"; exit 1; }
+          region_response="$(curl --silent --show-error --fail "$base/api/market/region")" || { echo "::error::Could not read the public market transport diagnostic"; exit 1; }
           printf '%s' "$region_response" | node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s);
-              if(x.transport!=="regional-fastapi-proxy"||x.egress_region!=="fra"||x.region_verified!==true){
-                console.error("Bybit market egress:",JSON.stringify(x));process.exit(1);
+              if(x.transport!=="cloudflare-worker-direct"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
+                console.error("Public market transport:",JSON.stringify(x));process.exit(1);
               }
-              console.log("Bybit public REST requests are routed through the ETI FastAPI origin in Fly.io Frankfurt.");
-            }catch(e){console.error("Invalid Bybit region response:",e.message);process.exit(1);}});' || exit 1
+              console.log("Bybit and Bitget public REST traffic is served directly by Cloudflare Workers; no Fly.io deployment is required.");
+            }catch(e){console.error("Invalid market transport response:",e.message);process.exit(1);}});' || exit 1
           symbols_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
           symbols_status="${symbols_response##*__HTTP_CODE__}"
           symbols="${symbols_response%__HTTP_CODE__*}"
@@ -129,6 +116,47 @@ jobs:
                 if(!ok){console.error("Bybit ticker:",JSON.stringify({market:process.env.MARKET,httpStatus:process.env.HTTP_STATUS,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice,error:x.error,attempts}));process.exit(1);}
                 console.log("Bybit "+process.env.MARKET+" ticker verified with valid live price and 24h high/low.");
               }catch(e){console.error("Invalid Bybit ticker response:",e.message);process.exit(1);}});' || failed=1
+          done
+
+          # Bitget public market verification (no API key required).
+          bitget_symbols="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?venue=bitget&market=all")" || { echo "::error::Could not contact Bitget symbol catalogue"; failed=1; bitget_symbols='{}__HTTP_CODE__000'; }
+          bitget_symbols_status="${bitget_symbols##*__HTTP_CODE__}"
+          bitget_symbols_body="${bitget_symbols%__HTTP_CODE__*}"
+          printf '%s' "$bitget_symbols_body" | HTTP_STATUS="$bitget_symbols_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s), rows=Array.isArray(x.symbols)?x.symbols:[];
+              const hasSpot=rows.some(r=>r[5]==="bitget"&&r[0]&&r[2]);
+              const hasUsdt=rows.some(r=>r[6]==="USDT-FUTURES");
+              const hasUsdc=rows.some(r=>r[6]==="USDC-FUTURES");
+              const hasCoin=rows.some(r=>r[6]==="COIN-FUTURES");
+              if(process.env.HTTP_STATUS!=="200"||x.provider!=="bitget"||!hasSpot||!hasUsdt||!hasUsdc||!hasCoin){
+                console.error("Bitget instrument catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,count:x.count,categories:x.categories,hasSpot,hasUsdt,hasUsdc,hasCoin,warnings:x.warnings}));process.exit(1);
+              }
+              console.log("Bitget spot and USDT/USDC/Coin-M perpetual instrument catalogues verified.");
+            }catch(e){console.error("Invalid Bitget catalogue response:",e.message);process.exit(1);}});' || failed=1
+
+          bitget_margin="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?venue=bitget&market=margin")" || { echo "::error::Could not contact Bitget margin catalogue"; failed=1; bitget_margin='{}__HTTP_CODE__000'; }
+          bitget_margin_status="${bitget_margin##*__HTTP_CODE__}"
+          bitget_margin_body="${bitget_margin%__HTTP_CODE__*}"
+          printf '%s' "$bitget_margin_body" | HTTP_STATUS="$bitget_margin_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s), rows=Array.isArray(x.symbols)?x.symbols:[];
+              if(process.env.HTTP_STATUS!=="200"||x.provider!=="bitget"||!rows.length||!x.categories.includes("MARGIN")){
+                console.error("Bitget margin catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,count:x.count,categories:x.categories,error:x.error}));process.exit(1);
+              }
+              console.log("Bitget margin-eligible pair catalogue verified.");
+            }catch(e){console.error("Invalid Bitget margin catalogue:",e.message);process.exit(1);}});' || failed=1
+
+          for suffix in "" "&market=futures&category=USDT-FUTURES"; do
+            bitget_ticker="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/ticker?venue=bitget&symbol=BTCUSDT$suffix")" || { echo "::error::Could not contact Bitget ticker"; failed=1; bitget_ticker='{}__HTTP_CODE__000'; }
+            bitget_ticker_status="${bitget_ticker##*__HTTP_CODE__}"
+            bitget_ticker_body="${bitget_ticker%__HTTP_CODE__*}"
+            printf '%s' "$bitget_ticker_body" | HTTP_STATUS="$bitget_ticker_status" node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                const x=JSON.parse(s),ok=process.env.HTTP_STATUS==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0;
+                if(!ok){console.error("Bitget live ticker:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice}));process.exit(1);}
+                console.log("Bitget ticker verified for requested market.");
+              }catch(e){console.error("Invalid Bitget ticker:",e.message);process.exit(1);}});' || failed=1
           done
 
           forecast_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }

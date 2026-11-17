@@ -1,29 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleMarket, listBybitSymbols, _resetSymbolCache } from "./market.ts";
+import { handleMarket, listBybitSymbols, listBitgetSymbols, _resetSymbolCache } from "./market.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; _resetSymbolCache(); });
-const payload = (category: string) => new Response(JSON.stringify({ retCode: 0, result: {
+const bybitPayload = (category: string) => new Response(JSON.stringify({ retCode: 0, result: {
   list: category === "spot"
     ? [{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "Trading", marginTrading: "both" }]
     : [{ symbol: category === "inverse" ? "BTCUSD" : "BTCUSDT", baseCoin: "BTC",
-         quoteCoin: category === "inverse" ? "USD" : "USDT", status: "Trading",
-         contractType: category === "inverse" ? "InversePerpetual" : "LinearPerpetual" }]
+         quoteCoin: category === "inverse" ? "USD" : "USDT", status: "Trading", contractType: category === "inverse" ? "InversePerpetual" : "LinearPerpetual" }]
 }}));
 
-test("Bybit replaces the legacy Bitget venue in the market route", async () => {
-  const res = await handleMarket(new Request("https://eti.test/api/market/klines?venue=bitget"), {});
-  assert.equal(res.status, 400);
-  assert.deepEqual((await res.json() as any).allowed, ["bybit"]);
-});
-
-test("Bybit spot, linear and inverse instrument discovery is category-aware", async () => {
+test("Bybit spot, linear and inverse symbol discovery remains category-aware", async () => {
   const cats: string[] = [];
   const fetcher: any = async (url: string) => {
     const category = new URL(url).searchParams.get("category") || "spot";
-    cats.push(category);
-    return payload(category);
+    cats.push(category); return bybitPayload(category);
   };
   const spot = await listBybitSymbols("spot", fetcher, Date.now, "spot");
   const linear = await listBybitSymbols("futures", fetcher, Date.now, "linear");
@@ -34,40 +26,34 @@ test("Bybit spot, linear and inverse instrument discovery is category-aware", as
   assert.deepEqual(cats, ["spot", "linear", "inverse"]);
 });
 
-test("Bybit is the only enabled crypto provider in diagnostics and symbols", async () => {
-  globalThis.fetch = (async (url: string) => payload(new URL(url).searchParams.get("category") || "spot")) as any;
-  const res = await handleMarket(new Request("https://eti.test/api/market/symbols?market=all"), {});
-  const body = await res.json() as any;
-  assert.equal(body.provider, "bybit");
-  assert.deepEqual(body.categories, ["spot", "linear", "inverse"]);
-  assert.ok(body.symbols.every((row: any[]) => row[5] === "bybit"));
-});
-
-test("Bybit instrument discovery uses one regional proxy request; the Frankfurt client owns host fallback", async () => {
-  const hosts: string[] = [];
+test("Bitget spot and three futures product catalogues are separately discovered", async () => {
+  const cats: string[] = [];
   const fetcher: any = async (url: string) => {
-    const host = new URL(url).hostname; hosts.push(host);
-    return payload("spot");
+    const category = new URL(url).searchParams.get("category") || "";
+    cats.push(category);
+    return new Response(JSON.stringify({ code: "00000", data: [{
+      symbol: category === "COIN-FUTURES" ? "BTCUSD" : "BTCUSDT", baseCoin: "BTC",
+      quoteCoin: category === "COIN-FUTURES" ? "USD" : "USDT", status: "online", type: "perpetual"
+    }] }));
   };
-  const result = await listBybitSymbols("spot", fetcher, Date.now, "spot");
-  assert.equal(result.rows[0].s, "BTCUSDT");
-  assert.equal(result.host, "https://api.bybit.com");
-  assert.deepEqual(hosts, ["api.bybit.com"]);
-  assert.deepEqual(result.attempts, []);
+  const spot = await listBitgetSymbols("spot", fetcher);
+  const futures = await listBitgetSymbols("futures", fetcher);
+  assert.equal(spot.rows[0].v, "bitget");
+  assert.equal(futures.rows.length, 3);
+  assert.deepEqual(cats, ["SPOT", "USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"]);
 });
 
-test("Bybit market ticker uses the primary host; regional backend performs alternate-host failover", async () => {
-  const hosts: string[] = [];
-  globalThis.fetch = (async (url: string) => {
-    const host = new URL(url).hostname; hosts.push(host);
-    return new Response(JSON.stringify({ retCode: 0, result: { list: [{
-      symbol: "BTCUSDT", lastPrice: "100", highPrice24h: "105", lowPrice24h: "95",
-      price24hPcnt: "0.01", volume24h: "10", turnover24h: "1000",
-    }] } }));
+test("Bitget chart route accepts only supported category names and does not route to Bybit", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: string) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify({ code: "00000", data: [["1700000000000", "100", "103", "99", "102", "5"]] }));
   }) as any;
-  const res = await handleMarket(new Request("https://eti.test/api/market/ticker?symbol=BTCUSDT"), {});
+  const res = await handleMarket(new Request("https://eti.test/api/market/klines?venue=bitget&market=futures&category=USDC-FUTURES&symbol=BTCUSDC&interval=1m"), {});
   assert.equal(res.status, 200);
-  const body = await res.json() as any;
-  assert.equal(body.lastPrice, 100);
-  assert.deepEqual(hosts, ["api.bybit.com"]);
+  assert.equal(res.headers.get("x-eti-provider"), "bitget_mix");
+  assert.ok(urls.every(u => new URL(u).hostname === "api.bitget.com"));
+  assert.match(urls[0], /category=USDC-FUTURES/);
+  const invalid = await handleMarket(new Request("https://eti.test/api/market/klines?venue=bitget&market=futures&category=inverse&symbol=BTCUSD"), {});
+  assert.equal(invalid.status, 400);
 });

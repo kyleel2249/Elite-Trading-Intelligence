@@ -28,5 +28,6 @@ The Cloudflare Worker (D1) is separate and is not affected. Trading stays paper/
 
 ## Automated deployment
 
-The production GitHub Actions workflow deploys the FastAPI origin to the `fra` region before deploying the Cloudflare Worker whenever backend files change. Add a Fly.io deploy token as the repository Actions secret `FLY_API_TOKEN`; the workflow does not store or print its value. Existing application secrets such as `DATABASE_URL` stay in Fly's secret store.
+The ETI Cloudflare Worker deployment workflow no longer deploys FastAPI to Fly.io and no longer requires `FLY_API_TOKEN`. Bybit and Bitget public market data run directly from the Cloudflare Worker on the free Worker plan, using each exchange's global public REST API.
 
+The PostgreSQL/FastAPI backend described in this document is a separate legacy service for backend-dependent features. It is not a dependency for Bybit or Bitget public market feeds. Do not provision a paid Fly.io service for those feeds. If other ETI features still require the Python backend or PostgreSQL, they need a separately chosen hosting/database plan; this market-data change does not migrate or delete that data.
