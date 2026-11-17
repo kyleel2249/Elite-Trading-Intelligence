@@ -3,16 +3,17 @@ import assert from "node:assert/strict";
 import { handleAlgoBacktest } from "./backtest-api.ts";
 import { withAlgo } from "./route.ts";
 import { regimeSeries } from "./fixtures.ts";
+import { bybitCompat } from "../test-support/bybit-compat.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
 function mock(seedBySymbol: Record<string, number>) {
-  globalThis.fetch = (async (input: any) => {
+  globalThis.fetch = bybitCompat((async (input: any) => {
     const u = new URL(String(input)), sym = u.searchParams.get("symbol") || "", seed = seedBySymbol[sym];
     if (seed === undefined) return new Response("no", { status: 500 });
     const rows = regimeSeries(1000, { seed, end: Date.now() }).map(r => [r[0], String(r[1]), String(r[2]), String(r[3]), String(r[4]), String(r[5])]);
     return new Response(JSON.stringify(rows), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 
 test("backtest endpoint validates parameters and method", async () => {

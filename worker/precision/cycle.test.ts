@@ -7,6 +7,7 @@ import { MIN_FIT_OUTCOMES, configuredPairs, ledgerKeys, ledgerSummary, runPrecis
 import type { LedgerEntry, LedgerOutcome } from "./ledger.ts";
 import { keys, type KvLike } from "./stores.ts";
 import { NOW, depthAround, informativeSamples, noiseSamples } from "./testkit.ts";
+import { bybitCompat } from "../test-support/bybit-compat.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
@@ -26,7 +27,7 @@ let fetchCount = 0;
 function liveExchange() {
   const px = series(260, { drift: 1, noise: 2, seed: 1, start: 100, end: Date.now() }).at(-1)![4];
   fetchCount = 0;
-  globalThis.fetch = (async (input: any) => {
+  globalThis.fetch = bybitCompat((async (input: any) => {
     fetchCount++;
     const u = new URL(String(input));
     if (u.pathname.includes("depth")) {
@@ -36,15 +37,15 @@ function liveExchange() {
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000;
     const rows = series(260, { drift: 1, noise: 2, seed: 1, start: 100, stepMs: step, end: Date.now() }).map(r => [r[0], String(r[1]), String(r[2]), String(r[3]), String(r[4]), String(r[5])]);
     return new Response(JSON.stringify(rows), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 /** Exchange that serves exactly the given 15m bars [open,high,low,close] starting at `t0`. */
 function fixedExchange(t0: number, bars: number[][]) {
   fetchCount = 0;
-  globalThis.fetch = (async () => {
+  globalThis.fetch = bybitCompat((async () => {
     fetchCount++;
     return new Response(JSON.stringify(bars.map((b, i) => [t0 + i * BAR, String(b[0]), String(b[1]), String(b[2]), String(b[3]), "100"])), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 const entry = (over: Partial<LedgerEntry> = {}): LedgerEntry => ({
   id: "seed1", symbol: "BTCUSDT", strategy: "intraday", timeframe: "15m", dir: 1, entry: 100, stop: 98, targets: [102, 104, 106], costInR: 0.05, score: 80,

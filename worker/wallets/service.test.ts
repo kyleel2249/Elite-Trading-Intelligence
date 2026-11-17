@@ -210,7 +210,11 @@ import { newRecoverySet, sealBackup, openBackup, checkRestoreBundle, parseSealed
 test("vault: backup round-trips with k shares, fails with fewer / wrong / tampered, restore only into an empty store", async () => {
   const r = await rig(); await sealed(r); await fund(r, "treasury", "500", "dep-0010-jjjj");
   const rec = await newRecoverySet(3, 5), key = "i".repeat(40), events = (await r.svc.st.events()).events;
-  const file = await sealBackup(events, rec.publicKey, rec.setId, key, r.t.now); assert.equal(findSecret(JSON.parse(file)), null);
+  const file = await sealBackup(events, rec.publicKey, rec.setId, key, r.t.now);
+  // `ct` is random AES-GCM ciphertext (base64url). It is opaque by design, and the heuristic WIF detector (51-52 base58 characters) can
+  // match a run inside a long random blob by chance, so scan the envelope around it and check the ciphertext separately.
+  const { ct, ...envelope } = JSON.parse(file); assert.equal(findSecret(envelope), null);
+  assert.match(ct, /^[A-Za-z0-9_-]+$/); assert.equal(ct.includes(key), false); assert.equal(file.includes(events[0].id), false, "plaintext event ids are not visible in the sealed file");
   assert.equal(file.includes('"d"'), false);
   const ok = await openBackup(file, [rec.shares[0], rec.shares[2], rec.shares[4]]); assert.ok(ok.ok); assert.equal((ok as any).events.length, events.length);
   assert.equal((await openBackup(file, rec.shares.slice(0, 2))).ok, false);

@@ -2,13 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleAlgoSignal } from "./api.ts";
 import { handleOmnisignal } from "./omni-api.ts";
+import { bybitCompat } from "../test-support/bybit-compat.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
 const STEP: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
 
 function mockExchange(opts: { depth?: boolean } = {}) {
-  globalThis.fetch = (async (input: any) => {
+  globalThis.fetch = bybitCompat((async (input: any) => {
     const u = new URL(String(input));
     if (u.pathname.includes("depth")) {
       if (opts.depth === false) return new Response("{}", { status: 500 });
@@ -18,7 +19,7 @@ function mockExchange(opts: { depth?: boolean } = {}) {
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000, now = Date.now();
     const rows = Array.from({ length: 300 }, (_, i) => { const c = 50 + i * 0.3; const o = c - 0.1; return [now - (299 - i) * step, String(o), String(c + 0.2), String(o - 0.2), String(c), String(100 + (i % 5) * 10)]; });
     return new Response(JSON.stringify(rows), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 
 test("algo endpoint validates input and only accepts GET", async () => {

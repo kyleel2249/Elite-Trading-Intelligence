@@ -13,6 +13,7 @@ import { handleExecution } from "./execution.ts";
 import { series } from "./algo/fixtures.ts";
 import { INTERVAL_SECONDS, type Kline } from "./market.ts";
 import type { ClosedTrade } from "./algo/performance.ts";
+import { bybitCompat } from "./test-support/bybit-compat.ts";
 
 const realFetch = globalThis.fetch, realNow = Date.now;
 test.afterEach(() => { globalThis.fetch = realFetch; Date.now = realNow; });
@@ -180,7 +181,7 @@ function mockMarket(now: number, o: { spike?: boolean; thinBook?: boolean; seed?
   const seed = o.seed ?? 7;
   const lastClose = series(1000, { drift: 0.05, noise: 0.6, seed, stepMs: HOUR, end: Math.floor(now / HOUR) * HOUR - HOUR }).at(-1)![4];
   const calls: string[] = [];
-  globalThis.fetch = (async (input: unknown) => {
+  globalThis.fetch = bybitCompat((async (input: unknown) => {
     const u = new URL(String((input as Request).url ?? input)); calls.push(u.pathname);
     if (u.pathname.endsWith("/klines")) {
       const iv = u.searchParams.get("interval")!, n = Number(u.searchParams.get("limit")), step = INTERVAL_SECONDS[iv] * 1000;
@@ -191,7 +192,7 @@ function mockMarket(now: number, o: { spike?: boolean; thinBook?: boolean; seed?
     if (u.pathname.endsWith("/depth")) { const w = o.thinBook ? 0.2 : 0.0002, lv = (s: number) => Array.from({ length: 20 }, (_, i) => [String(lastClose * (1 + s * (w + i * 0.0001))), o.thinBook ? "0.01" : "500"]); return new Response(JSON.stringify({ bids: lv(-1), asks: lv(1) }), { status: 200 }); }
     if (u.pathname.endsWith("/ticker/24hr")) return new Response(JSON.stringify({ lastPrice: String(lastClose), priceChangePercent: "1.2", highPrice: String(lastClose * 1.02), lowPrice: String(lastClose * 0.98), volume: "1000", quoteVolume: "100000" }), { status: 200 });
     return new Response("nope", { status: 404 });
-  }) as unknown as typeof fetch;
+  }) as unknown as typeof fetch);
   return calls;
 }
 const get = (path: string, env: Record<string, unknown> = {}) => handleReadiness(new Request("https://eti.test" + path), env as never);

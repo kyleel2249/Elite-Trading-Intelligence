@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleSignals } from "./signals.ts";
+import { bybitCompat } from "./test-support/bybit-compat.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
@@ -19,7 +20,7 @@ test("signal endpoint calculates market-derived BUY, ATR risk levels and attribu
     const open = close - 0.25;
     return [now - (499 - i) * 3600000, String(open), String(close + 1.2), String(open - 0.5), String(close), String(i === 499 ? 5000 : 100 + (i % 7) * 25)];
   });
-  globalThis.fetch = (async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch;
+  globalThis.fetch = bybitCompat((async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch);
   const res = await handleSignals(new Request("https://eti.test/api/signals?symbol=BTCUSDT&interval=1h"), {});
   assert.equal(res.status, 200);
   const signal = await res.json() as any;
@@ -49,7 +50,7 @@ function series(fn: (i: number) => number, n = 500) {
   });
 }
 async function signalFor(candles: unknown[]) {
-  globalThis.fetch = (async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch;
+  globalThis.fetch = bybitCompat((async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch);
   const res = await handleSignals(new Request("https://eti.test/api/signals?symbol=BTCUSDT&interval=1h"), {});
   assert.equal(res.status, 200);
   return await res.json() as any;
@@ -90,7 +91,7 @@ test("signal attribution is dynamic: regime, module stances, statistical edge an
 // ---------------------------------------------------------------------------------------------
 
 async function responseFor(candles: unknown[], query = "") {
-  globalThis.fetch = (async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch;
+  globalThis.fetch = bybitCompat((async () => new Response(JSON.stringify(candles), { status: 200 })) as typeof fetch);
   const res = await handleSignals(new Request("https://eti.test/api/signals?symbol=BTCUSDT&interval=1h" + query), {});
   return { status: res.status, body: await res.json() as any };
 }

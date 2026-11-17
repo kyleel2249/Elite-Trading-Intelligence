@@ -210,10 +210,11 @@ test("disabled engines are reported as neutral, so a disabled engine can never d
 // ---------- HTTP handler (mocked upstream market data; proves wiring and failure behaviour, not exchange reachability) ----------
 import { handleOmnisignal } from "./algo/omni-api.ts";
 import worker from "./index.ts";
+import { bybitCompat } from "./test-support/bybit-compat.ts";
 const realFetch = globalThis.fetch;
 const INTERVAL_MS: Record<string, number> = { "1m": 60000, "5m": 300000, "15m": 900000, "30m": 1800000, "1h": 3600000, "4h": 14400000, "1d": 86400000, "1w": 604800000 };
 function mockBinance(opts: { depthOk?: boolean; stale?: boolean } = {}) {
-  globalThis.fetch = (async (input: any) => {
+  globalThis.fetch = bybitCompat((async (input: any) => {
     const u = new URL(String(input));
     if (u.host !== "data-api.binance.vision") return new Response("down", { status: 500 });
     if (u.pathname.includes("klines")) {
@@ -224,7 +225,7 @@ function mockBinance(opts: { depthOk?: boolean; stale?: boolean } = {}) {
       const mid = 100; return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(mid - 0.01 - i * 0.01), "5"]), asks: Array.from({ length: 50 }, (_, i) => [String(mid + 0.01 + i * 0.01), "5"]) }), { status: 200 });
     }
     return new Response("down", { status: 500 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 test.afterEach(() => { globalThis.fetch = realFetch; });
 const R = (path: string, method = "GET") => new Request("https://eti.test" + path, { method });

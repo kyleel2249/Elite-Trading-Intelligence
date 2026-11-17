@@ -1,4 +1,5 @@
 import test from "node:test";
+import { bybitCompat } from "../test-support/bybit-compat.ts";
 import assert from "node:assert/strict";
 import { handleAlpha, runScheduled } from "./routes.ts";
 import { memoryKv } from "./store.ts";
@@ -88,7 +89,7 @@ test("wallet labels need a source and confidence, and are stored", async () => {
 });
 
 test("fusion, candles and candidate flow end to end on stubbed exchange data", async () => {
-  const calls: string[] = []; const orig = globalThis.fetch; globalThis.fetch = binanceFetch(calls) as any;
+  const calls: string[] = []; const orig = globalThis.fetch; globalThis.fetch = bybitCompat(binanceFetch(calls) as any);
   try {
     const env = mkEnv();
     const fr = await get(env, "/api/alpha/fusion?symbol=TESTUSDT&interval=1h"); const fj = await fr.json() as any;
@@ -106,7 +107,7 @@ test("fusion, candles and candidate flow end to end on stubbed exchange data", a
 });
 
 test("execution never reaches the live order endpoint and caps risk percent", async () => {
-  const calls: string[] = []; const orig = globalThis.fetch; globalThis.fetch = binanceFetch(calls) as any;
+  const calls: string[] = []; const orig = globalThis.fetch; globalThis.fetch = bybitCompat(binanceFetch(calls) as any);
   try {
     const env = mkEnv({ ETI_LIVE_TRADING_ENABLED: "true" });
     const r = await post(env, "/api/alpha/execute", { symbol: "TESTUSDT", assetClass: "crypto", interval: "1h", accountEquity: 10000, riskPercent: 50 }, "tok-secret"); const j = await r.json() as any;
@@ -119,10 +120,10 @@ test("execution never reaches the live order endpoint and caps risk percent", as
 });
 
 test("scheduled run completes within a budget and reports partial status", async () => {
-  const calls: string[] = []; const orig = globalThis.fetch; globalThis.fetch = binanceFetch(calls) as any;
+  const calls: string[] = []; const orig = globalThis.fetch; globalThis.fetch = bybitCompat(binanceFetch(calls) as any);
   try {
     const env = mkEnv({ ALPHA_SUBREQUEST_BUDGET: "20" });
-    const r = await runScheduled(env, NOW, binanceFetch(calls) as any); assert.ok(r && typeof r === "object");
+    const r = await runScheduled(env, NOW, bybitCompat(binanceFetch(calls) as any)); assert.ok(r && typeof r === "object");
     assert.ok(calls.length <= 60, "bounded subrequests, got " + calls.length);
   } finally { globalThis.fetch = orig; }
 });

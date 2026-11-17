@@ -463,7 +463,7 @@ export function setupStatus(provider: string, s: MarketsSettings = {}): Json {
   if (p === "alpaca") { const missing = [["ALPACA_API_KEY", s.alpaca_api_key], ["ALPACA_SECRET_KEY", s.alpaca_secret_key]].filter(([, v]) => !v).map(([n]) => n); return { configured: !missing.length, missing }; }
   if (p === "bybit") {
     const has = !!(s.bybit_api_key && s.bybit_api_secret);
-    return { configured: true, missing: [], note: has ? null : "public market data works without keys; private account access and testnet/live orders need BYBIT_API_KEY and BYBIT_API_SECRET" };
+    return { configured: true, missing: [], note: has ? null : "public market data works without keys; private account access and testnet/live orders require BYBIT_API_KEY and BYBIT_API_SECRET" };
   }
   if (p === "binance") return { configured: false, missing: [], note: "Binance is retired from ETI crypto routes." };
   return { configured: false, missing: [] };
