@@ -7,7 +7,7 @@ const req = (path: string) => new Request("https://eti.test" + path);
 const bybitKline = { retCode: 0, result: { list: [[String(now), "100", "103", "99", "102", "12"]] } };
 const bybitTicker = { retCode: 0, result: { list: [{ lastPrice: "102", price24hPcnt: "0.02", highPrice24h: "103", lowPrice24h: "99", volume24h: "1000", turnover24h: "102000" }] } };
 const bitgetKline = { code: "00000", data: [[String(now), "100", "103", "99", "102", "12"]] };
-const bitgetTicker = { code: "00000", data: [{ symbol: "BTCUSDT", lastPr: "102", open24h: "100", high24h: "103", low24h: "99", baseVolume: "1000", quoteVolume: "102000" }] };
+const bitgetTicker = { code: "00000", data: [{ symbol: "BTCUSDT", lastPr: "102", open24h: "100", high24h: "103", low24h: "99", baseVolume: "1000", quoteVolume: "102000", markPrice: "101.9", indexPrice: "102.1", fundingRate: "0.0001", openInterest: "12345", bid1Price: "101.99", ask1Price: "102.01", ts: String(now) }] };
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; _resetSymbolCache(); });
 
@@ -56,7 +56,14 @@ test("Bitget spot candles, ticker and margin market data use the global public A
   const ticker = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
   assert.equal(ticker.status, 200);
   assert.match(urls[3], /category=SPOT/);
-  assert.equal((await ticker.json() as any).lastPrice, 102);
+  const tickerData = await ticker.json() as any;
+  assert.equal(tickerData.lastPrice, 102);
+  assert.equal(tickerData.markPrice, 101.9);
+  assert.equal(tickerData.indexPrice, 102.1);
+  assert.equal(tickerData.fundingRate, 0.0001);
+  assert.equal(tickerData.openInterest, 12345);
+  assert.equal(tickerData.bidPrice, 101.99);
+  assert.equal(tickerData.askPrice, 102.01);
 });
 
 test("Bitget USDT, USDC and Coin-M futures remain explicit and never cross-substitute", async () => {
