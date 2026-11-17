@@ -253,7 +253,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   },
 
   bybit: {
-    hosts: ["https://api.bytick.com", "https://api.bybit.com"],
+    hosts: ["https://api.bybit.com"],
     request(endpoint, p) {
       if (endpoint === "klines") {
         const iv = BYBIT_INTERVAL[p.interval];
