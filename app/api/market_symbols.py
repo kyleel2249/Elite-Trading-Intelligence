@@ -85,6 +85,7 @@ async def public_history(
     interval: str = Query("1h", pattern=r"^[0-9]{1,2}[smhdwM]$"),
     limit: int = Query(100, ge=1, le=1000),
     provider: Provider = "bybit",
+    category: Literal["spot", "linear", "inverse"] = "spot",
     settings: Settings = Depends(get_settings),
 ):
     """Candles for any listed market, read-only. Binance uses Binance's public production market-data API (official global
@@ -95,7 +96,7 @@ async def public_history(
         raise HTTPException(status_code=422, detail="symbol must be letters and digits, e.g. BTCUSDT")
     try:
         if provider == "bybit":
-            return _normalise_service(await MarketService(settings).get_history("bybit", sym, interval=interval, limit=limit), response, "bybit")
+            return _normalise_service(await MarketService(settings).get_history("bybit", sym, interval=interval, limit=limit, category=category), response, "bybit")
         if provider == "binance":
             try:
                 rows, host = await bh.get_json("/api/v3/klines", {"symbol": sym, "interval": interval, "limit": limit})
