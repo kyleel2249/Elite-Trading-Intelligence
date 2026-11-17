@@ -89,7 +89,7 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
     try {
       const account = accountBySymbol(symbol);
       if (!account) { outcomes.push({ symbol, status: "blocked", reason: "paper_account_unavailable" }); continue; }
-      if (activePositions.length >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions" }); continue; }
+      if (activePositions.length + submitted >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions" }); continue; }
       if (account.positionQuantity > 0) { outcomes.push({ symbol, status: "skipped", reason: "position_already_open_no_pyramiding" }); continue; }
 
       const clientOrderId = ("eti-" + symbol + "-" + slot).slice(0, 36);
@@ -104,20 +104,23 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
           executionSource: { actorType: "automation", actorId: "eti-multi-agent-autopilot", sourceName: "ETI Multi-Agent Autopilot", strategyId: "commander-consensus", signalId: clientOrderId, triggerReason: "Scheduled multi-agent consensus; internal paper only" },
         },
       };
-      const req = new Request("https://eti.internal/api/agents/execute", {
-        method: "POST", headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "content-type": "application/json" }, body: json(body),
-      });
-      const response = await app.fetch(req, env);
+      const headers = { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "content-type": "application/json" };
+      const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(body) }), env);
+      const analysis: any = await preflight.json().catch(() => ({}));
+      const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
+      if (!preflight.ok || decision?.action !== "BUY" || confidence < minConfidence || agreement < minAgreement || analysis.risk?.approved !== true || ["high", "critical"].includes(analysis.security?.severity)) {
+        outcomes.push({ symbol, status: "no_trade", action: decision?.action || "NO_TRADE", confidence, agreement, reason: !preflight.ok ? "analysis_unavailable" : decision?.vetoedBy || "autopilot_entry_thresholds_or_risk_not_met", vetoes: analysis.risk?.vetoes || [], security: analysis.security?.severity || "unknown" });
+        continue;
+      }
+      const executeBody = { ...body, execution: {
+        broker: "eti_paper", clientOrderId, riskConfirmed: true,
+        executionSource: { actorType: "automation", actorId: "eti-multi-agent-autopilot", sourceName: "ETI Multi-Agent Autopilot", strategyId: "commander-consensus", signalId: clientOrderId, triggerReason: "Scheduled multi-agent consensus; internal paper only" },
+      } };
+      const response = await app.fetch(new Request("https://eti.internal/api/agents/execute", { method: "POST", headers, body: json(executeBody) }), env);
       const result: any = await response.json().catch(() => ({}));
-      const decision = result.decision;
       if (response.status >= 200 && response.status < 300 && result.ok) {
-        const confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
-        if (confidence < minConfidence || agreement < minAgreement) {
-          // The execution route has already submitted only after its own gates. This is defensive telemetry;
-          // thresholds are also checked before submission by the preflight analysis below in future versions.
-        }
         submitted++;
-        outcomes.push({ symbol, status: "paper_order_submitted", action: decision?.action, confidence, agreement, broker: "eti_paper", simulated: true, order: result.broker?.order ?? result.broker?.fill ?? null });
+        outcomes.push({ symbol, status: "paper_order_submitted", action: result.decision?.action, confidence, agreement, broker: "eti_paper", simulated: true, order: result.broker?.order ?? result.broker?.fill ?? null });
       } else {
         outcomes.push({ symbol, status: response.status === 409 ? "risk_veto_or_no_trade" : "blocked", httpStatus: response.status, error: result.error || result.reason || "agent_execution_rejected", reasons: result.reasons || result.risk?.vetoes || [] });
       }
