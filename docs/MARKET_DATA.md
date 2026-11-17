@@ -35,7 +35,7 @@ Bitget's catalogue refreshes every 60 seconds and identifies the futures product
 
 ## Validation and availability
 
-OHLCV rows are validated for finite positive prices, valid high/low bounds, non-negative volume, de-duplicated timestamps and ascending time order. Order books must contain valid bid/ask levels and cannot be crossed. Trades and tickers are validated before being returned. Unsupported intervals and upstream errors are surfaced; ETI does not fabricate data.
+OHLCV rows are validated for finite positive prices, valid high/low bounds, non-negative volume, de-duplicated timestamps and ascending time order. Order books must contain valid bid/ask levels and cannot be crossed. Trades and tickers are validated before being returned. Futures tickers retain exchange-reported mark price, index price, funding rate, open interest, best bid/ask and exchange timestamp when provided. Unsupported intervals and upstream errors are surfaced; ETI does not fabricate data.
 
 ## Regional eligibility
 
