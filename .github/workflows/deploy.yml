@@ -182,14 +182,18 @@ jobs:
                 const h = JSON.parse(input), odd = h.providers?.oddspapi || h.provider;
                 const ready = h.database?.ready === true
                   && h.sports_paper_token_configured === true
-                  && odd?.reachable === true
-                  && Number(odd?.active_subscription_count) > 0
-                  && Number(odd?.bookmaker_count) > 0;
-                if (!ready) {
+                  && odd?.configured === true;
+                const subscriptionReady = odd?.reachable !== true
+                  || (Number(odd?.active_subscription_count) > 0 && Number(odd?.bookmaker_count) > 0);
+                if (!ready || !subscriptionReady) {
                   console.error(JSON.stringify({database:h.database,provider:odd,paper_token_configured:h.sports_paper_token_configured}));
                   process.exit(1);
                 }
-                console.log("Sports D1, paper token, OddsPapi reachability and active bookmaker subscription verified.");
+                if (odd.reachable !== true) {
+                  console.log("WARNING: Sports D1, paper token and OddsPapi configuration are ready, but the external provider is temporarily unreachable. Fixture checks will distinguish an upstream outage from a broken ETI route.");
+                } else {
+                  console.log("Sports D1, paper token, OddsPapi reachability and active bookmaker subscription verified.");
+                }
               });
             '; then health_ok=1; break; fi
             sleep 3
