@@ -97,7 +97,7 @@ export function calculateTradePlan(input: TradePlanInput): TradePlan {
   return {
     valid: blockers.length === 0, canSubmitOrder: false, direction, entry, stopLoss, quantity, quantityUnit: contractType === "inverse" ? "contracts" : "base_units", notional, riskBudget,
     plannedStopRisk, remainingRiskBudget: Math.max(0, riskBudget - plannedStopRisk), riskPerUnit,
-    stopPercent: riskPerUnit / entry * 100, leverage, estimatedMargin: notional / leverage,
+    stopPercent: Math.abs(entry - stopLoss) / entry * 100, leverage, estimatedMargin: notional / leverage,
     estimatedRoundTripCosts, costsConfigured, targets, grossRewardRiskToFinalTarget,
     netRewardRiskToFinalTarget, blockers, notes,
   };
