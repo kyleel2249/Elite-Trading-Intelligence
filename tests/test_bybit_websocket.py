@@ -76,3 +76,15 @@ def test_status_reports_connected_category_and_subscription_state():
     assert state["testnet"] is True
     assert state["connected"] is False
     assert len(state["subscriptions"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_large_watchlist_changes_are_split_into_bounded_topic_batches():
+    manager = BybitWebSocketManager("linear")
+    socket = FakeSocket()
+    manager._ws = socket
+    manager.subscribe(["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"])
+    await manager._sync_subscriptions()
+    assert [len(message["args"]) for message in socket.sent] == [10, 2]
+    assert all(message["op"] == "subscribe" for message in socket.sent)
+    assert len(manager.status()["active_subscriptions"]) == 12
