@@ -13,6 +13,9 @@
 export interface MarketEnv {
   /** Legacy deployment variable; Bybit is the only enabled crypto venue. */
   MARKET_PROVIDER_ORDER?: string;
+  /** Regional FastAPI origin that performs all Bybit public REST egress outside US/mainland-China blocks. */
+  BYBIT_MARKET_DATA_ORIGIN?: string;
+  BACKEND_URL?: string;
 }
 
 export type ProviderId = "binance" | "bybit" | "okx" | "binance_usdm" | "bitget" | "bitget_mix";
@@ -378,11 +381,11 @@ export function providerOrder(env: MarketEnv, preferred?: string | null): Provid
 
 interface RawResult { status: number | null; text: string; latencyMs: number; errorClass: string | null; headers?: Headers }
 
-async function fetchHost(host: string, req: UpstreamRequest): Promise<RawResult> {
+async function fetchHost(host: string, req: UpstreamRequest, fetchImpl: typeof fetch = fetch): Promise<RawResult> {
   const url = host + req.path + "?" + new URLSearchParams(req.query).toString();
   const t0 = Date.now();
   try {
-    const res = await fetch(url, {
+    const res = await fetchImpl(url, {
       headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bybit.com", referer: "https://www.bybit.com/" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       // Cache successes briefly; never cache upstream errors.
@@ -404,7 +407,7 @@ export class AllProvidersFailed extends Error {
   constructor(attempts: Attempt[]) { super("all_providers_failed"); this.attempts = attempts; }
 }
 
-export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: ProviderId[]): Promise<MarketResult> {
+export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: ProviderId[], fetchImpl: typeof fetch = fetch): Promise<MarketResult> {
   const attempts: Attempt[] = [];
   const order: ProviderId[] = ["bybit"]; // Bybit is the sole ETI crypto market venue.
   for (const id of order) {
@@ -417,7 +420,7 @@ export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: Prov
       continue; // not compatible -> skip, never substitute data
     }
     for (const host of spec.hosts) {
-      const raw = await fetchHost(host, req);
+      const raw = await fetchHost(host, req, fetchImpl);
       const base = { provider: id, host: host.replace("https://", ""), status: raw.status, latencyMs: raw.latencyMs };
       if (raw.errorClass) {
         const a: Attempt = { ...base, ok: false, errorClass: raw.errorClass, detail: snippet(raw.text) || undefined };
