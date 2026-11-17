@@ -67,11 +67,15 @@ class BybitClient(BaseProvider):
             raise ValueError(f"Unsupported Bybit kline interval: {interval}")
         result = await self._get("/v5/market/kline", {"category": cat, "symbol": symbol.upper(),
                                                       "interval": iv, "limit": min(1000, max(1, limit))})
+        seconds = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600,
+                   "2h": 7200, "4h": 14400, "6h": 21600, "12h": 43200, "1d": 86400,
+                   "1w": 604800, "1M": 2592000}[interval]
         out = []
         for row in reversed(result.get("list") or []):
-            out.append({"open_time": int(row[0]), "open": float(row[1]), "high": float(row[2]),
+            opened = int(row[0])
+            out.append({"open_time": opened, "open": float(row[1]), "high": float(row[2]),
                         "low": float(row[3]), "close": float(row[4]), "volume": float(row[5]),
-                        "close_time": None})
+                        "close_time": opened + seconds * 1000 - 1})
         return out
 
     async def get_order_book_raw(self, symbol: str, limit: int = 20, category: Optional[str] = None):
