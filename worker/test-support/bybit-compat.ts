@@ -82,6 +82,13 @@ function toBybit(kind: "klines" | "depth" | "trades" | "ticker", j: any, symbol:
     symbol, lastPrice: String(j.lastPrice), price24hPcnt: String(Number(j.priceChangePercent ?? 0) / 100),
     highPrice24h: String(j.highPrice ?? last), lowPrice24h: String(j.lowPrice ?? last),
     volume24h: String(j.volume ?? 0), turnover24h: String(j.quoteVolume ?? 0),
+    ...(Number.isFinite(Number(j.markPrice)) ? { markPrice: String(j.markPrice) } : {}),
+    ...(Number.isFinite(Number(j.indexPrice)) ? { indexPrice: String(j.indexPrice) } : {}),
+    ...(Number.isFinite(Number(j.fundingRate)) ? { fundingRate: String(j.fundingRate) } : {}),
+    ...(Number.isFinite(Number(j.openInterest)) ? { openInterest: String(j.openInterest) } : {}),
+    ...(Number.isFinite(Number(j.bidPrice)) ? { bid1Price: String(j.bidPrice) } : {}),
+    ...(Number.isFinite(Number(j.askPrice)) ? { ask1Price: String(j.askPrice) } : {}),
+    ...(Number.isFinite(Number(j.closeTime)) ? { ts: String(j.closeTime) } : {}),
   }];
   return json({ retCode: 0, retMsg: "OK", result: { category: "spot", list } });
 }
