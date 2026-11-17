@@ -39,8 +39,8 @@ Testnet is the only recommended initial environment. Live execution requires a s
 
 ## Market data region and live streams
 
-- Cloudflare's ETI market-data Worker is explicitly placed near AWS Cape Town (`aws:af-south-1`) so public Bybit REST requests do not originate from the US-based GitHub Actions runner region that produced HTTP 403 responses.
-- Check the live Worker execution location with `GET /api/market/region`; a successful regional placement reports a Cloudflare `cf-placement` value ending in `-CPT`.
+- Cloudflare's ETI market-data Worker is explicitly placed near AWS Frankfurt (`aws:eu-central-1`) so public Bybit REST requests do not originate from the US-based GitHub Actions runner region that produced HTTP 403 responses.
+- Check the live Worker execution location with `GET /api/market/region`; a successful regional placement reports a Cloudflare `cf-placement` value ending in `-FRA`.
 - The Python FastAPI origin remains in Fly.io Frankfurt (`fra`), outside Bybit's documented US and mainland-China IP blocks. It remains there to avoid adding cross-region latency to its existing PostgreSQL connection.
 - ETI uses Bybit's global REST hosts (`api.bytick.com`, `api.bybit.com`) and global public WebSocket hosts for the Ghana-registered international account. Dedicated regional API domains must only be used when Bybit says the user's own account is registered on that regional site; server placement does not change account residency.
 - REST snapshots/history use the Bybit V5 public market endpoints.
