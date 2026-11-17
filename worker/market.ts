@@ -669,7 +669,6 @@ async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestInit): P
         return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       }
       last = response;
-      if (response.status !== 403) break;
     } catch { /* Try the next documented Bitget host. */ }
   }
   return last && last.status !== 403 ? last : primary;
@@ -738,14 +737,17 @@ export async function listBitgetMarginSymbols(fetchImpl: typeof fetch = fetch, n
   if (hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at };
   const r = await bitgetGet("/api/v3/market/instruments?category=MARGIN", fetchImpl);
   if (r.list) {
+    const flag = (v: unknown) => v === true || ["true", "yes", "1"].includes(String(v ?? "").toLowerCase());
     const rows = r.list.filter(x => x && String(x.status ?? "").toLowerCase() === "online" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol ?? "")))
       .map(x => ({
         s: String(x.symbol), b: String(x.baseCoin ?? "").toUpperCase(), q: String(x.quoteCoin ?? "").toUpperCase(),
         m: "spot" as MarketKind, c: bitgetCategory(String(x.baseCoin ?? "").toUpperCase(), String(x.quoteCoin ?? "").toUpperCase()),
-        v: "bitget" as const, marginCrossed: Boolean(x.isCrossBorrowable) || Number(x.maxCrossedLeverage) > 0,
-        marginIsolated: Boolean(x.isIsolatedBaseBorrowable) || Boolean(x.isIsolatedQuoteBorrowable) || Number(x.maxIsolatedLeverage) > 0,
-        marginBaseBorrowable: Boolean(x.isIsolatedBaseBorrowable), marginQuoteBorrowable: Boolean(x.isIsolatedQuoteBorrowable),
-        marginCrossBorrowable: Boolean(x.isCrossBorrowable),
+        v: "bitget" as const,
+        marginCrossed: x.isCrossBorrowable === undefined ? Number(x.maxCrossedLeverage) > 0 : flag(x.isCrossBorrowable),
+        marginIsolated: x.isIsolatedBaseBorrowable === undefined && x.isIsolatedQuoteBorrowable === undefined
+          ? Number(x.maxIsolatedLeverage) > 0 : flag(x.isIsolatedBaseBorrowable) || flag(x.isIsolatedQuoteBorrowable),
+        marginBaseBorrowable: flag(x.isIsolatedBaseBorrowable), marginQuoteBorrowable: flag(x.isIsolatedQuoteBorrowable),
+        marginCrossBorrowable: x.isCrossBorrowable === undefined ? Number(x.maxCrossedLeverage) > 0 : flag(x.isCrossBorrowable),
         maxCrossedLeverage: Number(x.maxCrossedLeverage) || 0, maxIsolatedLeverage: Number(x.maxIsolatedLeverage) || 0,
       }));
     if (rows.length) { const entry = { at: now(), rows, host: r.host }; bitgetMarginCache = entry; return { rows, host: entry.host, cached: false, stale: false, fetchedAt: entry.at }; }
