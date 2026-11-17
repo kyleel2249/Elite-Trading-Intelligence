@@ -22,6 +22,7 @@
  */
 import base from "./index.ts";
 import { withAlgo } from "./algo/route.ts";
+import { runV3AlphaTrackingCycle } from "./algo/v3-alpha-ledger.ts";
 import { withAgents } from "./agents/route.ts";
 import { runAgentAutopilotCycle } from "./agents/autopilot.ts";
 import { withFutures } from "./agents/futures-route.ts";
