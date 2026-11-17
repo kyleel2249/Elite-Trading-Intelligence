@@ -16,7 +16,7 @@ from .sql_store import SqlStore
 from .store import AccountRecord
 from .vault import CredentialVault, VaultError
 
-REQUIRED_CREDENTIALS = {"alpaca": ("api_key", "secret_key"), "binance": ("api_key", "secret_key"),
+REQUIRED_CREDENTIALS = {"alpaca": ("api_key", "secret_key"), "binance": ("api_key", "secret_key"), "bybit": ("api_key", "secret_key"),
                         "oanda": ("token", "account_id")}
 SUPPORTED_ENVIRONMENTS = ("paper", "live")
 
