@@ -48,6 +48,22 @@ export async function loadSignalInputs(
     try {
       const r = await getMarketData("ticker", { ...params, interval: "1m", limit: 1 }, order, fetchImpl), t = r.data as Ticker;
       derivatives = { fundingRate: t.fundingRate ?? null, openInterest: t.openInterest ?? null, ...(t.timestamp ? { timestamp: t.timestamp } : {}), source: r.provider };
+      const kv = (env as any).ETI_EXECUTION_LOG;
+      if (kv && typeof kv.get === "function" && typeof kv.put === "function" && derivatives.openInterest !== null && Number.isFinite(derivatives.openInterest)) {
+        const key = `eti:market:oi:v1:${r.provider}:${market}:${category}:${symbol}`;
+        const rawTs = derivatives.timestamp ?? now, currentTs = rawTs < 1e12 ? rawTs * 1000 : rawTs;
+        if (currentTs <= now + 30_000 && now - currentTs <= 180_000) {
+          try {
+            const raw = await kv.get(key), previous = typeof raw === "string" ? JSON.parse(raw) : raw;
+            if (previous && Number.isFinite(Number(previous.openInterest)) && Number.isFinite(Number(previous.timestamp))) {
+              const previousTs = Number(previous.timestamp) < 1e12 ? Number(previous.timestamp) * 1000 : Number(previous.timestamp);
+              if (currentTs > previousTs && currentTs - previousTs <= 86_400_000) derivatives.previousOpenInterest = Number(previous.openInterest);
+            }
+            if (!previous || currentTs >= (Number(previous.timestamp) < 1e12 ? Number(previous.timestamp) * 1000 : Number(previous.timestamp)))
+              await kv.put(key, JSON.stringify({ openInterest: derivatives.openInterest, timestamp: currentTs }), { expirationTtl: 86_400 });
+          } catch { /* Historical OI is advisory; KV failure must never block the signal. */ }
+        }
+      }
     } catch (e) { failures.derivatives = e instanceof Error ? e.message : "unknown"; }
   }
   return { candles, depth, derivatives, provider, market, category, failures };
