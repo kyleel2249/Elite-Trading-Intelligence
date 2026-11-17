@@ -299,36 +299,24 @@ See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs
 and [Daily intelligence report](docs/DAILY_REPORT.md).
 
 
-## Broker execution — paper/testnet only
+## Broker execution — guarded paper/testnet and Bitget live
 
-The Worker includes a server-side execution handler for **Alpaca Paper** and the **Binance Spot Testnet**. Orders are validated by in-process safeguards (see "Paper / testnet execution and in-process safeguards" below); no separately deployed risk service is needed and there is no live route that submits orders. The Worker does not expose withdrawal, transfer, funding or wallet-management endpoints.
+The Worker provides ETI Internal Paper, Alpaca Paper, Binance Spot Testnet and a server-side Bitget live adapter. Bitget live execution is **fail-closed by default**: it requires the master execution token, audit KV, `ETI_BITGET_LIVE_ENABLED=true`, and `ETI_BITGET_EGRESS_VERIFIED=true`. The last flag must remain unset until private Bitget API connectivity from the Cloudflare Worker has been independently verified. Public Bitget market data uses the browser-direct adapter because Bitget currently blocks ETI's Cloudflare Worker egress with HTTP 403; that public-feed workaround does not prove private order connectivity.
 
-Configure these as **Cloudflare Worker secrets**, never frontend variables or GitHub source files:
+Configure all exchange credentials as **Cloudflare Worker secrets**, never frontend variables or GitHub source files:
 
 - `ETI_EXECUTION_TOKEN` — long random bearer token used by the trusted ETI client.
-- `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` — Alpaca paper-account key pair only.
-- `BINANCE_API_KEY` and `BINANCE_SECRET_KEY` — Binance Spot Testnet key pair only.
+- `BITGET_API_KEY`, `BITGET_API_SECRET`, `BITGET_API_PASSPHRASE` — Bitget key with only the permissions required for trading and account reads; disable withdrawals and transfers.
+- `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` — Alpaca paper-account key pair.
+- `BINANCE_API_KEY` and `BINANCE_SECRET_KEY` — Binance Spot Testnet key pair.
 
-Optional Worker variables: `ETI_MAX_ORDER_QUANTITY` (default 100), `ETI_DUPLICATE_WINDOW_SECONDS` (default 60, 0 disables) and `ETI_KILL_SWITCH` (set to `true` to reject orders). Each order requires a unique `clientOrderId`; requests without it are rejected. The handler uses a fixed Alpaca paper URL and fixed Binance Spot Testnet URL. It does not offer a live-mode switch, and never calls withdrawal, transfer, funding or wallet-management endpoints.
+Optional Worker variables include `ETI_BITGET_LIVE_ENABLED`, `ETI_BITGET_EGRESS_VERIFIED`, `ETI_BITGET_MAX_LEVERAGE`, `ETI_BITGET_MAX_NOTIONAL_USDT`, `ETI_MAX_ORDER_QUANTITY`, `ETI_DUPLICATE_WINDOW_SECONDS` and `ETI_KILL_SWITCH`. Leave `ETI_BITGET_EGRESS_VERIFIED` unset while private API reachability is unconfirmed. The dashboard reports the gate through `GET /api/execution/status`; it refuses Bitget live orders before confirmation and the server independently rejects them with `423 bitget_worker_egress_unverified`. Do not copy API secrets into browser code to bypass this restriction.
 
-Authenticated order request:
+Paper/testnet requests use `POST /api/orders`. Bitget live requests use `POST /api/orders/live` and require the master token, explicit user confirmation, a unique `clientOrderId`, a complete `executionSource`, quantity/notional/leverage limits, duplicate protection, the audit log and an inactive kill switch. The Bitget adapter retries the official legacy host only after an explicit Cloudflare block; it never retries an ambiguous network outcome, which could duplicate an order. No withdrawal, transfer, funding or wallet-management endpoints are exposed.
 
-```http
-POST /api/orders
-Authorization: Bearer <ETI_EXECUTION_TOKEN>
-Content-Type: application/json
+Check `GET /api/execution/status` for credential presence, safeguards, kill-switch state and `bitget_egress_verified`. Never paste secrets into chat, commit them, or place them in public dashboard JavaScript. The bearer token must remain in the trusted authenticated execution flow, not public page code.
 
-{"broker":"alpaca","symbol":"AAPL","side":"buy","type":"limit","quantity":1,"limitPrice":150,"clientOrderId":"eti-demo-000001","riskConfirmed":true}
-```
-
-For Binance use `"broker":"binance"` and a Binance Spot Testnet symbol such as `BTCUSDT`. Check `GET /api/execution/status` for configured adapters, the safeguards in force and kill-switch state. This endpoint intentionally reports paper/testnet-only mode.
-
-**Before enabling order submission:** create paper/testnet API keys with trading-only permissions, disable withdrawals/transfers, and set the three credentials as Worker secrets using Wrangler or the Cloudflare dashboard. Never paste secrets into chat, commit them, or place them in browser code. The bearer token must be held only by a trusted authenticated backend/client; do not embed it in public dashboard JavaScript.
-
-Live trading is not implemented or enabled in this build.
-
-
-## Paper execution, attribution and audit history
+## Execution, attribution and audit history
 
 Every submitted order must include an `executionSource` object so the execution receipt identifies who or what initiated it:
 
@@ -345,11 +333,11 @@ Every submitted order must include an `executionSource` object so the execution 
 }
 ```
 
-Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, paper/testnet mode, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
+Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, execution environment, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
 
-### Paper / testnet execution and in-process safeguards
+### Paper/testnet execution, guarded Bitget live path and in-process safeguards
 
-ETI executes **paper and testnet orders only**: Alpaca Paper (`paper-api.alpaca.markets`) and the Binance Spot Testnet (`testnet.binance.vision`). There is no live order path in this build: `POST /api/orders/live` exists only to answer `423 live_trading_disabled`, no live broker host or live credential is referenced, and `ETI_LIVE_TRADING_ENABLED=true` is ignored (the status endpoint reports `live_flag_ignored`). No separately deployed risk service is required: `ETI_RISK_GATE_URL` and `ETI_RISK_GATE_TOKEN` are no longer read.
+ETI paper/testnet execution uses ETI Internal Paper, Alpaca Paper (`paper-api.alpaca.markets`) and Binance Spot Testnet (`testnet.binance.vision`). A Bitget live route exists, but it refuses orders until `ETI_BITGET_LIVE_ENABLED=true` and `ETI_BITGET_EGRESS_VERIFIED=true` are both set alongside the required credentials, master token and audit binding. The egress flag is intentionally false by default because Bitget blocks the current Cloudflare Worker public REST path; browser-direct public market data does not establish that private order endpoints are reachable. `ETI_LIVE_TRADING_ENABLED=true` remains ignored (the status endpoint reports `live_flag_ignored`). No separately deployed risk service is required: `ETI_RISK_GATE_URL` and `ETI_RISK_GATE_TOKEN` are no longer read.
 
 Every order is checked inside the Worker, in this order, before a broker is contacted. A refusal at any step never reaches the broker and is written to the audit log with the reason.
 
