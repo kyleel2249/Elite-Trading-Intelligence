@@ -128,7 +128,8 @@ uvicorn app.main:app --reload --port 8000
 Browser
   |-- HTTPS --> Cloudflare Worker (ETI dashboard + health APIs)
   |
-  |-- HTTPS/WSS --> Binance public market-data API/streams
+  |-- HTTPS --> Bybit V5 public REST (Worker)
+  |-- HTTPS --> Bitget V3/V2 public REST (browser-direct adapter)
 
 No external FastAPI origin is used by this Cloudflare-native edge build.
 ```
