@@ -56,6 +56,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
 | `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
 | `ETI_BITGET_LIVE_ENABLED` | config | `true` enables the separately authenticated Bitget live-order adapter. The master ETI execution token, Bitget trade-enabled credentials, explicit order confirmation, kill-switch check, idempotency and notional/leverage limits remain required. |
+| `ETI_BITGET_EGRESS_VERIFIED` | config | Must be `true` before Bitget live orders are available. Keep unset until private Bitget API connectivity from the Cloudflare Worker is independently verified; public browser-direct market data does not satisfy this gate. |
 | `ETI_BITGET_MAX_LEVERAGE` | config | Maximum allowed Bitget futures leverage (default 150x; capped by ETI at 150x and the exchange's own contract limit). |
 | `ETI_BITGET_MAX_NOTIONAL_USDT` | config | Maximum estimated notional per Bitget live order (default 1,000 quote units; checked against the submitted reference price or market-buy quote amount). |
 | `ETI_BITGET_MARGIN_SYMBOLS` | config | Comma-separated margin pairs whose fills are synced (Bitget margin fills require a symbol), e.g. `BTCUSDT,ETHUSDT`. |
