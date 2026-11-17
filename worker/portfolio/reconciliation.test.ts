@@ -12,7 +12,7 @@ test("verified gross exposure sums valued assets, open positions and remaining o
  const results=[...["spot","linear","inverse"].map(market=>({venue:"bybit",market,status:"connected"})),...markets.map(market=>({venue:"bitget",market,status:"connected"}))];
  const snapshot={venues:[{venue:"bybit",assets:[{coin:"USDT",walletBalance:100,usdValue:100}],positions:[{symbol:"BTCUSDT",size:0.01,positionValue:600}]},{venue:"bitget",markets:[{market:"spot",assets:[{coin:"USDT",total:100,usdValue:100}],positions:[]},{market:"usdt-futures",positions:[{symbol:"BTCUSDT",size:0.01,markPrice:60000}]},{market:"usdc-futures",positions:[]},{market:"coin-futures",positions:[]},{market:"margin-crossed",assets:[],positions:[]},{market:"margin-isolated",assets:[],positions:[]}]}]};
  const activity={syncedAt:now,syncs:[{results}],openOrders:[{venue:"bybit",market:"spot",symbol:"ETHUSDT",leavesQty:1,price:100},{venue:"bitget",market:"usdt-futures",symbol:"BTCUSDT",leavesQty:0.01,price:60000}]};
- const result=verifiedGrossExposureUsd(snapshot,activity,now);assert.equal(result.value,2000);assert.equal(result.problems.length,0);
+ const result=verifiedGrossExposureUsd(snapshot,activity,now);assert.equal(result.value,2100);assert.equal(result.problems.length,0);
 });
 test("verified gross exposure fails closed for stale or unpriced open orders and incomplete product sync",()=>{
  const now=1800000000000,snapshot={venues:[]};
