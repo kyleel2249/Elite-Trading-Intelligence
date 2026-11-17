@@ -18,7 +18,10 @@ export interface AgentAutopilotEnv extends ExecutionEnv {
   ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE?: string;
   ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE?: string;
   ETI_AGENT_AUTOPILOT_MIN_AGREEMENT?: string;
-  ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string;\n  ETI_AGENT_AUTOPILOT_STRATEGIES?: string;\n  ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT?: string;\n  ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE?: string;
+  ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string;
+  ETI_AGENT_AUTOPILOT_STRATEGIES?: string;
+  ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT?: string;
+  ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE?: string;
 }
 type App = { fetch(request: Request, env: any): Promise<Response> | Response };
 const ALLOWED_INTERVALS = new Set(["5m", "15m", "30m", "1h", "4h", "1d"]);
