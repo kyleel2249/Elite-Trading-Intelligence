@@ -112,6 +112,21 @@ jobs:
               }catch(e){console.error("Invalid Bybit ticker response:",e.message);process.exit(1);}});' || failed=1
           done
 
+          forecast_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }
+          forecast_status="${forecast_response##*__HTTP_CODE__}"
+          forecast="${forecast_response%__HTTP_CODE__*}"
+          printf '%s' "$forecast" | HTTP_STATUS="$forecast_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s),attempts=Array.isArray(x.attempts)?x.attempts:[];
+              const regionBlocked=process.env.HTTP_STATUS==="502"&&attempts.length>0&&attempts.every(a=>a.status===403&&a.errorClass==="http_403_blocked");
+              if(regionBlocked){console.log("24-hour forecast API is deployed; Bybit rejected both market-data hosts from the CI region, so forecast values cannot be verified from this region.");return;}
+              const h=x.forecast?.high,l=x.forecast?.low,c=x.forecast?.confidence;
+              const validTime=v=>typeof v==="string"&&Number.isFinite(Date.parse(v));
+              const ok=process.env.HTTP_STATUS==="200"&&x.status==="ready"&&Number(h?.price)>0&&Number(l?.price)>0&&validTime(h?.time?.expectedAt)&&validTime(l?.time?.expectedAt)&&Number(x.history?.timeSampleDays)>=5&&Number(x.history?.priceSampleDays)>=5&&Number(c?.score)>=0&&Number(c?.score)<=100;
+              if(!ok){console.error("24-hour forecast readiness:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,status:x.status,reason:x.reason,history:x.history,forecast:x.forecast,attempts}));process.exit(1);}
+              console.log("24-hour Bybit high/low forecast API verified with price targets, UTC time windows and historical samples.");
+            }catch(e){console.error("Invalid 24-hour forecast response:",e.message);process.exit(1);}});' || failed=1
+
           status="$(curl --silent --show-error --fail "$base/api/execution/status")" || { echo "::error::Could not read ETI execution safeguards"; failed=1; status='{}'; }
           printf '%s' "$status" | node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
