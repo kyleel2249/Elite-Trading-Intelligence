@@ -86,7 +86,7 @@ function okxSymbol(symbol: string): string {
   throw new Unsupported("symbol_format");
 }
 
-const REQUEST_TIMEOUT_MS = 6000;
+const REQUEST_TIMEOUT_MS = 12000;
 import { classify } from "./markets.ts";
 const UA = "Mozilla/5.0 (compatible; ETI-Market-Data/1.0)";
 
