@@ -31,7 +31,7 @@ const realFetch = globalThis.fetch;
 test.beforeEach(() => { globalThis.fetch = (async (input: any) => {
   const u = new URL(String(input)), sym = u.searchParams.get("symbol");
   if (sym === "DOWNUSDT") return new Response("down", { status: 500 });
-  if (u.pathname.includes("klines")) { const st = MS[u.searchParams.get("interval") || "1h"]; return new Response(JSON.stringify(series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: st, end: Date.now() - st * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"]))); }
+  if (u.pathname.includes("kline")) { const st = MS[u.searchParams.get("interval") || "1h"]; return new Response(JSON.stringify(series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: st, end: Date.now() - st * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"]))); }
   if (u.pathname.includes("depth")) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(PX - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(PX + 0.01 + i * 0.01), "50"]) }));
   return new Response("x", { status: 500 });
 }) as typeof fetch; });
