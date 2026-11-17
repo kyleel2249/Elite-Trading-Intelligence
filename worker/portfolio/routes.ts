@@ -14,6 +14,7 @@ import { cancelExchange, cancelInternal, ensureInit, matchInternal, reconcile, s
 import { present, type ClosedTrade, type Environment } from "./ledger.ts";
 import { PortfolioStore, importKvToD1, isD1, openStore, storageConfigured, type KVL } from "./store.ts";
 import { loadMinuteBars } from "../algo/market-inputs.ts";
+import { buildPortfolioManager } from "./manager.ts";
 
 export type PortfolioEnv = EngineEnv & { ETI_PORTFOLIO_DB?: any } & { ETI_EXECUTION_TOKEN?: string; ETI_SESSION_SECRET?: string; ETI_SESSION_SECRET_PREVIOUS?: string; ETI_AUTO_SESSIONS?: string; ETI_KEY_ROTATION_DAYS?: string; ETI_KILL_SWITCH?: string };
 const H = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -82,6 +83,11 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   if (environment === "live") return reply(post ? { error: "live_disabled", message: "Live trading is disabled; there is nothing to change." } : await buildState(env, deps, "live", now), post ? 423 : 200);
   if (!storageConfigured(env)) return reply({ error: "storage_not_configured", message: "Bind the ETI_PORTFOLIO_DB D1 database (preferred) or the ETI_EXECUTION_LOG KV namespace to store the portfolio." }, 503);
 
+  if (path === "/api/portfolio/manager" && req.method === "GET") {
+    const st = openStore(env, environment)!;
+    const { ledger } = await st.ledgerFast(now);
+    return reply(buildPortfolioManager(ledger, now));
+  }
   if (path === "/api/portfolio/state" && req.method === "GET") return reply(await buildState(env, deps, environment, now, (url.searchParams.get("symbol") || "").toUpperCase() || undefined));
   if (path === "/api/portfolio/history" && req.method === "GET") {
     const st = openStore(env, environment)!, { ledger: L } = await st.ledgerFast(now), rows = filterClosed(L.closed.slice().sort((a, b) => b.exitAt - a.exitAt), url.searchParams);
