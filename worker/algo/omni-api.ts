@@ -52,7 +52,7 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", error: inputs.error, executionTimeframe: inputs.executionTimeframe, failures: inputs.failures, submitsOrder: false, liveExecutionAllowed: false }, 503);
   const { candles, depth, provider, failures } = inputs;
   const now = Date.now(), exp = await expectancyFor(env, strategy, symbol, now);   // measured evidence from replay/paper, or "unproven"
-  const result = runOmnisignal({ symbol, strategy, candles, depth, now }, { ...opts, roundTripCostBps: costBpsFrom(env as any), enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") }, ...expectancyOptions(exp) });
+  const result = runOmnisignal({ symbol, strategy, candles, depth, now }, { ...opts, roundTripCostBps: costBpsFrom(env as any), fvg: (env as any)?.ETI_FVG_CONFLUENCE !== "off", enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") }, ...expectancyOptions(exp) });
   const journal = await journalFromRoute(env, result, strategy, now, { status: exp.status, expectancyR: exp.expectancyR, samples: exp.samples });
   return reply({ ...result, parameters: { version, name }, dataQuality: { provider, timeframesLoaded: Object.keys(candles), failures, orderBook: depth ? "rest_snapshot" : "unavailable", providerCrossCheck: "not_performed",
     note: "Single validated provider per request; cross-provider reconciliation is not performed and the REST order-book snapshot is timestamped at fetch time." },
