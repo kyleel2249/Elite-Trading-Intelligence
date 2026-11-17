@@ -163,8 +163,8 @@ test("free Cloudflare-only market routing does not require Fly.io or a fixed egr
   const response = await handleMarket(req("/api/market/region"), {});
   assert.equal(response.status, 200);
   const body = await response.json() as any;
-  assert.equal(body.transport, "cloudflare-worker-direct");
+  assert.equal(body.transport, "bybit-worker-rest+bitget-browser-direct");
   assert.equal(body.fixedEgressIp, false);
   assert.equal(body.accountResidencyIsNotChanged, true);
-  assert.equal(body.placementHint, "gcp:europe-west1");
+  assert.equal(body.placementHint, "cloudflare:global");
 });
