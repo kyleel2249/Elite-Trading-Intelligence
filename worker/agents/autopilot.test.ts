@@ -49,6 +49,21 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
   assert.equal(result.liveOrdersAllowed, false);
 });
 
+test("autopilot abstains when fewer than three Omnisignal strategies align", async () => {
+  const kv = memoryKV();
+  const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
+  let calls = 0;
+  const app = { fetch: async (req: Request) => {
+    calls++;
+    const strategy = new URL(req.url).searchParams.get("strategy");
+    return Response.json({ decision: strategy === "scalp" || strategy === "intraday" ? "BUY" : "HOLD", tradeable: true, confidence: 80, validation: { hardFailures: [] } });
+  } };
+  const result = await runAgentAutopilotCycle(env, app, 1_950_000);
+  assert.equal(result.submitted, 0);
+  assert.equal(calls, 4);
+  assert.equal(result.outcomes[0].reason, "omnisignal_strategy_consensus_not_met");
+});
+
 test("autopilot refuses a trade below configured confidence and agreement", async () => {
   const kv = memoryKV();
   const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
