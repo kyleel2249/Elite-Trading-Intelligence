@@ -660,6 +660,17 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "access-control-allow-methods": "GET,OPTIONS" } });
   if (request.method !== "GET") return jsonResp({ error: "method_not_allowed" }, 405);
   const endpoint = url.pathname.slice("/api/market/".length);
+  if (endpoint === "region") {
+    const placement = request.headers.get("cf-placement");
+    return jsonResp({
+      service: "eti-bybit-market-data",
+      configured_region: "aws:af-south-1",
+      placement,
+      placement_verified: typeof placement === "string" && placement.endsWith("-CPT"),
+      provider_hosts: PROVIDERS.bybit.hosts.map(host => host.replace("https://", "")),
+      account_residency_is_not_changed: true,
+    }, 200, { "cache-control": "no-store" });
+  }
   if (endpoint === "symbols") {
     const want = url.searchParams.get("market") || "all";
     if (!["spot", "futures", "all"].includes(want)) return jsonResp({ error: "invalid_market", allowed: ["spot", "futures", "all"] }, 400);
