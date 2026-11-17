@@ -7,13 +7,15 @@ from ..errors import ProviderUnavailableError
 from .alpaca import AlpacaAdapter
 from .base import AdapterInfo, BrokerAdapter, UnavailableAdapter
 from .binance import BinanceAdapter
+from .bybit import BybitAdapter
 from .oanda import OandaAdapter
 from .paper import PaperAdapter
 
 INFO = {
     "paper": AdapterInfo("paper", ("any",), True, True, "implemented", "Built-in simulator; never touches real money."),
     "alpaca": AdapterInfo("alpaca", ("us_equity",), False, True, "implemented", "REST; paper and live."),
-    "binance": AdapterInfo("binance", ("crypto_spot",), True, False, "implemented", "REST; testnet and live; spot only."),
+    "binance": AdapterInfo("binance", ("crypto_spot",), True, False, "implemented", "Legacy adapter; being retired in favour of Bybit."),
+    "bybit": AdapterInfo("bybit", ("crypto_spot", "crypto_derivatives"), True, True, "implemented", "Bybit V5 Unified Trading Account; spot, linear and inverse; testnet and live."),
     "oanda": AdapterInfo("oanda", ("forex", "cfd"), False, True, "implemented", "v20 REST; practice and live."),
     "kraken": AdapterInfo("kraken", ("crypto_spot",), False, False, "not_implemented",
                           "Adapter not written yet."),
@@ -33,6 +35,9 @@ def build_adapter(provider: str, credentials: dict, environment: str, symbols=()
         return PaperAdapter()
     if p == "alpaca":
         return AlpacaAdapter(credentials["api_key"], credentials["secret_key"], paper=not live)
+    if p == "bybit":
+        return BybitAdapter(credentials["api_key"], credentials["secret_key"], testnet=not live, symbols=symbols,
+                            category=credentials.get("category", "spot"))
     if p == "binance":
         return BinanceAdapter(credentials["api_key"], credentials["secret_key"], testnet=not live, symbols=symbols)
     if p == "oanda":
