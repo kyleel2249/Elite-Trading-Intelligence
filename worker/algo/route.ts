@@ -11,6 +11,7 @@ export function withAlgo<E extends MarketEnv>(base: App<E>): App<E> {
     async fetch(request, env) {
       if (new URL(request.url).pathname === "/api/algo/signal") return handleAlgoSignal(request, env);
       if (new URL(request.url).pathname === "/api/algo/backtest") return handleAlgoBacktest(request, env);
+      if (new URL(request.url).pathname.startsWith("/api/algo/v3-alpha/")) return handleV3AlphaLedger(request, env as never);
       const p = new URL(request.url).pathname;
       if (p.startsWith("/api/algo/expectancy") || p.startsWith("/api/algo/journal")) return handleAlgoRegistry(request, env as never);
       return base.fetch(request, env);
