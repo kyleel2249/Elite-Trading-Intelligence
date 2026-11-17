@@ -16,11 +16,11 @@ function mockExchange(opts: { depth?: boolean } = {}) {
       const bids = Array.from({ length: 20 }, (_, i) => [String(100 - 0.01 - i * 0.05), "20"]), asks = Array.from({ length: 20 }, (_, i) => [String(100 + 0.01 + i * 0.05), "10"]);
       return new Response(JSON.stringify({ lastUpdateId: 1, bids, asks }), { status: 200 });
     }
-    if (u.pathname.includes("tickers")) return new Response(JSON.stringify({ retCode: 0, result: { list: [{
-      symbol: "BTCUSDT", lastPrice: "100", price24hPcnt: "0.02", highPrice24h: "105", lowPrice24h: "95",
-      volume24h: "1000", turnover24h: "100000", markPrice: "100", indexPrice: "100", fundingRate: "0.0007",
-      openInterest: "12500", bid1Price: "99.99", ask1Price: "100.01", ts: String(Date.now())
-    }] } }), { status: 200 });
+    if (u.pathname.includes("ticker/24hr")) return new Response(JSON.stringify({
+      symbol: "BTCUSDT", lastPrice: "100", priceChangePercent: "2", highPrice: "105", lowPrice: "95",
+      volume: "1000", quoteVolume: "100000", markPrice: "100", indexPrice: "100", fundingRate: "0.0007",
+      openInterest: "12500", bidPrice: "99.99", askPrice: "100.01", closeTime: Date.now()
+    }), { status: 200 });
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000, now = Date.now();
     const rows = Array.from({ length: 300 }, (_, i) => { const c = 50 + i * 0.3; const o = c - 0.1; return [now - (299 - i) * step, String(o), String(c + 0.2), String(o - 0.2), String(c), String(100 + (i % 5) * 10)]; });
     return new Response(JSON.stringify(rows), { status: 200 });
