@@ -13,11 +13,11 @@ const fetchImpl = (async (input: any, init?: any) => {
   if (u.host !== "data-api.binance.vision") return new Response("x", { status: 500 });
   const sym = u.searchParams.get("symbol") || ""; world.fetched.push(sym);
   if (world.failSymbols.has(sym)) return new Response("down", { status: 500 });
-  if (u.pathname.includes("klines")) {
+  if (u.pathname.includes("kline")) {
     const iv = u.searchParams.get("interval")!, ov = iv === "1m" ? world.minuteOverride?.(sym) : null; if (ov) return new Response(JSON.stringify(ov));
     const step = MS[iv]; return new Response(JSON.stringify(series(300, { drift: 0.25, noise: 0.8, seed: 7, stepMs: step, end: world.clock - step * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"])));
   }
-  if (u.pathname.includes("depth")) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(PX - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(PX + 0.01 + i * 0.01), "50"]) }));
+  if (u.pathname.includes("orderbook") || u.pathname.includes("depth")) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(PX - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(PX + 0.01 + i * 0.01), "50"]) }));
   return new Response("x", { status: 500 });
 }) as typeof fetch;
 const realFetch = globalThis.fetch;
