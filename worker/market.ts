@@ -714,8 +714,9 @@ export function bitgetCategory(base: string, quote: string): string {
 }
 async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list: any[] | null; status: number | null; errorClass: string | null; host: string }> {
   try {
-    const res = await bitgetAwareFetch(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit, fetchImpl);
-    const host = res.headers.get("x-eti-upstream-host") || "api.bitget.com";
+    const res = await bitgetAwareFetch(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bitget.com", referer: "https://www.bitget.com/" }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit, fetchImpl);
+    const trace = res.headers.get("x-eti-fallback-attempts");
+    const host = res.headers.get("x-eti-upstream-host") || (trace ? "api.bitget.com; fallback attempts: " + trace : "api.bitget.com");
     if (!res.ok) return { list: null, status: res.status, errorClass: classifyStatus(res.status), host };
     const j: any = await res.json();
     if (!j || j.code !== "00000" || !Array.isArray(j.data)) return { list: null, status: res.status, errorClass: "invalid_payload", host };
