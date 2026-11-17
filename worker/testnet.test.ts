@@ -15,7 +15,7 @@ function world(drift = 0.25, acct: any = { environment: "paper", halted: false }
       if (u.pathname.startsWith("/api/execution/accounts/")) return new Response(JSON.stringify(acct), { status: acct ? 200 : 404 });
       if (u.pathname === "/api/execution/signals") return new Response(JSON.stringify(signal.body), { status: signal.status });
     }
-    if (u.pathname.includes("klines")) { const st = MS[u.searchParams.get("interval") || "1h"]; return new Response(JSON.stringify(series(300, { drift, noise: 0.35, seed: 7, stepMs: st, end: NOW - st * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"]))); }
+    if (u.pathname.includes("kline")) { const st = MS[u.searchParams.get("interval") || "1h"]; return new Response(JSON.stringify(series(300, { drift, noise: 0.35, seed: 7, stepMs: st, end: NOW - st * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"]))); }
     if (u.pathname.includes("depth")) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(px - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(px + 0.01 + i * 0.01), "50"]) }));
     return new Response("x", { status: 500 });
   }) as typeof fetch;
