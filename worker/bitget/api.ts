@@ -170,14 +170,17 @@ export async function syncAll(env: Record<string, any>, deps: Deps = {}, only?: 
   if (!kv) return { ok: false, error: "storage_not_configured", note: "bind the ETI_EXECUTION_LOG KV namespace" };
   if (!bitgetCreds(env).complete) return { ok: false, error: "credentials_missing", missing: bitgetCreds(env).missing };
   let crossedSymbols: string[] = [], isolatedSymbols: string[] = [], marginDiscoveryError: unknown = null;
-  try {
-    [crossedSymbols, isolatedSymbols] = await Promise.all([
-      listMarginSymbolsForMarket("margin-crossed", deps),
-      listMarginSymbolsForMarket("margin-isolated", deps),
-    ]);
-  } catch (e) { marginDiscoveryError = e; }
+  const marketsToSync = only ?? BITGET_MARKETS;
+  if (marketsToSync.some((m) => m.startsWith("margin-"))) {
+    try {
+      [crossedSymbols, isolatedSymbols] = await Promise.all([
+        listMarginSymbolsForMarket("margin-crossed", deps),
+        listMarginSymbolsForMarket("margin-isolated", deps),
+      ]);
+    } catch (e) { marginDiscoveryError = e; }
+  }
   const results: any[] = [];
-  for (const m of only ?? BITGET_MARKETS) {
+  for (const m of marketsToSync) {
     if (m.startsWith("margin-") && marginDiscoveryError) {
       results.push({ market: m, error: "margin_symbol_discovery_failed", message: marginDiscoveryError instanceof Error ? marginDiscoveryError.message : undefined });
       continue;
@@ -230,7 +233,7 @@ export async function handleBitget(req: Request, env: Record<string, any>, deps:
   if (sub === "/status" && req.method === "GET") {
     return reply({ venue: "bitget", credentials: { complete: c.complete, found: c.found, missing: c.missing }, markets: BITGET_MARKETS, storage: !!env.ETI_EXECUTION_LOG,
       readOnly: false, liveTradingEnabled: env.ETI_BITGET_LIVE_ENABLED === "true", note: "Account and history reads use allowlisted GET endpoints. Live orders are accepted only through the master-authenticated /api/orders/live route; transfers and withdrawals are not exposed.",
-      marginSymbols: String(env.ETI_BITGET_MARGIN_SYMBOLS ?? "") || null });
+      marginSymbolDiscovery: "automatic_all_eligible_pairs", marginSymbols: null });
   }
   if (!c.complete) return reply({ error: "credentials_missing", missing: c.missing, hint: "Set these Worker secrets; names only are reported." }, 503);
   const market = mkt(url.searchParams.get("market") ?? "spot");
