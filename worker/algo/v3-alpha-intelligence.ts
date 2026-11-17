@@ -33,7 +33,7 @@ export function evaluateSynchronizedV3Alpha(input: {
     const rows = source.filter(c => c[0] + tfMs <= synchronizedAt);
     if (rows.length) aligned[tf] = rows;
     coverage[tf] = rows.length;
-    if (rows.length && rows.at(-1)![0] + tfMs > synchronizedAt) warnings.push(tf + " contains an incomplete candle and it was excluded.");
+    if (source.some(c => c[0] + tfMs > synchronizedAt)) warnings.push(tf + " incomplete or future candles were excluded from the synchronized snapshot.");
   }
   const signal = evaluateV3Alpha({ symbol: input.symbol, strategy: input.strategy, candles: aligned, now: synchronizedAt });
   return { signal, synchronizedAt, coverage, warnings };
