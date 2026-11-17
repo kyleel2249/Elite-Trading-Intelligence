@@ -7,6 +7,7 @@
  * This is a read-only statistical estimate, not a trade signal.
  */
 import { AllProvidersFailed, getMarketData, type Kline, type MarketEnv, type Ticker } from "../market.ts";
+import { analyzeStructure, findPivots } from "./structure.ts";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -125,6 +126,50 @@ function stability(values: number[]): number {
   return clamp(1 - Math.sqrt(variance) / mean, 0, 1);
 }
 const round = (v: number, n = 6) => Number(v.toFixed(n));
+const average = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+
+/** Describe the current OHLCV regime without treating volume as order-book depth. */
+export function buildExtremeMarketContext(hourlyRows: Kline[], dailyRows: Kline[], ticker: ExtremeTicker, now = Date.now()) {
+  const hourly = hourlyRows.filter(validKline).filter(k => k[0] + HOUR_MS <= now).slice().sort((a, b) => a[0] - b[0]);
+  const daily = dailyRows.filter(validKline).filter(k => k[0] + DAY_MS <= now).slice().sort((a, b) => a[0] - b[0]);
+  const last24 = hourly.slice(-24), last = hourly[hourly.length - 1];
+  const close24 = hourly.length >= 25 ? hourly[hourly.length - 25][4] : null;
+  const close7d = hourly.length >= 169 ? hourly[hourly.length - 169][4] : null;
+  const momentum24hPct = last && close24 && close24 > 0 ? (last[4] / close24 - 1) * 100 : null;
+  const momentum7dPct = last && close7d && close7d > 0 ? (last[4] / close7d - 1) * 100 : null;
+  const tr: number[] = [];
+  for (let i = 1; i < hourly.length; i++) {
+    const k = hourly[i], prev = hourly[i - 1][4];
+    tr.push(Math.max(k[2] - k[3], Math.abs(k[2] - prev), Math.abs(k[3] - prev)));
+  }
+  const atr14 = average(tr.slice(-14)), baselineAtr = average(tr.slice(-14 * 20));
+  const volatilityRatio = baselineAtr > 0 ? atr14 / baselineAtr : null;
+  const volatilityRegime = volatilityRatio === null ? "undetermined" : volatilityRatio >= 1.25 ? "elevated" : volatilityRatio <= .8 ? "compressed" : "normal";
+  const volume24h = last24.reduce((sum, k) => sum + k[5], 0);
+  const averageDailyVolume = average(daily.slice(-20).map(k => k[5]));
+  const volumeRatio = averageDailyVolume > 0 ? volume24h / averageDailyVolume : null;
+  const high24 = last24.length ? Math.max(...last24.map(k => k[2])) : null;
+  const low24 = last24.length ? Math.min(...last24.map(k => k[3])) : null;
+  const range24hPct = high24 !== null && low24 !== null && ticker.lastPrice > 0 ? (high24 - low24) / ticker.lastPrice * 100 : null;
+  const structureRows = hourly.slice(-300);
+  const structure = structureRows.length >= 30 ? analyzeStructure(structureRows, findPivots(structureRows)) : null;
+  return {
+    trend: structure?.trend ?? "undetermined",
+    recentStructureEvents: structure?.events.slice(-5).map(e => ({ type: e.type, direction: e.direction, level: e.level, time: new Date(e.time).toISOString() })) ?? [],
+    momentum24hPct: momentum24hPct === null ? null : round(momentum24hPct, 3),
+    momentum7dPct: momentum7dPct === null ? null : round(momentum7dPct, 3),
+    range24hPct: range24hPct === null ? null : round(range24hPct, 3),
+    atr14Pct: ticker.lastPrice > 0 ? round(atr14 / ticker.lastPrice * 100, 3) : null,
+    volatilityRegime,
+    volatilityRatio: volatilityRatio === null ? null : round(volatilityRatio, 3),
+    volume24h: round(volume24h, 4),
+    volumeVs20DayAverage: volumeRatio === null ? null : round(volumeRatio, 3),
+    quoteVolume24h: finite(ticker.quoteVolume) ? ticker.quoteVolume : null,
+    liquidityProxy: "24-hour traded volume is a liquidity proxy only; it is not order-book depth.",
+    notIncludedInputs: ["order-book depth", "funding rate", "open interest"],
+    candles: { closedHourly: hourly.length, completedDaily: daily.length },
+  };
+}
 
 export function inferBybitCategory(symbol: string, market: "spot" | "futures"): "spot" | "linear" | "inverse" {
   if (market === "spot") return "spot";
@@ -197,6 +242,68 @@ export function forecast24hExtremes(
   };
 }
 
+/** Out-of-sample rolling 24-hour validation. Every forecast is trained only on candles before its evaluation time. */
+export function backtest24hExtremes(hourlyRows: Kline[], dailyRows: Kline[], now = Date.now(), sampleDays = 7) {
+  const hourly = hourlyRows.filter(validKline).slice().sort((a, b) => a[0] - b[0]);
+  const daily = dailyRows.filter(validKline).slice().sort((a, b) => a[0] - b[0]);
+  const count = Math.max(3, Math.min(14, Math.floor(sampleDays)));
+  const latestStart = Math.floor(now / HOUR_MS) * HOUR_MS - DAY_MS;
+  const samples: Array<{ evaluatedAt: string; highHit: boolean; lowHit: boolean; highTimeHit: boolean; lowTimeHit: boolean; highErrorPct: number; lowErrorPct: number; highTimeErrorMinutes: number; lowTimeErrorMinutes: number }> = [];
+  for (let offset = count - 1; offset >= 0; offset--) {
+    const start = latestStart - offset * DAY_MS, end = start + DAY_MS;
+    const dayStart = Math.floor(start / DAY_MS) * DAY_MS;
+    const trainingHourly = hourly.filter(k => k[0] < start);
+    // Daily candles are admitted only when their entire UTC day ended before the forecast time.
+    const trainingDaily = daily.filter(k => k[0] < dayStart);
+    const previous = trainingHourly.filter(k => k[0] >= start - DAY_MS);
+    const target = hourly.filter(k => k[0] >= start && k[0] < end);
+    if (previous.length < 20 || target.length < 20) continue;
+    const prior = previous[previous.length - 1];
+    const historicalTicker: ExtremeTicker = {
+      symbol: "BACKTEST", lastPrice: prior[4],
+      highPrice: Math.max(...previous.map(k => k[2])),
+      lowPrice: Math.min(...previous.map(k => k[3])),
+    };
+    const prediction = forecast24hExtremes(trainingHourly, trainingDaily, historicalTicker, start);
+    if (prediction.status !== "ready") continue;
+    const highBar = target.reduce((best, k) => k[2] > best[2] ? k : best, target[0]);
+    const lowBar = target.reduce((best, k) => k[3] < best[3] ? k : best, target[0]);
+    const actualHighAt = highBar[0] + HOUR_MS / 2, actualLowAt = lowBar[0] + HOUR_MS / 2;
+    const predictedHighAt = Date.parse(prediction.forecast.high.time.expectedAt);
+    const predictedLowAt = Date.parse(prediction.forecast.low.time.expectedAt);
+    const highWindowStart = Date.parse(prediction.forecast.high.time.windowStart), highWindowEnd = Date.parse(prediction.forecast.high.time.windowEnd);
+    const lowWindowStart = Date.parse(prediction.forecast.low.time.windowStart), lowWindowEnd = Date.parse(prediction.forecast.low.time.windowEnd);
+    samples.push({
+      evaluatedAt: new Date(start).toISOString(),
+      highHit: highBar[2] >= prediction.forecast.high.price,
+      lowHit: lowBar[3] <= prediction.forecast.low.price,
+      highTimeHit: actualHighAt >= highWindowStart && actualHighAt <= highWindowEnd,
+      lowTimeHit: actualLowAt >= lowWindowStart && actualLowAt <= lowWindowEnd,
+      highErrorPct: Math.abs(prediction.forecast.high.price - highBar[2]) / highBar[2] * 100,
+      lowErrorPct: Math.abs(prediction.forecast.low.price - lowBar[3]) / lowBar[3] * 100,
+      highTimeErrorMinutes: Math.abs(predictedHighAt - actualHighAt) / 60_000,
+      lowTimeErrorMinutes: Math.abs(predictedLowAt - actualLowAt) / 60_000,
+    });
+  }
+  if (samples.length < 3) return {
+    status: "insufficient_history" as const, sampleCount: samples.length, requiredSamples: 3,
+    reason: "At least three completed rolling 24-hour forecast windows are required for validation.",
+    samples,
+  };
+  const pct = (key: "highHit" | "lowHit" | "highTimeHit" | "lowTimeHit") => round(samples.filter(s => s[key]).length / samples.length * 100, 1);
+  return {
+    status: "ready" as const, window: "rolling_24h" as const, sampleCount: samples.length,
+    highPriceHitRatePct: pct("highHit"), lowPriceHitRatePct: pct("lowHit"),
+    highTimeWindowHitRatePct: pct("highTimeHit"), lowTimeWindowHitRatePct: pct("lowTimeHit"),
+    meanAbsoluteHighPriceErrorPct: round(average(samples.map(s => s.highErrorPct)), 3),
+    meanAbsoluteLowPriceErrorPct: round(average(samples.map(s => s.lowErrorPct)), 3),
+    meanAbsoluteHighTimeErrorMinutes: round(average(samples.map(s => s.highTimeErrorMinutes)), 1),
+    meanAbsoluteLowTimeErrorMinutes: round(average(samples.map(s => s.lowTimeErrorMinutes)), 1),
+    samples,
+    note: "Historical out-of-sample hit rates describe past windows; they are not probabilities for the next window.",
+  };
+}
+
 const jsonHeaders = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 
@@ -225,8 +332,14 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv): 
   const hourRows = Array.isArray(hourly.value.data) ? hourly.value.data as Kline[] : [];
   const dayRows = daily.status === "fulfilled" && Array.isArray(daily.value.data) ? daily.value.data as Kline[] : [];
   const ticker = tick.value.data as Ticker;
-  const result = forecast24hExtremes(hourRows, dayRows, ticker, Date.now());
-  if (result.status === "insufficient_history") return reply({ ...result, historyWarning: daily.status === "rejected" ? "Long-range daily candles unavailable; retry after data recovers." : null });
-  const historyFallback = "history" in result && result.history?.priceSampleSource === "1h_fallback";
-  return reply({ ...result, historyWarning: daily.status === "rejected" || historyFallback ? "Long-range daily candles unavailable; this estimate uses the available completed hourly sessions." : null });
+  const now = Date.now();
+  const result = forecast24hExtremes(hourRows, dayRows, ticker, now);
+  if (result.status !== "ready") return reply({ ...result, marketContext: buildExtremeMarketContext(hourRows, dayRows, ticker, now), backtest: backtest24hExtremes(hourRows, dayRows, now), historyWarning: daily.status === "rejected" ? "Long-range daily candles unavailable; retry after data recovers." : null });
+  const historyFallback = result.history.priceSampleSource === "1h_fallback";
+  return reply({
+    ...result,
+    marketContext: buildExtremeMarketContext(hourRows, dayRows, ticker, now),
+    backtest: backtest24hExtremes(hourRows, dayRows, now),
+    historyWarning: daily.status === "rejected" || historyFallback ? "Long-range daily candles unavailable; this estimate uses the available completed hourly sessions." : null,
+  });
 }
