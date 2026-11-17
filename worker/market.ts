@@ -644,8 +644,9 @@ export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: 
   const parts = await Promise.all(categories.map(async (category) => ({ category, r: await bitgetGet("/api/v3/market/instruments?category=" + category, fetchImpl) })));
   for (const { category, r } of parts) {
     if (r.list) r.list.filter((x) => x && BITGET_OK_STATUS.has(String(x.status ?? "").toLowerCase()) && (category === "SPOT" || !x.type || ["perpetual", "delivery"].includes(String(x.type).toLowerCase()))).forEach((x) => {
+      const before = rows.length;
       add(x, category === "SPOT" ? undefined : category);
-      if (category !== "SPOT") rows[rows.length - 1].contractType = String(x.type ?? "perpetual").toLowerCase() === "delivery" ? "delivery" : "perpetual";
+      if (category !== "SPOT" && rows.length > before) rows[rows.length - 1].contractType = String(x.type ?? "perpetual").toLowerCase() === "delivery" ? "delivery" : "perpetual";
     });
     else attempts.push({ host: BITGET_BASE + " (" + category + ")", status: r.status, errorClass: r.errorClass });
   }
