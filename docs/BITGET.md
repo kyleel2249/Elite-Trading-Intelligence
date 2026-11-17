@@ -18,7 +18,7 @@ The common market endpoints accept `venue=bitget`:
 - `GET /api/market/trades?venue=bitget&symbol=BTCUSDT`
 - `GET /api/market/ticker?venue=bitget&symbol=BTCUSDT`
 
-Use `market=futures` and an explicit Bitget futures `category` for derivatives. Use `market=margin` for margin-enabled spot pairs. Spot, margin, USDT, USDC and Coin-M data are never silently substituted for one another. The symbol catalogue is refreshed on a 60-second cache; public REST calls use short cache windows and strict payload validation.
+Use `market=futures` and an explicit Bitget futures `category` for derivatives. Use `market=margin` for margin-enabled pairs discovered from Bitget's MARGIN instrument catalogue. Bitget exposes the margin pair's underlying spot candles, order book and ticker through the SPOT market-data category; the recent fills request uses MARGIN. ETI keeps the margin eligibility catalogue distinct from ordinary spot listings and never substitutes another exchange's data. The symbol catalogue is refreshed on a 60-second cache; public REST calls use short cache windows and strict payload validation.
 
 ## Account, fills and history
 
