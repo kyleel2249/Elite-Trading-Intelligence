@@ -14,7 +14,7 @@ const headers = { "content-type":"application/json; charset=utf-8", "cache-contr
 
 export interface BitgetLiveEnv {
   BITGET_API_KEY?: string; BITGET_API_SECRET?: string; BITGET_API_PASSPHRASE?: string;
-  ETI_BITGET_LIVE_ENABLED?: string; ETI_BITGET_MAX_LEVERAGE?: string; ETI_BITGET_MAX_NOTIONAL_USDT?: string; ETI_MAX_ORDER_QUANTITY?: string;
+  ETI_BITGET_LIVE_ENABLED?: string; ETI_BITGET_EGRESS_VERIFIED?: string; ETI_BITGET_MAX_LEVERAGE?: string; ETI_BITGET_MAX_NOTIONAL_USDT?: string; ETI_MAX_ORDER_QUANTITY?: string;
   ETI_KILL_SWITCH?: string; ETI_EXECUTION_LOG?: { get(k:string):Promise<string|null>; put(k:string,v:string,o?:any):Promise<void> };
 }
 export interface BitgetLiveDeps { fetchImpl?: typeof fetch; now?:()=>number }
@@ -41,6 +41,7 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   const maxQty=num(env.ETI_MAX_ORDER_QUANTITY??"100");
   if(env.ETI_KILL_SWITCH==="true")return response({ok:false,error:"execution_disabled",broker_contacted:false},423);
   if(env.ETI_BITGET_LIVE_ENABLED!=="true")return response({ok:false,error:"bitget_live_disabled",message:"Set ETI_BITGET_LIVE_ENABLED=true after verifying the Bitget API key is trade-enabled and withdrawal-disabled."},423);
+  if(env.ETI_BITGET_EGRESS_VERIFIED!=="true")return response({ok:false,error:"bitget_worker_egress_unverified",message:"Bitget live execution is fail-closed until private API connectivity from Cloudflare Workers is verified. Public market data uses the browser-direct adapter; never expose Bitget API secrets in the browser."},423);
   if(!kv)return response({ok:false,error:"audit_log_not_configured"},503);
   if(!bitgetCreds(env as any).complete)return response({ok:false,error:"credentials_missing",missing:bitgetCreds(env as any).missing},503);
   if(!(MARKETS as string[]).includes(market)||!/^[A-Z0-9]{5,24}$/.test(symbol)||!["buy","sell"].includes(side)||!["market","limit"].includes(type)||!Number.isFinite(qty)||qty<=0||!Number.isFinite(maxQty)||maxQty<=0||qty>maxQty||!/^eti[a-f0-9]{8,32}$/i.test(clientOid)||body?.riskConfirmed!==true)
