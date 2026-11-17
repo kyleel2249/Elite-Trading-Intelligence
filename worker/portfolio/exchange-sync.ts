@@ -63,9 +63,9 @@ export async function syncExchangeActivity(env:Env,environment:"internal_paper"|
     const [tradeResult,orderResult]=await Promise.allSettled([fetchBitgetWindow(env,market,symbols,since,now,deps),getOpenOrders(env,market,symbols,fetchDeps)]);
     if(tradeResult.status==="rejected"&&orderResult.status==="rejected")throw tradeResult.reason;
     const tradeData=tradeResult.status==="fulfilled"?tradeResult.value:{fills:[],truncated:false},trades=tradeData.fills,orders=orderResult.status==="fulfilled"?orderResult.value:[],ordersTruncated=orderResult.status==="fulfilled"&&!!(orderResult.value as any).truncated;
-    if(orderResult.status==="fulfilled")freshOrderScopes.add("bitget|"+market);
+    if(orderResult.status==="fulfilled"&&!ordersTruncated)freshOrderScopes.add("bitget|"+market);
     let added=0;for(const f of trades){const key="bitget|"+market+"|"+f.id;if(seen.has(key))continue;seen.add(key);incoming.push({key,venue:"bitget",market,id:f.id,orderId:f.orderId,clientOrderId:"",symbol:f.symbol,side:f.side,qty:f.qty,price:f.price,fee:f.fee,feeCoin:f.feeCoin||null,at:f.ts,realizedPnl:f.realizedPnl});added++;}
-    for(const o of orders)openOrders.push({key:"bitget|"+market+"|"+o.orderId,venue:"bitget",market,orderId:o.orderId,clientOrderId:o.clientOrderId,symbol:o.symbol,side:o.side,qty:o.qty,leavesQty:o.leavesQty,price:o.price,status:o.status,updatedAt:o.updatedAt});
+    if(!ordersTruncated)for(const o of orders)openOrders.push({key:"bitget|"+market+"|"+o.orderId,venue:"bitget",market,orderId:o.orderId,clientOrderId:o.clientOrderId,symbol:o.symbol,side:o.side,qty:o.qty,leavesQty:o.leavesQty,price:o.price,status:o.status,updatedAt:o.updatedAt});
     results.push({venue:"bitget",market,status:tradeResult.status==="fulfilled"&&orderResult.status==="fulfilled"&&!tradeData.truncated&&!ordersTruncated?"connected":"partial",symbolsMonitored:market.startsWith("margin-")?symbols.length:undefined,fillsFetched:trades.length,fillsAdded:added,openOrders:orders.length,historyTruncated:tradeData.truncated,openOrdersTruncated:ordersTruncated,errors:[tradeResult.status==="rejected"?"fills_unavailable":null,orderResult.status==="rejected"?"open_orders_unavailable":null].filter(Boolean)});
    }catch(e){results.push({venue:"bitget",market,status:"unavailable",error:e instanceof Error?e.message.slice(0,160):"sync_failed"});}
   }
