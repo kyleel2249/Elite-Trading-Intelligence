@@ -4,6 +4,7 @@
 // flip, upgrade or downgrade a decision, and it never edits the entry zone, stop-loss or take-profits that the risk engine produced.
 import type { Kline } from "../market.ts";
 import { analyzeFvgMtf, FVG_TF_MS, type FvgZone } from "../analysis/fvg.ts";
+import { fvgMtfAlignmentPoints } from "../analysis/fvg-intel.ts";
 import { findPivots, analyzeStructure } from "../analysis/structure.ts";
 import { detectLiquiditySweeps, detectOrderBlocks } from "../analysis/smc.ts";
 import { atrSeries } from "./indicators.ts";
@@ -18,6 +19,8 @@ export interface FvgEntryOptimization {
 export interface FvgConfluence {
   available: boolean; stance: "supports" | "opposes" | "neutral"; confidenceDelta: number; score: number; factors: FvgFactor[];
   supporting: FvgZoneBrief[]; opposing: FvgZoneBrief[]; entryOptimization: FvgEntryOptimization | null;
+  /** Active (unfilled or partially filled) gaps considered, by direction, and the timeframes they sit on. */
+  unfilled?: { bullish: number; bearish: number; partial: number; timeframes: string[] };
   summary: string; canTriggerTrade: false; advisoryOnly: true;
 }
 export interface FvgZoneBrief { id: string; timeframe: string; direction: "bullish" | "bearish"; upper: number; lower: number; mid: number; sizeAtr: number; strength: number; status: string; mitigationPct: number; confluence: number; distanceAtr: number }
@@ -63,6 +66,10 @@ export function assessFvgConfluence(rowsByTf: Partial<Record<string, Kline[]>>, 
   if (worst) add("opposing FVG in the path", -(worst.strength / 100) * 3 * tfw(worst) * (1 - Math.min(1, near(worst) / 3) * 0.5), `${worst.timeframe} ${worst.direction} gap ${worst.lower}-${worst.upper} (strength ${worst.strength}) between price and the first target`);
   if (opposing.length > 1) add("additional opposing FVGs", -Math.min(1, (opposing.length - 1) * 0.5), `${opposing.length - 1} more opposing gap(s) ahead`);
 
+  // Multi-timeframe alignment of unfilled gaps: several timeframes leaving an unfilled gap on the same side of the trade is stronger evidence than one.
+  const align = fvgMtfAlignmentPoints(supporting.map(z => z.timeframe), opposing.map(z => z.timeframe));
+  if (align.points !== 0) add("multi-timeframe unfilled-gap alignment", align.points, align.detail);
+
   // Structure context on the execution timeframe: BOS, liquidity sweeps, order blocks. Each is one point and only counts when it agrees with the same-direction gap.
   const n = rows.length;
   const pivots = findPivots(rows), structure = analyzeStructure(rows, pivots);
@@ -95,5 +102,6 @@ export function assessFvgConfluence(rowsByTf: Partial<Record<string, Kline[]>>, 
 
   const label = (z: FvgZone) => `${z.timeframe} ${z.direction} ${z.lower}-${z.upper}`;
   const summary = !active.length ? "No active fair value gaps near price." : `FVG ${stance}${delta ? ` (${delta > 0 ? "+" : ""}${delta} confidence)` : ""}: ${best ? `supported by ${label(best)}` : "no supporting gap nearby"}${worst ? `; opposed by ${label(worst)}` : ""}.`;
-  return { available: true, stance, confidenceDelta: delta, score: round(raw, 2), factors, supporting: supporting.slice(0, 3).map(z => brief(z, price, atrNow)), opposing: opposing.slice(0, 3).map(z => brief(z, price, atrNow)), entryOptimization, summary, canTriggerTrade: false, advisoryOnly: true };
+  const unfilled = { bullish: active.filter(z => z.direction === "bullish").length, bearish: active.filter(z => z.direction === "bearish").length, partial: active.filter(z => z.status === "partially_mitigated").length, timeframes: [...new Set(active.map(z => z.timeframe))] };
+  return { available: true, stance, confidenceDelta: delta, score: round(raw, 2), factors, supporting: supporting.slice(0, 3).map(z => brief(z, price, atrNow)), opposing: opposing.slice(0, 3).map(z => brief(z, price, atrNow)), entryOptimization, unfilled, summary, canTriggerTrade: false, advisoryOnly: true };
 }
