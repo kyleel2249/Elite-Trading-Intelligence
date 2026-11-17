@@ -2,8 +2,8 @@
 
 Sources (first match wins)
   1. BYBIT_TESTNET_API_KEY + BYBIT_TESTNET_API_SECRET   (preferred, testnet-only)
-  2. BINANCE_API_KEY + BINANCE_SECRET_KEY, only while BINANCE_TESTNET_ENABLED=true AND
-     BINANCE_LIVE_TRADING_ENABLED=false (so a live key is never reinterpreted as a testnet key)
+  2. BYBIT_API_KEY + BYBIT_API_SECRET, only while BYBIT_TESTNET_ENABLED=true AND
+     BYBIT_LIVE_TRADING_ENABLED=false (so a live key is never reinterpreted as a testnet key)
 
 In production these variables are populated from your secret store (Cloudflare / Render secrets). ETI
 never generates, derives or substitutes exchange credentials. Verification reuses the execution
@@ -42,8 +42,8 @@ class CredentialState:
 
 def load_testnet_credentials(settings: Optional[Settings] = None) -> Optional[tuple[dict[str, str], str]]:
     s = settings or get_settings()
-    k = (os.environ.get("BINANCE_TESTNET_API_KEY") or "").strip()
-    sec = (os.environ.get("BINANCE_TESTNET_SECRET_KEY") or "").strip()
+    k = (os.environ.get("BYBIT_TESTNET_API_KEY") or "").strip()
+    sec = (os.environ.get("BYBIT_TESTNET_API_SECRET") or "").strip()
     if k and sec:
         return {"api_key": k, "api_secret": sec}, "env:BYBIT_TESTNET_*"
     if s.bybit_api_key and s.bybit_api_secret and s.bybit_testnet_enabled and not s.bybit_live_trading_enabled:
