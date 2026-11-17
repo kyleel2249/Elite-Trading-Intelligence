@@ -40,16 +40,24 @@ export async function loadExchangePortfolioSnapshot(env: Env, now = Date.now(), 
   const [bybit, ...bg] = await Promise.all([
     safe(() => loadBybitAccountSnapshot(env, { now: () => now, fetchImpl: deps.fetchImpl })),
     ...MARKETS.map(market => safe(async () => {
-      const [a, p] = await Promise.all([
+      const [a, p] = await Promise.allSettled([
         getAssets(env, market, { now: () => now, fetchImpl: deps.fetchImpl }),
-        market.endsWith("futures") ? getPositions(env, market, { now: () => now, fetchImpl: deps.fetchImpl }).catch(() => []) : Promise.resolve([]),
+        market.endsWith("futures") ? getPositions(env, market, { now: () => now, fetchImpl: deps.fetchImpl }) : Promise.resolve([]),
       ]);
-      return { assets: assets(market, a), positions: positions(p) };
+      if (a.status === "rejected") throw a.reason;
+      return {
+        assets: assets(market, a.value),
+        positions: p.status === "fulfilled" ? positions(p.value) : [],
+        positionStatus: p.status === "rejected" ? "unavailable" : "connected",
+        positionError: p.status === "rejected" ? (p.reason instanceof Error ? p.reason.message.slice(0, 160) : "positions_unavailable") : null,
+      };
     })),
   ]);
   const bitgetMarkets = MARKETS.map((market, i) => ({
-    market, status: bg[i].status, assets: bg[i].data?.assets ?? [],
-    positions: bg[i].data?.positions ?? [], error: bg[i].error,
+    market, status: bg[i].status === "connected" && bg[i].data?.positionStatus === "unavailable" ? "partial" : bg[i].status,
+    assets: bg[i].data?.assets ?? [], positions: bg[i].data?.positions ?? [],
+    positionStatus: bg[i].data?.positionStatus ?? (market.endsWith("futures") ? "unavailable" : "not_applicable"),
+    error: bg[i].error ?? bg[i].data?.positionError ?? null,
   }));
   const bybitConfigured = !!(env.BYBIT_API_KEY?.trim() && env.BYBIT_API_SECRET?.trim());
   const bitgetConfigured = !!(env.BITGET_API_KEY?.trim() || env.BITGET_KEY?.trim() || env.BITGET_ACCESS_KEY?.trim());
