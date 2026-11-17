@@ -191,5 +191,13 @@ export async function runPortfolioCycle(env: PortfolioEnv, deps: EngineDeps = {}
       if (r.idle) await st.kvPut("idle", { head: head2 }); // nothing active: sleep until a new event arrives
     } catch (e) { out[environment] = "error: " + (e instanceof Error ? e.message : "?"); }
   }
+  try {
+    const st=openStore(env,"exchange_testnet");
+    if(st){
+      const activity=await st.kvGet<{syncedAt:number}|null>("exchange_activity",null);
+      if(!activity||now-activity.syncedAt>=5*60_000) out.exchangeActivity=await syncExchangeActivity(env,"exchange_testnet",now,deps);
+      else out.exchangeActivity="recent_sync";
+    }
+  } catch(e) { out.exchangeActivity="error: "+(e instanceof Error?e.message:"sync_failed"); }
   return out;
 }
