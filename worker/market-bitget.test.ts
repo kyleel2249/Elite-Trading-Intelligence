@@ -70,6 +70,6 @@ test("Bybit market ticker falls through to its alternate API host after a 403", 
   const res = await handleMarket(new Request("https://eti.test/api/market/ticker?symbol=BTCUSDT"), {});
   assert.equal(res.status, 200);
   const body = await res.json() as any;
-  assert.equal(body.data.lastPrice, 100);
+  assert.equal(body.lastPrice, 100);
   assert.deepEqual(hosts, ["api.bytick.com", "api.bybit.com"]);
 });
