@@ -77,6 +77,32 @@ test("Bitget V2 fallback serves spot ticker when the UTA V3 endpoint is Cloudfla
   assert.equal(ticker.priceChangePercent, 1.69);
 });
 
+test("Bitget V2 candles use the documented spot and futures endpoints and granularities", async () => {
+  const fallbackUrls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/candles")
+      return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com") {
+      fallbackUrls.push(u.pathname + u.search);
+      return new Response(JSON.stringify({ code: "00000", data: [["1794940561000", "100", "103", "99", "102", "5", "500"]] }));
+    }
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const fut1m = await handleMarket(req("/api/market/klines?venue=bitget&market=futures&category=USDT-FUTURES&symbol=BTCUSDT&interval=1m&limit=5"), {});
+  assert.equal(fut1m.status, 200);
+  const fut1h = await handleMarket(req("/api/market/klines?venue=bitget&market=futures&category=USDT-FUTURES&symbol=BTCUSDT&interval=1h&limit=5"), {});
+  assert.equal(fut1h.status, 200);
+  const spot1m = await handleMarket(req("/api/market/klines?venue=bitget&market=spot&symbol=BTCUSDT&interval=1m&limit=5"), {});
+  assert.equal(spot1m.status, 200);
+  assert.match(fallbackUrls[0], /\/api\/v2\/mix\/market\/candles\?/);
+  assert.match(fallbackUrls[0], /granularity=1m/);
+  assert.match(fallbackUrls[1], /\/api\/v2\/mix\/market\/history-candles\?/);
+  assert.match(fallbackUrls[1], /granularity=1H/);
+  assert.match(fallbackUrls[2], /\/api\/v2\/spot\/market\/candles\?/);
+  assert.match(fallbackUrls[2], /granularity=1min/);
+});
+
 test("Bitget V2 fallback tries the main domain if the legacy host is unavailable", async () => {
   globalThis.fetch = (async (input: any) => {
     const u = new URL(typeof input === "string" ? input : input.url);
