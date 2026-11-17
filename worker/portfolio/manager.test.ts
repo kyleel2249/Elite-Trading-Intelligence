@@ -45,6 +45,20 @@ test("manager rewards profitable verified strategy history while enforcing alloc
   assert.equal(result.account.currency, "USDT");
 });
 
+test("manager excludes trades with unknown fees from allocation qualification", () => {
+  const ledger = emptyLedger("internal_paper");
+  ledger.startingBalance = 10_000; ledger.cash = 10_000;
+  ledger.closed = [
+    ...Array.from({ length: 19 }, (_, i) => trade(i, "swing", 25)),
+    { ...trade(20, "swing", 25), unknownFees: 1 },
+  ];
+  const result = buildPortfolioManager(ledger, 2_000_000);
+  const swing = result.strategies.find(x => x.strategy === "swing")!;
+  assert.equal(swing.trades, 19);
+  assert.equal(swing.eligible, false);
+  assert.ok(swing.reasons.includes("trades_with_unknown_fees_excluded_from_sample"));
+});
+
 test("manager blocks readiness when position marks or protective stops are missing", () => {
   const ledger = emptyLedger("internal_paper");
   ledger.startingBalance = 10_000; ledger.cash = 9_000;
