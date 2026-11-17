@@ -47,6 +47,10 @@ All private routes except the public margin catalogue require `Authorization: Be
 
 The 5-minute sync covers all six account market types when credentials and KV storage are configured. Margin fill history needs explicit symbols via `ETI_BITGET_MARGIN_SYMBOLS`.
 
+## Account-mode note
+
+The existing private account, fill-history and live-order adapter is retained on Bitget Classic V2 endpoints. The new shared chart feed uses the current public V3 market-data endpoints. Bitget documents a UTA V3 migration path and unified order/account endpoints; this change does not silently rewrite the existing private trading adapter. If the Bitget account is already in Unified Trading Account mode, verify the private account/order routes against that account before enabling live execution. The live adapter remains gated by the ETI execution token, explicit enable flag, kill switch and audit log.
+
 ## Execution and regional eligibility
 
 - The existing live-order adapter is separate from public market data. It requires the master ETI execution token, explicit risk confirmation, kill-switch approval, audit KV, quantity/notional limits and futures leverage checks. No transfer or withdrawal route is exposed.
