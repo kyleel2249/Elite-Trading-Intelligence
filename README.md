@@ -19,10 +19,9 @@ Open http://localhost:8000  · API docs http://localhost:8000/docs
 
 Health: `curl -s localhost:8000/api/system/health | jq`
 
-## Cloudflare (edge proxy only)
+## Legacy Python/FastAPI deployment (optional)
 
-Cloudflare Workers **do not run** the Python app. Deploy FastAPI with Docker (above) or any host,
-then optionally deploy the Worker as a reverse proxy:
+The Docker/Python app is a separate legacy service. It is **not required** by the current Cloudflare-native ETI build documented below. Skip this section if you want Cloudflare-only hosting. If you still run the Python service, Cloudflare can optionally proxy to that origin:
 
 ```bash
 npm install
@@ -32,7 +31,7 @@ npx wrangler secret put BACKEND_URL   # https://your-origin.example.com
 
 Details and Workers Builds settings: [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md).
 
-## Local Python (no Docker)
+## Optional legacy Python/FastAPI local development
 
 ```bash
 python -m venv .venv
@@ -79,9 +78,9 @@ Profiles & methods: `GET /api/intelligence/traders`
 | Reconcile | `POST /api/trading/reconcile` |
 | MTM job | `GET /api/system/mtm-status`, `POST /api/system/mtm-run` |
 
-## Authentication
+## Legacy Python/FastAPI authentication
 
-Mutating routes (orders, reconcile, MTM run, strategy execution, monitor control) require the
+The following `X-API-Key` instructions apply to the optional Python service, not the Cloudflare-native Worker. Mutating routes (orders, reconcile, MTM run, strategy execution, monitor control) require the
 `X-API-Key` header matching the `API_KEY` environment variable:
 
 ```bash
@@ -101,7 +100,7 @@ curl -X POST localhost:8000/api/trading/order \
 
 ETI uses Bybit V5 for crypto spot, opt-in spot margin, linear perpetuals and inverse perpetuals. Configure testnet credentials server-side and keep live trading disabled until testnet verification and reconciliation checks pass. Setup, API scopes, account categories and limitations are documented in [docs/BYBIT.md](docs/BYBIT.md).
 
-## Safety
+## Legacy Python/FastAPI safety
 
 - Live trading is **disabled by default** (`LIVE_TRADING_ENABLED=false`). When enabled, every order still passes **Helena Frost / RiskEngine** and requires an `API_KEY`
 - Risk inputs are **server-derived**: equity, open positions, daily PnL, drawdown and data freshness come from the database and a server-fetched quote. Values sent in the order request body are ignored (the fields remain accepted but deprecated). Responses include `risk_inputs` showing what the risk engine used
