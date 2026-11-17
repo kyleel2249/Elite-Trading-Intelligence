@@ -74,6 +74,41 @@ async def _fetch_bitget(transport: Optional[httpx.AsyncBaseTransport] = None) ->
     return out
 
 
+async def _fetch_bybit(transport: Optional[httpx.AsyncBaseTransport] = None) -> list[dict[str, Any]]:
+    """Bybit V5 tradable spot, linear and inverse instruments, with cursor pagination."""
+    out: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=30.0, transport=transport) as client:
+        for category in ("spot", "linear", "inverse"):
+            cursor = ""
+            for _page in range(20):
+                params = {"category": category, "limit": "1000"}
+                if cursor:
+                    params["cursor"] = cursor
+                response = await client.get("https://api.bybit.com/v5/market/instruments-info", params=params)
+                response.raise_for_status()
+                body = response.json()
+                if not isinstance(body, dict) or body.get("retCode") != 0 or not isinstance(body.get("result", {}).get("list"), list):
+                    raise ValueError("unexpected Bybit instruments payload")
+                for row in body["result"]["list"]:
+                    if not isinstance(row, dict) or row.get("status") != "Trading":
+                        continue
+                    symbol = str(row.get("symbol") or "").upper()
+                    base, quote = str(row.get("baseCoin") or "").upper(), str(row.get("quoteCoin") or "").upper()
+                    if not symbol or not base or not quote:
+                        continue
+                    if category != "spot" and "Perpetual" not in str(row.get("contractType") or ""):
+                        continue
+                    out.append({"provider": "bybit", "symbol": symbol, "base": base, "quote": quote,
+                                "name": None, "asset_class": "crypto", "exchange": "BYBIT",
+                                "market": category, "margin_eligible": category == "spot" and str(row.get("marginTrading") or "none").lower() != "none"})
+                cursor = str(body["result"].get("nextPageCursor") or "")
+                if not cursor or category == "spot":
+                    break
+    if not out:
+        raise ValueError("Bybit returned no tradable instruments")
+    return out
+
+
 async def _fetch_alpaca(settings: Settings, transport: Optional[httpx.AsyncBaseTransport] = None) -> list[dict[str, Any]]:
     base = settings.alpaca_base_url.rstrip("/")
     headers = {"APCA-API-KEY-ID": settings.alpaca_api_key or "", "APCA-API-SECRET-KEY": settings.alpaca_secret_key or ""}
@@ -124,14 +159,16 @@ async def get_source(provider: str, settings: Optional[Settings] = None, refresh
     settings = settings or get_settings()
     if provider == "alpaca" and not (settings.alpaca_api_key and settings.alpaca_secret_key):
         return [], _meta(None, "not_configured", "ALPACA_API_KEY / ALPACA_SECRET_KEY are not set, so stocks cannot be listed")
-    if provider not in ("binance", "bitget", "alpaca"):
+    if provider not in ("binance", "bitget", "bybit", "alpaca"):
         return [], _meta(None, "unavailable", f"unknown provider '{provider}'")
     entry = _cache.get(provider)
     age = time.time() - entry["at"] if entry else None
     if entry and age is not None and age < CACHE_TTL_SECONDS and not (refresh and age >= MIN_REFRESH_SECONDS):
         return _annotate(provider, entry["items"], time.time()), _meta(entry, "ok")
     try:
-        if provider == "binance":
+        if provider == "bybit":
+            items = await _fetch_bybit(transport)
+        elif provider == "binance":
             items = await _fetch_binance(transport)
         elif provider == "bitget":
             items = await _fetch_bitget(transport)
@@ -170,10 +207,10 @@ def search(items: list[dict[str, Any]], q: str = "", quote: str = "", new_only: 
 
 # ---------------------------------------------------------------- one-minute background sync
 async def sync_once(settings: Optional[Settings] = None) -> dict[str, Any]:
-    """Force-refresh Binance and Bitget (and Alpaca when configured). Failures are recorded, never raised."""
+    """Force-refresh Bybit and Alpaca when configured. Failures are recorded, never raised."""
     settings = settings or get_settings()
     result: dict[str, Any] = {}
-    for p in ("binance", "bitget", "alpaca"):
+    for p in ("bybit", "alpaca"):
         _items, meta = await get_source(p, settings, refresh=True)
         result[p] = {"status": meta["status"], "count": meta["count"]}
     _sync["runs"] += 1
