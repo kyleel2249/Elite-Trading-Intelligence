@@ -44,7 +44,8 @@ export async function syncExchangeActivity(env:Env,environment:"internal_paper"|
    try{
     const symbols=market.startsWith("margin-")?marginSymbols(env):[];
     if(market.startsWith("margin-")&&!symbols.length){results.push({venue:"bitget",market,status:"partial",warning:"margin_symbols_not_configured"});continue;}
-    const [tradeResult,orderResult]=await Promise.allSettled([market.startsWith("margin-")?Promise.all(symbols.map(symbol=>getFills(env,market,{symbol,startTime:since,endTime:now,limit:100},fetchDeps))).then(a=>a.flat()):getFills(env,market,{startTime:since,endTime:now,limit:100},fetchDeps),getOpenOrders(env,market,symbols,fetchDeps)]);
+    const fetchMarketFills=async()=>{if(!market.startsWith("margin-"))return getFills(env,market,{startTime:since,endTime:now,limit:100},fetchDeps);const all:any[]=[];for(const symbol of symbols)all.push(...await getFills(env,market,{symbol,startTime:since,endTime:now,limit:100},fetchDeps));return all;};
+    const [tradeResult,orderResult]=await Promise.allSettled([fetchMarketFills(),getOpenOrders(env,market,symbols,fetchDeps)]);
     if(tradeResult.status==="rejected"&&orderResult.status==="rejected")throw tradeResult.reason;
     const trades=tradeResult.status==="fulfilled"?tradeResult.value:[],orders=orderResult.status==="fulfilled"?orderResult.value:[];
     if(orderResult.status==="fulfilled")freshOrderScopes.add("bitget|"+market);
