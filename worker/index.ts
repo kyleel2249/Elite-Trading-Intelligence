@@ -593,11 +593,11 @@ async function refreshExecutionStatus(){
  try{
   const r=await fetch('/api/execution/status',{cache:'no-store'}),d=await r.json();executionStatus=d;
   const b=$('orderBroker').value,internal=b==='eti_paper',bitget=b==='bitget';
-  const ready=internal||(b==='alpaca'?d.alpaca_paper_configured:b==='bitget'?d.bitget_configured&&d.bitget_live_enabled:d.binance_testnet_configured), name=internal?'ETI Internal Paper':b==='alpaca'?'Alpaca Paper':bitget?'Bitget Live':'Binance Testnet';
+  const ready=internal||(b==='alpaca'?d.alpaca_paper_configured:bitget?d.live_trading_available:d.binance_testnet_configured), name=internal?'ETI Internal Paper':b==='alpaca'?'Alpaca Paper':bitget?'Bitget Live':'Binance Testnet';
   const sg=d.safeguards||{}, ok=!d.kill_switch&&(internal||(ready&&d.audit_log_configured))&&d.audit_log_configured;
-  $('executionStatus').textContent=d.kill_switch?'Halted (kill switch)':ok?(bitget?'Ready · Bitget live orders (master token required)':'Ready · paper/testnet') :!d.audit_log_configured?'Needs audit log (KV binding)':'Needs '+name+' credentials / live activation';
+  $('executionStatus').textContent=d.kill_switch?'Halted (kill switch)':bitget&&!d.bitget_egress_verified?'Paused · Bitget private API egress not verified':ok?(bitget?'Ready · Bitget live orders (master token required)':'Ready · paper/testnet') :!d.audit_log_configured?'Needs audit log (KV binding)':'Needs '+name+' credentials / live activation';
   $('executionStatus').style.color=ok?'#21d69a':'#ffb08c';
-  if($('brokerStatus')){$('brokerStatus').textContent=name+(internal?' · simulated, no exchange':ready?' · credentials and activation set':' · not configured');$('brokerStatus').style.color=ready?'#21d69a':'#ffb08c';}
+  if($('brokerStatus')){$('brokerStatus').textContent=name+(internal?' · simulated, no exchange':bitget&&!d.bitget_egress_verified?' · live paused until private egress verification':ready?' · credentials and activation set':' · not configured');$('brokerStatus').style.color=ready?'#21d69a':'#ffb08c';}
   $('bitgetMarketWrap').style.display=bitget?'':'none';const bf=bitget&&$('orderBitgetMarket').value.endsWith('futures');$('bitgetLeverageWrap').style.display=bf?'':'none';$('bitgetMarginModeWrap').style.display=bf?'':'none';$('bitgetLoanTypeWrap').style.display=bitget&&($('orderBitgetMarket').value==='margin-crossed'||$('orderBitgetMarket').value==='margin-isolated')?'':'none';
   if($('safeguardStatus')){$('safeguardStatus').textContent=sg.engine==='in_process'?'In-process · max qty '+(sg.max_order_quantity==null?'unset':sg.max_order_quantity)+' · duplicate window '+sg.duplicate_window_seconds+'s'+(d.live_flag_ignored?' · live flag ignored':'')+(d.legacy_gateway_config_ignored?' · old gateway settings ignored (safe to delete)':''):'Unknown';$('safeguardStatus').style.color=sg.engine==='in_process'?'#21d69a':'#ff637d';}
   $('killSwitchStatus').textContent=d.kill_switch?'ACTIVE':'Inactive';
