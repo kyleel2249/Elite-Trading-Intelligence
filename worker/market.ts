@@ -225,7 +225,7 @@ function parseBitget(endpoint: Endpoint, j: any, p: Params): unknown {
     ...(Number.isFinite(Number(t.markPrice)) ? { markPrice: num(t.markPrice) } : {}),
     ...(Number.isFinite(Number(t.indexPrice)) ? { indexPrice: num(t.indexPrice) } : {}),
     ...(Number.isFinite(Number(t.fundingRate)) ? { fundingRate: num(t.fundingRate) } : {}),
-    ...(Number.isFinite(Number(t.openInterest)) ? { openInterest: num(t.openInterest) } : {}),
+    ...(Number.isFinite(Number(t.openInterest ?? t.holdingAmount)) ? { openInterest: num(t.openInterest ?? t.holdingAmount) } : {}),
     ...(Number.isFinite(Number(t.bid1Price ?? t.bidPr)) ? { bidPrice: num(t.bid1Price ?? t.bidPr) } : {}),
     ...(Number.isFinite(Number(t.ask1Price ?? t.askPr)) ? { askPrice: num(t.ask1Price ?? t.askPr) } : {}),
     ...(Number.isFinite(Number(t.ts)) ? { timestamp: num(t.ts) } : {}),
