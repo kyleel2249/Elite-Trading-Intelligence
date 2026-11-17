@@ -557,6 +557,7 @@ export interface SymbolRow {
   /** Bybit spot margin eligibility */ marginTrading?: string;
   /** Bitget cross/isolated margin eligibility and max leverage */ marginCrossed?: boolean; marginIsolated?: boolean;
   maxCrossedLeverage?: number; maxIsolatedLeverage?: number;
+  marginBaseBorrowable?: boolean; marginQuoteBorrowable?: boolean; marginCrossBorrowable?: boolean;
   /** Bitget derivative contract type */ contractType?: "perpetual" | "delivery";
 }
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
@@ -643,6 +644,7 @@ function bitgetV2FallbackUrl(source: string): string | null {
     return "/api/v2/spot/market/fills?" + q.toString();
   }
   if (u.pathname === "/api/v3/market/tickers") {
+    q.delete("limit");
     if (futures) { q.set("productType", category); return "/api/v2/mix/market/ticker?" + q.toString(); }
     return "/api/v2/spot/market/tickers?" + q.toString();
   }
@@ -722,10 +724,11 @@ export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: 
       add(x, category === "SPOT" ? undefined : category);
       if (category !== "SPOT" && rows.length > before) rows[rows.length - 1].contractType = String(x.type ?? "perpetual").toLowerCase() === "delivery" ? "delivery" : "perpetual";
     });
-    else attempts.push({ host: BITGET_BASE + " (" + category + ")", status: r.status, errorClass: r.errorClass });
+    else attempts.push({ host: r.host + " (" + category + ")", status: r.status, errorClass: r.errorClass });
   }
   rows.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : (a.pt ?? "") < (b.pt ?? "") ? -1 : 1));
-  if (rows.length) { bitgetCache[market] = { at: now(), rows, host: BITGET_BASE }; return { rows, host: BITGET_BASE, cached: false, stale: false, fetchedAt: now(), attempts }; }
+  const actualHost = parts.find(part => part.r.list)?.r.host || BITGET_BASE;
+  if (rows.length) { bitgetCache[market] = { at: now(), rows, host: actualHost }; return { rows, host: actualHost, cached: false, stale: false, fetchedAt: now(), attempts }; }
   if (!attempts.length) attempts.push({ host: BITGET_BASE, status: 200, errorClass: "empty_symbols" });
   if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at, attempts };
   throw new AllProvidersFailed(attempts.map((a) => ({ provider: (market === "futures" ? "bitget_mix" : "bitget") as ProviderId, host: a.host, status: a.status, ok: false, errorClass: a.errorClass, latencyMs: 0 })));
@@ -739,10 +742,13 @@ export async function listBitgetMarginSymbols(fetchImpl: typeof fetch = fetch, n
       .map(x => ({
         s: String(x.symbol), b: String(x.baseCoin ?? "").toUpperCase(), q: String(x.quoteCoin ?? "").toUpperCase(),
         m: "spot" as MarketKind, c: bitgetCategory(String(x.baseCoin ?? "").toUpperCase(), String(x.quoteCoin ?? "").toUpperCase()),
-        v: "bitget" as const, marginCrossed: Number(x.maxCrossedLeverage) > 0, marginIsolated: Number(x.maxIsolatedLeverage) > 0,
+        v: "bitget" as const, marginCrossed: Boolean(x.isCrossBorrowable) || Number(x.maxCrossedLeverage) > 0,
+        marginIsolated: Boolean(x.isIsolatedBaseBorrowable) || Boolean(x.isIsolatedQuoteBorrowable) || Number(x.maxIsolatedLeverage) > 0,
+        marginBaseBorrowable: Boolean(x.isIsolatedBaseBorrowable), marginQuoteBorrowable: Boolean(x.isIsolatedQuoteBorrowable),
+        marginCrossBorrowable: Boolean(x.isCrossBorrowable),
         maxCrossedLeverage: Number(x.maxCrossedLeverage) || 0, maxIsolatedLeverage: Number(x.maxIsolatedLeverage) || 0,
       }));
-    if (rows.length) { const entry = { at: now(), rows, host: BITGET_BASE }; bitgetMarginCache = entry; return { rows, host: entry.host, cached: false, stale: false, fetchedAt: entry.at }; }
+    if (rows.length) { const entry = { at: now(), rows, host: r.host }; bitgetMarginCache = entry; return { rows, host: entry.host, cached: false, stale: false, fetchedAt: entry.at }; }
   }
   if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at };
   throw new AllProvidersFailed([{ provider: "bitget", host: BITGET_BASE + "/api/v3/market/instruments?category=MARGIN", status: r.status, ok: false, errorClass: r.errorClass ?? "empty_symbols", latencyMs: 0 }]);
@@ -852,7 +858,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
       symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : []), ...(x.marginTrading ? [x.marginTrading] : []),
-        ...(x.marginCrossed !== undefined ? [x.marginCrossed, x.marginIsolated, x.maxCrossedLeverage, x.maxIsolatedLeverage] : []), ...(x.contractType ? [x.contractType] : [])]) }, 200, { "cache-control": "public, max-age=45" });
+        ...(x.marginCrossed !== undefined ? [x.marginCrossed, x.marginIsolated, x.maxCrossedLeverage, x.maxIsolatedLeverage, x.marginBaseBorrowable, x.marginQuoteBorrowable, x.marginCrossBorrowable] : []), ...(x.contractType ? [x.contractType] : [])]) }, 200, { "cache-control": "public, max-age=45" });
   }
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";
