@@ -4,7 +4,9 @@ import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
 import { expectancyFor, expectancyOptions, expectancyStatus } from "./expectancy.ts";
 import { journalFromRoute } from "./journal.ts";
-import { loadSignalInputs } from "./market-inputs.ts";
+import { loadSignalInputs, type SignalInputs } from "./market-inputs.ts";
+import { DEFAULT_WEIGHTS, EXECUTION_TF, MIN_TF_CANDLES, TIMEFRAMES, type Timeframe } from "./timeframes.ts";
+import type { Kline } from "../market.ts";
 import { costBpsFrom, runOmnisignal } from "./omnisignal.ts";
 import { activeOptions } from "./params.ts";
 import { MAX_SCAN_SYMBOLS, parseSymbols, scan } from "./scan.ts";
@@ -14,6 +16,53 @@ import { leaderboardOf, loadUniverse, runUniverseBatch } from "./universe.ts";
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
 export const STRATEGIES: Strategy[] = ["scalp", "intraday", "swing", "position"];
+
+function validateBrowserKlines(value: unknown, minimum: number): Kline[] | null {
+  if (!Array.isArray(value) || value.length < minimum || value.length > 1000) return null;
+  const rows: Kline[] = []; let previous = 0;
+  for (const item of value) {
+    if (!Array.isArray(item) || item.length < 6) return null;
+    const row = item.slice(0, 6).map(Number) as Kline;
+    const [time, open, high, low, close, volume] = row;
+    if (![time, open, high, low, close, volume].every(Number.isFinite) || time <= previous || time <= 0 ||
+        open <= 0 || high <= 0 || low <= 0 || close <= 0 || volume < 0 ||
+        high < Math.max(open, close) || low > Math.min(open, close) || high < low) return null;
+    rows.push(row); previous = time;
+  }
+  return rows;
+}
+
+function validateBrowserMarketData(raw: any, strategy: Strategy, market: "spot" | "futures", category: string): SignalInputs | null {
+  if (!raw || typeof raw !== "object" || !raw.candles || typeof raw.candles !== "object") return null;
+  const required = new Set<Timeframe>([...Object.entries(DEFAULT_WEIGHTS[strategy]).filter(([, weight]) => weight > 0).map(([tf]) => tf as Timeframe), EXECUTION_TF[strategy]]);
+  const candles: Partial<Record<Timeframe, Kline[]>> = {};
+  for (const tf of TIMEFRAMES) {
+    const value = raw.candles[tf];
+    if (value === undefined) { if (required.has(tf)) return null; continue; }
+    const rows = validateBrowserKlines(value, required.has(tf) ? MIN_TF_CANDLES : 1);
+    if (!rows) return null;
+    candles[tf] = rows;
+  }
+  let depth: SignalInputs["depth"] = null;
+  if (raw.depth && typeof raw.depth === "object") {
+    const bids = Array.isArray(raw.depth.bids) ? raw.depth.bids.map((x: any) => [Number(x?.[0]), Number(x?.[1])] as [number, number]) : [];
+    const asks = Array.isArray(raw.depth.asks) ? raw.depth.asks.map((x: any) => [Number(x?.[0]), Number(x?.[1])] as [number, number]) : [];
+    const timestamp = Number(raw.depth.timestamp);
+    if (bids.length && asks.length && bids.length <= 100 && asks.length <= 100 &&
+        [...bids, ...asks].every(([price, size]) => Number.isFinite(price) && price > 0 && Number.isFinite(size) && size > 0) &&
+        Number.isFinite(timestamp) && Math.abs(Date.now() - timestamp) <= 180_000) depth = { bids, asks, timestamp };
+  }
+  let derivatives: SignalInputs["derivatives"] = null;
+  if (market === "futures" && raw.derivatives && typeof raw.derivatives === "object") {
+    const fundingRate = raw.derivatives.fundingRate == null ? null : Number(raw.derivatives.fundingRate);
+    const openInterest = raw.derivatives.openInterest == null ? null : Number(raw.derivatives.openInterest);
+    const timestamp = Number(raw.derivatives.timestamp);
+    if ((fundingRate === null || Number.isFinite(fundingRate)) && (openInterest === null || (Number.isFinite(openInterest) && openInterest >= 0)) &&
+        Number.isFinite(timestamp)) derivatives = { fundingRate, openInterest, timestamp, source: "bitget-browser" };
+  }
+  const failures = raw.failures && typeof raw.failures === "object" ? Object.fromEntries(Object.entries(raw.failures).map(([k, v]) => [k, String(v).slice(0, 200)])) : {};
+  return { candles, depth, derivatives, provider: "bitget-browser", market, category, failures };
+}
 
 export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(req.url);
@@ -73,7 +122,15 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
     return reply({ error: "invalid_trade_plan_inputs", message: "Supply equity and riskFraction together; riskFraction must be <= 5%, leverage 1-100x, and fee/slippage 0-500 bps." }, 400);
   let active; try { active = await activeOptions((env as any).ETI_EXECUTION_LOG); } catch { return reply({ error: "params_unavailable", submitsOrder: false }, 503); }
   const { version, name, ...opts } = active;
-  const inputs = await loadSignalInputs(env, symbol, strategy, venue, Date.now(), market as "spot" | "futures", category);
+  let inputs: SignalInputs | { error: "market_data_unavailable"; executionTimeframe: Timeframe; failures: Record<string, string> };
+  if (venue === "bitget") {
+    if (req.method !== "POST" || !body.marketData) return reply({ error: "bitget_browser_market_data_required", message: "Bitget blocks ETI Cloudflare Worker egress. Load its public feed in the browser and POST the validated marketData snapshot; no API secret is exposed to the browser." }, 400);
+    const supplied = validateBrowserMarketData(body.marketData, strategy, market as "spot" | "futures", category);
+    if (!supplied) return reply({ error: "invalid_bitget_browser_market_data", message: "Required timeframes, candle ordering, order-book snapshot or derivatives context failed validation." }, 400);
+    inputs = supplied;
+  } else {
+    inputs = await loadSignalInputs(env, symbol, strategy, venue, Date.now(), market as "spot" | "futures", category);
+  }
   if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", error: inputs.error, executionTimeframe: inputs.executionTimeframe, failures: inputs.failures, submitsOrder: false, liveExecutionAllowed: false }, 503);
   const { candles, depth, derivatives, provider, failures } = inputs;
   const now = Date.now(), exp = await expectancyFor(env, strategy, symbol, now);
