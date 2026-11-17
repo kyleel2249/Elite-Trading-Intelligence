@@ -31,8 +31,9 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
   };
   const calls: { path: string; body: any }[] = [];
   const app = { fetch: async (req: Request) => {
-    const path = new URL(req.url).pathname, body = path.endsWith("/execute") ? await req.json() : {};
+    const path = new URL(req.url).pathname, body = path.endsWith("/execute") || path.endsWith("/analyze") ? await req.json() : {};
     calls.push({ path, body });
+    if (path === "/api/omnisignal") return Response.json({ decision: "BUY", tradeable: true, confidence: 82, validation: { hardFailures: [] } });
     if (path.endsWith("/analyze")) return Response.json({ decision: { action: "BUY", confidence: 0.82, consensus: { agreement: 0.78 } }, risk: { approved: true, vetoes: [] }, security: { severity: "none" } });
     return Response.json({ ok: true, decision: { action: "BUY" }, broker: { fill: { price: 100 } } }, { status: 201 });
   } };
@@ -53,6 +54,7 @@ test("autopilot refuses a trade below configured confidence and agreement", asyn
   const calls: string[] = [];
   const app = { fetch: async (req: Request) => {
     const path = new URL(req.url).pathname; calls.push(path);
+    if (path === "/api/omnisignal") return Response.json({ decision: "BUY", tradeable: true, confidence: 82, validation: { hardFailures: [] } });
     return Response.json({ decision: { action: "BUY", confidence: 0.54, consensus: { agreement: 0.9 } }, risk: { approved: true }, security: { severity: "none" } });
   } };
   const result = await runAgentAutopilotCycle(env, app, 2_100_000);
@@ -66,10 +68,10 @@ test("autopilot idempotency claim prevents duplicate symbol-slot runs", async ()
   const kv = memoryKV();
   const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
   let calls = 0;
-  const app = { fetch: async () => { calls++; return Response.json({ decision: { action: "NO_TRADE" } }); } };
+  const app = { fetch: async (req: Request) => { calls++; return new URL(req.url).pathname === "/api/omnisignal" ? Response.json({ decision: "HOLD", tradeable: false, confidence: 20, validation: { hardFailures: [] } }) : Response.json({ decision: { action: "NO_TRADE" } }); } };
   const now = 2_400_000;
   await runAgentAutopilotCycle(env, app, now);
   const second = await runAgentAutopilotCycle(env, app, now);
-  assert.equal(calls, 1);
+  assert.equal(calls, 4);
   assert.equal(second.outcomes[0].reason, "already_processed_this_slot");
 });
