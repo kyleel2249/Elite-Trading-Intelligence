@@ -9,22 +9,26 @@ const MARKETS = [...BITGET_MARKETS] as BitgetMarket[];
 const n = (v: unknown): number | null => v === null || v === undefined || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null;
 const t = (v: unknown) => v === null || v === undefined ? null : String(v).slice(0, 80);
 const rows = (v: any): any[] => Array.isArray(v) ? v : Array.isArray(v?.list) ? v.list : Array.isArray(v?.data) ? v.data : v && typeof v === "object" ? [v] : [];
-function assets(market: BitgetMarket, data: any) {
-  return rows(data).slice(0, 200).map(x => ({
-    coin: t(x.coin ?? x.marginCoin ?? x.symbol),
-    total: n(x.available ?? x.availableBalance ?? x.accountEquity ?? x.equity ?? x.totalAmount ?? x.balance),
-    available: n(x.available ?? x.availableBalance ?? x.crossedMaxAvailable),
-    locked: n(x.frozen ?? x.locked ?? x.lockedAmount),
-    equity: n(x.accountEquity ?? x.equity ?? x.usdtEquity ?? x.usdcEquity),
-    unrealizedPnl: n(x.unrealizedPL ?? x.unrealizedPnl ?? x.unrealizedProfit),
-    debt: n(x.borrowed ?? x.liability),
-    usdValue: n(x.usdtValue ?? x.usdValue ?? x.usdtEquity),
-  })).filter(x => x.coin || x.total !== null || x.equity !== null);
+function assets(data: any) {
+  return rows(data).slice(0, 200).map(x => {
+    const available = n(x.available ?? x.availableBalance ?? x.crossedMaxAvailable);
+    const locked = n(x.frozen ?? x.locked ?? x.lockedAmount);
+    const reportedTotal = n(x.total ?? x.totalAmount ?? x.balance);
+    return {
+      coin: t(x.coin ?? x.marginCoin ?? x.symbol),
+      total: reportedTotal ?? (available !== null ? available + (locked ?? 0) : n(x.accountEquity ?? x.equity)),
+      available, locked,
+      equity: n(x.accountEquity ?? x.equity ?? x.usdtEquity ?? x.usdcEquity),
+      unrealizedPnl: n(x.unrealizedPL ?? x.unrealizedPnl ?? x.unrealizedProfit),
+      debt: n(x.borrowed ?? x.liability),
+      usdValue: n(x.usdtValue ?? x.usdValue ?? x.usdtEquity),
+    };
+  }).filter(x => x.coin || x.total !== null || x.equity !== null);
 }
 function positions(data: any) {
   return rows(data).slice(0, 200).map(x => ({
     symbol: t(x.symbol), side: t(x.holdSide ?? x.posSide ?? x.side),
-    size: n(x.total ?? x.size ?? x.available), available: n(x.available),
+    size: n(x.total ?? x.size), available: n(x.available),
     entryPrice: n(x.openPriceAvg ?? x.openPrice ?? x.averageOpenPrice),
     markPrice: n(x.markPrice), liquidationPrice: n(x.liquidationPrice ?? x.liqPrice),
     leverage: n(x.leverage), marginCoin: t(x.marginCoin),
