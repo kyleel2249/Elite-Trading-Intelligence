@@ -32,7 +32,7 @@ export function verifiedGrossExposureUsd(snapshot:any,activity:any,now:number){
   if(m.market==="usdt-futures"||m.market==="usdc-futures"){for(const p of m.positions??[]){if(qty(p.size)>0){const mark=finite(p.markPrice);if(mark===null||mark<=0)problems.push("bitget_position_mark_unavailable:"+p.symbol);else total+=qty(p.size)*mark;}}}
   if(m.market==="coin-futures"&&(m.positions??[]).some((p:any)=>qty(p.size)>0))problems.push("bitget_coin_futures_contract_value_unverified");
  }
- for(const o of activity?.openOrders??[]){const remaining=finite(o.leavesQty),price=finite(o.price);if(remaining===null||remaining<=0)continue;if(o.market==="coin-futures"){problems.push("coin_futures_open_order_notional_unverified:"+o.symbol);continue;}if(price===null||price<=0){problems.push("open_order_notional_unverified:"+o.venue+":"+o.market+":"+o.symbol);continue;}total+=remaining*price;}
+ for(const o of activity?.openOrders??[]){const remaining=finite(o.leavesQty),price=finite(o.price);if(remaining===null||remaining<=0)continue;if(o.market==="coin-futures"){problems.push("coin_futures_open_order_notional_unverified:"+o.symbol);continue;}if(o.venue==="bybit"&&o.market==="inverse"){const value=finite(o.notionalUsd);if(value===null||value<0)problems.push("bybit_inverse_open_order_notional_unverified:"+o.symbol);else total+=value;continue;}if(price===null||price<=0){problems.push("open_order_notional_unverified:"+o.venue+":"+o.market+":"+o.symbol);continue;}total+=remaining*price;}
  return {value:problems.length===0?total:null,problems:[...new Set(problems)]};
 }
 export function reconcileCrossExchange(snapshot: any, ledger: any, now: number, maxAgeMs = 90_000, activity:any=null) {
