@@ -19,6 +19,18 @@ export function matchActivityFills(fills:ActivityFill[],orders:any[]){
  return {matched,unmatched};
 }
 const marginSymbols=(env:Env)=>String(env.ETI_BITGET_MARGIN_SYMBOLS??"").split(",").map(x=>x.trim().toUpperCase()).filter(x=>/^[A-Z0-9]{5,20}$/.test(x)).slice(0,20);
+async function fetchBitgetWindow(env:Env,market:BitgetMarket,symbols:string[],since:number,now:number,deps:{fetchImpl?:typeof fetch}){
+ const targets=market.startsWith("margin-")?symbols:[undefined],all:any[]=[],seen=new Set<string>();let truncated=false;
+ for(const symbol of targets){let end=now;for(let page=0;page<5;page++){
+  const batch=await getFills(env,market,{symbol,startTime:since,endTime:end,limit:100},{now:()=>now,fetchImpl:deps.fetchImpl});
+  for(const f of batch)if(!seen.has(f.id)){seen.add(f.id);all.push(f);}
+  if(batch.length<100)break;
+  const earliest=Math.min(...batch.map(f=>f.ts));if(!Number.isFinite(earliest)||earliest>=end){truncated=true;break;}
+  end=earliest-1;if(page===4)truncated=true;
+ }}
+ return {fills:all,truncated};
+}
+
 export async function syncExchangeActivity(env:Env,environment:"internal_paper"|"exchange_testnet",now:number,deps:{fetchImpl?:typeof fetch}={}){
  const st=openStore(env,environment);if(!st)throw new Error("portfolio_storage_unavailable");
  const previous=await st.kvGet<ActivityState>("exchange_activity",{schema:"eti.exchange-activity/1",syncedAt:0,fills:[],openOrders:[],syncs:[]});
@@ -34,7 +46,7 @@ export async function syncExchangeActivity(env:Env,environment:"internal_paper"|
     if(orderResult.status==="fulfilled")freshOrderScopes.add("bybit|"+category);
     let added=0;for(const f of trades){const key="bybit|"+category+"|"+f.id;if(seen.has(key))continue;seen.add(key);incoming.push({key,venue:"bybit",market:category,id:f.id,orderId:f.orderId,clientOrderId:f.clientOrderId,symbol:f.symbol,side:f.side,qty:f.qty,price:f.price,fee:f.fee,feeCoin:f.feeCoin,at:f.at,realizedPnl:null});added++;}
     for(const o of orders)openOrders.push({key:"bybit|"+category+"|"+o.orderId,venue:"bybit",market:category,orderId:o.orderId,clientOrderId:o.clientOrderId,symbol:o.symbol,side:o.side,qty:o.qty,leavesQty:o.leavesQty,price:o.price,notionalUsd:o.leavesValue,status:o.status,updatedAt:o.updatedAt});
-    results.push({venue:"bybit",market:category,status:tradeResult.status==="fulfilled"&&orderResult.status==="fulfilled"?"connected":"partial",fillsFetched:trades.length,fillsAdded:added,openOrders:orders.length,errors:[tradeResult.status==="rejected"?"fills_unavailable":null,orderResult.status==="rejected"?"open_orders_unavailable":null].filter(Boolean)});
+    results.push({venue:"bybit",market:category,status:tradeResult.status==="fulfilled"&&orderResult.status==="fulfilled"?"connected":"partial",fillsFetched:trades.length,fillsAdded:added,openOrders:orders.length,historyTruncated:tradeData.truncated,errors:[tradeResult.status==="rejected"?"fills_unavailable":null,orderResult.status==="rejected"?"open_orders_unavailable":null].filter(Boolean)});
    }catch(e){results.push({venue:"bybit",market:category,status:"unavailable",error:e instanceof Error?e.message.slice(0,160):"sync_failed"});}
   }
  }else results.push({venue:"bybit",status:"credentials_missing"});
@@ -44,10 +56,9 @@ export async function syncExchangeActivity(env:Env,environment:"internal_paper"|
    try{
     const symbols=market.startsWith("margin-")?marginSymbols(env):[];
     if(market.startsWith("margin-")&&!symbols.length){results.push({venue:"bitget",market,status:"partial",warning:"margin_symbols_not_configured"});continue;}
-    const fetchMarketFills=async()=>{if(!market.startsWith("margin-"))return getFills(env,market,{startTime:since,endTime:now,limit:100},fetchDeps);const all:any[]=[];for(const symbol of symbols)all.push(...await getFills(env,market,{symbol,startTime:since,endTime:now,limit:100},fetchDeps));return all;};
-    const [tradeResult,orderResult]=await Promise.allSettled([fetchMarketFills(),getOpenOrders(env,market,symbols,fetchDeps)]);
+    const [tradeResult,orderResult]=await Promise.allSettled([fetchBitgetWindow(env,market,symbols,since,now,deps),getOpenOrders(env,market,symbols,fetchDeps)]);
     if(tradeResult.status==="rejected"&&orderResult.status==="rejected")throw tradeResult.reason;
-    const trades=tradeResult.status==="fulfilled"?tradeResult.value:[],orders=orderResult.status==="fulfilled"?orderResult.value:[];
+    const tradeData=tradeResult.status==="fulfilled"?tradeResult.value:{fills:[],truncated:false},trades=tradeData.fills,orders=orderResult.status==="fulfilled"?orderResult.value:[];
     if(orderResult.status==="fulfilled")freshOrderScopes.add("bitget|"+market);
     let added=0;for(const f of trades){const key="bitget|"+market+"|"+f.id;if(seen.has(key))continue;seen.add(key);incoming.push({key,venue:"bitget",market,id:f.id,orderId:f.orderId,clientOrderId:"",symbol:f.symbol,side:f.side,qty:f.qty,price:f.price,fee:f.fee,feeCoin:f.feeCoin||null,at:f.ts,realizedPnl:f.realizedPnl});added++;}
     for(const o of orders)openOrders.push({key:"bitget|"+market+"|"+o.orderId,venue:"bitget",market,orderId:o.orderId,clientOrderId:o.clientOrderId,symbol:o.symbol,side:o.side,qty:o.qty,leavesQty:o.leavesQty,price:o.price,status:o.status,updatedAt:o.updatedAt});
