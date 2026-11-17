@@ -838,7 +838,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   const endpoint = url.pathname.slice("/api/market/".length);
   const marketFetch = (input: RequestInfo | URL, init?: RequestInit) => bitgetAwareFetch(input, init, fetch);
   if (endpoint === "region") return jsonResp({
-    service: "eti-public-market-data", transport: "bybit-worker-rest+bitget-browser-direct", placementHint: "gcp:europe-west1",
+    service: "eti-public-market-data", transport: "bybit-worker-rest+bitget-browser-direct", placementHint: "cloudflare:global",
     providers: { bybit: PROVIDERS.bybit.hosts, bitget: PROVIDERS.bitget.hosts },
     fixedEgressIp: false, accountResidencyIsNotChanged: true,
     note: "Bybit REST uses the Worker. Bitget public REST is fetched from the user browser because Bitget blocks Cloudflare Worker egress. Worker placement does not change exchange account-country eligibility."
