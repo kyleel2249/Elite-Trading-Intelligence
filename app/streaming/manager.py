@@ -91,7 +91,10 @@ class StreamHub:
                 return
             key = f"{category}:{q['symbol']}"
             self.latest_bybit_by_market[key] = msg
-            self.latest_bybit[key] = msg
+            if category == "spot":
+                self.latest_bybit[q["symbol"]] = msg
+            else:
+                self.latest_bybit[key] = msg
             self.bybit_quotes_by_market[key] = q
             # Preserve the original symbol-only quote cache, preferring spot when available.
             if category == "spot" or q["symbol"] not in self.quotes:
@@ -249,8 +252,8 @@ class StreamHub:
                         q = max(candidates, key=lambda item: item.get("ts", ""))
         if q is None:
             q = self.quotes.get(sym)
-        if q and (provider is None or q.get("provider") == provider)
-                and (category is None or q.get("category") == category.lower()):
+        if (q and (provider is None or q.get("provider") == provider)
+                and (category is None or q.get("category") == category.lower())):
             age = None
             try:
                 ts = datetime.fromisoformat(q["ts"].replace("Z", "+00:00"))
