@@ -58,7 +58,7 @@ test("invalid category and malformed upstream data fail closed", async () => {
 });
 
 
-test("Bybit market region endpoint reports Cloudflare Cape Town placement without changing account residency", async () => {
+test("Bybit market region endpoint reports Cloudflare Frankfurt placement without changing account residency", async () => {
   const request = new Request("https://eti.test/api/market/region", { headers: { "cf-placement": "local-FRA" } });
   const response = await handleMarket(request, {});
   assert.equal(response.status, 200);
