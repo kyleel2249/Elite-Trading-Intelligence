@@ -146,5 +146,5 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const v3AlphaRecorded = await recordV3AlphaSignal((env as any).ETI_PORTFOLIO_DB, symbol, strategy, venue, market, category, result.v3Alpha, now).catch(() => false);
   return reply({ ...result, parameters: { version, name }, dataQuality: { provider, venue, market, category, timeframesLoaded: Object.keys(candles), failures, orderBook: depth ? "rest_snapshot" : "unavailable", derivatives: derivatives ? "ticker_snapshot" : "unavailable", providerCrossCheck: "not_performed",
     note: "Single selected provider per request; cross-provider reconciliation is not performed. The REST order-book and derivatives snapshots are timestamped at fetch time." },
-    validationStatus: { expectancy: expectancyStatus(exp), accountRisk: "not_evaluated_by_analytical_endpoint", execution: "This endpoint is analytical and read-only. It never submits orders; live execution remains disabled." }, journal });
+    validationStatus: { expectancy: expectancyStatus(exp), accountRisk: "not_evaluated_by_analytical_endpoint", execution: "This endpoint is analytical and read-only. It never submits orders; live execution remains disabled." }, journal, v3AlphaRecorded });
 }
