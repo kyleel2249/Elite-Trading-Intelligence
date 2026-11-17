@@ -420,6 +420,11 @@ async def providers_status(settings: Settings = Depends(get_settings)):
     }
 
 
+@app.get("/api/providers/bybit/stream/status")
+async def bybit_stream_status():
+    return stream_hub.bybit.status()
+
+
 @app.get("/api/providers/binance/stream/status")
 async def binance_stream_status():
     return stream_hub.binance.status()
