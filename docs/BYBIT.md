@@ -37,8 +37,12 @@ ETI sends orders through the Python execution engine and its existing account po
 
 Testnet is the only recommended initial environment. Live execution requires a separately created environment=live account, the global LIVE_TRADING_ENABLED=true gate, successful key-permission verification and the same ETI risk controls. ETI does not expose transfer or withdrawal endpoints.
 
-## Market data and live streams
+## Market data region and live streams
 
+- Cloudflare's ETI market-data Worker is explicitly placed near AWS Cape Town (`aws:af-south-1`) so public Bybit REST requests do not originate from the US-based GitHub Actions runner region that produced HTTP 403 responses.
+- Check the live Worker execution location with `GET /api/market/region`; a successful regional placement reports a Cloudflare `cf-placement` value ending in `-CPT`.
+- The Python FastAPI origin remains in Fly.io Frankfurt (`fra`), outside Bybit's documented US and mainland-China IP blocks. It remains there to avoid adding cross-region latency to its existing PostgreSQL connection.
+- ETI uses Bybit's global REST hosts (`api.bytick.com`, `api.bybit.com`) and global public WebSocket hosts for the Ghana-registered international account. Dedicated regional API domains must only be used when Bybit says the user's own account is registered on that regional site; server placement does not change account residency.
 - REST snapshots/history use the Bybit V5 public market endpoints.
 - Instruments use /v5/market/instruments-info with pagination for linear/inverse.
 - Public WebSockets: wss://stream.bybit.com/v5/public/spot, /linear, and /inverse.
