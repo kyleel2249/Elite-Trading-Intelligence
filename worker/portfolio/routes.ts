@@ -17,6 +17,7 @@ import { loadMinuteBars } from "../algo/market-inputs.ts";
 import { buildPortfolioManager } from "./manager.ts";
 import { loadExchangePortfolioSnapshot } from "./exchanges.ts";
 import { buildCrossExchangeReconciliation, readAutonomyControls, saveAutonomyControls } from "./reconciliation.ts";
+import { readExchangeActivity, syncExchangeActivity } from "./exchange-sync.ts";
 
 export type PortfolioEnv = EngineEnv & { ETI_PORTFOLIO_DB?: any } & { ETI_EXECUTION_TOKEN?: string; ETI_SESSION_SECRET?: string; ETI_SESSION_SECRET_PREVIOUS?: string; ETI_AUTO_SESSIONS?: string; ETI_KEY_ROTATION_DAYS?: string; ETI_KILL_SWITCH?: string };
 const H = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -87,6 +88,12 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   if (path === "/api/portfolio/exchanges") {
     if (!isOperator(auth)) return reply({ error: "operator_required", message: "Exchange account snapshots require the ETI master execution token or an administrator session with MFA." }, 403);
     return reply(await loadExchangePortfolioSnapshot(env as any, now));
+  }
+  if (path === "/api/portfolio/exchange-activity") {
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Exchange activity sync requires the ETI master execution token or administrator MFA." }, 403);
+    if (req.method === "GET") { try { return reply(await readExchangeActivity(env as any, environment as "internal_paper" | "exchange_testnet", now)); } catch(e) { return reply({error:"exchange_activity_unavailable",message:e instanceof Error?e.message:"read_failed"},503); } }
+    if (req.method === "POST") { try { const result=await syncExchangeActivity(env as any, environment as "internal_paper" | "exchange_testnet", now, deps); await ((env.ETI_EXECUTION_LOG ?? {put:async()=>undefined}) as KVL).put("exec:audit:"+new Date(now).toISOString()+":exchange_activity_sync",JSON.stringify({at:now,environment,actor:auth.master?"master_token":"administrator",summary:result.summary}),{expirationTtl:60*60*24*90}); return reply(result); } catch(e) { return reply({error:"exchange_activity_sync_failed",message:e instanceof Error?e.message:"sync_failed"},503); } }
+    return reply({error:"method_not_allowed"},405);
   }
   if (path === "/api/portfolio/manager" && environment === "live") return reply({ environment, disabled: true, mode: "read_only_disabled", executionEnabled: false, message: "Live portfolio management is disabled; no live account data or orders are accessed." }, 423);
   if (environment === "live") return reply(post ? { error: "live_disabled", message: "Live trading is disabled; there is nothing to change." } : await buildState(env, deps, "live", now), post ? 423 : 200);
