@@ -519,7 +519,7 @@ function connectWs(){
  sock.onclose=()=>{if(socket!==sock)return;const wait=Math.min(30000,1000*Math.pow(2,wsRetry++));setConn('WebSocket disconnected · REST polling active · reconnect in '+Math.round(wait/1000)+'s','#f59e0b');wsTimer=setTimeout(connectWs,wait);};
  sock.onerror=()=>sock.close();
 }
-function resetAndLoad(){sig=null;sigWantProvider=null;bitgetSignalBar=0;hoverIdx=-1;reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();renderSignalCharts();if(socket){socket.onclose=null;socket.close();socket=null;}loadSignal();load();}
+function resetAndLoad(){sig=null;sigWantProvider=null;bitgetSignalBar=0;hoverIdx=-1;reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();renderSignalCharts();if(socket){socket.onclose=null;socket.close();socket=null;}if(symInfo().venue!=='bitget')loadSignal();load();}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let preparedOrder=null, executionStatus=null;
 /* ---- automatic, server-side execution sessions (HttpOnly cookies: this page never sees or stores a token) ---- */
