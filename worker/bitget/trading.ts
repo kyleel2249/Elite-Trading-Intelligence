@@ -23,12 +23,18 @@ async function post(env:BitgetLiveEnv,path:string,payload:Record<string,unknown>
   const c=bitgetCreds(env as any); if(!c.complete) return {ok:false,definite:true,status:503,data:{code:"credentials_missing",missing:c.missing}};
   const body=json(payload),ts=String((deps.now??Date.now)());
   const sign=await bitgetSign(c.secret!,ts,"POST",path,"",body);
-  try {
-    const r=await (deps.fetchImpl??fetch)(BASE+path,{method:"POST",headers:{"ACCESS-KEY":c.key!,"ACCESS-SIGN":sign,"ACCESS-TIMESTAMP":ts,"ACCESS-PASSPHRASE":c.passphrase!,"Content-Type":"application/json","locale":"en-US"},body,signal:AbortSignal.timeout(12000)});
-    const data=await r.json().catch(()=>({message:"Bitget returned invalid JSON"}));
-    if(r.ok&&data?.code==="00000")return {ok:true,data:data.data??data};
-    return {ok:false,definite:(r.status>=400&&r.status<500&&r.status!==408)||(r.ok&&data?.code!=="00000"&&String(data?.code)!=="40010"),status:r.status||502,data:{httpStatus:r.status,code:data?.code??"bitget_rejected",message:String(data?.msg??data?.message??"Bitget rejected the request").slice(0,240),data:data?.data??null}};
-  } catch(e) { return {ok:false,definite:false,status:0,data:{code:"network_outcome_unknown",message:e instanceof Error?e.message:"network failure"}}; }
+  const requestHeaders={"ACCESS-KEY":c.key!,"ACCESS-SIGN":sign,"ACCESS-TIMESTAMP":ts,"ACCESS-PASSPHRASE":c.passphrase!,"Content-Type":"application/json","locale":"en-US"};
+  const hosts=[BASE,"https://capi.bitget.com"];let last:Sent|null=null;
+  for(const host of hosts){
+    try {
+      const r=await (deps.fetchImpl??fetch)(host+path,{method:"POST",headers:requestHeaders,body,signal:AbortSignal.timeout(12000)});
+      const data=await r.json().catch(()=>({message:"Bitget returned invalid JSON"}));
+      if(r.ok&&data?.code==="00000")return {ok:true,data:data.data??data};
+      last={ok:false,definite:(r.status>=400&&r.status<500&&r.status!==408)||(r.ok&&data?.code!=="00000"&&String(data?.code)!=="40010"),status:r.status||502,data:{httpStatus:r.status,code:data?.code??"bitget_rejected",message:String(data?.msg??data?.message??"Bitget rejected the request").slice(0,240),data:data?.data??null}};
+      if(!(r.status===403&&data?.cloudflare==="block")&&r.status<500)return last;
+    } catch(e) { last={ok:false,definite:false,status:0,data:{code:"network_outcome_unknown",message:e instanceof Error?e.message:"network failure"}}; }
+  }
+  return last??{ok:false,definite:false,status:502,data:{code:"network_outcome_unknown",message:"Bitget API hosts were unavailable"}};
 }
 const response=(body:unknown,status=200)=>new Response(json(body),{status,headers});
 export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:BitgetLiveDeps={}):Promise<Response>{
