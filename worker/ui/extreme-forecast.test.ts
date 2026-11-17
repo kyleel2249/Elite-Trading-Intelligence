@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import type { Kline } from "../market.ts";
-import { forecast24hExtremes, inferBybitCategory } from "../analysis/extremes.ts";
+import { backtest24hExtremes, buildExtremeMarketContext, forecast24hExtremes, inferBybitCategory } from "../analysis/extremes.ts";
 import { EXTREME_FORECAST_JS, withExtremeForecastLayer } from "./extreme-forecast.ts";
 
 const DAY = 86_400_000, HOUR = 3_600_000;
@@ -78,5 +78,39 @@ test("forecast overlay parses and is added only to the live dashboard chart", ()
   assert.ok(injected.includes("eti-extreme-forecast-js"));
   assert.ok(injected.includes("24H HIGH"));
   assert.ok(injected.includes("24H LOW"));
+  assert.ok(injected.includes("Rolling 24H backtest"));
+  assert.ok(injected.includes("Historical hit rates are not probabilities"));
   assert.equal(withExtremeForecastLayer("<html><body>no chart</body></html>"), "<html><body>no chart</body></html>");
+});
+
+test("rolling 24-hour validation reports out-of-sample price and timing hit rates", () => {
+  const h = history(30), result = backtest24hExtremes(h.hourly, h.daily, now);
+  if (result.status !== "ready") throw new Error("Expected rolling backtest, received " + result.status);
+  assert.ok(result.sampleCount >= 3);
+  for (const key of ["highPriceHitRatePct", "lowPriceHitRatePct", "highTimeWindowHitRatePct", "lowTimeWindowHitRatePct"] as const) {
+    assert.ok(result[key] >= 0 && result[key] <= 100, key);
+  }
+  assert.ok(result.meanAbsoluteHighPriceErrorPct >= 0);
+  assert.ok(result.meanAbsoluteLowPriceErrorPct >= 0);
+  assert.match(result.note, /not probabilities/);
+});
+test("market context reports structure, momentum, volatility, volume and transparent liquidity limitations", () => {
+  const h = history(30), context = buildExtremeMarketContext(h.hourly, h.daily, ticker, now);
+  assert.ok(typeof context.trend === "string");
+  assert.ok(context.atr14Pct !== null && context.atr14Pct > 0);
+  assert.ok(context.volumeVs20DayAverage !== null);
+  assert.ok(context.momentum24hPct !== null);
+  assert.match(context.liquidityProxy, /not order-book depth/);
+  assert.ok(context.notIncludedInputs.includes("funding rate"));
+});
+
+test("backtest predictions are isolated from future target candles (no look-ahead)", () => {
+  const h = history(30), baseline = backtest24hExtremes(h.hourly, h.daily, now);
+  if (baseline.status !== "ready") throw new Error("Expected a ready backtest");
+  const first = baseline.samples[0], start = Date.parse(first.evaluatedAt);
+  const mutated = h.hourly.map(k => k[0] >= start && k[0] < start + DAY ? [k[0], k[1], k[2] * 1.2, k[3] * .8, k[4], k[5]] as Kline : k);
+  const changed = backtest24hExtremes(mutated, h.daily, now);
+  if (changed.status !== "ready") throw new Error("Expected a ready backtest after target mutation");
+  assert.equal(changed.samples[0].predictedHighPrice, first.predictedHighPrice);
+  assert.equal(changed.samples[0].predictedLowPrice, first.predictedLowPrice);
 });
