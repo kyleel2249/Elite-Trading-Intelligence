@@ -103,6 +103,7 @@ test("HTTP: private routes need the bearer token, status never reveals values, m
   const st = await handleBitget(new Request("https://eti.test/api/bitget/status", { headers: { authorization: "Bearer tok" } }), ENV);
   const body = JSON.stringify(await st.json());
   assert.equal(st.status, 200); assert.doesNotMatch(body, /s3cret|"pp"/); assert.match(body, /BITGET_API_KEY/); assert.match(body, /"readOnly":false/);
+  _resetSymbolCache();
   const pairs = await handleBitget(new Request("https://eti.test/api/bitget/margin-pairs"), {}, { fetchImpl: (async(url:any,init:any) => {
     const u = new URL(String(url)); assert.equal(init.method,undefined);
     if (u.hostname === "api.bitget.com") { assert.equal(u.pathname,"/api/v3/market/instruments"); assert.equal(u.searchParams.get("category"),"MARGIN"); return new Response(JSON.stringify({cloudflare:"block"}),{status:403}); }
