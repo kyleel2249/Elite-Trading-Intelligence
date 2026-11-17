@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { BITGET_MARKETS, BitgetError, bitgetCreds, bitgetGetSigned, bitgetSign, getFills, handleBitget, normalizeFills, syncAll } from "./api.ts";
+import { BITGET_MARKETS, BitgetError, bitgetCreds, bitgetGetSigned, bitgetSign, getFills, handleBitget, normalizeFills, syncAll, listMarginSymbolsForMarket, _resetSymbolCache } from "./api.ts";
 
 const ENV = { BITGET_API_KEY: "k", BITGET_API_SECRET: "s3cret", BITGET_API_PASSPHRASE: "pp", ETI_EXECUTION_TOKEN: "tok" };
 const kvStore = () => { const m = new Map<string, string>(); return { m, get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); } }; };
@@ -62,10 +62,11 @@ test("margin needs a symbol; futures use productType; positions only for futures
 
 test("sync is idempotent, paginates, covers every market and reports per-market failures", async () => {
   const kv = kvStore();
-  const env = { ...ENV, ETI_EXECUTION_LOG: kv, ETI_BITGET_MARGIN_SYMBOLS: "BTCUSDT" };
+  const env = { ...ENV, ETI_EXECUTION_LOG: kv };
   let calls = 0;
   const fetchImpl = (async (u: string) => {
     calls++;
+    if (u.includes("/api/v3/market/instruments?category=MARGIN")) return ok([{symbol:"BTCUSDT",baseCoin:"BTC",quoteCoin:"USDT",status:"online",isCrossBorrowable:true,isIsolatedBaseBorrowable:true}]);
     if (u.includes("/margin/isolated/")) return new Response(JSON.stringify({ code: "40014", msg: "no permission" }));
     const t = Date.now() - 1000;
     if (u.includes("/spot/trade/fills")) return ok([{ tradeId: "s1", symbol: "BTCUSDT", orderId: "o", side: "buy", priceAvg: "1", size: "1", amount: "1", feeDetail: { feeCoin: "USDT", totalFee: "0" }, cTime: String(t) }]);
@@ -84,11 +85,15 @@ test("sync is idempotent, paginates, covers every market and reports per-market 
   assert.ok(calls > 6);
 });
 
-test("sync without margin symbols skips margin with an explanation; without credentials it refuses", async () => {
-  const kv = kvStore();
-  const r: any = await syncAll({ ...ENV, ETI_EXECUTION_LOG: kv }, { fetchImpl: (async () => ok([])) as any }, ["margin-crossed"]);
-  assert.match(r.results[0].skipped, /ETI_BITGET_MARGIN_SYMBOLS/);
-  assert.equal(((await syncAll({ ETI_EXECUTION_LOG: kv })) as any).error, "credentials_missing");
+test("margin symbol discovery is automatic and no manual symbol variable is required", async () => {
+  _resetSymbolCache();
+  const symbols = await listMarginSymbolsForMarket("margin-crossed", {fetchImpl:(async()=>ok([
+    {symbol:"BTCUSDT",baseCoin:"BTC",quoteCoin:"USDT",status:"online",isCrossBorrowable:true},
+    {symbol:"ETHUSDT",baseCoin:"ETH",quoteCoin:"USDT",status:"online",isCrossBorrowable:true},
+    {symbol:"XRPUSDT",baseCoin:"XRP",quoteCoin:"USDT",status:"online",isCrossBorrowable:false}
+  ])) as any});
+  assert.deepEqual(symbols,["BTCUSDT","ETHUSDT"]);
+  assert.equal(((await syncAll({ ETI_EXECUTION_LOG: kvStore() })) as any).error, "credentials_missing");
 });
 
 test("HTTP: private routes need the bearer token, status never reveals values, margin pairs are public", async () => {
