@@ -62,7 +62,7 @@ export async function syncExchangeActivity(env:Env,environment:"internal_paper"|
     if(orderResult.status==="fulfilled")freshOrderScopes.add("bitget|"+market);
     let added=0;for(const f of trades){const key="bitget|"+market+"|"+f.id;if(seen.has(key))continue;seen.add(key);incoming.push({key,venue:"bitget",market,id:f.id,orderId:f.orderId,clientOrderId:"",symbol:f.symbol,side:f.side,qty:f.qty,price:f.price,fee:f.fee,feeCoin:f.feeCoin||null,at:f.ts,realizedPnl:f.realizedPnl});added++;}
     for(const o of orders)openOrders.push({key:"bitget|"+market+"|"+o.orderId,venue:"bitget",market,orderId:o.orderId,clientOrderId:o.clientOrderId,symbol:o.symbol,side:o.side,qty:o.qty,leavesQty:o.leavesQty,price:o.price,status:o.status,updatedAt:o.updatedAt});
-    results.push({venue:"bitget",market,status:tradeResult.status==="fulfilled"&&orderResult.status==="fulfilled"?"connected":"partial",fillsFetched:trades.length,fillsAdded:added,openOrders:orders.length,historyTruncated:tradeData.truncated,errors:[tradeResult.status==="rejected"?"fills_unavailable":null,orderResult.status==="rejected"?"open_orders_unavailable":null].filter(Boolean)});
+    results.push({venue:"bitget",market,status:tradeResult.status==="fulfilled"&&orderResult.status==="fulfilled"&&!tradeData.truncated?"connected":"partial",fillsFetched:trades.length,fillsAdded:added,openOrders:orders.length,historyTruncated:tradeData.truncated,errors:[tradeResult.status==="rejected"?"fills_unavailable":null,orderResult.status==="rejected"?"open_orders_unavailable":null].filter(Boolean)});
    }catch(e){results.push({venue:"bitget",market,status:"unavailable",error:e instanceof Error?e.message.slice(0,160):"sync_failed"});}
   }
  }else results.push({venue:"bitget",status:"credentials_missing"});
