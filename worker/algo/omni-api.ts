@@ -12,6 +12,7 @@ import { activeOptions } from "./params.ts";
 import { MAX_SCAN_SYMBOLS, parseSymbols, scan } from "./scan.ts";
 import { authorized } from "../execution.ts";
 import { leaderboardOf, loadUniverse, runUniverseBatch } from "./universe.ts";
+import { recordV3AlphaSignal } from "./v3-alpha-ledger.ts";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
