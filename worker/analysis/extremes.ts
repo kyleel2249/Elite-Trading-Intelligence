@@ -137,7 +137,8 @@ export function forecast24hExtremes(
     finite(ticker.lowPrice) && ticker.lowPrice > 0 &&
     ticker.highPrice >= ticker.lowPrice;
   const hourly = hourlyExtremeSamples(hourlyRows, now, 60);
-  const daily = dailyRangeSamples(dailyRows, now, 1000);
+  const dailyFromHigherTimeframe = dailyRangeSamples(dailyRows, now, 1000);
+  const daily = dailyFromHigherTimeframe.length >= 5 ? dailyFromHigherTimeframe : hourly;
   const observed = validTicker ? {
     lastPrice: ticker.lastPrice,
     high24h: ticker.highPrice,
@@ -185,7 +186,7 @@ export function forecast24hExtremes(
       low: { price: round(lowPrice), range: { low: round(lowRange.low), high: round(lowRange.high) }, excursionPct: round(downMedian, 4), time: makeTime(lowAt), typicalUtcHour: round(lowTime.hour, 2), timeConsistency: round(lowTime.concentration * 100, 1) },
       confidence: { score: confidence, label: confidenceLabel, meaning: "Historical pattern consistency score, not a probability of profit or a guarantee." },
     },
-    history: { hourlyDays: hourly.length, dailyDays: daily.length, priceSampleDays: daily.length, timeSampleDays: hourly.length, hourlyCandles: hourlyRows.length, dailyCandles: dailyRows.length },
+    history: { hourlyDays: hourly.length, dailyDays: dailyFromHigherTimeframe.length, priceSampleDays: daily.length, priceSampleSource: dailyFromHigherTimeframe.length >= 5 ? "1d" : "1h_fallback", timeSampleDays: hourly.length, hourlyCandles: hourlyRows.length, dailyCandles: dailyRows.length },
     methodology: "Median completed-day high/low excursions estimate the next 24-hour price range. Circular time-of-day averages from completed hourly sessions estimate the expected high/low timing. Current Bybit 24-hour high/low are shown separately as observed context.",
     warnings: ["Forecasts are statistical estimates, not certain prices or times.", "Timing is based on hourly candles; each time window is approximate to ±60 minutes.", "Low pattern consistency or short history should reduce reliance on the estimate."],
   };
@@ -195,7 +196,7 @@ const jsonHeaders = { "content-type": "application/json; charset=utf-8", "cache-
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 
 /** Read-only API route: /api/analysis/extremes?symbol=BTCUSDT[&market=futures]. */
-export async function handleExtremeForecast(request: Request, env: MarketEnv): Promise<Response> {
+export async function handleExtremeForecast(request: Request, _env: MarketEnv): Promise<Response> {
   const url = new URL(request.url);
   if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").trim().toUpperCase();
@@ -220,5 +221,5 @@ export async function handleExtremeForecast(request: Request, env: MarketEnv): P
   const ticker = tick.value.data as Ticker;
   const result = forecast24hExtremes(hourRows, dayRows, ticker, Date.now());
   if (result.status === "insufficient_history") return reply({ ...result, historyWarning: daily.status === "rejected" ? "Long-range daily candles unavailable; retry after data recovers." : null });
-  return reply({ ...result, historyWarning: daily.status === "rejected" ? "Long-range daily candles unavailable; this estimate uses the available completed hourly sessions." : null });
+  return reply({ ...result, historyWarning: daily.status === "rejected" || result.history.priceSampleSource === "1h_fallback" ? "Long-range daily candles unavailable; this estimate uses the available completed hourly sessions." : null });
 }
