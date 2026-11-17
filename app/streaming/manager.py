@@ -15,7 +15,7 @@ from app.integrations.alpaca.websocket import AlpacaWebSocketManager
 logger = logging.getLogger(__name__)
 
 # Hard allowlist — research/demo symbols only (not a trading permission)
-BINANCE_ALLOWLIST = {
+BYBIT_ALLOWLIST = {
     "BTCUSDT",
     "ETHUSDT",
     "SOLUSDT",
@@ -26,6 +26,8 @@ BINANCE_ALLOWLIST = {
     "AVAXUSDT",
 }
 ALPACA_ALLOWLIST = {"AAPL", "SPY", "QQQ", "MSFT", "TSLA", "NVDA", "AMZN", "META"}
+
+BINANCE_ALLOWLIST = BYBIT_ALLOWLIST  # compatibility alias for existing imports/tests
 
 _SYM_RE = re.compile(r"^[A-Z0-9]{2,20}$")
 
@@ -290,7 +292,7 @@ class StreamHub:
                 rejected.append({"symbol": sym, "reason": "invalid_format"})
                 continue
             if provider == "bybit":
-                if sym not in BINANCE_ALLOWLIST:
+                if sym not in BYBIT_ALLOWLIST:
                     rejected.append({"symbol": sym, "reason": "not_in_allowlist"})
                     continue
                 if sym in self._bybit_symbols:
