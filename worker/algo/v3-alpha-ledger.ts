@@ -41,7 +41,7 @@ async function trackOpen(db:DB,env:MarketEnv,now:number){
  const rows=(q.results??[]) as any[], updates:any[]=[];
  const grouped=new Map<string,any[]>();
  for(const r of rows){const k=r.symbol+"|"+r.timeframe;grouped.set(k,[...(grouped.get(k)??[]),r]);}
- for(const [key,items] of grouped){
+ for(const [key,items] of [...grouped].slice(0,20)){
   const [symbol,interval]=key.split("|");
   let candles:Kline[];
   try{candles=(await getMarketData("klines",{symbol,interval,limit:1000},providerOrder(env))).data as Kline[];}catch{continue}
