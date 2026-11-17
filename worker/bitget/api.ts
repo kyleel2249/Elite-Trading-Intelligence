@@ -121,7 +121,7 @@ export async function getPositions(env: Record<string, any>, market: BitgetMarke
 export async function getOpenOrders(env:Record<string,any>,market:BitgetMarket,symbols:string[]=[],deps:Deps={}):Promise<any[]> {
  const path=market==="spot"?"/api/v2/spot/trade/unfilled-orders":market.endsWith("futures")?"/api/v2/mix/order/orders-pending":`/api/v2/margin/${marginKind(market)}/open-orders`;
  const base:Record<string,string|number|undefined>=market==="spot"?{limit:100}:market.endsWith("futures")?{productType:productTypeParam(market),limit:100}:{limit:100,startTime:(deps.now??Date.now)()-7*86400_000};
- const targets=market.startsWith("margin-")?symbols.slice(0,20):[undefined];const out:any[]=[];
+ const targets=market.startsWith("margin-")?symbols:[undefined];const out:any[]=[];
  for(const symbol of targets){const data=await bitgetGetSigned(env,path,{...base,symbol},deps),list=Array.isArray(data)?data:Array.isArray(data?.orderList)?data.orderList:Array.isArray(data?.list)?data.list:Array.isArray(data?.entrustedList)?data.entrustedList:[];for(const x of list){const orderId=String(x.orderId??x.orderID??"");if(!orderId)continue;const qty=Number(x.baseSize??x.qty??x.size??x.quantity??x.baseVolume??0),filled=Number(x.cumExecQty??x.filledQty??x.baseVolume??(market.startsWith("margin-")?x.size:0)??0);out.push({orderId,clientOrderId:String(x.clientOid??x.clientOrderId??""),market,symbol:String(x.symbol??symbol??""),side:String(x.side??"").toLowerCase(),qty,leavesQty:Math.max(0,qty-filled),price:Number.isFinite(Number(x.price))?Number(x.price):null,status:String(x.status??x.orderStatus??"live"),updatedAt:Number(x.uTime??x.updatedTime??x.cTime??0)});}}
  return out;
 }
@@ -169,9 +169,20 @@ export async function syncAll(env: Record<string, any>, deps: Deps = {}, only?: 
   const kv = env.ETI_EXECUTION_LOG as KV | undefined;
   if (!kv) return { ok: false, error: "storage_not_configured", note: "bind the ETI_EXECUTION_LOG KV namespace" };
   if (!bitgetCreds(env).complete) return { ok: false, error: "credentials_missing", missing: bitgetCreds(env).missing };
-  const symbols = String(env.ETI_BITGET_MARGIN_SYMBOLS ?? "").split(",").map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z0-9]{5,20}$/.test(s)).slice(0, 20);
+  let crossedSymbols: string[] = [], isolatedSymbols: string[] = [], marginDiscoveryError: unknown = null;
+  try {
+    [crossedSymbols, isolatedSymbols] = await Promise.all([
+      listMarginSymbolsForMarket("margin-crossed", deps),
+      listMarginSymbolsForMarket("margin-isolated", deps),
+    ]);
+  } catch (e) { marginDiscoveryError = e; }
   const results: any[] = [];
   for (const m of only ?? BITGET_MARKETS) {
+    if (m.startsWith("margin-") && marginDiscoveryError) {
+      results.push({ market: m, error: "margin_symbol_discovery_failed", message: marginDiscoveryError instanceof Error ? marginDiscoveryError.message : undefined });
+      continue;
+    }
+    const symbols = m === "margin-crossed" ? crossedSymbols : m === "margin-isolated" ? isolatedSymbols : [];
     try { results.push(await syncMarket(env, kv, m, symbols, deps)); }
     catch (e) { results.push({ market: m, error: e instanceof BitgetError ? e.code : "failed", message: e instanceof BitgetError ? e.message : undefined }); }
   }
@@ -193,6 +204,16 @@ export async function listMarginPairs(deps: Deps = {}) {
   } catch (e) {
     throw new BitgetError("margin_pairs_unavailable", e instanceof Error ? null : null, "Bitget margin instrument list unavailable");
   }
+}
+
+/** Resolve every currently online Bitget margin pair from the live instrument catalogue.
+ * Cross and isolated products have separate eligibility flags; no fixed symbol cap or
+ * manually maintained ETI_BITGET_MARGIN_SYMBOLS list is used.
+ */
+export async function listMarginSymbolsForMarket(market: "margin-crossed" | "margin-isolated", deps: Deps = {}): Promise<string[]> {
+  const pairs = await listMarginPairs(deps);
+  const eligible = pairs.filter((pair) => market === "margin-crossed" ? pair.crossed : pair.isolated);
+  return [...new Set(eligible.map((pair) => pair.symbol))].sort();
 }
 
 // ----------------------------------------------------------------------------------------------------------------- HTTP
