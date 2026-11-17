@@ -11,7 +11,7 @@ import { DEFAULT_THRESHOLDS, validateSignal, type DataIntegrity, type RiskContex
 
 export interface SignalInput {
   symbol: string; strategy: Strategy; candles: Partial<Record<Timeframe, Kline[]>>; depth?: DepthSnapshot | null; prevLiquidity?: LiquidityAnalysis | null; derivatives?: DerivativesSnapshot | null;
-  now?: number; provider?: string; providersAgree?: boolean; risk?: RiskContext; expectancyR?: number | null; expectancySamples?: number; equity?: number; riskFraction?: number; maxNotionalFraction?: number; leverage?: number; feeBps?: number; slippageBps?: number;
+  now?: number; provider?: string; providersAgree?: boolean; risk?: RiskContext; expectancyR?: number | null; expectancySamples?: number; equity?: number; riskFraction?: number; maxNotionalFraction?: number; leverage?: number; feeBps?: number; slippageBps?: number; contractType?: "linear" | "inverse"; contractValue?: number;
   weights?: Weights; thresholds?: Thresholds; timeframeWeights?: Record<Timeframe, number>; maxStopPct?: number; minConsensusScore?: number;
 }
 export interface AlgoSignal {
@@ -55,7 +55,7 @@ export function buildSignal(inp: SignalInput): AlgoSignal {
     stopExceedsMax: levels.exceedsMaxStop, data, risk: inp.risk ?? { withinLimits: true, reasons: [] }, expectancyR: inp.expectancyR ?? null, expectancySamples: inp.expectancySamples, weights: inp.weights, thresholds: th, derivativesAdjustment: derivatives?.scoreAdjustment ?? 0 });
   const cls = validation.classification;
   const actionable = cls === "EARLY" || cls === "CONFIRMED" || cls === "HIGH_CONVICTION";
-  const tradePlan = actionable && inp.equity && inp.riskFraction ? calculateTradePlan({ direction: dir, entry: levels.entry, stopLoss: levels.stop, takeProfits: levels.targets.map(t => ({ label: t.label, price: t.price, closeFraction: t.closeFraction })), equity: inp.equity, riskFraction: inp.riskFraction * regime.profile.exposureScale, maxNotionalFraction: inp.maxNotionalFraction, leverage: inp.leverage, feeBps: inp.feeBps, slippageBps: inp.slippageBps }) : null;
+  const tradePlan = actionable && inp.equity && inp.riskFraction ? calculateTradePlan({ direction: dir, entry: levels.entry, stopLoss: levels.stop, takeProfits: levels.targets.map(t => ({ label: t.label, price: t.price, closeFraction: t.closeFraction })), equity: inp.equity, riskFraction: inp.riskFraction * regime.profile.exposureScale, maxNotionalFraction: inp.maxNotionalFraction, leverage: inp.leverage, feeBps: inp.feeBps, slippageBps: inp.slippageBps, contractType: inp.contractType, contractValue: inp.contractValue }) : null;
   const size = tradePlan ? (tradePlan.valid ? tradePlan.quantity : null) : inp.equity && inp.riskFraction ? positionSize(inp.equity, inp.riskFraction * regime.profile.exposureScale, price, levels.stop, vol.classification) : null;
   const expires = now + TF_SECONDS[execTf] * 8 * 1000;
   const supporting = [`EMA alignment ${ef.alignment}`, `Adaptive bands ${bands.trend}`, `Volume-weighted momentum ${vm.score}`, `Consensus ${consensus.bullish}B/${consensus.bearish}S/${consensus.neutral}N`, `Regime ${regime.regime}`, ...(liquidity ? [`Liquidity ${liquidity.status}`] : []), ...(derivatives?.notes ?? [])];
