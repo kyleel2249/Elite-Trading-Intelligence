@@ -873,7 +873,7 @@ function symFilters(){
 function symRebuild(want){
  const sel=$('symbol'),cur=want||sel.value,all=symRows(),rows=symVisible();
  const frag=document.createDocumentFragment();let hasCur=false;
- rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=(SYM.market==='metals'?symMetalLabel(r):r[1]+'/'+r[2]+(r[4]&&r[4]!=='crypto'?' · '+r[4]:''))+(r[6]?' · '+r[6]:'');if(r[0]===cur)hasCur=true;frag.appendChild(o);});
+ rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=(SYM.market==='metals'?symMetalLabel(r):r[1]+'/'+r[2]+(r[4]&&r[4]!=='crypto'?' · '+r[4]:''))+(r[5]==='bitget'&&r[6]?' · '+r[6]:'');if(r[0]===cur)hasCur=true;frag.appendChild(o);});
  sel.textContent='';
  if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
  sel.appendChild(frag);sel.value=cur;
