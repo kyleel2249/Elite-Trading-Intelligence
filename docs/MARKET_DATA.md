@@ -5,7 +5,7 @@ All public crypto market-data requests are served by `worker/market.ts` on Cloud
 ## Explicit venue selection
 
 - **Bybit (default):** V5 spot, spot-margin-eligible pairs, linear perpetual and inverse perpetual markets. Margin pairs are filtered from Bybit's spot instrument catalogue using the exchange-reported `marginTrading` field and use the spot market-data category. Uses `api.bybit.com` with `api.bytick.com` as an alternate host.
-- **Bitget:** V3 spot, margin, USDT futures, USDC futures and Coin-M futures. Uses `api.bitget.com`. The three futures product categories are selected explicitly and are never mixed.
+- **Bitget:** V3 spot, margin, USDT futures, USDC futures and Coin-M futures, with a Classic V2 public REST fallback through `capi.bitget.com` and `api.bitget.com` when V3 is blocked. The three futures product categories are selected explicitly and are never mixed.
 - **No silent cross-venue failover:** a Bitget request is never answered with Bybit data, or vice versa. Provider identity and upstream attempts are exposed in response headers.
 
 ## Common market endpoints
