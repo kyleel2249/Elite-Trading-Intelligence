@@ -8,7 +8,7 @@
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
   "placement": {
-    "region": "aws:af-south-1"
+    "region": "aws:eu-central-1"
   },
   "observability": {
     "enabled": true
