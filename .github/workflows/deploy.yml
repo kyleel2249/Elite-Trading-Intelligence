@@ -91,7 +91,7 @@ jobs:
           printf '%s' "$region_response" | node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s);
-              if(x.transport!=="bybit-worker-rest+bitget-browser-direct"||x.placementHint!=="gcp:europe-west1"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
+              if(x.transport!=="bybit-worker-rest+bitget-browser-direct"||x.placementHint!=="cloudflare:global"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
                 console.error("Public market transport:",JSON.stringify(x));process.exit(1);
               }
               console.log("Bybit Worker REST and Bitget browser-direct public feed are configured; no paid relay or Fly.io is required.");
