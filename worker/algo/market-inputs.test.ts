@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadSignalInputs } from "./market-inputs.ts";
+import { analyzeDerivativesContext } from "./derivatives.ts";
 
 const NOW = 1_800_000_000_000;
-function fetcherFor(calls: string[]) {
+function fetcherFor(calls: string[], openInterest = 12500, timestamp = NOW) {
   return (async (input: any) => {
     const u = new URL(typeof input === "string" ? input : input.url);
     calls.push(u.pathname + u.search);
@@ -14,7 +15,7 @@ function fetcherFor(calls: string[]) {
     } }));
     if (u.pathname === "/api/v3/market/tickers") return new Response(JSON.stringify({ code: "00000", data: [{
       symbol: "BTCUSDT", lastPr: "100.5", open: "99", high24h: "102", low24h: "98", baseVolume: "10", quoteVolume: "1000",
-      fundingRate: "0.0008", holdingAmount: "12500", ts: String(NOW)
+      fundingRate: "0.0008", holdingAmount: String(openInterest), ts: String(timestamp)
     }] }));
     return new Response("not found", { status: 404 });
   }) as any;
@@ -39,4 +40,20 @@ test("spot loader does not invent futures funding or open-interest values", asyn
   assert.equal(r.market, "spot");
   assert.equal(r.derivatives, null);
   assert.ok(calls.every(x => !x.includes("/api/v3/market/tickers")));
+});
+
+test("futures loader compares open interest with the previous short-lived KV snapshot", async () => {
+  const values = new Map<string, string>();
+  const kv = {
+    get: async (key: string) => values.get(key) ?? null,
+    put: async (key: string, value: string) => { values.set(key, value); }
+  };
+  const env = { ETI_EXECUTION_LOG: kv } as any;
+  const first = await loadSignalInputs(env, "BTCUSDT", "intraday", "bitget", NOW, "futures", "USDT-FUTURES", fetcherFor([], 10_000, NOW));
+  assert.equal(first.derivatives?.previousOpenInterest, undefined);
+  const second = await loadSignalInputs(env, "BTCUSDT", "intraday", "bitget", NOW + 60_000, "futures", "USDT-FUTURES", fetcherFor([], 9_000, NOW + 60_000));
+  assert.equal(second.derivatives?.previousOpenInterest, 10_000);
+  const analysis = analyzeDerivativesContext(second.derivatives, 1, NOW + 60_000);
+  assert.equal(analysis.openInterestChangePct, -10);
+  assert.ok(analysis.notes.some(n => /contracting sharply/.test(n)));
 });
