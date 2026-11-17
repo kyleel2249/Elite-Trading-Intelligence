@@ -29,7 +29,7 @@ function liveExchange() {
   globalThis.fetch = (async (input: any) => {
     fetchCount++;
     const u = new URL(String(input));
-    if (u.pathname.includes("depth")) {
+    if (u.pathname.includes("orderbook") || u.pathname.includes("depth")) {
       const d = depthAround(px, Date.now());
       return new Response(JSON.stringify({ lastUpdateId: 1, bids: d.bids.map(([p, q]) => [String(p), String(q)]), asks: d.asks.map(([p, q]) => [String(p), String(q)]) }), { status: 200 });
     }
