@@ -17,12 +17,12 @@ export interface MarketEnv {
 
 export type ProviderId = "binance" | "bybit" | "okx" | "binance_usdm" | "bitget" | "bitget_mix";
 export type MarketKind = "spot" | "futures";
-/** Where a pair is listed. Binance is the default; Bitget is selected explicitly per request (venue=bitget) and is never silently substituted for Binance data. */
+/** Legacy venue type retained for older internal callers; public crypto routes accept Bybit only. */
 export type Venue = "binance" | "bitget";
 export type BitgetProductType = "USDT-FUTURES" | "USDC-FUTURES" | "COIN-FUTURES";
 export const BITGET_PRODUCT_TYPES: BitgetProductType[] = ["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"];
 export type Endpoint = "klines" | "depth" | "trades" | "ticker";
-/** [openTime, open, high, low, close, volume, takerBuyBaseVolume?]. The optional 7th field is the exchange-reported aggressive-buy volume (Binance klines only). */
+/** [openTime, open, high, low, close, volume, optional exchange-specific field]. */
 export type Kline = [number, number, number, number, number, number, number?];
 
 export interface Attempt {
@@ -39,9 +39,9 @@ interface Params {
   symbol: string;
   interval: string;
   limit: number;
-  /** "futures" = Binance USDⓈ-M perpetuals only. Never mixed with spot and never failed over to another exchange. */
+  /** "futures" selects Bybit linear by default; category=inverse selects inverse perpetuals. */
   market?: MarketKind;
-  /** "bitget" routes the request to Bitget (spot, or its perpetual futures when market=futures). Default Binance. */
+  /** Legacy venue hint; the active crypto venue is Bybit only. */
   venue?: Venue;
   /** Bybit V5 category. Spot margin uses category=spot. */
   category?: "spot" | "linear" | "inverse" | "option";
@@ -370,16 +370,8 @@ function record(a: Attempt) {
   if (a.ok) s.lastSuccessAt = Date.now();
 }
 
-export function providerOrder(env: MarketEnv, preferred?: string | null): ProviderId[] {
-  const configured = (env.MARKET_PROVIDER_ORDER || "bybit")
-    .split(",").map((s) => s.trim().toLowerCase()).filter((s): s is ProviderId => (ALL_PROVIDERS as string[]).includes(s));
-  const base: ProviderId[] = ["bybit"];
-  // Bybit is the only enabled crypto venue; legacy provider preferences are ignored.
-  if (preferred === "bitget" || preferred === "bitget_mix") return [preferred];
-  if (preferred && (ALL_PROVIDERS as string[]).includes(preferred) && base.includes(preferred as ProviderId)) {
-    return [preferred as ProviderId, ...base.filter((p) => p !== preferred)];
-  }
-  return [...new Set(base)];
+export function providerOrder(_env: MarketEnv, _preferred?: string | null): ProviderId[] {
+  return ["bybit"];
 }
 
 interface RawResult { status: number | null; text: string; latencyMs: number; errorClass: string | null; headers?: Headers }
