@@ -371,8 +371,11 @@ async function fetchHost(host: string, req: UpstreamRequest, fetchImpl: typeof f
   const url = host + req.path + "?" + new URLSearchParams(req.query).toString();
   const t0 = Date.now();
   try {
+    const site = host.includes("bitget.com") ? "https://www.bitget.com" : host.includes("bybit") || host.includes("bytick") ? "https://www.bybit.com" : null;
+    const headers: Record<string, string> = { accept: "application/json", "user-agent": UA };
+    if (site) { headers.origin = site; headers.referer = site + "/"; }
     const res = await fetchImpl(url, {
-      headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bybit.com", referer: "https://www.bybit.com/" },
+      headers,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       // Cache successes briefly; never cache upstream errors.
       cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": 2, "400-599": 0 } },
