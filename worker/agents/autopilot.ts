@@ -77,6 +77,8 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
   const { ledger } = await store.ledgerFast(now);
   const accountBySymbol = (symbol: string) => accountFromLedger(ledger, symbol, now);
   const activePositions = Object.values(ledger.positions ?? {}).filter((p: any) => Number(p.qty) > 0);
+  const activeOrders = Object.values(ledger.orders ?? {}).filter((o: any) => ["pending", "open", "partially_filled"].includes(o.status));
+  const pendingEntryCount = activeOrders.filter((o: any) => o.side === "buy").length;
   const slot = Math.floor(now / 300_000);
   const outcomes: any[] = [];
   let submitted = 0;
@@ -89,8 +91,7 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
     try {
       const account = accountBySymbol(symbol);
       if (!account) { outcomes.push({ symbol, status: "blocked", reason: "paper_account_unavailable" }); continue; }
-      if (activePositions.length + submitted >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions" }); continue; }
-      if (account.positionQuantity > 0) { outcomes.push({ symbol, status: "skipped", reason: "position_already_open_no_pyramiding" }); continue; }
+      if (activeOrders.some((o: any) => o.symbol === symbol)) { outcomes.push({ symbol, status: "skipped", reason: "active_order_already_exists" }); continue; }
 
       const clientOrderId = ("eti-" + symbol + "-" + slot).slice(0, 36);
       const body = {
@@ -104,10 +105,12 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(body) }), env);
       const analysis: any = await preflight.json().catch(() => ({}));
       const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
-      if (!preflight.ok || decision?.action !== "BUY" || confidence < minConfidence || agreement < minAgreement || analysis.risk?.approved !== true || ["high", "critical"].includes(analysis.security?.severity)) {
+      const expectedAction = account.positionQuantity > 0 ? "SELL" : "BUY";
+      if (!preflight.ok || decision?.action !== expectedAction || confidence < minConfidence || agreement < minAgreement || analysis.risk?.approved !== true || ["high", "critical"].includes(analysis.security?.severity)) {
         outcomes.push({ symbol, status: "no_trade", action: decision?.action || "NO_TRADE", confidence, agreement, reason: !preflight.ok ? "analysis_unavailable" : decision?.vetoedBy || "autopilot_entry_thresholds_or_risk_not_met", vetoes: analysis.risk?.vetoes || [], security: analysis.security?.severity || "unknown" });
         continue;
       }
+      if (expectedAction === "BUY" && activePositions.length + pendingEntryCount + submitted >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions" }); continue; }
       const executeBody = { ...body, execution: {
         broker: "eti_paper", clientOrderId, riskConfirmed: true,
         executionSource: { actorType: "automation", actorId: "eti-multi-agent-autopilot", sourceName: "ETI Multi-Agent Autopilot", strategyId: "commander-consensus", signalId: clientOrderId, triggerReason: "Scheduled multi-agent consensus; internal paper only" },
