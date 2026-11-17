@@ -168,3 +168,32 @@ def test_chart_page_uses_symbol_search_and_public_history_without_synthetic_data
     assert "/api/market/symbols" in js and "/api/market/public-history" in js and "Math.random" not in js
     html = client.get("/static/market3d.html").text
     assert 'id="symlist"' in html and 'id="prov"' in html
+
+
+def test_bybit_catalogue_paginates_spot_linear_and_inverse_instruments():
+    calls = []
+
+    def handler(req):
+        params = dict(req.url.params)
+        category, cursor = params["category"], params.get("cursor")
+        calls.append((category, cursor))
+        rows = {
+            ("spot", None): [{"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT",
+                              "status": "Trading", "marginTrading": "both"}],
+            ("spot", "spot-next"): [{"symbol": "ETHUSDT", "baseCoin": "ETH", "quoteCoin": "USDT",
+                                     "status": "Trading", "marginTrading": "none"}],
+            ("linear", None): [{"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT",
+                                "status": "Trading", "contractType": "LinearPerpetual"}],
+            ("inverse", None): [{"symbol": "BTCUSD", "baseCoin": "BTC", "quoteCoin": "USD",
+                                 "status": "Trading", "contractType": "InversePerpetual"}],
+        }[(category, cursor)]
+        next_cursor = "spot-next" if category == "spot" and cursor is None else ""
+        return httpx.Response(200, json={"retCode": 0, "result": {"list": rows, "nextPageCursor": next_cursor}})
+
+    items = asyncio.run(sym._fetch_bybit(httpx.MockTransport(handler)))
+    assert ("spot", "spot-next") in calls
+    assert {row["market"] for row in items} == {"spot", "linear", "inverse"}
+    assert {row["symbol"] for row in items if row["market"] == "spot"} == {"BTCUSDT", "ETHUSDT"}
+    assert next(row for row in items if row["symbol"] == "BTCUSDT" and row["market"] == "spot")["margin_eligible"] is True
+    assert next(row for row in items if row["market"] == "linear")["symbol"] == "BTCUSDT"
+    assert next(row for row in items if row["market"] == "inverse")["symbol"] == "BTCUSD"
