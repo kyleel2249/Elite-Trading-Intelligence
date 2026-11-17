@@ -49,7 +49,7 @@ The 5-minute sync covers all six account market types when credentials and KV st
 
 - The existing live-order adapter is separate from public market data. It requires the master ETI execution token, explicit risk confirmation, kill-switch approval, audit KV, quantity/notional limits and futures leverage checks. No transfer or withdrawal route is exposed.
 - Use an API key with only the permissions ETI needs; disable withdrawals. IP allowlisting may require a fixed egress IP, which Cloudflare Workers Free does not provide. Do not enable IP whitelist unless the Worker outbound IP situation is supported by your Bitget account setup.
-- The public API uses Bitget's global host. Hosting the Worker in a Cloudflare location does not alter account registration country, KYC or product permissions. A Ghana-based user must use the actual Bitget account's global/regional entity and the products available to that verified account. ETI will report upstream geo/IP errors instead of masking them.
+- The public API uses Bitget's global host. Hosting the Worker in a Cloudflare location does not alter account registration country, KYC or product permissions. Ghana is not named in Bitget's currently published prohibited-country list, but that list may change and does not guarantee eligibility for every account or product. Use the actual account's verified entity and check the account's own API access. ETI reports upstream geo/IP errors instead of masking them.
 - Cloudflare Workers Free is used for this integration; Fly.io is not part of the deployment workflow.
 
 ## Verification status
