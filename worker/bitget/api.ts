@@ -31,10 +31,10 @@ export async function bitgetSign(secret: string, timestamp: string, method: stri
 
 /** Allowlist: the only private endpoints this module can reach. All are GET. */
 const ALLOWED = new Set([
-  "/api/v2/spot/account/assets", "/api/v2/spot/trade/fills", "/api/v2/spot/trade/history-orders",
-  "/api/v2/margin/crossed/account/assets", "/api/v2/margin/crossed/fills", "/api/v2/margin/crossed/history-orders",
-  "/api/v2/margin/isolated/account/assets", "/api/v2/margin/isolated/fills", "/api/v2/margin/isolated/history-orders",
-  "/api/v2/mix/account/accounts", "/api/v2/mix/account/account", "/api/v2/mix/order/fills", "/api/v2/mix/order/orders-history", "/api/v2/mix/position/all-position",
+  "/api/v2/spot/account/assets", "/api/v2/spot/trade/fills", "/api/v2/spot/trade/history-orders", "/api/v2/spot/trade/unfilled-orders",
+  "/api/v2/margin/crossed/account/assets", "/api/v2/margin/crossed/fills", "/api/v2/margin/crossed/history-orders", "/api/v2/margin/crossed/open-orders",
+  "/api/v2/margin/isolated/account/assets", "/api/v2/margin/isolated/fills", "/api/v2/margin/isolated/history-orders", "/api/v2/margin/isolated/open-orders",
+  "/api/v2/mix/account/accounts", "/api/v2/mix/account/account", "/api/v2/mix/order/fills", "/api/v2/mix/order/orders-history", "/api/v2/mix/order/orders-pending", "/api/v2/mix/position/all-position",
 ]);
 
 export class BitgetError extends Error {
@@ -116,6 +116,14 @@ export async function getPositions(env: Record<string, any>, market: BitgetMarke
   if (!isFut(market)) throw new BitgetError("not_applicable", null, "positions exist only for futures markets");
   const marginCoin = market === "usdt-futures" ? "USDT" : market === "usdc-futures" ? "USDC" : undefined;
   return bitgetGetSigned(env, "/api/v2/mix/position/all-position", { productType: productTypeParam(market), marginCoin }, deps);
+}
+/** Read-only currently pending orders. Margin APIs are symbol-scoped, so symbols must be explicitly supplied. */
+export async function getOpenOrders(env:Record<string,any>,market:BitgetMarket,symbols:string[]=[],deps:Deps={}):Promise<any[]> {
+ const path=market==="spot"?"/api/v2/spot/trade/unfilled-orders":market.endsWith("futures")?"/api/v2/mix/order/orders-pending":`/api/v2/margin/${marginKind(market)}/open-orders`;
+ const base:Record<string,string|number|undefined>=market==="spot"?{limit:100}:market.endsWith("futures")?{productType:productTypeParam(market),limit:100}:{limit:100};
+ const targets=market.startsWith("margin-")?symbols.slice(0,20):[undefined];const out:any[]=[];
+ for(const symbol of targets){const data=await bitgetGetSigned(env,path,{...base,symbol},deps),list=Array.isArray(data)?data:Array.isArray(data?.orderList)?data.orderList:Array.isArray(data?.list)?data.list:Array.isArray(data?.entrustedList)?data.entrustedList:[];for(const x of list){const orderId=String(x.orderId??x.orderID??"");if(!orderId)continue;out.push({orderId,clientOrderId:String(x.clientOid??x.clientOrderId??""),market,symbol:String(x.symbol??symbol??""),side:String(x.side??"").toLowerCase(),qty:Number(x.size??x.quantity??x.baseVolume??0),leavesQty:Number(x.size??x.quantity??x.baseVolume??0)-Number(x.filledQty??x.baseVolume??0),price:Number.isFinite(Number(x.price))?Number(x.price):null,status:String(x.status??"live"),updatedAt:Number(x.uTime??x.cTime??0)});}}
+ return out;
 }
 export async function getOrders(env: Record<string, any>, market: BitgetMarket, p: { symbol?: string; startTime?: number; endTime?: number; limit?: number }, deps: Deps = {}) {
   const limit = Math.min(100, Math.max(1, p.limit ?? 50));
