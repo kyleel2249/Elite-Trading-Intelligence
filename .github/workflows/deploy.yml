@@ -86,10 +86,10 @@ jobs:
           printf '%s' "$region_response" | node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s);
-              if(x.configured_region!=="aws:af-south-1"||typeof x.placement!=="string"||!x.placement.endsWith("-CPT")||x.placement_verified!==true){
+              if(x.configured_region!=="aws:eu-central-1"||typeof x.placement!=="string"||!x.placement.endsWith("-FRA")||x.placement_verified!==true){
                 console.error("Bybit market execution placement:",JSON.stringify(x));process.exit(1);
               }
-              console.log("Bybit market requests are executing through Cloudflare placement near Cape Town ("+x.placement+").");
+              console.log("Bybit market requests are executing through Cloudflare placement near Frankfurt ("+x.placement+").");
             }catch(e){console.error("Invalid Bybit region response:",e.message);process.exit(1);}});' || exit 1
           symbols_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
           symbols_status="${symbols_response##*__HTTP_CODE__}"
