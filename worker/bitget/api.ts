@@ -117,12 +117,25 @@ export async function getPositions(env: Record<string, any>, market: BitgetMarke
   const marginCoin = market === "usdt-futures" ? "USDT" : market === "usdc-futures" ? "USDC" : undefined;
   return bitgetGetSigned(env, "/api/v2/mix/position/all-position", { productType: productTypeParam(market), marginCoin }, deps);
 }
-/** Read-only currently pending orders. Margin APIs are symbol-scoped, so symbols must be explicitly supplied. */
+/** Read-only currently pending orders. Futures are account-wide per product type; margin APIs are symbol-scoped. */
 export async function getOpenOrders(env:Record<string,any>,market:BitgetMarket,symbols:string[]=[],deps:Deps={}):Promise<any[]> {
  const path=market==="spot"?"/api/v2/spot/trade/unfilled-orders":market.endsWith("futures")?"/api/v2/mix/order/orders-pending":`/api/v2/margin/${marginKind(market)}/open-orders`;
  const base:Record<string,string|number|undefined>=market==="spot"?{limit:100}:market.endsWith("futures")?{productType:productTypeParam(market),limit:100}:{limit:100,startTime:(deps.now??Date.now)()-7*86400_000};
- const targets=market.startsWith("margin-")?symbols:[undefined];const out:any[]=[];
- for(const symbol of targets){const data=await bitgetGetSigned(env,path,{...base,symbol},deps),list=Array.isArray(data)?data:Array.isArray(data?.orderList)?data.orderList:Array.isArray(data?.list)?data.list:Array.isArray(data?.entrustedList)?data.entrustedList:[];for(const x of list){const orderId=String(x.orderId??x.orderID??"");if(!orderId)continue;const qty=Number(x.baseSize??x.qty??x.size??x.quantity??x.baseVolume??0),filled=Number(x.cumExecQty??x.filledQty??x.baseVolume??(market.startsWith("margin-")?x.size:0)??0);out.push({orderId,clientOrderId:String(x.clientOid??x.clientOrderId??""),market,symbol:String(x.symbol??symbol??""),side:String(x.side??"").toLowerCase(),qty,leavesQty:Math.max(0,qty-filled),price:Number.isFinite(Number(x.price))?Number(x.price):null,status:String(x.status??x.orderStatus??"live"),updatedAt:Number(x.uTime??x.updatedTime??x.cTime??0)});}}
+ const targets=market.startsWith("margin-")?symbols:[undefined];const out:any[]=[];let truncated=false;
+ for(const symbol of targets){
+  let cursor:string|undefined;
+  for(let page=0;page<5;page++){
+   const data=await bitgetGetSigned(env,path,{...base,symbol,idLessThan:cursor},deps);
+   const list=Array.isArray(data)?data:Array.isArray(data?.orderList)?data.orderList:Array.isArray(data?.list)?data.list:Array.isArray(data?.entrustedList)?data.entrustedList:[];
+   for(const x of list){const orderId=String(x.orderId??x.orderID??"");if(!orderId)continue;const qty=Number(x.baseSize??x.qty??x.size??x.quantity??x.baseVolume??0),filled=Number(x.cumExecQty??x.filledQty??x.baseVolume??(market.startsWith("margin-")?x.size:0)??0);out.push({orderId,clientOrderId:String(x.clientOid??x.clientOrderId??""),market,symbol:String(x.symbol??symbol??""),side:String(x.side??"").toLowerCase(),qty,leavesQty:Math.max(0,qty-filled),price:Number.isFinite(Number(x.price))?Number(x.price):null,status:String(x.status??x.orderStatus??"live"),updatedAt:Number(x.uTime??x.updatedTime??x.cTime??0)});}
+   if(list.length<100)break;
+   const next=String(data?.endId??"");
+   if(!next||next===cursor){truncated=true;break;}
+   cursor=next;
+   if(page===4)truncated=true;
+  }
+ }
+ (out as any).truncated=truncated;
  return out;
 }
 export async function getOrders(env: Record<string, any>, market: BitgetMarket, p: { symbol?: string; startTime?: number; endTime?: number; limit?: number }, deps: Deps = {}) {
