@@ -56,7 +56,7 @@ Futures orders use a separate event-sourced ledger (`worker/perp/`), stored unde
 
 ## AI Portfolio Manager
 
-GET /api/portfolio/manager?environment=internal_paper is an authenticated, read-only allocation advisory. It scores the four managed strategies from up to 60 most recent closed trades per strategy using net expectancy, profit factor, sample reliability and drawdown. Strategies need at least 20 closed trades, positive net expectancy and a profit factor of at least 1.15 before receiving a recommended allocation. Eligible strategies share a maximum 50% deployment budget, with a 35% per-strategy cap; remaining capital stays unallocated/reserved.
+GET /api/portfolio/manager?environment=internal_paper is an authenticated, read-only allocation advisory. It scores the four managed strategies from up to 60 most recent closed trades per strategy using net expectancy, profit factor, sample reliability and drawdown. Strategies need at least 20 closed trades with known fees, positive net expectancy and a profit factor of at least 1.15 before receiving a recommended allocation. Trades with unknown fees are excluded from the qualification sample. Eligible strategies share a maximum 50% deployment budget, with a 35% per-strategy cap; remaining capital stays unallocated/reserved.
 
 The response includes current ledger equity, cash, position exposure, estimated open risk, venue exposure recorded in the selected ledger, stale marks, missing protective stops and ledger anomalies. Missing/stale account information is never guessed into available capital. Venue exposure is limited to fills recorded in that ledger; it is not a live Bybit/Bitget account-balance aggregator.
 
