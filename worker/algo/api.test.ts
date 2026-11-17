@@ -16,6 +16,11 @@ function mockExchange(opts: { depth?: boolean } = {}) {
       const bids = Array.from({ length: 20 }, (_, i) => [String(100 - 0.01 - i * 0.05), "20"]), asks = Array.from({ length: 20 }, (_, i) => [String(100 + 0.01 + i * 0.05), "10"]);
       return new Response(JSON.stringify({ lastUpdateId: 1, bids, asks }), { status: 200 });
     }
+    if (u.pathname.includes("tickers")) return new Response(JSON.stringify({ retCode: 0, result: { list: [{
+      symbol: "BTCUSDT", lastPrice: "100", price24hPcnt: "0.02", highPrice24h: "105", lowPrice24h: "95",
+      volume24h: "1000", turnover24h: "100000", markPrice: "100", indexPrice: "100", fundingRate: "0.0007",
+      openInterest: "12500", bid1Price: "99.99", ask1Price: "100.01", ts: String(Date.now())
+    }] } }), { status: 200 });
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000, now = Date.now();
     const rows = Array.from({ length: 300 }, (_, i) => { const c = 50 + i * 0.3; const o = c - 0.1; return [now - (299 - i) * step, String(o), String(c + 0.2), String(o - 0.2), String(c), String(100 + (i % 5) * 10)]; });
     return new Response(JSON.stringify(rows), { status: 200 });
@@ -60,6 +65,31 @@ test("single signal path: /api/algo/signal and /api/omnisignal return the same d
     assert.equal(a.decision, b.decision, q); assert.deepEqual(a.stopLoss, b.stopLoss, q); assert.deepEqual(a.takeProfits, b.takeProfits, q); assert.equal(a.fusion.direction, b.fusion.direction, q);
     assert.equal(a.action, a.decision === "BUY" || a.decision === "SELL" ? a.decision : "HOLD");
   }
+});
+
+test("Omnisignal POST loads futures derivatives and builds a read-only position plan", async () => {
+  mockExchange();
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", strategy: "intraday", engines: ["swift", "gainz"], venue: "bybit", market: "futures", category: "linear", equity: 10000, riskFraction: 0.01, leverage: 2, feeBps: 5, slippageBps: 3 })
+  }), {});
+  assert.equal(res.status, 200);
+  const s = await res.json() as any;
+  assert.equal(s.dataQuality.market, "futures");
+  assert.equal(s.dataQuality.category, "linear");
+  assert.equal(s.derivatives?.fundingRate, 0.0007);
+  assert.equal(s.derivatives?.openInterest, 12500);
+  assert.equal(s.submitsOrder, false);
+  assert.equal(s.liveExecutionAllowed, false);
+  if (s.tradePlan) assert.equal(s.tradePlan.canSubmitOrder, false);
+});
+
+test("Omnisignal POST rejects unsafe or incomplete sizing inputs", async () => {
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", equity: 10000 })
+  }), {});
+  assert.equal(res.status, 400);
 });
 
 test("engines parameter is honoured and validated", async () => {
