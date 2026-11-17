@@ -61,48 +61,40 @@ The health response should include `"status":"ok"` and `"backend_required":false
 The previous `BACKEND_URL is not set` error is removed because the Worker no longer
 proxies requests to a separate origin.
 
-## Live market data
+## Public market data routing
 
-| Variable | Notes |
-|----------|--------|
-| `APP_ENV` | Defaults to production; Compose forces production |
-| `API_KEY` | Required for mutations and private portfolio/history reads (`X-API-Key`) |
-| `DATABASE_URL` | Prefer Postgres in production (see `docs/POSTGRES.md`) |
-| Provider keys | Alpaca, Binance, FRED, NewsAPI, Quiver, Liquid as needed |
-| `LIVE_TRADING_ENABLED` | Keep `false` until intentional |
-The dashboard consumes Binance's public REST endpoints for initial candle and order-book
-snapshots, then subscribes to Binance public WebSocket streams for trades, partial depth,
-and kline updates. No exchange API key is required for these public market-data endpoints.
+ETI uses provider-specific transport rather than silently substituting another exchange:
 
-This is a browser-to-exchange data connection. It is not a Cloudflare-hosted exchange
-feed or a guaranteed low-latency institutional feed. Exchange availability, regional
-connectivity, rate limits, and browser network conditions apply. If the exchange stream
-is disconnected, the UI must show the disconnected state rather than presenting stale
-data as live.
+- **Bybit:** public V5 REST requests are served from the Cloudflare Worker.
+- **Bitget:** public REST requests are made directly from the user's browser through the same-origin `/bitget-client.js` adapter. Bitget returned HTTP 403 with a Cloudflare block response to both `api.bitget.com` and `capi.bitget.com` from the ETI Worker. A server-side retry cannot change that egress identity, so the dashboard no longer depends on Worker-to-Bitget public REST.
+- **Bitget browser adapter:** tries the official V3 endpoints first, then the documented V2 public endpoints and official legacy host. It normalizes symbols, candles, order-book levels, trades, ticker and futures funding/open-interest context. It uses no exchange API key for public market data.
+- **No cross-exchange substitution:** if the selected venue cannot be reached from the browser, ETI reports the feed as unavailable rather than displaying another venue's prices as Bitget data.
+
+Browser-direct Bitget data depends on the user's network, browser CORS policy, exchange availability, region and rate limits. The dashboard polls REST snapshots; it is not an institutional low-latency feed. If a request fails, the UI must show the disconnected/partial state rather than present stale values as live. The Omnisignal analysis API accepts validated browser snapshots, then runs the analysis and risk checks in the Worker.
 
 ## Free-plan constraints and scope
 
 - No paid Cloudflare Containers, Durable Objects, Workers Paid features, Fly.io, VPS,
   Railway, Render, or other application-hosting origin is required for this dashboard.
 - Cloudflare Workers Free plan quotas and execution limits apply.
-- Public browser market data is read-only. It does not place trades.
-- Full historical data storage, always-on ingestion, persistent background monitoring,
-  and authenticated broker execution require separate design against the available
-  Cloudflare free-plan quotas; they are not claimed by this dashboard build.
-- Existing Python/FastAPI intelligence, portfolio, broker execution, investor-monitoring,
-  Quiver Quant, and Liquid API modules have not all been ported by this edge-dashboard
-  change. Do not represent those features as operational on this Worker until separately
-  migrated and tested.
+- Public browser market data is read-only. It does not place trades or expose private exchange credentials.
+- Bybit market data is Worker-fetched; Bitget public data is browser-fetched because of the upstream Cloudflare egress block.
+- Authenticated Bitget live order submission remains fail-closed until private API connectivity from the Worker is independently verified.
+- The Worker continues to apply server-side execution authentication, audit, duplicate, quantity, leverage and kill-switch safeguards where an execution adapter is enabled.
+- Cloudflare Workers Free quotas and browser network conditions apply; this build does not claim an always-on Bitget ingestion process when no user dashboard is open.
 
 ## Secrets and trading safety
 
 Do not put broker credentials, Quiver tokens, Liquid API credentials, or exchange private
-keys in browser code or public Worker variables. Use encrypted Worker secrets only for
-server-side integrations that are actually implemented and required.
+keys in browser code or public Worker variables. Store Bitget credentials only as Cloudflare
+Worker secrets (`BITGET_API_KEY`, `BITGET_API_SECRET`, `BITGET_API_PASSPHRASE`).
 
-Public market-data routes do not require authentication. No withdrawal permission is
-requested or supported. Live order execution remains disabled unless a separately
-implemented, authenticated, risk-gated execution service is deployed and tested.
+Public market-data requests do not require authentication. The browser adapter receives no
+private key or passphrase. Bitget live orders require `ETI_BITGET_LIVE_ENABLED=true` and
+`ETI_BITGET_EGRESS_VERIFIED=true`, plus the master execution token, audit KV and all
+server-side safeguards. Leave the egress flag unset until private Bitget API connectivity
+from the Worker is independently verified. No withdrawal, transfer or wallet-management
+permissions or endpoints are enabled.
 
 ## Troubleshooting
 
@@ -110,8 +102,8 @@ implemented, authenticated, risk-gated execution service is deployed and tested.
 |---|---|
 | Build fails | Run `npm install` then `npm run check:worker`; inspect Wrangler output |
 | Worker URL unavailable | Check Workers Builds deployment status and workers.dev setting |
-| Market data unavailable | Check Binance API/WebSocket availability and local network access |
-| WebSocket disconnects | UI should show disconnected/retrying; refresh and check exchange connectivity |
+| Market data unavailable | Check Bybit V5 REST and the user's browser access to Bitget public REST/CORS; inspect the UI's per-provider error |
+| Bitget browser feed unavailable | Check `api.bitget.com` / `capi.bitget.com` reachability from the browser, CORS and regional access; never paste API secrets into the browser |
 | BACKEND_URL error persists | Confirm Cloudflare is deploying the latest commit and correct Worker entry point |
 
 ## Deployment architecture
