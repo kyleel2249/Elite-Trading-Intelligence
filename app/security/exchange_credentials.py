@@ -46,7 +46,7 @@ def load_testnet_credentials(settings: Optional[Settings] = None) -> Optional[tu
     sec = (os.environ.get("BYBIT_TESTNET_API_SECRET") or "").strip()
     if k and sec:
         return {"api_key": k, "api_secret": sec}, "env:BYBIT_TESTNET_*"
-    if s.bybit_api_key and s.bybit_api_secret and s.bybit_testnet_enabled and not s.bybit_live_trading_enabled:
+    if getattr(s, "bybit_api_key", None) and getattr(s, "bybit_api_secret", None) and getattr(s, "bybit_testnet_enabled", True) and not getattr(s, "bybit_live_trading_enabled", False):
         return {"api_key": s.bybit_api_key.strip(), "api_secret": s.bybit_api_secret.strip()}, "env:BYBIT_*"
     return None
 
