@@ -1,7 +1,7 @@
 /** ETI read-only live-chart indicator overlay. */
 export const INDICATOR_OVERLAY_CSS = '<style id="eti-indicators">.eti-indicator-bar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 0 9px;padding:8px 10px;border:1px solid #2a3b54;border-radius:9px;background:rgba(7,16,29,.9);font-size:11px;color:#a9bad0}.eti-indicator-bar label,.eti-metric{display:inline-flex;align-items:center;gap:5px;border:1px solid #31445f;border-radius:6px;padding:4px 7px}.eti-indicator-bar input{width:auto;margin:0;accent-color:#56a8ff}.eti-metric{font-variant-numeric:tabular-nums}.eti-metric b{color:#eaf2ff}.eti-state{font-weight:800}.eti-state.buy{color:#21d69a}.eti-state.sell{color:#ff637d}.eti-state.wait{color:#f5bd62}.eti-chart-legend{display:flex;gap:9px;flex-wrap:wrap;margin:0 0 7px;color:#a9bad0;font-size:10px}.eti-chart-legend span{display:inline-flex;align-items:center;gap:4px}.eti-chart-legend i{width:15px;height:3px;border-radius:2px;display:inline-block}@media(max-width:700px){.eti-indicator-bar{gap:5px;padding:7px}}</style>';
 
-export const INDICATOR_OVERLAY_JS = String.raw'<script id="eti-indicators-js">
+export const INDICATOR_OVERLAY_JS = String.raw`<script id="eti-indicators-js">
 (function(){
 "use strict";
 try{
@@ -31,7 +31,7 @@ function render(){if(!data)return;var cls=data.dir>0?"buy":data.dir<0?"sell":"wa
 var original=drawChart;drawChart=function(){original.apply(this,arguments);try{compute();paint()}catch(e){if(window.console)console.warn("ETI indicator overlay skipped",e&&e.message)}};drawChart();
 }catch(e){if(window.console)console.warn("ETI indicator overlay unavailable",e&&e.message)}
 })();
-</script>';
+</script>`;
 export function withIndicatorOverlay(page: string): string {
   if (!page.includes('id="stack"') || !page.includes('id="chart"') || !page.includes("function drawChart")) return page;
   return page.replace("</head>", INDICATOR_OVERLAY_CSS + "</head>").replace("</body>", INDICATOR_OVERLAY_JS + "</body>");
