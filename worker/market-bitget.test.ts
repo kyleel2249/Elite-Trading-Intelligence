@@ -66,8 +66,8 @@ test("Bitget retries the V3 public endpoint on the legacy host before downgradin
       return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
     if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v3/market/tickers")
       return new Response(JSON.stringify({ code: "00000", data: [{
-        symbol: "BTCUSDT", lastPrice: "60000", highPrice24h: "61000", lowPrice24h: "58000",
-        baseVolume: "10", quoteVolume: "590000", bidPrice: "59999", askPrice: "60001", ts: "1794940561000"
+        symbol: "BTCUSDT", lastPr: "60000", high24h: "61000", low24h: "58000",
+        baseVolume: "10", quoteVolume: "590000", bidPr: "59999", askPr: "60001", ts: "1794940561000"
       }] }));
     return new Response("not found", { status: 404 });
   }) as any;
@@ -125,6 +125,7 @@ test("Bitget V2 candles use the documented spot and futures endpoints and granul
     const u = new URL(typeof input === "string" ? input : input.url);
     if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/candles")
       return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com" && u.pathname.startsWith("/api/v3/")) return new Response("not found", { status: 404 });
     if (u.hostname === "capi.bitget.com") {
       fallbackUrls.push(u.pathname + u.search);
       return new Response(JSON.stringify({ code: "00000", data: [["1794940561000", "100", "103", "99", "102", "5", "500"]] }));
