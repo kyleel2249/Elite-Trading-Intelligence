@@ -100,7 +100,7 @@ const STEP: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "30m": 1
 function market() {
   globalThis.fetch = (async (input: any) => {
     const u = new URL(String(input)), last = 50 + 299 * 0.3 + 0.1;
-    if (u.pathname.includes("depth")) { const bids = Array.from({ length: 20 }, (_, i) => [String(last - 0.01 - i * 0.05), "20"]), asks = Array.from({ length: 20 }, (_, i) => [String(last + 0.01 + i * 0.05), "10"]); return new Response(JSON.stringify({ lastUpdateId: 1, bids, asks }), { status: 200 }); }
+    if (u.pathname.includes("orderbook") || u.pathname.includes("depth")) { const bids = Array.from({ length: 20 }, (_, i) => [String(last - 0.01 - i * 0.05), "20"]), asks = Array.from({ length: 20 }, (_, i) => [String(last + 0.01 + i * 0.05), "10"]); return new Response(JSON.stringify({ lastUpdateId: 1, bids, asks }), { status: 200 }); }
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000, now = Date.now();
     const rows = Array.from({ length: 300 }, (_, i) => { const c = 50 + i * 0.3 + 0.1, o = c - 0.1; return [now - (299 - i) * step, String(o), String(c + 1.5), String(o - 1.5), String(c), String(100 + (i % 5) * 10)]; });   // wide wicks: stops large enough to clear the cost gate
     return new Response(JSON.stringify(rows), { status: 200 });
