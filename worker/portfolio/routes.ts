@@ -111,7 +111,18 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
     if (url.searchParams.get("format") === "csv") return new Response(closedCsv(rows, label), { headers: { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": "attachment; filename=eti-closed-trades-" + environment + ".csv" } });
     return reply({ environment, label, total: L.closed.length, count: rows.length, trades: rows.slice(0, 500) });
   }
-  if (!post) return reply({ error: "method_not_allowed" }, 405);
+  if (!post) {
+    if (path === "/api/portfolio/reconciliation" && req.method === "GET") {
+      if (!isOperator(auth)) return reply({error:"operator_required"},403);
+      try { return reply(await buildCrossExchangeReconciliation(env as any, environment as "internal_paper" | "exchange_testnet", now, deps)); }
+      catch(e) { return reply({error:"reconciliation_unavailable",message:e instanceof Error?e.message:"reconciliation_failed"},503); }
+    }
+    if (path === "/api/portfolio/autonomy" && req.method === "GET") {
+      if (!isOperator(auth)) return reply({error:"operator_required"},403);
+      return reply(await readAutonomyControls(env.ETI_EXECUTION_LOG as KVL | undefined,now));
+    }
+    return reply({ error: "method_not_allowed" }, 405);
+  }
   if (!auth.master) { const rl = await rateLimit(env as any, "pf:" + (auth.refs[need!] || "anon"), 120, 600, now); if (!rl.ok) return reply({ error: "rate_limited" }, 429); }
   const authRef = auth.master ? "master_token" : "session:" + (auth.refs[need!] || "?");
   const audit = async (what: string, detail: unknown) => { try { await ((env.ETI_EXECUTION_LOG ?? { put: async () => undefined }) as KVL).put("exec:audit:" + new Date(now).toISOString() + ":" + what, JSON.stringify({ at: new Date(now).toISOString(), what, environment, auth: authRef, detail }), { expirationTtl: 60 * 60 * 24 * 90 }); } catch { /* audit is best effort here; the ledger event is the record */ } };
