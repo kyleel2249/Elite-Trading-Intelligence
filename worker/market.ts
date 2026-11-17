@@ -703,7 +703,7 @@ export function bitgetCategory(base: string, quote: string): string {
 }
 async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list: any[] | null; status: number | null; errorClass: string | null; host: string }> {
   try {
-    const res = await fetchImpl(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit);
+    const res = await bitgetAwareFetch(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit, fetchImpl);
     const host = res.headers.get("x-eti-upstream-host") || "api.bitget.com";
     if (!res.ok) return { list: null, status: res.status, errorClass: classifyStatus(res.status), host };
     const j: any = await res.json();
