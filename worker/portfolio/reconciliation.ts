@@ -28,7 +28,7 @@ export function verifiedGrossExposureUsd(snapshot:any,activity:any,now:number){
  const bitget=snapshot?.venues?.find((v:any)=>v.venue==="bitget");
  for(const m of bitget?.markets??[]){
   if(m.market==="spot"){for(const a of m.assets??[]){if(qty(a.total)>0){const value=finite(a.usdValue);if(value===null)problems.push("unvalued_bitget_spot_asset:"+String(a.coin));else total+=value;}}}
-  if(m.market==="margin-crossed"||m.market==="margin-isolated"){for(const a of m.assets??[])if(qty(a.debt)>0)problems.push("bitget_margin_liability_not_reconciled:"+m.market+":"+String(a.coin));}
+  if(m.market==="margin-crossed"||m.market==="margin-isolated"){for(const a of m.assets??[]){if(qty(a.debt)>0)problems.push("bitget_margin_liability_not_reconciled:"+m.market+":"+String(a.coin));if(qty(a.total)>0)problems.push("bitget_margin_asset_exposure_not_reconciled:"+m.market+":"+String(a.coin));}}
   if(m.market==="usdt-futures"||m.market==="usdc-futures"){for(const p of m.positions??[]){if(qty(p.size)>0){const mark=finite(p.markPrice);if(mark===null||mark<=0)problems.push("bitget_position_mark_unavailable:"+p.symbol);else total+=qty(p.size)*mark;}}}
   if(m.market==="coin-futures"&&(m.positions??[]).some((p:any)=>qty(p.size)>0))problems.push("bitget_coin_futures_contract_value_unverified");
  }
