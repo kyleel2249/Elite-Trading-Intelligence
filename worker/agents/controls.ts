@@ -144,17 +144,17 @@ export function riskReport(r: RiskDecision | null, now: number): AgentReport {
 export interface ExecutionSource { actorType: "manual_user" | "strategy" | "system" | "automation"; actorId: string; sourceName: string; strategyId?: string | null; signalId?: string | null; triggerReason?: string | null }
 export interface OrderTicket { broker: "alpaca" | "binance" | "eti_paper"; symbol: string; side: "buy" | "sell"; type: "limit"; quantity: number; limitPrice: number; timeInForce: "gtc"; clientOrderId: string; riskConfirmed: true; executionSource: ExecutionSource; plan?: { stop: number; tp1: number; tp2: number; tp3: number } }
 export interface ExecutionRequest { broker?: string; clientOrderId?: string; riskConfirmed?: boolean; executionSource?: ExecutionSource }
-export interface ExecutionReview { schema: "eti.execution.review/1"; requested: boolean; eligible: boolean; mode: "paper_testnet_only"; blockers: string[]; warnings: string[]; ticket: OrderTicket | null }
+export interface ExecutionReview { schema: "eti.execution.review/1"; requested: boolean; eligible: boolean; mode: "paper_testnet_only" | "internal_paper_only"; blockers: string[]; warnings: string[]; ticket: OrderTicket | null }
 
 /** Builds a limit-order ticket only when every gate passes. Never submits; the route forwards to the existing /api/orders handler (token, kill switch, in-process paper safeguards, KV audit). */
 export function prepareTicket(a: {
   request?: ExecutionRequest; action: "BUY" | "SELL" | "NO_TRADE"; proposal: TradeProposal | null; risk: RiskDecision | null;
   account?: AccountState; integrity: Integrity; maxOrderQuantity?: number; decisionId: string;
 }): ExecutionReview {
-  const base = { schema: "eti.execution.review/1" as const, mode: "paper_testnet_only" as const };
   const q = a.request;
+  const base = { schema: "eti.execution.review/1" as const, mode: q?.broker === "eti_paper" ? "internal_paper_only" as const : "paper_testnet_only" as const };
   if (!q?.broker) return { ...base, requested: false, eligible: false, blockers: [], warnings: ["No broker specified: no ticket prepared. Live execution is not available through this system."], ticket: null };
-  const blockers: string[] = [], warnings: string[] = ["Exchange lot-size, tick-size and minimum-notional filters are not checked here; the broker may still reject the order."];
+  const blockers: string[] = [], warnings: string[] = q.broker === "eti_paper" ? ["Simulated internal-paper order; no external exchange is contacted."] : ["Exchange lot-size, tick-size and minimum-notional filters are not checked here; the broker may still reject the order."];
   if (a.action === "NO_TRADE" || !a.proposal) blockers.push("no_trade_decision");
   if (!a.risk?.approved || !a.risk.sizing) blockers.push("risk_not_approved");
   if (q.broker !== "alpaca" && q.broker !== "binance" && q.broker !== "eti_paper") blockers.push("unsupported_broker");
@@ -177,7 +177,7 @@ export function prepareTicket(a: {
 }
 
 export function executionReport(e: ExecutionReview, now: number): AgentReport {
-  return makeReport("execution", { stance: "neutral", confidence: e.eligible ? 1 : 0, status: e.requested ? "ok" : "insufficient_data", summary: !e.requested ? "No execution requested; paper/testnet only, live unavailable." : e.eligible ? "Order ticket prepared (paper/testnet); not yet submitted." : "Execution blocked: " + e.blockers.join(", "), evidence: e.blockers.map((b) => ({ label: "blocker", value: b })), warnings: e.warnings, missingInputs: e.requested ? [] : ["broker"] }, now);
+  return makeReport("execution", { stance: "neutral", confidence: e.eligible ? 1 : 0, status: e.requested ? "ok" : "insufficient_data", summary: !e.requested ? "No execution requested; paper/testnet only, live unavailable." : e.eligible ? (e.mode === "internal_paper_only" ? "Internal-paper order ticket prepared; no exchange is contacted." : "Order ticket prepared (paper/testnet); not yet submitted.") : "Execution blocked: " + e.blockers.join(", "), evidence: e.blockers.map((b) => ({ label: "blocker", value: b })), warnings: e.warnings, missingInputs: e.requested ? [] : ["broker"] }, now);
 }
 
 // ------------------------------------------------------- 11. PERFORMANCE AUDITOR
