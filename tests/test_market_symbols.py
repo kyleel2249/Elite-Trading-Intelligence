@@ -155,7 +155,7 @@ def test_public_history_error_mapping(client, monkeypatch):
     async def junk(*a, **k):
         return {"not": "a list"}, "https://api.binance.com"
     monkeypatch.setattr(bh, "get_json", junk)
-    assert client.get("/api/market/public-history", params={"symbol": "BTCUSDT"}).status_code == 502
+    assert client.get("/api/market/public-history", params={"provider": "binance", "symbol": "BTCUSDT"}).status_code == 502
 
 
 def test_binance_hosts_status_endpoint_excludes_binance_us(client):
