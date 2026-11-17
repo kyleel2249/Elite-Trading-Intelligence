@@ -16,7 +16,7 @@ const nowMs=()=>Date.now();
 
 export async function recordV3AlphaSignal(db:DB|undefined, symbol:string, strategy:Strategy, venue:string, market:string, category:string, a:V3AlphaResult, now=nowMs()):Promise<boolean>{
  if(!db||a.status!=="SIGNAL"||!a.evaluatedCandleTime||!a.entryZone||a.stopLoss===null||!a.takeProfits)return false;
- const id=[symbol,strategy,a.evaluatedCandleTime].join(":");
+ const id=[venue,market,category,symbol,strategy,a.evaluatedCandleTime].join(":");
  await db.prepare(`INSERT OR IGNORE INTO eti_v3_alpha_signals
  (id,symbol,strategy,venue,market,category,timeframe,direction,signal_time,received_at,entry_low,entry_high,entry,stop_loss,tp1,tp2,tp3,score,threshold,regime,payload_json)
  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
@@ -37,7 +37,7 @@ function outcomeFor(row:any, candles:Kline[]):{outcome:"win"|"loss"|"expired"|nu
 }
 
 async function trackOpen(db:DB,env:MarketEnv,now:number){
- const q=await db.prepare("SELECT * FROM eti_v3_alpha_signals WHERE outcome IS NULL ORDER BY signal_time ASC LIMIT 100").all();
+ const q=await db.prepare("SELECT * FROM eti_v3_alpha_signals WHERE outcome IS NULL AND venue='bybit' ORDER BY signal_time ASC LIMIT 100").all();
  const rows=(q.results??[]) as any[], updates:any[]=[];
  const grouped=new Map<string,any[]>();
  for(const r of rows){const k=r.symbol+"|"+r.timeframe;grouped.set(k,[...(grouped.get(k)??[]),r]);}
@@ -45,7 +45,7 @@ async function trackOpen(db:DB,env:MarketEnv,now:number){
   const [symbol,interval]=key.split("|");
   let candles:Kline[];
   try{candles=(await getMarketData("klines",{symbol,interval,limit:1000},providerOrder(env))).data as Kline[];}catch{continue}
-  for(const r of items){const o=outcomeFor(r,candles);await db.prepare("UPDATE eti_v3_alpha_signals SET outcome=?,outcome_r=?,resolved_at=?,last_checked_at=?,bars_observed=? WHERE id=? AND outcome IS NULL").bind(o.outcome,o.r,o.at,now,o.bars,r.id).run();if(o.outcome)updates.push({id:r.id,outcome:o.outcome,outcomeR:o.r,barsObserved:o.bars});}
+  for(const r of items){const o=outcomeFor(r,candles);if(!o.outcome)continue;await db.prepare("UPDATE eti_v3_alpha_signals SET outcome=?,outcome_r=?,resolved_at=?,last_checked_at=?,bars_observed=? WHERE id=? AND outcome IS NULL").bind(o.outcome,o.r,o.at,now,o.bars,r.id).run();updates.push({id:r.id,outcome:o.outcome,outcomeR:o.r,barsObserved:o.bars});}
  }
  return{checked:rows.length,resolved:updates.length,updates};
 }
@@ -66,7 +66,7 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
   const symbol=(url.searchParams.get("symbol")??"").toUpperCase();if(symbol&&!validSymbol(symbol))return reply({error:"invalid_symbol"},400);
   const q=await db.prepare("SELECT outcome,outcome_r FROM eti_v3_alpha_signals WHERE outcome IN ('win','loss') "+(symbol?"AND symbol=? ":"")).bind(...(symbol?[symbol]:[])).all();
   const a=(q.results??[]) as any[],wins=a.filter(x=>x.outcome==="win").length,losses=a.length-wins,netR=a.reduce((s,x)=>s+Number(x.outcome_r??0),0),enough=a.length>=30;
-  return reply({sampleSize:a.length,wins,losses,winRate:enough?wins/a.length:null,expectancyR:enough?netR/a.length:null,netR,minimumSample:30,status:enough?"reportable_sample":"insufficient_sample",note:enough?"Historical first-touch outcomes only; not a forecast.":"Win rate and expectancy are withheld until 30 resolved signals are recorded.",submitsOrder:false});
+  return reply({sampleSize:a.length,wins,losses,winRate:enough?wins/a.length:null,expectancyR:enough?netR/a.length:null,netR,minimumSample:30,status:enough?"reportable_sample":"insufficient_sample",note:enough?"Historical first-touch outcomes only; not a forecast.":"Win rate and expectancy are withheld until 30 resolved signals are recorded.",trackedVenue:"bybit",noteOnCoverage:"Automatic outcome tracking uses Bybit historical candles. Bitget signal records are retained but are not scored against a different venue feed.",submitsOrder:false});
  }
  if(path==="/api/algo/v3-alpha/track"&&req.method==="POST"){
   if(!(await authorized(req,env as any)))return reply({error:"unauthorized"},401);
