@@ -234,7 +234,7 @@ test("omnisignal endpoint validates input and is read-only", async () => {
   assert.equal((await handleOmnisignal(R("/api/omnisignal?symbol=bad!"), {})).status, 400);
   assert.equal((await handleOmnisignal(R("/api/omnisignal?strategy=yolo"), {})).status, 400);
   assert.equal((await handleOmnisignal(R("/api/omnisignal?engines=swift,nope"), {})).status, 400);
-  assert.equal((await handleOmnisignal(R("/api/omnisignal", "POST"), {})).status, 405);
+  assert.equal((await handleOmnisignal(new Request("https://eti.test/api/omnisignal", { method: "DELETE" }), {})).status, 405);
 });
 test("omnisignal endpoint is routed by the Worker and returns a complete analytical payload", async () => {
   mockBinance({ depthOk: true });
