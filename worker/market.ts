@@ -462,7 +462,7 @@ export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: Prov
       const raw = await fetchHost(host, req, transport);
       const base = { provider: id, host: raw.headers?.get("x-eti-upstream-host") || host.replace("https://", ""), status: raw.status, latencyMs: raw.latencyMs };
       if (raw.errorClass) {
-        const a: Attempt = { ...base, ok: false, errorClass: raw.errorClass, detail: snippet(raw.text) || undefined };
+        const a: Attempt = { ...base, ok: false, errorClass: raw.errorClass, detail: [snippet(raw.text), raw.headers?.get("x-eti-fallback-attempts") ? "fallback attempts: " + raw.headers.get("x-eti-fallback-attempts") : ""].filter(Boolean).join(" | ") || undefined };
         attempts.push(a); record(a);
         if (raw.status === 400 || raw.status === 404) break; // same request will fail on mirrors
         continue;
@@ -665,24 +665,35 @@ export async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestI
   const source = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   const primary = await fetchImpl(input, init);
   if (primary.status !== 403 || !source.startsWith(BITGET_BASE + "/api/v3/")) return primary;
-  const fallbackPath = bitgetV2FallbackUrl(source);
-  if (!fallbackPath) return primary;
+  const u = new URL(source), fallbackPath = bitgetV2FallbackUrl(source);
+  const attempts: string[] = [];
   let last: Response | null = null;
   for (const host of BITGET_V2_HOSTS) {
-    try {
-      const response = await fetchImpl(host + fallbackPath, init);
-      if (response.ok) {
-        const body: any = await response.clone().json().catch(() => null);
-        if (!body || body.code !== "00000") { last = response; continue; }
-        const headers = new Headers(response.headers);
-        headers.set("x-eti-upstream-host", new URL(host).host);
-        headers.set("x-eti-api-version", "v2-fallback");
-        return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    const sameOrigin = new URL(host).origin === u.origin;
+    const paths = [...(!sameOrigin ? [u.pathname + u.search] : []), ...(fallbackPath ? [fallbackPath] : [])];
+    for (const path of paths) {
+      try {
+        const response = await fetchImpl(host + path, init);
+        attempts.push(host + path + ":" + response.status);
+        if (response.ok) {
+          const body: any = await response.clone().json().catch(() => null);
+          if (!body || body.code !== "00000") { last = response; continue; }
+          const headers = new Headers(response.headers);
+          headers.set("x-eti-upstream-host", new URL(host).host);
+          headers.set("x-eti-api-version", path === fallbackPath ? "v2-fallback" : "v3-mirror");
+          headers.set("x-eti-fallback-attempts", attempts.join(" | "));
+          return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+        }
+        last = response;
+      } catch (e) {
+        attempts.push(host + path + ":" + (e instanceof Error ? e.name : "network_error"));
       }
-      last = response;
-    } catch { /* Try the next documented Bitget host. */ }
+    }
   }
-  return last && last.status !== 403 ? last : primary;
+  const failed = last && last.status !== 403 ? last : primary;
+  const headers = new Headers(failed.headers);
+  if (attempts.length) headers.set("x-eti-fallback-attempts", attempts.join(" | "));
+  return new Response(failed.body, { status: failed.status, statusText: failed.statusText, headers });
 }
 /** Category for a Bitget pair, decided by the ETI classifier so the chart, the dropdown and the risk review agree. Catalog-confirmed matches only: an unrecognised ticker stays "crypto" rather than being guessed into a stock. */
 export function bitgetCategory(base: string, quote: string): string {
