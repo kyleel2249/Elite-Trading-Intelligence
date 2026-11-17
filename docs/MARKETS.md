@@ -114,8 +114,7 @@ rerun the exporter after changing `app/markets`.
 Not on the Worker: `/snapshot`, `/calibrated-assess`, the `/markets` page, and any OANDA/Alpaca-market-data adapter. Its order
 path (Alpaca paper / Binance testnet / internal paper) now runs the market review before contacting a broker: a pairing the
 broker cannot trade (a London stock on Alpaca, a stock on Binance) is refused with `market_review_rejected`, and warnings
-(closed market, high-risk token) are stored on the audit record. Closed-market blocking applies only to live, which the Worker
-does not offer. Its `setup.configured` flags only say whether the matching secrets exist in the Worker environment.
+(closed market, high-risk token) are stored on the audit record. This Alpaca/Binance/internal order path is paper/testnet-only. Bitget live is a separate adapter with independent execution safeguards and remains fail-closed until private Worker egress is verified. Its `setup.configured` flags only say whether the matching secrets exist in the Worker environment.
 
 CME/ICE holiday calendars are not modelled: CME's published schedule is per product with early halts and its own page was not
 machine-readable or self-consistent enough to encode safely.
