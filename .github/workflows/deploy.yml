@@ -77,20 +77,43 @@ jobs:
             fi
           done
 
-      - name: Verify Bitget live market and execution readiness
+      - name: Verify Bybit spot, margin-compatible and derivatives market readiness
         shell: bash
         run: |
+          base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
           failed=0
-          status="$(curl --silent --show-error --fail https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/execution/status)" || { echo "::error::Could not read ETI execution readiness"; failed=1; status='{}'; }
-          printf '%s' "$status" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s);if(x.bitget_live_enabled!==true||x.bitget_configured!==true||x.live_trading_available!==true||x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error("Bitget live readiness:",JSON.stringify({enabled:x.bitget_live_enabled,configured:x.bitget_configured,missingCredentials:x.bitget_missing_credentials,available:x.live_trading_available,masterToken:x.master_execution_token_configured,auditLog:x.audit_log_configured}));process.exit(1);}console.log("Bitget live credentials, activation flag, master ETI token and audit storage verified.");}catch(e){console.error("Invalid execution status response:",e.message);process.exit(1);}});' || failed=1
-          symbols_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' 'https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/market/symbols?venue=bitget&market=all')" || { echo "::error::Could not contact Bitget symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
+          symbols_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
           symbols_status="${symbols_response##*__HTTP_CODE__}"
           symbols="${symbols_response%__HTTP_CODE__*}"
-          printf '%s' "$symbols" | HTTP_STATUS="$symbols_status" node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s);if(process.env.HTTP_STATUS!=="200"||!Array.isArray(x.symbols)||x.symbols.length===0||x.refreshEverySeconds>60){console.error("Bitget spot/futures catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error,detail:x.detail,count:x.count,refreshEverySeconds:x.refreshEverySeconds,warnings:x.warnings}));process.exit(1);}console.log("Bitget spot and perpetual symbol catalogue verified; refresh interval <= 60 seconds.");}catch(e){console.error("Invalid Bitget symbol response:",e.message,s.slice(0,500));process.exit(1);}});' || failed=1
-          margin_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/bitget/margin-pairs)" || { echo "::error::Could not contact Bitget margin pair endpoint"; failed=1; margin_response='{}__HTTP_CODE__000'; }
-          margin_status="${margin_response##*__HTTP_CODE__}"
-          margin="${margin_response%__HTTP_CODE__*}"
-          printf '%s' "$margin" | HTTP_STATUS="$margin_status" node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s);if(process.env.HTTP_STATUS!=="200"||!Array.isArray(x.pairs)||x.pairs.length===0){console.error("Bitget margin pair catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error,code:x.code,message:x.message,count:x.count}));process.exit(1);}console.log("Bitget margin pair catalogue verified.");}catch(e){console.error("Invalid Bitget margin response:",e.message,s.slice(0,500));process.exit(1);}});' || failed=1
+          printf '%s' "$symbols" | HTTP_STATUS="$symbols_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s),cats=Array.isArray(x.categories)?x.categories:[];
+              const ok=process.env.HTTP_STATUS==="200"&&x.provider==="bybit"&&Array.isArray(x.symbols)&&x.symbols.length>0&&["spot","linear","inverse"].every(v=>cats.includes(v))&&Number(x.refreshEverySeconds)>0&&Number(x.refreshEverySeconds)<=60;
+              if(!ok){console.error("Bybit catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,provider:x.provider,categories:cats,count:x.count,refreshEverySeconds:x.refreshEverySeconds,warnings:x.warnings}));process.exit(1);}
+              console.log("Bybit spot, linear and inverse catalogues verified; spot market data also backs the margin-compatible feed.");
+            }catch(e){console.error("Invalid Bybit catalogue response:",e.message);process.exit(1);}});' || failed=1
+
+          for market in spot futures; do
+            suffix=""
+            [ "$market" = "futures" ] && suffix="&market=futures"
+            ticker_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/ticker?symbol=BTCUSDT$suffix")" || { echo "::error::Could not contact the Bybit $market ticker"; failed=1; ticker_response='{}__HTTP_CODE__000'; }
+            ticker_status="${ticker_response##*__HTTP_CODE__}"
+            ticker="${ticker_response%__HTTP_CODE__*}"
+            printf '%s' "$ticker" | HTTP_STATUS="$ticker_status" MARKET="$market" node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                const x=JSON.parse(s),ok=process.env.HTTP_STATUS==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0&&Number(x.highPrice)>=Number(x.lowPrice);
+                if(!ok){console.error("Bybit ticker:",JSON.stringify({market:process.env.MARKET,httpStatus:process.env.HTTP_STATUS,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice,error:x.error}));process.exit(1);}
+                console.log("Bybit "+process.env.MARKET+" ticker verified with valid live price and 24h high/low.");
+              }catch(e){console.error("Invalid Bybit ticker response:",e.message);process.exit(1);}});' || failed=1
+          done
+
+          status="$(curl --silent --show-error --fail "$base/api/execution/status")" || { echo "::error::Could not read ETI execution safeguards"; failed=1; status='{}'; }
+          printf '%s' "$status" | node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s);
+              if(x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error("ETI execution safeguards:",JSON.stringify({masterToken:x.master_execution_token_configured,auditLog:x.audit_log_configured}));process.exit(1);}
+              console.log("ETI master execution authentication and audit storage verified; no live order was submitted.");
+            }catch(e){console.error("Invalid execution status response:",e.message);process.exit(1);}});' || failed=1
           exit "$failed"
 
       - name: Verify live GainzAlgo service, webhook and D1 readiness
