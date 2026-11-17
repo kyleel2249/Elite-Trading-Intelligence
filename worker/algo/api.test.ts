@@ -84,6 +84,44 @@ test("Omnisignal POST loads futures derivatives and builds a read-only position 
   if (s.tradePlan) assert.equal(s.tradePlan.canSubmitOrder, false);
 });
 
+test("Omnisignal accepts validated Bitget browser snapshots without Worker-to-Bitget requests", async () => {
+  const now = Date.now();
+  const intervals: Record<string, number> = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "1w": 604_800_000 };
+  const candles: Record<string, number[][]> = {};
+  for (const [tf, step] of Object.entries(intervals)) candles[tf] = Array.from({ length: 260 }, (_, i) => {
+    const close = 100 + i * 0.02, open = close - 0.01;
+    return [now - (259 - i) * step, open, close + 0.2, open - 0.2, close, 100 + i % 7];
+  });
+  const marketData = {
+    provider: "bitget-browser", candles,
+    depth: { bids: [[99.99, 10], [99.98, 12]], asks: [[100.01, 9], [100.02, 11]], timestamp: now },
+    derivatives: { fundingRate: 0.0008, openInterest: 12500, timestamp: now, source: "bitget-browser" },
+    failures: {}
+  };
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", strategy: "intraday", engines: ["swift", "gainz"], venue: "bitget", market: "futures", category: "USDT-FUTURES", marketData })
+  }), {});
+  assert.equal(res.status, 200);
+  const s = await res.json() as any;
+  assert.equal(s.dataQuality.provider, "bitget-browser");
+  assert.equal(s.dataQuality.market, "futures");
+  assert.equal(s.dataQuality.derivatives, "ticker_snapshot");
+  assert.equal(s.derivatives.fundingRate, 0.0008);
+  assert.equal(s.derivatives.openInterest, 12500);
+  assert.equal(s.submitsOrder, false);
+  assert.equal(s.liveExecutionAllowed, false);
+});
+
+test("Omnisignal requires browser-supplied data for Bitget rather than retrying blocked Worker egress", async () => {
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", strategy: "intraday", venue: "bitget", market: "futures", category: "USDT-FUTURES" })
+  }), {});
+  assert.equal(res.status, 400);
+  assert.equal((await res.json() as any).error, "bitget_browser_market_data_required");
+});
+
 test("Omnisignal POST rejects unsafe or incomplete sizing inputs", async () => {
   const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
     method: "POST", headers: { "content-type": "application/json" },
