@@ -1,7 +1,7 @@
 # Fly.io config for the ETI FastAPI origin. Deployed by `flyctl deploy` (see docs/POSTGRES_FRANKFURT.md).
 # Change `app` to a globally unique name if taken.
 app = "eti-trading-intelligence"
-# Frankfurt. Bybit rejects US and mainland-China source IPs; this origin remains outside both. The Cloudflare market-data Worker uses Frankfurt placement.
+# Frankfurt. Bybit rejects US and mainland-China source IPs; this origin remains outside both. The Cloudflare market-data Worker forwards Bybit REST requests to this Frankfurt origin.
 primary_region = "fra"
 
 [build]
