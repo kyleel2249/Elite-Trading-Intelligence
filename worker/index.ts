@@ -451,7 +451,7 @@ function scheduleSignal(){clearTimeout(sigTimer);sigTimer=setTimeout(loadSignal,
 function syncSignalProvider(){if(provider&&sig&&sig.provider!==provider&&sigWantProvider!==provider){sigWantProvider=provider;loadSignal();}}
 function renderBook(){const bids=book.bids.slice(0,15),asks=book.asks.slice(0,15);if(bids.length)$('bid').textContent=fmt(bids[0][0]);if(asks.length)$('ask').textContent=fmt(asks[0][0]);if(bids.length&&asks.length)$('spread').textContent=fmt(asks[0][0]-bids[0][0]);let rows='<table><tr><th>Side</th><th>Price</th><th>Quantity</th></tr>';for(const a of [...asks].reverse())rows+='<tr><td class="ask">ASK</td><td>'+fmt(a[0])+'</td><td>'+fmt(a[1])+'</td></tr>';for(const b of bids)rows+='<tr><td class="bid">BID</td><td>'+fmt(b[0])+'</td><td>'+fmt(b[1])+'</td></tr>';rows+='</table>';$('book').innerHTML=rows;drawDepth();}
 function renderTrades(){$('trades').innerHTML='<table><tr><th>Time</th><th>Side</th><th>Price</th><th>Quantity</th></tr>'+trades.slice(0,50).map(t=>'<tr><td>'+new Date(t.T).toLocaleTimeString()+'</td><td class="'+(t.m?'sell':'buy')+'">'+(t.m?'SELL':'BUY')+'</td><td>'+fmt(t.p)+'</td><td>'+fmt(t.q)+'</td></tr>').join('')+'</table>';}
-let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='';
+let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='',bitgetSignalBar=0;
 function setConn(t,c){$('connection').textContent=t;$('connection').style.color=c;}
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
 function symInfo(){const raw=$('symMarket').value,m=symMkt(),s=$('symbol').value,c=SYM.all.filter(r=>r[0]===s&&r[3]===(raw==='margin'?'margin':m==='futures'?'futures':'spot')),row=(SYM.venue&&c.find(r=>symV(r)===SYM.venue&&(!(m==='futures')||!r[6]||String(r[6]).toLowerCase()===$('orderBitgetMarket').value)))||c.find(r=>symV(r)===SYM.venue)||c[0]||null;return{market:m,row:row,venue:row?symV(row):SYM.venue||'bybit'};}
@@ -476,6 +476,7 @@ async function load(){
    drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());
    $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent='Bitget browser-direct ('+category+')';
    failCount=0;setStale(problems.length?'Partial Bitget context — '+problems[0].slice(0,140):'');
+   const signalBar=Number(candles.at(-1)[0]);if(!sig||sig.provider!=='bitget-browser'||bitgetSignalBar!==signalBar){bitgetSignalBar=signalBar;loadSignal();}
    $('stamp').textContent='Updated '+new Date().toLocaleTimeString()+' via Bitget browser connection';
    setConn('Bitget direct browser REST feed connected ('+category+')',problems.length?'#f59e0b':'#21d69a');
    if(socket){socket.onclose=null;socket.close();socket=null;}
@@ -518,7 +519,7 @@ function connectWs(){
  sock.onclose=()=>{if(socket!==sock)return;const wait=Math.min(30000,1000*Math.pow(2,wsRetry++));setConn('WebSocket disconnected · REST polling active · reconnect in '+Math.round(wait/1000)+'s','#f59e0b');wsTimer=setTimeout(connectWs,wait);};
  sock.onerror=()=>sock.close();
 }
-function resetAndLoad(){sig=null;sigWantProvider=null;hoverIdx=-1;reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();renderSignalCharts();if(socket){socket.onclose=null;socket.close();socket=null;}loadSignal();load();}
+function resetAndLoad(){sig=null;sigWantProvider=null;bitgetSignalBar=0;hoverIdx=-1;reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();renderSignalCharts();if(socket){socket.onclose=null;socket.close();socket=null;}loadSignal();load();}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let preparedOrder=null, executionStatus=null;
 /* ---- automatic, server-side execution sessions (HttpOnly cookies: this page never sees or stores a token) ---- */
