@@ -1,6 +1,7 @@
 import { withChartView } from "./chartview.ts";
 import { withFvgLayer } from "./fvg-layer.ts";
 import { withIndicatorOverlay } from "./indicator-overlay.ts";
+import { withSmcLayer } from "./smc-layer.ts";
 import { withExtremeForecastLayer } from "./extreme-forecast.ts";
 /**
  * Dashboard visual layer: depth, glass surfaces and 3D pointer-responsive motion. Pure CSS + vanilla JS (the dashboard's CSP allows only
@@ -89,5 +90,5 @@ if(!reduce&&'MutationObserver' in window)watch.forEach(function(el){prev.set(el,
 </script>`;
 
 export function withMotion(page: string): string {
-  return withExtremeForecastLayer(withIndicatorOverlay(withFvgLayer(withChartView(page.replace("</head>", MOTION_CSS + "</head>").replace("</body>", MOTION_JS + "</body>")))));
+  return withExtremeForecastLayer(withSmcLayer(withIndicatorOverlay(withFvgLayer(withChartView(page.replace("</head>", MOTION_CSS + "</head>").replace("</body>", MOTION_JS + "</body>"))))));
 }
