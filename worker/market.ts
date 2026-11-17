@@ -669,8 +669,9 @@ const BYBIT_PROXY_PATHS: Record<string, string> = {
   "/v5/market/open-interest": "open-interest",
 };
 
-function bybitMarketOrigin(env: MarketEnv): URL {
-  const configured = env.BYBIT_MARKET_DATA_ORIGIN || env.BACKEND_URL || "https://eti-trading-intelligence.fly.dev";
+function bybitMarketOrigin(env: MarketEnv): URL | null {
+  const configured = env.BYBIT_MARKET_DATA_ORIGIN || env.BACKEND_URL;
+  if (!configured) return null;
   const origin = new URL(configured);
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) {
     throw new Error("BYBIT_MARKET_DATA_ORIGIN must be an HTTPS origin without credentials or path");
@@ -680,9 +681,10 @@ function bybitMarketOrigin(env: MarketEnv): URL {
 
 /** Route Bybit REST calls through the ETI Frankfurt origin; all other fetches remain untouched. */
 function bybitRegionalFetch(env: MarketEnv): typeof fetch {
-  let origin: URL;
+  let origin: URL | null;
   try { origin = bybitMarketOrigin(env); }
   catch { return (async () => new Response(JSON.stringify({ error: "bybit_market_origin_invalid" }), { status: 503, headers: baseHeaders })) as typeof fetch; }
+  if (!origin) return fetch;
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const source = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(String(input));
     if (!["api.bybit.com", "api.bytick.com"].includes(source.hostname)) return fetch(input, init);
@@ -705,6 +707,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   if (endpoint === "region") {
     try {
       const origin = bybitMarketOrigin(env);
+      if (!origin) return jsonResp({ error: "bybit_market_origin_not_configured" }, 503);
       const upstream = await fetch(new URL("/api/market/bybit/region", origin).toString(), { headers: { accept: "application/json" } });
       const details = await upstream.json().catch(() => ({})) as Record<string, unknown>;
       const egressRegion = String(details.egress_region || "unknown").toLowerCase();
