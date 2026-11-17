@@ -142,6 +142,8 @@ export function validateTrades(trades: Trade[]): Trade[] {
 export interface Ticker {
   symbol: string; lastPrice: number; priceChangePercent: number;
   highPrice: number; lowPrice: number; volume: number; quoteVolume: number;
+  markPrice?: number; indexPrice?: number; fundingRate?: number; openInterest?: number;
+  bidPrice?: number; askPrice?: number; timestamp?: number;
 }
 function validateTicker(t: Ticker): Ticker {
   if (!(t.lastPrice > 0 && t.highPrice > 0 && t.lowPrice > 0 && t.volume >= 0)) throw new InvalidPayload("bad_ticker");
@@ -189,7 +191,18 @@ function parseBitget(endpoint: Endpoint, j: any, p: Params): unknown {
   if (!t) throw new InvalidPayload("empty_ticker");
   const last = num(t.lastPrice ?? t.lastPr), open = Number(t.openPrice24h ?? t.open ?? t.open24h), ratio = Number(t.price24hPcnt), ch = Number(t.change24h);
   const pct = Number.isFinite(ratio) ? ratio * 100 : Number.isFinite(ch) ? ch * 100 : Number.isFinite(open) && open > 0 ? ((last - open) / open) * 100 : NaN;
-  return validateTicker({ symbol: p.symbol, lastPrice: last, priceChangePercent: num(pct), highPrice: num(t.highPrice24h ?? t.high24h), lowPrice: num(t.lowPrice24h ?? t.low24h), volume: num(t.volume24h ?? t.baseVolume), quoteVolume: num(t.turnover24h ?? t.quoteVolume ?? t.usdtVolume) });
+  return validateTicker({
+    symbol: p.symbol, lastPrice: last, priceChangePercent: num(pct),
+    highPrice: num(t.highPrice24h ?? t.high24h), lowPrice: num(t.lowPrice24h ?? t.low24h),
+    volume: num(t.volume24h ?? t.baseVolume), quoteVolume: num(t.turnover24h ?? t.quoteVolume ?? t.usdtVolume),
+    ...(Number.isFinite(Number(t.markPrice)) ? { markPrice: num(t.markPrice) } : {}),
+    ...(Number.isFinite(Number(t.indexPrice)) ? { indexPrice: num(t.indexPrice) } : {}),
+    ...(Number.isFinite(Number(t.fundingRate)) ? { fundingRate: num(t.fundingRate) } : {}),
+    ...(Number.isFinite(Number(t.openInterest)) ? { openInterest: num(t.openInterest) } : {}),
+    ...(Number.isFinite(Number(t.bid1Price)) ? { bidPrice: num(t.bid1Price) } : {}),
+    ...(Number.isFinite(Number(t.ask1Price)) ? { askPrice: num(t.ask1Price) } : {}),
+    ...(Number.isFinite(Number(t.ts)) ? { timestamp: num(t.ts) } : {}),
+  });
 }
 
 const PROVIDERS: Record<ProviderId, ProviderSpec> = {
@@ -271,6 +284,13 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
       return validateTicker({
         symbol: p.symbol, lastPrice: num(t.lastPrice), priceChangePercent: num(t.price24hPcnt) * 100,
         highPrice: num(t.highPrice24h), lowPrice: num(t.lowPrice24h), volume: num(t.volume24h), quoteVolume: num(t.turnover24h),
+        ...(Number.isFinite(Number(t.markPrice)) ? { markPrice: num(t.markPrice) } : {}),
+        ...(Number.isFinite(Number(t.indexPrice)) ? { indexPrice: num(t.indexPrice) } : {}),
+        ...(Number.isFinite(Number(t.fundingRate)) ? { fundingRate: num(t.fundingRate) } : {}),
+        ...(Number.isFinite(Number(t.openInterest)) ? { openInterest: num(t.openInterest) } : {}),
+        ...(Number.isFinite(Number(t.bid1Price)) ? { bidPrice: num(t.bid1Price) } : {}),
+        ...(Number.isFinite(Number(t.ask1Price)) ? { askPrice: num(t.ask1Price) } : {}),
+        ...(Number.isFinite(Number(t.ts)) ? { timestamp: num(t.ts) } : {}),
       });
     },
   },
