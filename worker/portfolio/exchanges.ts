@@ -63,7 +63,7 @@ export async function loadExchangePortfolioSnapshot(env: Env, now = Date.now(), 
     aggregation: { combinedEquityUsd: null, combinedAvailableUsd: null, policy: "not_summed_shared_collateral_and_margin_products_can_double_count_balances" },
     limitations: [
       "Read-only account snapshots; no order placement, amendment, cancellation, transfers or withdrawals.",
-      "Bybit unified account equity is reported by Bybit. Bitget balances are separated by product; no combined Bitget equity is calculated because collateral may be shared.",
+      "Bybit unified account equity is reported by Bybit. Bitget balances are separated by product; no combined Bitget equity is calculated because shared collateral can be counted more than once.",
       "Values remain in exchange-reported units. Non-USD coin balances are not converted without a verified valuation.",
       "A missing or failed product snapshot is never treated as a zero balance.",
     ],
