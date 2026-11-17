@@ -221,6 +221,6 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv): 
   const ticker = tick.value.data as Ticker;
   const result = forecast24hExtremes(hourRows, dayRows, ticker, Date.now());
   if (result.status === "insufficient_history") return reply({ ...result, historyWarning: daily.status === "rejected" ? "Long-range daily candles unavailable; retry after data recovers." : null });
-  const historyFallback = "history" in result && result.history.priceSampleSource === "1h_fallback";
+  const historyFallback = "history" in result && result.history?.priceSampleSource === "1h_fallback";
   return reply({ ...result, historyWarning: daily.status === "rejected" || historyFallback ? "Long-range daily candles unavailable; this estimate uses the available completed hourly sessions." : null });
 }
