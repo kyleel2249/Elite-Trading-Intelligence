@@ -7,7 +7,7 @@ ETI's shared chart market API supports Bitget directly from Cloudflare Workers u
 | Product | Symbol catalogue | Chart data category |
 |---|---|---|
 | Spot | `/api/market/symbols?venue=bitget&market=spot` | `SPOT` |
-| Margin (cross / isolated eligibility) | `/api/market/symbols?venue=bitget&market=margin` | `MARGIN` |
+| Margin (cross / isolated eligibility) | `/api/market/symbols?venue=bitget&market=margin` | `SPOT` for candles/depth/ticker; `MARGIN` for public fills |
 | USDT-margined perpetual futures | `/api/market/symbols?venue=bitget&market=futures&category=USDT-FUTURES` | `USDT-FUTURES` |
 | USDC-margined futures | same route with `category=USDC-FUTURES` | `USDC-FUTURES` |
 | Coin-margined futures | same route with `category=COIN-FUTURES` | `COIN-FUTURES` |
