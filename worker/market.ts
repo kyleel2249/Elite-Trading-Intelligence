@@ -11,7 +11,7 @@
  */
 
 export interface MarketEnv {
-  /** Comma separated provider order, e.g. "binance,bybit,okx". */
+  /** Legacy deployment variable; Bybit is the only enabled crypto venue. */
   MARKET_PROVIDER_ORDER?: string;
 }
 
@@ -57,7 +57,7 @@ interface UpstreamRequest {
 class Unsupported extends Error {}
 class InvalidPayload extends Error {}
 
-export const ALL_PROVIDERS: ProviderId[] = ["binance", "bybit", "okx"];
+export const ALL_PROVIDERS: ProviderId[] = ["bybit"];
 export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"];
 
 export const INTERVAL_SECONDS: Record<string, number> = {
@@ -368,7 +368,7 @@ export function providerOrder(env: MarketEnv, preferred?: string | null): Provid
   const configured = (env.MARKET_PROVIDER_ORDER || "bybit")
     .split(",").map((s) => s.trim().toLowerCase()).filter((s): s is ProviderId => (ALL_PROVIDERS as string[]).includes(s));
   const base: ProviderId[] = ["bybit"];
-  // Bitget is a venue, not a failover peer: asking for it by name (as the signal route does) means Bitget only.
+  // Bybit is the only enabled crypto venue; legacy provider preferences are ignored.
   if (preferred === "bitget" || preferred === "bitget_mix") return [preferred];
   if (preferred && (ALL_PROVIDERS as string[]).includes(preferred) && base.includes(preferred as ProviderId)) {
     return [preferred as ProviderId, ...base.filter((p) => p !== preferred)];
@@ -383,7 +383,7 @@ async function fetchHost(host: string, req: UpstreamRequest): Promise<RawResult>
   const t0 = Date.now();
   try {
     const res = await fetch(url, {
-      headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bitget.com", referer: "https://www.bitget.com/" },
+      headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bybit.com", referer: "https://www.bybit.com/" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       // Cache successes briefly; never cache upstream errors.
       cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": 2, "400-599": 0 } },
