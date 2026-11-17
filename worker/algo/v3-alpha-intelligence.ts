@@ -104,7 +104,7 @@ export function monteCarloRisk(input: { rMultiples: number[]; simulations?: numb
       equity *= Math.max(0, 1 + r * riskPct / 100);
       peak = Math.max(peak, equity);
       dd = Math.max(dd, (peak - equity) / peak);
-      if (equity <= 0.5) { ruin++; break; }
+      if (dd >= 0.5) { ruin++; break; }
     }
     returns.push((equity - 1) * 100); drawdowns.push(dd * 100);
   }
