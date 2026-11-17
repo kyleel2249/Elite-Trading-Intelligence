@@ -36,7 +36,10 @@ test("Bitget spot candles, ticker and margin market data use the global public A
   const urls: string[] = [];
   globalThis.fetch = (async (input: any) => {
     urls.push(String(input));
-    return new Response(JSON.stringify(new URL(String(input)).pathname.endsWith("/candles") ? bitgetKline : bitgetTicker));
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/candles")) return new Response(JSON.stringify(bitgetKline));
+    if (path.endsWith("/fills")) return new Response(JSON.stringify({ code: "00000", data: [{ ts: String(now), price: "100", size: "1", side: "buy" }] }));
+    return new Response(JSON.stringify(bitgetTicker));
   }) as any;
   const candles = await handleMarket(req("/api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1m"), {});
   assert.equal(candles.status, 200);
@@ -46,9 +49,13 @@ test("Bitget spot candles, ticker and margin market data use the global public A
   assert.match(urls[0], /interval=1min/);
   const margin = await handleMarket(req("/api/market/klines?venue=bitget&market=margin&symbol=BTCUSDT&interval=1m"), {});
   assert.equal(margin.status, 200);
-  assert.match(urls[1], /category=MARGIN/);
+  assert.match(urls[1], /category=SPOT/);
+  const marginTrades = await handleMarket(req("/api/market/trades?venue=bitget&market=margin&symbol=BTCUSDT"), {});
+  assert.equal(marginTrades.status, 200);
+  assert.match(urls[2], /category=MARGIN/);
   const ticker = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
   assert.equal(ticker.status, 200);
+  assert.match(urls[3], /category=SPOT/);
   assert.equal((await ticker.json() as any).lastPrice, 102);
 });
 
