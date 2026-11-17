@@ -51,7 +51,8 @@ function accountFromLedger(ledger: any, symbol: string, now: number) {
     positionQuantity: Number(ledger.positions?.[symbol]?.qty || 0),
     dailyPnlPct: ((equity - dayStart) / dayStart) * 100,
     drawdownPct: ((peak - equity) / peak) * 100,
-    openRiskPct: unknownStop ? 100 : (openRiskUsd / equity) * 100,
+    openRiskPct: (openRiskUsd / equity) * 100,
+    unknownOpenRisk: unknownStop,
     openPositions: positions.length,
   };
 }
@@ -104,12 +105,13 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const body = {
         symbol, interval, account: {
           equityUsd: account.equityUsd, availableUsd: account.availableUsd,
-          positionQuantity: account.positionQuantity, dailyPnlPct: account.dailyPnlPct,
+          positionQuantity: account.positionQuantity, availableUsd: expectedAction === "SELL" ? account.equityUsd : account.availableUsd, dailyPnlPct: account.dailyPnlPct,
           drawdownPct: account.drawdownPct, openRiskPct: account.openRiskPct,
         },
       };
       const headers = { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "content-type": "application/json" };
       const expectedAction = account.positionQuantity > 0 ? "SELL" : "BUY";
+      if (expectedAction === "BUY" && account.unknownOpenRisk) { outcomes.push({ symbol, status: "blocked", reason: "existing_position_has_no_protective_stop" }); continue; }
       // Omnisignal runs the existing Swift + GainzAlgo engines, FVG, liquidity, flow,
       // multi-timeframe and validation stack independently for each configured strategy.
       const strategyResults: any[] = [];
