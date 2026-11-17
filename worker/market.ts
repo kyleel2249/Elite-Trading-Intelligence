@@ -319,7 +319,9 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   bitget: {
     hosts: ["https://api.bitget.com"],
     request(endpoint, p) {
-      const category = p.category === "MARGIN" ? "MARGIN" : "SPOT";
+      // Bitget's margin instrument list is distinct, but its documented candles,
+      // order book and ticker use the underlying SPOT category. Margin fills accept MARGIN.
+      const category = p.category === "MARGIN" && endpoint === "trades" ? "MARGIN" : "SPOT";
       const interval = BITGET_SPOT_GRAN[p.interval];
       if (endpoint === "klines") {
         if (!interval) throw new Unsupported("bitget_spot_interval");
