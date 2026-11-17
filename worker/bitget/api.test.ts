@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { BITGET_MARKETS, BitgetError, bitgetCreds, bitgetGetSigned, bitgetSign, getFills, handleBitget, normalizeFills, syncAll, listMarginSymbolsForMarket, _resetSymbolCache } from "./api.ts";
+import { BITGET_MARKETS, BitgetError, bitgetCreds, bitgetGetSigned, bitgetSign, getFills, handleBitget, normalizeFills, syncAll, listMarginSymbolsForMarket } from "./api.ts";
+import { _resetSymbolCache } from "../market.ts";
 
 const ENV = { BITGET_API_KEY: "k", BITGET_API_SECRET: "s3cret", BITGET_API_PASSPHRASE: "pp", ETI_EXECUTION_TOKEN: "tok" };
 const kvStore = () => { const m = new Map<string, string>(); return { m, get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); } }; };
