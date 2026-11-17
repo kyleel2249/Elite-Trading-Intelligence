@@ -171,30 +171,46 @@ jobs:
       - name: Verify live sports service and D1 readiness
         shell: bash
         run: |
+          base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
+          health_ok=0
           for attempt in $(seq 1 10); do
-            response="$(curl --silent --show-error --fail https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/sports/health)" || { sleep 3; continue; }
+            response="$(curl --silent --show-error --fail "$base/api/sports/health")" || { sleep 3; continue; }
             if printf '%s' "$response" | node -e '
               let input = "";
               process.stdin.on("data", chunk => input += chunk);
               process.stdin.on("end", () => {
-                const h = JSON.parse(input);
-                const odd = h.providers?.oddspapi;
-                const ready = h.database?.ready
-                  && h.sports_paper_token_configured
-                  && odd?.reachable
+                const h = JSON.parse(input), odd = h.providers?.oddspapi || h.provider;
+                const ready = h.database?.ready === true
+                  && h.sports_paper_token_configured === true
+                  && odd?.reachable === true
                   && Number(odd?.active_subscription_count) > 0
-                  && Number(odd?.bookmaker_count) > 0
-                  && Array.isArray(odd?.sports) && odd.sports.includes(10);
+                  && Number(odd?.bookmaker_count) > 0;
                 if (!ready) {
                   console.error(JSON.stringify({database:h.database,provider:odd,paper_token_configured:h.sports_paper_token_configured}));
                   process.exit(1);
                 }
-                console.log("Sports readiness verified: D1 migrations, paper token, OddsPapi football subscription and bookmakers are ready.");
+                console.log("Sports D1, paper token, OddsPapi reachability and active bookmaker subscription verified.");
               });
-            '; then
-              exit 0
-            fi
+            '; then health_ok=1; break; fi
             sleep 3
           done
-          echo "::error::ETI Sports readiness check failed. Verify ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, active football/bookmaker subscription, and D1 migrations."
-          exit 1
+          test "$health_ok" -eq 1 || { echo "::error::ETI Sports health check failed. Verify ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN and D1 migrations."; exit 1; }
+
+          football_ok=0
+          for attempt in $(seq 1 5); do
+            football="$(curl --silent --show-error --fail "$base/api/sports/football/next?limit=1")" || { sleep 3; continue; }
+            if printf '%s' "$football" | node -e '
+              let input = "";
+              process.stdin.on("data", chunk => input += chunk);
+              process.stdin.on("end", () => {
+                const x = JSON.parse(input);
+                const ready = x.provider === "OddsPapi" && x.sport === "football"
+                  && Array.isArray(x.events) && Number.isFinite(Number(x.fixture_candidates))
+                  && Number.isFinite(Number(x.fixture_count));
+                if (!ready) { console.error(JSON.stringify({provider:x.provider,sport:x.sport,error:x.error,fixture_candidates:x.fixture_candidates})); process.exit(1); }
+                console.log("Live football fixture route verified; zero upcoming fixtures is accepted as a valid empty result.");
+              });
+            '; then football_ok=1; break; fi
+            sleep 3
+          done
+          test "$football_ok" -eq 1 || { echo "::error::ETI football fixture route is not healthy. Verify the active OddsPapi football subscription."; exit 1; }
