@@ -470,7 +470,7 @@ async function load(){
    const category=info.market==='futures'?$('orderBitgetMarket').value.toUpperCase():'SPOT';
    const direct=await window.ETIBitget.marketData({symbol:s,interval:i,limit:BARS,market:info.market,category:category});
    if(seq!==reqSeq)return;
-   candles=direct.candles;book=direct.depth||{bids:[],asks:[]};trades=direct.trades||[];provider='bitget-browser';lastGoodAt=Date.now();lastGoodKey=key;syncSignalProvider();
+   candles=direct.candles;book=direct.depth||{bids:[],asks:[]};trades=direct.trades||[];provider='bitget-browser';lastGoodAt=Date.now();lastGoodKey=key;
    const problems=Object.keys(direct.failures||{}).map(k=>k+': '+direct.failures[k]);
    const ticker=direct.ticker||{};$('volume').textContent=fmt(ticker.volume);const change=Number(ticker.priceChangePercent||0);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';
    drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());
