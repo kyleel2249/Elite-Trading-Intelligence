@@ -170,7 +170,7 @@ export interface FvgMtfOptions {
   window?: number;
 }
 export interface FvgSummary {
-  active: number; bullishActive: number; bearishActive: number;
+  active: number; unfilledActive: number; partiallyFilledActive: number; bullishActive: number; bearishActive: number;
   byTimeframe: Record<string, { active: number; bullish: number; bearish: number }>;
   /** Strongest active bullish zone at or below price (acts as support) and strongest active bearish zone at or above price (resistance). */
   nearestSupport: FvgZone | null; nearestResistance: FvgZone | null;
@@ -227,7 +227,7 @@ export function analyzeFvgMtf(chartTimeframe: string, inputs: FvgTfInput[], o: F
   for (const z of active) { const b = (byTimeframe[z.timeframe] ??= { active: 0, bullish: 0, bearish: 0 }); b.active++; if (z.direction === "bullish") b.bullish++; else b.bearish++; }
   const pick = (zs: FvgZone[]) => zs.sort((a, b) => b.relevance - a.relevance)[0] ?? null;
   const summary: FvgSummary = {
-    active: active.length, bullishActive: active.filter(z => z.direction === "bullish").length, bearishActive: active.filter(z => z.direction === "bearish").length, byTimeframe,
+    active: active.length, unfilledActive: active.filter(z => z.status === "fresh").length, partiallyFilledActive: active.filter(z => z.status === "partially_mitigated").length, bullishActive: active.filter(z => z.direction === "bullish").length, bearishActive: active.filter(z => z.direction === "bearish").length, byTimeframe,
     nearestSupport: pick(active.filter(z => z.direction === "bullish" && z.lower <= price)), nearestResistance: pick(active.filter(z => z.direction === "bearish" && z.upper >= price)),
     inside: active.filter(z => price >= z.lower && price <= z.upper), confluentZones: active.filter(z => z.confluence.length > 0).length,
   };
