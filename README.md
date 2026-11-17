@@ -121,7 +121,7 @@ GitHub Actions runs compile + pytest on every push to `main`.
 
 Research and trading software. Use at your own risk. Live trading can result in loss of capital.
 
-## Security defaults and API compatibility
+## Legacy Python/FastAPI security defaults and API compatibility
 
 The application now defaults to `APP_ENV=production`. Configure `API_KEY` before using mutations or private portfolio, journal, and order-history reads. A missing configured key returns HTTP 503 on these routes; an incorrect or missing request header returns HTTP 401 when a key is configured. Only explicit `development`, `test`, or `local` mode permits a missing key. Unknown environment names and nonpositive job intervals are rejected.
 
@@ -140,6 +140,8 @@ ETI Cloudflare-native edge dashboard for live public market data.
 
 This deployment serves the ETI dashboard and health APIs directly from a Cloudflare Worker.
 It does not require a FastAPI origin, Fly.io, Docker hosting, a VPS, or `BACKEND_URL`.
+
+**Market-data routing:** Bybit V5 public REST is fetched from the Worker. Bitget public REST is fetched from the user's browser through `/bitget-client.js`, because Bitget blocks ETI's Cloudflare Worker egress with HTTP 403. The browser sends validated candles, order-book and derivatives snapshots to the Worker for Omnisignal analysis. Bitget live private orders remain fail-closed until Worker-to-Bitget private API connectivity is independently verified; API secrets never enter browser code.
 
 ### Cloudflare Workers Builds
 
