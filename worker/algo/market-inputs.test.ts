@@ -1,0 +1,42 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { loadSignalInputs } from "./market-inputs.ts";
+
+const NOW = 1_800_000_000_000;
+function fetcherFor(calls: string[]) {
+  return (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    calls.push(u.pathname + u.search);
+    if (u.pathname === "/api/v3/market/candles") return new Response(JSON.stringify({ code: "00000", data: [["1799999940000", "100", "101", "99", "100.5", "10"]] }));
+    if (u.pathname === "/api/v3/market/orderbook") return new Response(JSON.stringify({ code: "00000", data: {
+      bids: Array.from({ length: 10 }, (_, i) => [String(100 - i * 0.1), "10"]),
+      asks: Array.from({ length: 10 }, (_, i) => [String(101 + i * 0.1), "10"])
+    } }));
+    if (u.pathname === "/api/v3/market/tickers") return new Response(JSON.stringify({ code: "00000", data: [{
+      symbol: "BTCUSDT", lastPr: "100.5", open: "99", high24h: "102", low24h: "98", baseVolume: "10", quoteVolume: "1000",
+      fundingRate: "0.0008", holdingAmount: "12500", ts: String(NOW)
+    }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+}
+
+test("Bitget futures loader keeps one venue/category and returns order book plus derivatives context", async () => {
+  const calls: string[] = [];
+  const r = await loadSignalInputs({} as any, "BTCUSDT", "intraday", "bitget", NOW, "futures", "USDT-FUTURES", fetcherFor(calls));
+  assert.equal(r.provider, "bitget_mix");
+  assert.equal(r.market, "futures");
+  assert.equal(r.category, "USDT-FUTURES");
+  assert.ok(r.depth && r.depth.bids.length === 10 && r.depth.asks.length === 10);
+  assert.equal(r.derivatives?.fundingRate, 0.0008);
+  assert.equal(r.derivatives?.openInterest, 12500);
+  assert.equal(r.derivatives?.source, "bitget_mix");
+  assert.ok(calls.every(x => x.includes("category=USDT-FUTURES")));
+});
+
+test("spot loader does not invent futures funding or open-interest values", async () => {
+  const calls: string[] = [];
+  const r = await loadSignalInputs({} as any, "BTCUSDT", "intraday", "bitget", NOW, "spot", "SPOT", fetcherFor(calls));
+  assert.equal(r.market, "spot");
+  assert.equal(r.derivatives, null);
+  assert.ok(calls.every(x => !x.includes("/api/v3/market/tickers")));
+});
