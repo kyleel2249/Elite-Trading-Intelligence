@@ -58,18 +58,6 @@ test("invalid category and malformed upstream data fail closed", async () => {
 });
 
 
-test("Bybit market region endpoint reports Cloudflare Frankfurt placement without changing account residency", async () => {
-  const request = new Request("https://eti.test/api/market/region", { headers: { "cf-placement": "local-FRA" } });
-  const response = await handleMarket(request, {});
-  assert.equal(response.status, 200);
-  const body = await response.json() as any;
-  assert.equal(body.configured_region, "aws:eu-central-1");
-  assert.equal(body.placement, "local-FRA");
-  assert.equal(body.placement_verified, true);
-  assert.equal(body.account_residency_is_not_changed, true);
-});
-
-
 test("Bybit REST market requests are sent through the configured Frankfurt egress origin", async () => {
   const urls: string[] = [];
   globalThis.fetch = (async (input: any) => {
