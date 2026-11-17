@@ -10,20 +10,20 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.security.auth import require_api_key
-from app.streaming.manager import stream_hub, BINANCE_ALLOWLIST, ALPACA_ALLOWLIST
+from app.streaming.manager import stream_hub, BYBIT_ALLOWLIST, ALPACA_ALLOWLIST
 
 router = APIRouter(tags=["stream"])
 
 
 class SubscribeRequest(BaseModel):
     symbols: list[str] = Field(..., min_length=1, max_length=10)
-    provider: str = "binance"
+    provider: str = "bybit"
 
 
 @router.get("/api/market/live")
 async def market_live(
     symbol: str = Query("BTCUSDT"),
-    provider: Optional[str] = Query(None, description="binance | alpaca | omit for any"),
+    provider: Optional[str] = Query(None, description="bybit | alpaca | omit for any"),
 ):
     """Normalized last tick from WebSocket cache (not an order)."""
     return stream_hub.get_live(symbol, provider=provider)
@@ -91,8 +91,8 @@ async def stream_subscribe(body: SubscribeRequest, _auth=Depends(require_api_key
     Requires API key when configured — still never places orders.
     """
     provider = body.provider.lower().strip()
-    if provider not in ("binance", "alpaca"):
-        raise HTTPException(status_code=400, detail="provider must be binance or alpaca")
+    if provider not in ("bybit", "alpaca"):
+        raise HTTPException(status_code=400, detail="provider must be bybit or alpaca")
     result = await stream_hub.subscribe(body.symbols, provider=provider)
     return result
 
@@ -100,7 +100,7 @@ async def stream_subscribe(body: SubscribeRequest, _auth=Depends(require_api_key
 @router.get("/api/stream/allowlist")
 async def stream_allowlist():
     return {
-        "binance": sorted(BINANCE_ALLOWLIST),
+        "bybit": sorted(BYBIT_ALLOWLIST),
         "alpaca": sorted(ALPACA_ALLOWLIST),
         "note": "Allowlist limits market-data subscriptions only",
     }
