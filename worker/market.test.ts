@@ -15,7 +15,8 @@ test("Bybit spot kline is the only market-data source and returns normalized asc
   const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), {});
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-eti-provider"), "bybit");
-  assert.ok(urls.every(u => new URL(u).hostname === "api.bybit.com"));
+  assert.ok(urls.every(u => ["api.bytick.com", "api.bybit.com"].includes(new URL(u).hostname)));
+  assert.equal(new URL(urls[0]).hostname, "api.bytick.com");
   assert.match(urls[0], /category=spot/);
   const rows = await res.json() as number[][];
   assert.equal(rows.length, 1);
