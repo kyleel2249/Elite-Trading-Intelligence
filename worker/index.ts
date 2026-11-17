@@ -464,6 +464,23 @@ function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
 async function load(){
  const seq=++reqSeq,s=$('symbol').value,i=$('interval').value,key=s+'|'+i+'|'+mkt(),q='symbol='+encodeURIComponent(s)+mkt();
  try{
+  const info=symInfo();
+  if(info.venue==='bitget'){
+   if(!window.ETIBitget)throw Error('Bitget browser adapter did not load');
+   const category=info.market==='futures'?$('orderBitgetMarket').value.toUpperCase():'SPOT';
+   const direct=await window.ETIBitget.marketData({symbol:s,interval:i,limit:BARS,market:info.market,category:category});
+   if(seq!==reqSeq)return;
+   candles=direct.candles;book=direct.depth||{bids:[],asks:[]};trades=direct.trades||[];provider='bitget-browser';lastGoodAt=Date.now();lastGoodKey=key;syncSignalProvider();
+   const problems=Object.keys(direct.failures||{}).map(k=>k+': '+direct.failures[k]);
+   const ticker=direct.ticker||{};$('volume').textContent=fmt(ticker.volume);const change=Number(ticker.priceChangePercent||0);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';
+   drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());
+   $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent='Bitget browser-direct ('+category+')';
+   failCount=0;setStale(problems.length?'Partial Bitget context — '+problems[0].slice(0,140):'');
+   $('stamp').textContent='Updated '+new Date().toLocaleTimeString()+' via Bitget browser connection';
+   setConn('Bitget direct browser REST feed connected ('+category+')',problems.length?'#f59e0b':'#21d69a');
+   if(socket){socket.onclose=null;socket.close();socket=null;}
+   schedule(5000);return;
+  }
   const k=await getJson('/api/market/klines?'+q+'&interval='+encodeURIComponent(i)+'&limit='+BARS);
   if(seq!==reqSeq)return;
   const rows=k.data;if(!Array.isArray(rows)||!rows.length)throw Error('klines returned no candles');
@@ -714,7 +731,8 @@ async function loadSignal(){
  const sym=$('symbol').value, iv=$('interval').value, seq=++sigSeq;
  $('signalAction').textContent='ANALYSING…';$('signalAction').style.color='#8fa3bd';
  try{
-  const r=await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider&&!mkt()?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
+  const directBitget=symInfo().venue==='bitget';
+  const r=directBitget?await fetch('/api/signals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol:sym,interval:iv,window:BARS,provider:'bitget-browser',market:symInfo().market,candles:candles}),cache:'no-store'}):await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider&&!mkt()?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
   const d=await r.json();
   if(seq!==sigSeq)return;
   if(!r.ok)throw Error(d.error||('HTTP '+r.status));
@@ -886,8 +904,8 @@ async function loadSymbols(){
  try{
   const results=await Promise.allSettled([
    getJson('/api/market/symbols?venue=bybit&market=all'),
-   getJson('/api/market/symbols?venue=bitget&market=all'),
-   getJson('/api/market/symbols?venue=bitget&market=margin'),
+   window.ETIBitget.symbols('all'),
+   window.ETIBitget.symbols('margin'),
    getJson('/api/market/symbols?venue=bybit&market=margin')
   ]);
   SYM.all=[];
