@@ -29,7 +29,7 @@ def test_market_selector_offers_every_supported_market(client):
     for value in ("bybit", "alpaca", "oanda", "twelvedata"):
         assert f'<option value="{value}"' in html, value
     js = client.get("/static/market3d.js").text
-    for value in ("binance", "bitget", "alpaca", "oanda", "twelvedata"):
+    for value in ("bybit", "alpaca", "oanda", "twelvedata"):
         assert value in js
 
 
