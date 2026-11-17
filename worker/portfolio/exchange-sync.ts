@@ -3,7 +3,7 @@
  * not silently forced into ETI's long-only spot position fold.
  */
 import { getBybitExecutions, getBybitOpenOrders } from "../bybit/account.ts";
-import { BITGET_MARKETS, getFills, getOpenOrders, type BitgetMarket } from "../bitget/api.ts";
+import { BITGET_MARKETS, getFills, getOpenOrders, listMarginSymbolsForMarket, type BitgetMarket } from "../bitget/api.ts";
 import { openStore, type KVL } from "./store.ts";
 type Env = Record<string,any>;
 type ActivityFill = { key:string; venue:"bybit"|"bitget"; market:string; id:string; orderId:string; clientOrderId:string; symbol:string; side:string; qty:number; price:number; fee:number|null; feeCoin:string|null; at:number; realizedPnl:number|null };
@@ -18,7 +18,7 @@ export function matchActivityFills(fills:ActivityFill[],orders:any[]){
  for(const f of fills){const hit=orders.some(o=>String(o.venue??"").toLowerCase().includes(f.venue)&&((o.brokerOrderId&&o.brokerOrderId===f.orderId)||(o.clientOrderId&&f.clientOrderId&&o.clientOrderId===f.clientOrderId)||(o.orderId===f.orderId)));(hit?matched:unmatched).push(f);}
  return {matched,unmatched};
 }
-const marginSymbols=(env:Env)=>String(env.ETI_BITGET_MARGIN_SYMBOLS??"").split(",").map(x=>x.trim().toUpperCase()).filter(x=>/^[A-Z0-9]{5,20}$/.test(x)).slice(0,20);
+
 async function fetchBitgetWindow(env:Env,market:BitgetMarket,symbols:string[],since:number,now:number,deps:{fetchImpl?:typeof fetch}){
  const targets=market.startsWith("margin-")?symbols:[undefined],all:any[]=[],seen=new Set<string>();let truncated=false;
  for(const symbol of targets){let end=now;for(let page=0;page<5;page++){
@@ -52,17 +52,21 @@ export async function syncExchangeActivity(env:Env,environment:"internal_paper"|
  }else results.push({venue:"bybit",status:"credentials_missing"});
  const bitgetConfigured=!!(env.BITGET_API_KEY?.trim()||env.BITGET_KEY?.trim()||env.BITGET_ACCESS_KEY?.trim());
  if(bitgetConfigured){
+  let crossedSymbols:string[]=[],isolatedSymbols:string[]=[],marginDiscoveryError:unknown=null;
+  try{[crossedSymbols,isolatedSymbols]=await Promise.all([listMarginSymbolsForMarket("margin-crossed",{fetchImpl:deps.fetchImpl,now:()=>now}),listMarginSymbolsForMarket("margin-isolated",{fetchImpl:deps.fetchImpl,now:()=>now})]);}
+  catch(e){marginDiscoveryError=e;}
   for(const market of BITGET_MARKETS as BitgetMarket[]){
    try{
-    const symbols=market.startsWith("margin-")?marginSymbols(env):[];
-    if(market.startsWith("margin-")&&!symbols.length){results.push({venue:"bitget",market,status:"partial",warning:"margin_symbols_not_configured"});continue;}
+    if(market.startsWith("margin-")&&marginDiscoveryError)throw new Error("margin_symbol_discovery_failed");
+    const symbols=market==="margin-crossed"?crossedSymbols:market==="margin-isolated"?isolatedSymbols:[];
+    if(market.startsWith("margin-")&&!symbols.length){freshOrderScopes.add("bitget|"+market);results.push({venue:"bitget",market,status:"connected",symbolsMonitored:0,fillsFetched:0,fillsAdded:0,openOrders:0,note:"no_eligible_margin_symbols"});continue;}
     const [tradeResult,orderResult]=await Promise.allSettled([fetchBitgetWindow(env,market,symbols,since,now,deps),getOpenOrders(env,market,symbols,fetchDeps)]);
     if(tradeResult.status==="rejected"&&orderResult.status==="rejected")throw tradeResult.reason;
     const tradeData=tradeResult.status==="fulfilled"?tradeResult.value:{fills:[],truncated:false},trades=tradeData.fills,orders=orderResult.status==="fulfilled"?orderResult.value:[];
     if(orderResult.status==="fulfilled")freshOrderScopes.add("bitget|"+market);
     let added=0;for(const f of trades){const key="bitget|"+market+"|"+f.id;if(seen.has(key))continue;seen.add(key);incoming.push({key,venue:"bitget",market,id:f.id,orderId:f.orderId,clientOrderId:"",symbol:f.symbol,side:f.side,qty:f.qty,price:f.price,fee:f.fee,feeCoin:f.feeCoin||null,at:f.ts,realizedPnl:f.realizedPnl});added++;}
     for(const o of orders)openOrders.push({key:"bitget|"+market+"|"+o.orderId,venue:"bitget",market,orderId:o.orderId,clientOrderId:o.clientOrderId,symbol:o.symbol,side:o.side,qty:o.qty,leavesQty:o.leavesQty,price:o.price,status:o.status,updatedAt:o.updatedAt});
-    results.push({venue:"bitget",market,status:tradeResult.status==="fulfilled"&&orderResult.status==="fulfilled"&&!tradeData.truncated?"connected":"partial",fillsFetched:trades.length,fillsAdded:added,openOrders:orders.length,historyTruncated:tradeData.truncated,errors:[tradeResult.status==="rejected"?"fills_unavailable":null,orderResult.status==="rejected"?"open_orders_unavailable":null].filter(Boolean)});
+    results.push({venue:"bitget",market,status:tradeResult.status==="fulfilled"&&orderResult.status==="fulfilled"&&!tradeData.truncated?"connected":"partial",symbolsMonitored:market.startsWith("margin-")?symbols.length:undefined,fillsFetched:trades.length,fillsAdded:added,openOrders:orders.length,historyTruncated:tradeData.truncated,errors:[tradeResult.status==="rejected"?"fills_unavailable":null,orderResult.status==="rejected"?"open_orders_unavailable":null].filter(Boolean)});
    }catch(e){results.push({venue:"bitget",market,status:"unavailable",error:e instanceof Error?e.message.slice(0,160):"sync_failed"});}
   }
  }else results.push({venue:"bitget",status:"credentials_missing"});
