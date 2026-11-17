@@ -651,20 +651,24 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     const venueQ = url.searchParams.get("venue") || "bybit";
     if (venueQ !== "bybit") return jsonResp({ error: "unsupported_venue", allowed: ["bybit"] }, 400);
     const markets: MarketKind[] = want === "all" ? ["spot", "futures"] : [want as MarketKind];
+    const categoryQ = url.searchParams.get("category");
+    const jobs = want === "all"
+      ? [{ m: "spot" as MarketKind, c: "spot" as const }, { m: "futures" as MarketKind, c: "linear" as const }, { m: "futures" as MarketKind, c: "inverse" as const }]
+      : [{ m: want as MarketKind, c: (categoryQ || (want === "futures" ? "linear" : "spot")) as "spot" | "linear" | "inverse" }];
+    if (jobs.some(j => (j.m === "spot") !== (j.c === "spot"))) return jsonResp({ error: "invalid_category" }, 400);
     const venues = ["bybit"];
-    const jobs = venues.flatMap((v) => markets.map((m) => ({ v, m })));
-    const settled = await Promise.allSettled(jobs.map(({ v, m }) => listBybitSymbols(m)));
+    const settled = await Promise.allSettled(jobs.map(({ m, c }) => listBybitSymbols(m, fetch, Date.now, c)));
     const rows: SymbolRow[] = [], sources: Record<string, unknown> = {}, warnings: unknown[] = [];
     settled.forEach((r, i) => {
-      const { v, m } = jobs[i], key = m;
+      const { m, c } = jobs[i], key = c;
       if (r.status === "fulfilled") {
         rows.push(...r.value.rows.map((x) => ({ ...x, v: "bybit" as any })));
         sources[key] = { host: r.value.host.replace("https://", ""), count: r.value.rows.length, fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale };
-      } else warnings.push({ market: venueQ === "binance" ? m : key, venue: v, error: "unavailable", attempts: r.reason instanceof AllProvidersFailed ? r.reason.attempts.map(({ host, status, errorClass }) => ({ host, status, errorClass })) : [] });
+      } else warnings.push({ market: key, venue: "bybit", error: "unavailable", attempts: r.reason instanceof AllProvidersFailed ? r.reason.attempts.map(({ host, status, errorClass }) => ({ host, status, errorClass })) : [] });
     });
-    if (rows.length === 0) return jsonResp({ error: "symbols_unavailable", detail: venueQ === "bitget" ? "Bitget did not return its symbol list." : venueQ === "all" ? "Neither Binance nor Bitget returned its symbol list." : "Binance did not return its symbol list.", warnings }, 502);
+    if (rows.length === 0) return jsonResp({ error: "symbols_unavailable", detail: "Bybit did not return its instrument list.", warnings }, 502);
     return jsonResp({
-      provider: "bybit", venues: ["bybit"], markets, refreshEverySeconds: 60, refreshIntervalsSeconds: { bybit: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
+      provider: "bybit", venues: ["bybit"], markets, categories: jobs.map(j => j.c), refreshEverySeconds: 60, refreshIntervalsSeconds: { bybit: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
       symbols: rows.map((x) => [x.s, x.b, x.q, x.m, x.c, "bybit"]),
     }, 200, { "cache-control": "public, max-age=60" });
   }
