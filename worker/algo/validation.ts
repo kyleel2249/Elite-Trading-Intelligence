@@ -22,10 +22,10 @@ export interface ValidationInput {
   direction: 1 | -1; emaFilter: EmaFilter; bands: AdaptiveBands; volume: VolumeMomentum; structure: Structure; consensus: Consensus; regime: RegimeResult;
   liquidity: LiquidityAnalysis | null; rewardRiskTP1: number; rewardRiskTP3: number; stopExceedsMax: boolean; /** Round-trip fees and slippage as a multiple of the initial risk (R). Omitted = not evaluated. */ costR?: number | null; maxCostR?: number; data: DataIntegrity; risk: RiskContext;
   /** Validated expectancy in R per trade for this setup family; null when not yet measured (never assumed positive). */
-  expectancyR: number | null; expectancySamples?: number; weights?: Weights; thresholds?: Thresholds;
+  expectancyR: number | null; expectancySamples?: number; weights?: Weights; thresholds?: Thresholds; /** Advisory derivatives penalty, clamped to -10..0; cannot promote a signal. */ derivativesAdjustment?: number;
 }
 export interface ValidationResult {
-  score: number; classification: SignalClass; components: Record<keyof Weights, number>; weights: Weights; hardFailures: string[]; warnings: string[];
+  score: number; classification: SignalClass; components: Record<keyof Weights, number>; weights: Weights; derivativesAdjustment: number; hardFailures: string[]; warnings: string[];
   independentEvidence: { family: string; vote: -1 | 0 | 1; detail: string }[]; supportingFamilies: number; opposingFamilies: number;
   disagreement: null | { proposed: "BUY" | "SELL"; independentView: "BUY" | "SELL" | "NEUTRAL"; explanation: string };
   checklist: { question: string; pass: boolean | null; detail: string }[]; degraded: boolean; liveExecutionAllowed: boolean; reasoning: string[];
@@ -48,7 +48,7 @@ export function validateSignal(i: ValidationInput): ValidationResult {
   const rrScore = clamp((i.rewardRiskTP3 / 3.5) * 70 + (i.rewardRiskTP1 >= 1 ? 20 : 0) + (i.stopExceedsMax ? -40 : 10));
   const dataScore = (i.data.fresh ? 40 : 0) + (i.data.providersAgree ? 30 : 0) + (i.data.candlesComplete ? 30 : 0);
   const components = { technical, consensus, volume: clamp(volume), structure: structBias, liquidity: lq.score, regime: regimeFit, riskReward: rrScore, dataIntegrity: dataScore };
-  const score = Object.entries(components).reduce((s, [k, v]) => s + (v * (w as any)[k]) / 100, 0);
+  const derivativesAdjustment = clamp(i.derivativesAdjustment ?? 0, -10, 0);\n  const score = clamp(Object.entries(components).reduce((s, [k, v]) => s + (v * (w as any)[k]) / 100, 0) + derivativesAdjustment);\n  if (derivativesAdjustment < 0) warn.push(`Derivatives positioning adjusted confidence by ${derivativesAdjustment.toFixed(1)} points`);
 
   // Independent evidence families: correlated indicators inside a family count once.
   const fam = [
@@ -100,7 +100,7 @@ export function validateSignal(i: ValidationInput): ValidationResult {
   else cls = "HOLD";
   if (disagreement && (cls === "HIGH_CONVICTION" || cls === "CONFIRMED")) { cls = cls === "HIGH_CONVICTION" ? "CONFIRMED" : "EARLY"; warn.push("Class downgraded because independent evidence disagrees"); }
   if (i.expectancyR === null && cls === "HIGH_CONVICTION") { cls = "CONFIRMED"; warn.push("HIGH_CONVICTION requires validated positive expectancy; capped at CONFIRMED"); }
-  reasoning.push(`Independent score ${score.toFixed(1)}/100; ${supporting} supporting, ${opposing} opposing, ${5 - supporting - opposing} neutral evidence families; class ${cls}.`);
+  reasoning.push(`Independent score ${score.toFixed(1)}/100; ${supporting} supporting, ${opposing} opposing, ${5 - supporting - opposing} neutral evidence families; derivatives adjustment ${derivativesAdjustment.toFixed(1)}; class ${cls}.`);
   if (hard.length) reasoning.push("Hard failures: " + hard.join(" | "));
 
   const checklist = [
@@ -118,6 +118,6 @@ export function validateSignal(i: ValidationInput): ValidationResult {
     { question: "Are there abnormal market conditions?", pass: i.regime.regime !== "abnormal", detail: i.regime.regime },
     { question: "Does it satisfy account-level risk limits?", pass: i.risk.withinLimits, detail: i.risk.reasons.join("; ") || "ok" },
   ];
-  return { score: Number(score.toFixed(1)), classification: cls, components: components as any, weights: w, hardFailures: hard, warnings: warn, independentEvidence: fam, supportingFamilies: supporting, opposingFamilies: opposing,
+  return { score: Number(score.toFixed(1)), classification: cls, components: components as any, weights: w, derivativesAdjustment, hardFailures: hard, warnings: warn, independentEvidence: fam, supportingFamilies: supporting, opposingFamilies: opposing,
     disagreement, checklist, degraded, liveExecutionAllowed: !hard.length && !degraded && cls !== "HOLD" && cls !== "REJECTED" && i.data.fresh, reasoning };
 }
