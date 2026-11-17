@@ -21,7 +21,7 @@ function mockExchange(opts: { klines?: boolean; depth?: boolean; drift?: number;
   const px = series(260, { drift, noise: 2, seed: 1, start, end: Date.now() }).at(-1)![4];
   globalThis.fetch = (async (input: any) => {
     const u = new URL(String(input));
-    if (u.pathname.includes("depth")) {
+    if (u.pathname.includes("orderbook") || u.pathname.includes("depth")) {
       if (opts.depth === false) return new Response("{}", { status: 500 });
       const d = depthAround(px, Date.now());
       return new Response(JSON.stringify({ lastUpdateId: 1, bids: d.bids.map(([p, q]) => [String(p), String(q)]), asks: d.asks.map(([p, q]) => [String(p), String(q)]) }), { status: 200 });
