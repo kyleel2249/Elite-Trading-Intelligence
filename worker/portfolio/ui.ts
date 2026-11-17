@@ -41,6 +41,10 @@ export const PORTFOLIO_HTML = `
 <div class="pfperf"><div><canvas id="pfCurve" class="pfcurve" role="img" aria-label="Equity curve from actual fills"></canvas><div id="pfCurveNote" class="muted" style="font-size:11px;margin-top:4px"></div></div><div id="pfStats" class="pfstats"></div></div>
 <h3>AI Portfolio Manager <span class="muted">read-only allocation advisory</span></h3><div id="pfManager" class="pfwrap muted" aria-live="polite">Loading strategy allocation analysis…</div>
 <h3>Bybit &amp; Bitget Account Sync <button type="button" class="mini" id="pfExchangeRefresh">Refresh accounts</button></h3><div id="pfExchanges" class="pfwrap muted" aria-live="polite">Account snapshots require the ETI master execution token or administrator MFA.</div>
+<h3>Cross-Exchange Risk Reconciliation <button type="button" class="mini" id="pfCrossRefresh">Reconcile Bybit + Bitget</button></h3><div id="pfCrossRisk" class="pfwrap muted" aria-live="polite">No cross-exchange reconciliation has been run.</div>
+<h3>Autonomous Execution Authorization <span class="muted">separate permission · order dispatch locked</span></h3>
+<div class="pfinfo">Authorization records agent limits for 15 minutes. This does not activate live orders. Every future order must receive Risk Manager approval; its veto cannot be overridden.</div>
+<div class="pfbar"><label>Per-order cap USD <input id="pfAutoCap" type="number" min="1" max="1000" value="50" style="width:90px"></label><label>Max concurrent positions <input id="pfAutoPositions" type="number" min="1" max="5" value="2" style="width:65px"></label><input id="pfAutoConfirm" placeholder="Type AUTHORIZE ETI AUTONOMY" style="min-width:230px"><button id="pfAutoEnable" class="mini">Authorize agents (15 min)</button><button id="pfAutoDisable" class="mini danger">Revoke</button></div><div id="pfAutoStatus" class="pfwrap muted" aria-live="polite">Authorization status not loaded.</div>
 <details style="margin-top:12px"><summary class="muted">Ledger integrity (anomalies and reconciliation)</summary><div id="pfIntegrity" class="muted" style="font-size:12px;margin-top:6px"></div></details>
 </section>
 `;
@@ -338,9 +342,30 @@ function pfUseSignal(){
  $('planStop').value=L.stopLoss;$('planTp1').value=L.targets[0]!=null?L.targets[0]:'';$('planTp2').value=L.targets[1]!=null?L.targets[1]:'';$('planTp3').value=L.targets[2]!=null?L.targets[2]:'';
  n.textContent='Copied the ETI engine levels (entry '+fp(L.entry)+'). They apply to BUY orders only.';
 }
+async function pfLoadCrossRisk(){
+ const root=$('pfCrossRisk');if(!root)return;root.textContent='Reconciling exchange positions with the ETI ledger…';
+ const {r,d}=await pfCall('/api/portfolio/reconciliation?environment='+encodeURIComponent(pf.env));
+ if(!r.ok){root.textContent=d.message||d.error||('Reconciliation failed: HTTP '+r.status);return;}
+ const rows=(d.comparisons||[]).map(x=>'<tr><td>'+pfEsc(x.venue)+'</td><td>'+pfEsc(x.symbol)+'</td><td>'+pfEsc(x.side)+'</td><td class="num">'+pfQty(x.exchangeQty)+'</td><td class="num">'+pfQty(x.ledgerQty)+'</td><td class="num">'+pfQty(x.delta)+'</td><td>'+pfEsc(x.status)+'</td></tr>').join('');
+ root.innerHTML='<div class="pfkpis"><div><span>Status</span><b class="'+(d.ok?'pos':'neg')+'">'+pfEsc(d.status)+'</b></div><div><span>Combined verified available USD</span><b>'+pfMoney(d.combinedVerifiedAvailableUsd)+'</b></div><div><span>Combined verified exposure USD</span><b>'+pfMoney(d.combinedVerifiedExposureUsd)+'</b></div><div><span>Snapshot age</span><b>'+pfEsc(d.fresh?'Fresh':'Stale / invalid')+'</b></div></div><p class="muted">Checked '+pfTime(d.checkedAt)+'. Exposure is withheld until exchange open orders and trusted USD notionals are available. Execution eligible: no.</p><div class="pfwrap"><table><thead><tr><th>Venue</th><th>Symbol</th><th>Side</th><th class="num">Exchange qty</th><th class="num">ETI ledger qty</th><th class="num">Difference</th><th>Status</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7">No comparable open positions.</td></tr>')+'</tbody></table></div><div class="pfnote">'+(d.problems||[]).map(pfEsc).join(' · ')+'</div><div class="pfinfo">'+(d.warnings||[]).map(pfEsc).join(' · ')+'</div>';
+}
+async function pfLoadAutonomy(){
+ const root=$('pfAutoStatus');if(!root)return;const {r,d}=await pfCall('/api/portfolio/autonomy');
+ if(!r.ok){root.textContent=d.message||d.error||'Authorization status unavailable.';return;}
+ root.textContent=(d.enabled?'AUTHORIZED until '+pfTime(d.expiresAt):'NOT AUTHORIZED')+' · '+(d.reason||'')+' · execution dispatch: '+(d.executionDispatchEnabled?'enabled':'LOCKED');
+}
+async function pfSetAutonomy(enabled){
+ const body=enabled?{enabled:true,confirmation:$('pfAutoConfirm').value,perOrderCapUsd:Number($('pfAutoCap').value),maxConcurrentPositions:Number($('pfAutoPositions').value)}:{enabled:false};
+ const {r,d}=await pfCall('/api/portfolio/autonomy',body);if(!r.ok){alert(d.message||d.error||'Autonomy control update failed');return;}
+ $('pfAutoStatus').textContent=(d.enabled?'AUTHORIZED until '+pfTime(d.expiresAt):'REVOKED')+' · execution dispatch: LOCKED';$('pfAutoConfirm').value='';
+}
 function pfInit(){
  pf.env=pfEnvOfBroker();$('pfEnv').value=pf.env;
  $('pfExchangeRefresh').onclick=()=>{pf.exchangesAt=0;pfLoadExchanges();};
+ $('pfCrossRefresh').onclick=pfLoadCrossRisk;
+ $('pfAutoEnable').onclick=()=>pfSetAutonomy(true);
+ $('pfAutoDisable').onclick=()=>pfSetAutonomy(false);
+ pfLoadAutonomy();
  $('pfEnv').onchange=()=>{pf.env=$('pfEnv').value;pf.state=null;pf.manager=null;pf.managerAt=0;pf.exchanges=null;pf.exchangesAt=0;pf.closedRows=null;pfRender();$('pfManager').textContent='Loading strategy allocation analysis…';$('pfExchanges').textContent='Refresh accounts to load exchange snapshots.';pfLoad();};
  $('orderBroker').addEventListener('change',()=>{const e=pfEnvOfBroker();if(e!==pf.env){pf.env=e;pf.state=null;pf.closedRows=null;pfRender();pfLoad();}});
  $('pfAllOrders').onchange=()=>{pf.allOrders=$('pfAllOrders').checked;pfRenderOrders();};
