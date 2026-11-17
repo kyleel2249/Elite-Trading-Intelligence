@@ -6,6 +6,11 @@ on:
     branches: [main]
     paths:
       - "worker/**"
+      - "app/**"
+      - "fly.toml"
+      - "Dockerfile"
+      - "requirements.txt"
+      - "pyproject.toml"
       - "wrangler.jsonc"
       - "migrations/**"
       - "package.json"
@@ -31,6 +36,15 @@ jobs:
         run: npm ci
       - name: Run full Worker, security and type checks
         run: npm run check
+      - name: Deploy Frankfurt FastAPI origin for Bybit market egress
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy FastAPI backend to Fly.io Frankfurt
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "::error::Set FLY_API_TOKEN in GitHub Actions secrets to deploy the Frankfurt Bybit egress service"; exit 1)
+          flyctl deploy --remote-only --config fly.toml
+
       - name: Apply pending D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -82,14 +96,21 @@ jobs:
         run: |
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
           failed=0
+          region_response="$(curl --silent --show-error --fail "$base/api/market/region")" || { echo "::error::Could not read the Bybit market execution region"; exit 1; }
+          printf '%s' "$region_response" | node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s);
+              if(x.transport!=="regional-fastapi-proxy"||x.egress_region!=="fra"||x.region_verified!==true){
+                console.error("Bybit market egress:",JSON.stringify(x));process.exit(1);
+              }
+              console.log("Bybit public REST requests are routed through the ETI FastAPI origin in Fly.io Frankfurt.");
+            }catch(e){console.error("Invalid Bybit region response:",e.message);process.exit(1);}});' || exit 1
           symbols_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
           symbols_status="${symbols_response##*__HTTP_CODE__}"
           symbols="${symbols_response%__HTTP_CODE__*}"
           printf '%s' "$symbols" | HTTP_STATUS="$symbols_status" node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s),cats=Array.isArray(x.categories)?x.categories:[],warnings=Array.isArray(x.warnings)?x.warnings:[];
-              const allRegionBlocked=process.env.HTTP_STATUS==="502"&&cats.length===0&&warnings.length>=3&&warnings.every(w=>Array.isArray(w.attempts)&&w.attempts.length>0&&w.attempts.every(a=>a.status===403&&a.errorClass==="http_403_blocked"));
-              if(allRegionBlocked){console.log("Bybit routes are deployed and both public hosts were attempted. The CI execution region is receiving HTTP 403 from Bybit; live catalogue availability is unverified from this region and must be checked from the local region.");return;}
               const ok=process.env.HTTP_STATUS==="200"&&x.provider==="bybit"&&Array.isArray(x.symbols)&&x.symbols.length>0&&["spot","linear","inverse"].every(v=>cats.includes(v))&&Number(x.refreshEverySeconds)>0&&Number(x.refreshEverySeconds)<=60;
               if(!ok){console.error("Bybit catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,provider:x.provider,categories:cats,count:x.count,refreshEverySeconds:x.refreshEverySeconds,warnings}));process.exit(1);}
               console.log("Bybit spot, linear and inverse catalogues verified; spot market data also backs the margin-compatible feed.");
@@ -104,8 +125,6 @@ jobs:
             printf '%s' "$ticker" | HTTP_STATUS="$ticker_status" MARKET="$market" node -e '
               let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
                 const x=JSON.parse(s),attempts=Array.isArray(x.attempts)?x.attempts:[];
-                const regionBlocked=process.env.HTTP_STATUS==="502"&&attempts.length>0&&attempts.every(a=>a.status===403&&a.errorClass==="http_403_blocked");
-                if(regionBlocked){console.log("Bybit "+process.env.MARKET+" ticker route is deployed; both upstream hosts returned HTTP 403 from the CI region. Live price availability remains unverified from this region.");return;}
                 const ok=process.env.HTTP_STATUS==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0&&Number(x.highPrice)>=Number(x.lowPrice);
                 if(!ok){console.error("Bybit ticker:",JSON.stringify({market:process.env.MARKET,httpStatus:process.env.HTTP_STATUS,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice,error:x.error,attempts}));process.exit(1);}
                 console.log("Bybit "+process.env.MARKET+" ticker verified with valid live price and 24h high/low.");
@@ -118,8 +137,6 @@ jobs:
           printf '%s' "$forecast" | HTTP_STATUS="$forecast_status" node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s),attempts=Array.isArray(x.attempts)?x.attempts:[];
-              const regionBlocked=process.env.HTTP_STATUS==="502"&&attempts.length>0&&attempts.every(a=>a.status===403&&a.errorClass==="http_403_blocked");
-              if(regionBlocked){console.log("24-hour forecast API is deployed; Bybit rejected both market-data hosts from the CI region, so forecast values cannot be verified from this region.");return;}
               const h=x.forecast?.high,l=x.forecast?.low,c=x.forecast?.confidence;
               const validTime=v=>typeof v==="string"&&Number.isFinite(Date.parse(v));
               const ok=process.env.HTTP_STATUS==="200"&&x.status==="ready"&&Number(h?.price)>0&&Number(l?.price)>0&&validTime(h?.time?.expectedAt)&&validTime(l?.time?.expectedAt)&&Number(x.history?.timeSampleDays)>=5&&Number(x.history?.priceSampleDays)>=5&&Number(c?.score)>=0&&Number(c?.score)<=100;

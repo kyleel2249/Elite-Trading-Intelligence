@@ -43,25 +43,23 @@ test("Bybit is the only enabled crypto provider in diagnostics and symbols", asy
   assert.ok(body.symbols.every((row: any[]) => row[5] === "bybit"));
 });
 
-test("Bybit instrument discovery retries the alternate host after a geo or IP block", async () => {
+test("Bybit instrument discovery uses one regional proxy request; the Frankfurt client owns host fallback", async () => {
   const hosts: string[] = [];
   const fetcher: any = async (url: string) => {
     const host = new URL(url).hostname; hosts.push(host);
-    if (host === "api.bytick.com") return new Response("blocked", { status: 403 });
     return payload("spot");
   };
   const result = await listBybitSymbols("spot", fetcher, Date.now, "spot");
   assert.equal(result.rows[0].s, "BTCUSDT");
   assert.equal(result.host, "https://api.bybit.com");
-  assert.deepEqual(hosts, ["api.bytick.com", "api.bybit.com"]);
-  assert.equal(result.attempts[0].status, 403);
+  assert.deepEqual(hosts, ["api.bybit.com"]);
+  assert.deepEqual(result.attempts, []);
 });
 
-test("Bybit market ticker falls through to its alternate API host after a 403", async () => {
+test("Bybit market ticker uses the primary host; regional backend performs alternate-host failover", async () => {
   const hosts: string[] = [];
   globalThis.fetch = (async (url: string) => {
     const host = new URL(url).hostname; hosts.push(host);
-    if (host === "api.bytick.com") return new Response("blocked", { status: 403 });
     return new Response(JSON.stringify({ retCode: 0, result: { list: [{
       symbol: "BTCUSDT", lastPrice: "100", highPrice24h: "105", lowPrice24h: "95",
       price24hPcnt: "0.01", volume24h: "10", turnover24h: "1000",
@@ -71,5 +69,5 @@ test("Bybit market ticker falls through to its alternate API host after a 403", 
   assert.equal(res.status, 200);
   const body = await res.json() as any;
   assert.equal(body.lastPrice, 100);
-  assert.deepEqual(hosts, ["api.bytick.com", "api.bybit.com"]);
+  assert.deepEqual(hosts, ["api.bybit.com"]);
 });

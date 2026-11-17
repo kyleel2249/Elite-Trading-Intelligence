@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
+from app.integrations.bybit import BybitClient
 from app.integrations.oanda import OandaClient
 from app.market import binance_hosts as bh
 from app.market import history_extra as hx
@@ -66,6 +69,72 @@ async def symbols_sync_status(settings: Settings = Depends(get_settings)):
     """State of the one-minute Bybit pair sync (runs, last run, last error, baseline providers)."""
     sym_mod.ensure_sync_started(settings)
     return sym_mod.sync_status()
+
+
+@router.get("/api/market/bybit/region")
+async def bybit_market_region():
+    """Public diagnostic proving which Fly region performs Bybit upstream requests."""
+    region = os.getenv("FLY_REGION", "").strip().lower()
+    return {
+        "service": "eti-bybit-market-egress",
+        "provider": "bybit",
+        "egress_region": region or "unknown",
+        "api_hosts": ["api.bybit.com", "api.bytick.com"],
+        "read_only": True,
+        "account_residency_unchanged": True,
+    }
+
+
+@router.get("/api/market/bybit/proxy/{endpoint}")
+async def bybit_public_market_proxy(
+    endpoint: Literal["time", "instruments-info", "kline", "orderbook", "recent-trade", "tickers", "funding-history", "open-interest"],
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    """Allow-listed read-only Bybit V5 proxy. Requests originate from the ETI Frankfurt backend."""
+    paths = {
+        "time": "/v5/market/time",
+        "instruments-info": "/v5/market/instruments-info",
+        "kline": "/v5/market/kline",
+        "orderbook": "/v5/market/orderbook",
+        "recent-trade": "/v5/market/recent-trade",
+        "tickers": "/v5/market/tickers",
+        "funding-history": "/v5/market/funding/history",
+        "open-interest": "/v5/market/open-interest",
+    }
+    allowed_params = {
+        "time": set(),
+        "instruments-info": {"category", "limit", "cursor"},
+        "kline": {"category", "symbol", "interval", "limit", "start", "end"},
+        "orderbook": {"category", "symbol", "limit"},
+        "recent-trade": {"category", "symbol", "limit"},
+        "tickers": {"category", "symbol"},
+        "funding-history": {"category", "symbol", "limit"},
+        "open-interest": {"category", "symbol", "intervalTime", "limit"},
+    }
+    params = dict(request.query_params)
+    if set(params) - allowed_params[endpoint]:
+        raise HTTPException(status_code=422, detail="Unsupported Bybit proxy query parameter")
+    category = params.get("category")
+    if category and category not in ("spot", "linear", "inverse"):
+        raise HTTPException(status_code=422, detail="Invalid Bybit market category")
+    symbol = params.get("symbol")
+    if symbol and not re.fullmatch(r"[A-Za-z0-9]{2,32}", symbol):
+        raise HTTPException(status_code=422, detail="Invalid Bybit symbol")
+    try:
+        if "limit" in params:
+            limit = int(params["limit"])
+            maximum = 1000 if endpoint in ("instruments-info", "kline") else 200
+            if not 1 <= limit <= maximum:
+                raise HTTPException(status_code=422, detail="Bybit proxy limit is out of range")
+        return await BybitClient(settings).get_public_payload(paths[endpoint], params)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.warning("Bybit regional proxy failed: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=502, detail="Bybit public market data is unavailable from the configured egress region")
 
 
 @router.get("/api/market/bybit/derivatives-context")

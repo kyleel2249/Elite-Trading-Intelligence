@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.integrations.bybit import BybitClient
 from app.market import binance_hosts as bh
 from app.market import symbols as sym
 from app.market.service import MarketService
@@ -228,3 +229,61 @@ def test_bybit_derivatives_context_api_rejects_spot_and_invalid_intervals(client
                       params={"symbol": "BTCUSDT", "category": "spot"}).status_code == 422
     assert client.get("/api/market/bybit/derivatives-context",
                       params={"symbol": "BTCUSDT", "category": "linear", "interval": "2h"}).status_code == 422
+
+
+def test_bybit_public_proxy_forwards_only_allowlisted_market_data(client, monkeypatch):
+    async def fake_payload(self, path, params):
+        assert path == "/v5/market/kline"
+        assert params == {"category": "linear", "symbol": "BTCUSDT", "interval": "60", "limit": "10"}
+        return {"retCode": 0, "retMsg": "OK", "result": {"list": [["1", "100", "102", "99", "101", "5"]]}}
+    monkeypatch.setattr("app.api.market_symbols.BybitClient.get_public_payload", fake_payload)
+    response = client.get("/api/market/bybit/proxy/kline",
+                          params={"category": "linear", "symbol": "BTCUSDT", "interval": "60", "limit": "10"})
+    assert response.status_code == 200
+    assert response.json()["retCode"] == 0
+    assert response.json()["result"]["list"][0][4] == "101"
+
+
+def test_bybit_public_proxy_rejects_unapproved_paths_parameters_and_categories(client):
+    assert client.get("/api/market/bybit/proxy/private").status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "linear", "symbol": "BTCUSDT", "interval": "60", "api_key": "leak"}).status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "option", "symbol": "BTCUSDT", "interval": "60"}).status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "linear", "symbol": "../../private", "interval": "60"}).status_code == 422
+
+
+def test_bybit_egress_region_reports_fly_machine_region(client, monkeypatch):
+    monkeypatch.setenv("FLY_REGION", "fra")
+    response = client.get("/api/market/bybit/region")
+    assert response.status_code == 200
+    assert response.json()["egress_region"] == "fra"
+    assert response.json()["read_only"] is True
+    assert response.json()["account_residency_unchanged"] is True
+
+
+def test_bybit_public_client_retries_secondary_global_host_from_frankfurt(monkeypatch):
+    hosts = []
+
+    def handler(request):
+        hosts.append(request.url.host)
+        if request.url.host == "api.bybit.com":
+            return httpx.Response(403, request=request, text="blocked")
+        return httpx.Response(200, request=request, json={
+            "retCode": 0, "retMsg": "OK",
+            "result": {"category": "spot", "list": [["1", "100", "102", "99", "101", "5"]]},
+        })
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "app.integrations.bybit.client.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    result = asyncio.run(BybitClient(settings()).get_public_payload(
+        "/v5/market/kline",
+        {"category": "spot", "symbol": "BTCUSDT", "interval": "1", "limit": "1"},
+    ))
+    assert result["retCode"] == 0
+    assert hosts == ["api.bybit.com", "api.bytick.com"]

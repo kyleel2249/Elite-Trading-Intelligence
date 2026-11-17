@@ -15,8 +15,8 @@ test("Bybit spot kline is the only market-data source and returns normalized asc
   const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), {});
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-eti-provider"), "bybit");
-  assert.ok(urls.every(u => ["api.bytick.com", "api.bybit.com"].includes(new URL(u).hostname)));
-  assert.equal(new URL(urls[0]).hostname, "api.bytick.com");
+  assert.ok(urls.every(u => new URL(u).hostname === "api.bybit.com"));
+  assert.equal(new URL(urls[0]).hostname, "api.bybit.com");
   assert.match(urls[0], /category=spot/);
   const rows = await res.json() as number[][];
   assert.equal(rows.length, 1);
@@ -55,4 +55,35 @@ test("invalid category and malformed upstream data fail closed", async () => {
   const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT"), {});
   assert.equal(res.status, 502);
   assert.equal((await res.json() as any).error, "market_data_unavailable");
+});
+
+
+test("Bybit REST market requests are sent through the configured Frankfurt egress origin", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify(kline));
+  }) as any;
+  const response = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m"), {
+    BYBIT_MARKET_DATA_ORIGIN: "https://market-egress.example",
+  });
+  assert.equal(response.status, 200);
+  assert.equal(new URL(urls[0]).hostname, "market-egress.example");
+  assert.match(urls[0], /\/api\/market\/bybit\/proxy\/kline/);
+  assert.match(urls[0], /category=spot/);
+});
+
+test("Bybit market region diagnostic verifies the actual Frankfurt backend egress", async () => {
+  globalThis.fetch = (async (input: any) => {
+    assert.equal(String(input), "https://market-egress.example/api/market/bybit/region");
+    return new Response(JSON.stringify({ provider: "bybit", egress_region: "fra" }));
+  }) as any;
+  const response = await handleMarket(req("/api/market/region"), {
+    BYBIT_MARKET_DATA_ORIGIN: "https://market-egress.example",
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.transport, "regional-fastapi-proxy");
+  assert.equal(body.egress_region, "fra");
+  assert.equal(body.region_verified, true);
 });
