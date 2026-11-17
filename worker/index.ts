@@ -10,6 +10,7 @@
  * Worker answers unknown routes with a JSON 404, exactly as before.
  */
 import { withMotion } from "./ui/motion.ts";
+import { PWA_ICON, PWA_MANIFEST, PWA_SERVICE_WORKER } from "./ui/pwa.ts";
 import { handleExecution } from "./execution.ts";
 import { handlePortfolio } from "./portfolio/routes.ts";
 import { CALC_CSS, CALC_HTML, CALC_JS } from "./calculator/ui.ts";
@@ -916,6 +917,9 @@ const page = withMotion(html);
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/manifest.webmanifest") return new Response(PWA_MANIFEST, { headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/app-icon.svg") return new Response(PWA_ICON, { headers: { "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/sw.js") return new Response(PWA_SERVICE_WORKER, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-cache", "service-worker-allowed": "/", "x-content-type-options": "nosniff" } });
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
     }
