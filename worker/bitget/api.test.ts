@@ -97,10 +97,16 @@ test("HTTP: private routes need the bearer token, status never reveals values, m
   const st = await handleBitget(new Request("https://eti.test/api/bitget/status", { headers: { authorization: "Bearer tok" } }), ENV);
   const body = JSON.stringify(await st.json());
   assert.equal(st.status, 200); assert.doesNotMatch(body, /s3cret|"pp"/); assert.match(body, /BITGET_API_KEY/); assert.match(body, /"readOnly":false/);
-  const pairs = await handleBitget(new Request("https://eti.test/api/bitget/margin-pairs"), {}, { fetchImpl: (async(url:any,init:any) => { assert.match(String(url),/api\/v3\/market\/instruments\?category=MARGIN/); assert.equal(init.method,undefined); return ok([{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "online", maxCrossedLeverage: "3", maxIsolatedLeverage: "10" }, { symbol: "x" }]); }) as any });
+  const pairs = await handleBitget(new Request("https://eti.test/api/bitget/margin-pairs"), {}, { fetchImpl: (async(url:any,init:any) => {
+    const u = new URL(String(url)); assert.equal(init.method,undefined);
+    if (u.hostname === "api.bitget.com") { assert.equal(u.pathname,"/api/v3/market/instruments"); assert.equal(u.searchParams.get("category"),"MARGIN"); return new Response(JSON.stringify({cloudflare:"block"}),{status:403}); }
+    assert.equal(u.hostname,"capi.bitget.com"); assert.equal(u.pathname,"/api/v2/margin/currencies");
+    return ok([{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "1", maxCrossedLeverage: "3", maxIsolatedLeverage: "10", isCrossBorrowable: true, isIsolatedBaseBorrowable: true, isIsolatedQuoteBorrowable: false }, { symbol: "x" }]);
+  }) as any });
   assert.equal(pairs.status, 200);
   const pj: any = await pairs.json();
-  assert.equal(pj.count, 1); assert.equal(pj.pairs[0].crossed, true);
+  assert.equal(pj.count, 1); assert.equal(pj.pairs[0].crossed, true); assert.equal(pj.pairs[0].isolated, true);
+  assert.equal(pj.pairs[0].isCrossBorrowable, true); assert.equal(pj.pairs[0].isIsolatedBaseBorrowable, true);
   const bad = await handleBitget(new Request("https://eti.test/api/bitget/fills?market=nope", { headers: { authorization: "Bearer tok" } }), ENV);
   assert.equal(bad.status, 400);
   assert.equal(BITGET_MARKETS.length, 6);
