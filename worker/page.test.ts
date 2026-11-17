@@ -46,7 +46,7 @@ test("dashboard market requests support Bybit and Bitget spot, margin and future
   assert.match(html, /venue=bybit/);
   assert.match(html, /venue=bitget/);
   assert.match(html, /market=margin/);
-  assert.match(html, /USDT-FUTURES/);
+  assert.match(html, /usdt-futures/);
   assert.match(html, /Bitget \(spot, margin &amp; futures\)/);
   assert.match(html, /function mkt\(\)\{[^}]*venue=/);
   assert.match(html, /const SYM=\{all:\[\],market:'spot',venue:'bybit'/);
