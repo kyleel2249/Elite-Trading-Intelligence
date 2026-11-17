@@ -7,6 +7,8 @@ import { auditorReport, executionReport, prepareTicket, riskManager, riskReport,
 import type { AuditSummary, DecisionRecord, ExecutionRequest, ExecutionReview, RiskDecision, SecurityReport } from "./controls.ts";
 import { commanderReport, deliberate, finalize } from "./commander.ts";
 import type { Deliberation, FinalDecision } from "./commander.ts";
+import { evaluateV3Alpha } from "../algo/v3-alpha.ts";
+import type { Strategy, Timeframe } from "../algo/timeframes.ts";
 
 export interface AnalyzeInput {
   market: MarketInput; supplied?: SuppliedData; account?: AccountState; integrity: Integrity; audit?: AuditSummary | null;
@@ -29,7 +31,7 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   };
   const reports = new Map<AgentId, AgentReport>();
   const run = (agent: AgentId, fn: () => AgentReport) => { const r = safe(agent, fn); reports.set(agent, r); bus.send(agent, "commander", "report", r, now); return r; };
-  run("quant", () => quantitativeAnalyst(ctx)); run("technical", () => technicalAnalyst(ctx)); run("fundamental", () => fundamentalAnalyst(ctx));
+  run("quant", () => quantitativeAnalyst(ctx)); run("technical", () => { const report = technicalAnalyst(ctx); const strategyByInterval: Record<string, Strategy> = { "5m": "scalp", "15m": "intraday", "4h": "swing", "1d": "position" }; const strategy = strategyByInterval[input.market.interval]; if (!strategy || input.market.candles.length < 100) return report; const v3 = evaluateV3Alpha({ symbol: input.market.symbol, strategy, candles: { [input.market.interval as Timeframe]: input.market.candles }, now }); return { ...report, evidence: [...report.evidence, { label: "eti_v3_alpha_direction", value: v3.direction, note: `${v3.action}; score ${v3.score}/${v3.threshold}; regime ${v3.regime}` }, { label: "eti_v3_alpha_status", value: v3.status }], warnings: [...report.warnings, "V3 Alpha is supporting technical context, not a separate consensus voter; this council snapshot contains one timeframe only."] }; }); run("fundamental", () => fundamentalAnalyst(ctx));
   run("macro", () => macroIntelligence(ctx)); run("crypto", () => cryptoIntelligence(ctx)); run("news", () => newsIntelligence(ctx)); run("researcher", () => eliteTraderResearcher(ctx));
   let security: SecurityReport;
   try { security = securityAnalyst(ctx); } catch (e) { security = { ...errorReport("security", e instanceof Error ? e.message : "unknown", now), severity: "high", flags: [{ id: "security_agent_failed", severity: "high", detail: "Security analysis failed; failing closed." }] }; }

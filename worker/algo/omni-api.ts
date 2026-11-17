@@ -12,6 +12,7 @@ import { activeOptions } from "./params.ts";
 import { MAX_SCAN_SYMBOLS, parseSymbols, scan } from "./scan.ts";
 import { authorized } from "../execution.ts";
 import { leaderboardOf, loadUniverse, runUniverseBatch } from "./universe.ts";
+import { recordV3AlphaSignal } from "./v3-alpha-ledger.ts";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
@@ -142,7 +143,8 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const planOptions = equity !== undefined && riskFraction !== undefined ? { equity, riskFraction, maxNotionalFraction, leverage, feeBps, slippageBps, contractType, contractValue } : {};
   const result = runOmnisignal({ symbol, strategy, candles, depth, derivatives, now }, { ...opts, ...planOptions, roundTripCostBps: costBpsFrom(env as any), fvg: (env as any)?.ETI_FVG_CONFLUENCE !== "off", enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") }, ...expectancyOptions(exp) });
   const journal = await journalFromRoute(env, result, strategy, now, { status: exp.status, expectancyR: exp.expectancyR, samples: exp.samples });
+  const v3AlphaRecorded = await recordV3AlphaSignal((env as any).ETI_PORTFOLIO_DB, symbol, strategy, venue, market, category, result.v3Alpha, now).catch(() => false);
   return reply({ ...result, parameters: { version, name }, dataQuality: { provider, venue, market, category, timeframesLoaded: Object.keys(candles), failures, orderBook: depth ? "rest_snapshot" : "unavailable", derivatives: derivatives ? "ticker_snapshot" : "unavailable", providerCrossCheck: "not_performed",
     note: "Single selected provider per request; cross-provider reconciliation is not performed. The REST order-book and derivatives snapshots are timestamped at fetch time." },
-    validationStatus: { expectancy: expectancyStatus(exp), accountRisk: "not_evaluated_by_analytical_endpoint", execution: "This endpoint is analytical and read-only. It never submits orders; live execution remains disabled." }, journal });
+    validationStatus: { expectancy: expectancyStatus(exp), accountRisk: "not_evaluated_by_analytical_endpoint", execution: "This endpoint is analytical and read-only. It never submits orders; live execution remains disabled." }, journal, v3AlphaRecorded });
 }
