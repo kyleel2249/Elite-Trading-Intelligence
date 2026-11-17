@@ -14,7 +14,7 @@ function exchangePositions(snapshot: any) {
  return out;
 }
 
-function verifiedGrossExposureUsd(snapshot:any,activity:any,now:number){
+export function verifiedGrossExposureUsd(snapshot:any,activity:any,now:number){
  const problems:string[]=[];
  if(!activity?.syncedAt||now-activity.syncedAt<0||now-activity.syncedAt>6*60_000)problems.push("exchange_activity_snapshot_stale_or_missing");
  const last=activity?.syncs?.at?.(-1),results=last?.results??[];
