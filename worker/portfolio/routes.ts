@@ -16,6 +16,7 @@ import { PortfolioStore, importKvToD1, isD1, openStore, storageConfigured, type 
 import { loadMinuteBars } from "../algo/market-inputs.ts";
 import { buildPortfolioManager } from "./manager.ts";
 import { loadExchangePortfolioSnapshot } from "./exchanges.ts";
+import { buildCrossExchangeReconciliation, readAutonomyControls, saveAutonomyControls } from "./reconciliation.ts";
 
 export type PortfolioEnv = EngineEnv & { ETI_PORTFOLIO_DB?: any } & { ETI_EXECUTION_TOKEN?: string; ETI_SESSION_SECRET?: string; ETI_SESSION_SECRET_PREVIOUS?: string; ETI_AUTO_SESSIONS?: string; ETI_KEY_ROTATION_DAYS?: string; ETI_KILL_SWITCH?: string };
 const H = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -107,6 +108,25 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   if (!auth.master) { const rl = await rateLimit(env as any, "pf:" + (auth.refs[need!] || "anon"), 120, 600, now); if (!rl.ok) return reply({ error: "rate_limited" }, 429); }
   const authRef = auth.master ? "master_token" : "session:" + (auth.refs[need!] || "?");
   const audit = async (what: string, detail: unknown) => { try { await ((env.ETI_EXECUTION_LOG ?? { put: async () => undefined }) as KVL).put("exec:audit:" + new Date(now).toISOString() + ":" + what, JSON.stringify({ at: new Date(now).toISOString(), what, environment, auth: authRef, detail }), { expirationTtl: 60 * 60 * 24 * 90 }); } catch { /* audit is best effort here; the ledger event is the record */ } };
+  if (path === "/api/portfolio/reconciliation") {
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Cross-exchange reconciliation requires the master execution token or administrator MFA." }, 403);
+    if (!["GET", "POST"].includes(req.method)) return reply({ error: "method_not_allowed" }, 405);
+    try {
+      const rec = await buildCrossExchangeReconciliation(env as any, environment as "internal_paper" | "exchange_testnet", now, deps);
+      await audit("cross_exchange_reconciliation", { ok: rec.ok, status: rec.status, problems: rec.problems.length });
+      return reply(rec);
+    } catch (e) { return reply({ error: "reconciliation_unavailable", message: e instanceof Error ? e.message : "reconciliation_failed" }, 503); }
+  }
+  if (path === "/api/portfolio/autonomy") {
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Autonomous execution controls require the master execution token or administrator MFA." }, 403);
+    if (req.method === "GET") return reply(await readAutonomyControls(env.ETI_EXECUTION_LOG as KVL | undefined, now));
+    if (req.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
+    try {
+      const controls = await saveAutonomyControls(env.ETI_EXECUTION_LOG as KVL | undefined, body, authRef, now);
+      await audit("autonomy_controls", { enabled: controls.enabled, expiresAt: controls.expiresAt, executionDispatchEnabled: false });
+      return reply(controls);
+    } catch (e) { return reply({ error: e instanceof Error ? e.message : "invalid_autonomy_controls" }, 400); }
+  }
   if (path === "/api/portfolio/cancel") {
     const orderId = typeof body.orderId === "string" ? body.orderId : ""; if (!/^[A-Za-z0-9_.:-]{4,80}$/.test(orderId)) return reply({ error: "invalid_order_id" }, 400);
     const r = environment === "internal_paper" ? await cancelInternal(env, orderId, now, authRef) : await cancelExchange(env, deps, orderId, now);
