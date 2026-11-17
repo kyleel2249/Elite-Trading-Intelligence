@@ -1,8 +1,8 @@
 /**
  * Unfilled Fair Value Gap intelligence for the live chart. Layered on top of the FVG layer (worker/ui/fvg-layer.ts), which keeps owning detection,
  * rectangles, higher-timeframe loading and the existing controls. This layer adds, without replacing anything:
- *  - an explicit status badge on every drawn zone ("BULLISH FVG – UNFILLED", "BEARISH FVG – PARTIALLY FILLED", ...) with price boundaries,
- *    timeframe, percentage filled, gap size and formation time (as many segments as fit the zone),
+ *  - an explicit status badge on every drawn zone ("BULLISH FVG – UNFILLED", "BEARISH FVG – PARTIALLY FILLED", ...) with percentage filled, price boundaries,
+ *    timeframe, gap size and formation time (as many segments as fit the zone, in that priority order),
  *  - a lifecycle that keeps the UNFILLED designation until the candle that filled the gap has CLOSED ("FILL PENDING CLOSE" in between),
  *  - an in-memory history registry: zones are keyed once (no duplicates), fill depth only grows, confirmed resolutions are locked (no repainting)
  *    and zones that scroll out of the candle window keep being tracked,
@@ -180,7 +180,7 @@ function paintBadges(st,list){
    x.fillStyle=hexRgba(c,0.08);x.fillRect(h.x0,h.y0,h.x1-h.x0,h.y1-h.y0);
    x.strokeStyle=hexRgba(c,0.8);x.lineWidth=1;x.setLineDash([4,3]);x.strokeRect(h.x0+.5,h.y0+.5,Math.max(1,h.x1-h.x0-1),Math.max(1,h.y1-h.y0-1));x.setLineDash([]);
   }
-  var segs=[label(z,lc),px(z.lower)+' – '+px(z.upper),z.timeframe,z.mitigationPct+'% filled','gap '+px(z.sizeAbs)+' ('+z.sizePct+'%)','formed '+fmtT(z.formationTime)];
+  var segs=[label(z,lc),z.mitigationPct+'% filled',px(z.lower)+' – '+px(z.upper),z.timeframe,'gap '+px(z.sizeAbs)+' ('+z.sizePct+'%)','formed '+fmtT(z.formationTime)];
   var maxW=Math.max(60,h.x1-h.x0-8),txt=segs[0];
   for(var i=1;i<segs.length;i++){var t2=txt+' · '+segs[i];if(tw(x,t2)+10>maxW)break;txt=t2;}
   var w=Math.min(maxW,tw(x,txt)+10),bx=Math.max(h.x0+4,2),by=Math.max(h.y0-8,s.top+7);
