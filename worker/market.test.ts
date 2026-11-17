@@ -68,7 +68,7 @@ test("Bitget spot candles, ticker and margin market data use the global public A
   assert.equal(candles.headers.get("x-eti-provider"), "bitget");
   assert.equal(new URL(urls[0]).hostname, "api.bitget.com");
   assert.match(urls[0], /category=SPOT/);
-  assert.match(urls[0], /interval=1min/);
+  assert.match(urls[0], /interval=1m/);
   const margin = await handleMarket(req("/api/market/klines?venue=bitget&market=margin&symbol=BTCUSDT&interval=1m"), {});
   assert.equal(margin.status, 200);
   assert.match(urls[1], /category=SPOT/);
