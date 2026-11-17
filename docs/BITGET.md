@@ -2,7 +2,7 @@
 
 ## Public market data (Cloudflare Workers; no API key)
 
-ETI's shared chart market API supports Bitget directly from Cloudflare Workers using the global `https://api.bitget.com` REST host. The Worker uses Cloudflare's free placement hint targeting the data centre nearest GCP `europe-west1` (Belgium); this is a location hint, not a fixed-IP guarantee. No Fly.io service, paid regional proxy, or exchange credentials are used for public data.
+ETI's shared chart market API supports Bitget directly from Cloudflare Workers. It tries Bitget's UTA V3 public market endpoints first, then falls back to documented Classic V2 public market endpoints through `capi.bitget.com` and `api.bitget.com` when V3 is blocked. The Worker uses Cloudflare's free placement hint targeting the data centre nearest GCP `europe-west1` (Belgium); this is a location hint, not a fixed-IP guarantee. No Fly.io service, paid regional proxy, or exchange credentials are used for public data.
 
 | Product | Symbol catalogue | Chart data category |
 |---|---|---|
@@ -20,7 +20,7 @@ The common market endpoints accept `venue=bitget`:
 - `GET /api/market/trades?venue=bitget&symbol=BTCUSDT`
 - `GET /api/market/ticker?venue=bitget&symbol=BTCUSDT`
 
-Use `market=futures` and an explicit Bitget futures `category` for derivatives. Use `market=margin` for margin-enabled pairs discovered from Bitget's MARGIN instrument catalogue. Bitget exposes the margin pair's underlying spot candles, order book and ticker through the SPOT market-data category; the recent fills request uses MARGIN. ETI keeps the margin eligibility catalogue distinct from ordinary spot listings and never substitutes another exchange's data. The symbol catalogue is refreshed on a 60-second cache; public REST calls use short cache windows and strict payload validation. Bitget V3's documented candle intervals are used directly; 2h, 8h, 3d, weekly and monthly chart bars are aggregated from hourly or daily candles rather than sending unsupported interval strings.
+Use `market=futures` and an explicit Bitget futures `category` for derivatives. Use `market=margin` for margin-enabled pairs discovered from Bitget's MARGIN instrument catalogue. Bitget exposes margin pairs from its MARGIN instrument catalogue (V3) or Classic V2 `/api/v2/margin/currencies` fallback, including cross/isolated borrowability and leverage limits. The underlying spot candles, order book and ticker use the SPOT market-data category; V3 margin fills use MARGIN, while the V2 fallback uses the public spot fills tape. ETI keeps the margin eligibility catalogue distinct from ordinary spot listings and never substitutes another exchange's data. The symbol catalogue is refreshed on a 60-second cache; public REST calls use short cache windows and strict payload validation. Bitget V3's documented candle intervals are used directly; 2h, 8h, 3d, weekly and monthly chart bars are aggregated from hourly or daily candles rather than sending unsupported interval strings.
 
 ## Account, fills and history
 
