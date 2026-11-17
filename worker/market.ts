@@ -732,7 +732,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   const endpoint = url.pathname.slice("/api/market/".length);
   const marketFetch = fetch;
   if (endpoint === "region") return jsonResp({
-    service: "eti-public-market-data", transport: "cloudflare-worker-direct",
+    service: "eti-public-market-data", transport: "cloudflare-worker-direct", placementHint: "gcp:europe-west1",
     providers: { bybit: PROVIDERS.bybit.hosts, bitget: PROVIDERS.bitget.hosts },
     fixedEgressIp: false, accountResidencyIsNotChanged: true,
     note: "Exchange account permissions follow the verified account registration country; Worker location does not change account eligibility."
