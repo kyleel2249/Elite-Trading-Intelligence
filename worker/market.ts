@@ -164,12 +164,14 @@ const asArray = (v: unknown, what: string): any[] => {
 };
 
 // Bitget granularity names. Day/week/month and 6h/12h use the UTC-aligned variants so candles line up with the other venues.
+// Exact Bitget V3 granularities. Wider intervals are safely aggregated from
+// documented 1H/1D candles instead of sending unsupported interval strings.
 const BITGET_SPOT_GRAN: Record<string, string> = {
-  "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "6h": "6Hutc", "12h": "12Hutc", "1d": "1Dutc", "1w": "1Wutc", "1M": "1Mutc",
+  "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+  "1h": "1H", "2h": "1H", "4h": "4H", "6h": "6H", "8h": "1H", "12h": "12H",
+  "1d": "1D", "3d": "1D", "1w": "1D", "1M": "1D",
 };
-const BITGET_MIX_GRAN: Record<string, string> = {
-  "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "2h": "2H", "4h": "4H", "6h": "6Hutc", "8h": "8Hutc", "12h": "12Hutc", "1d": "1Dutc", "3d": "3Dutc", "1w": "1Wutc", "1M": "1Mutc",
-};
+const BITGET_MIX_GRAN: Record<string, string> = { ...BITGET_SPOT_GRAN };
 /** Bitget futures product type from the contract symbol when the caller did not say: ...USDT, ...USDC / ...PERP, ...USD (coin-margined). */
 export function bitgetProductFor(symbol: string): BitgetProductType {
   if (/USDC$|PERP$/.test(symbol)) return "USDC-FUTURES";
@@ -178,10 +180,35 @@ export function bitgetProductFor(symbol: string): BitgetProductType {
   return "USDT-FUTURES";
 }
 /** Spot and futures share one envelope ({code:"00000", data}) and the same row shapes, so one parser serves both. Anything unexpected is a provider failure, never a guess. */
+function aggregateBitgetKlines(rows: Kline[], interval: string, limit: number): Kline[] {
+  const start = (time: number): number => {
+    const d = new Date(time);
+    if (interval === "1M") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+    if (interval === "1w") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    const seconds = interval === "2h" ? 7200 : interval === "8h" ? 28800 : interval === "3d" ? 259200 : 0;
+    return seconds ? Math.floor(time / (seconds * 1000)) * seconds * 1000 : time;
+  };
+  const grouped = new Map<number, Kline>();
+  for (const row of rows) {
+    const key = start(row[0]), current = grouped.get(key);
+    if (!current) grouped.set(key, [key, row[1], row[2], row[3], row[4], row[5]]);
+    else { current[2] = Math.max(current[2], row[2]); current[3] = Math.min(current[3], row[3]); current[4] = row[4]; current[5] += row[5]; }
+  }
+  return [...grouped.values()].sort((a, b) => a[0] - b[0]).slice(-limit);
+}
+function bitgetCandleRequest(p: Params, granularity: Record<string, string>) {
+  const aggregateFactor = p.interval === "2h" ? 2 : p.interval === "8h" ? 8 : p.interval === "3d" ? 3 : p.interval === "1w" ? 7 : p.interval === "1M" ? 31 : 1;
+  const limit = Math.min(1000, Math.max(p.limit, p.limit * aggregateFactor));
+  return { interval: granularity[p.interval], limit: String(limit), aggregate: aggregateFactor > 1 };
+}
 function parseBitget(endpoint: Endpoint, j: any, p: Params): unknown {
   if (!j || j.code !== "00000" || j.data === undefined || j.data === null) throw new InvalidPayload("bitget_rejected_" + (j && j.code));
   const d = j.data;
-  if (endpoint === "klines") return validateKlines(asArray(d, "klines_not_array").map((a) => { const r = asArray(a, "kline_row"); return [num(r[0]), num(r[1]), num(r[2]), num(r[3]), num(r[4]), num(r[5])] as Kline; }), p.limit);
+  if (endpoint === "klines") {
+    const requestFactor = p.interval === "2h" ? 2 : p.interval === "8h" ? 8 : p.interval === "3d" ? 3 : p.interval === "1w" ? 7 : p.interval === "1M" ? 31 : 1;
+    const rows = validateKlines(asArray(d, "klines_not_array").map((a) => { const r = asArray(a, "kline_row"); return [num(r[0]), num(r[1]), num(r[2]), num(r[3]), num(r[4]), num(r[5])] as Kline; }), Math.min(1000, p.limit * requestFactor));
+    return requestFactor > 1 ? aggregateBitgetKlines(rows, p.interval, p.limit) : rows.slice(-p.limit);
+  }
   if (endpoint === "depth") {
     const lv = (x: unknown) => asArray(x, "book_side").map((a) => [num(a[0]), num(a[1])] as [number, number]);
     return validateDepth({ bids: lv(d.bids ?? d.b), asks: lv(d.asks ?? d.a) });
@@ -199,8 +226,8 @@ function parseBitget(endpoint: Endpoint, j: any, p: Params): unknown {
     ...(Number.isFinite(Number(t.indexPrice)) ? { indexPrice: num(t.indexPrice) } : {}),
     ...(Number.isFinite(Number(t.fundingRate)) ? { fundingRate: num(t.fundingRate) } : {}),
     ...(Number.isFinite(Number(t.openInterest)) ? { openInterest: num(t.openInterest) } : {}),
-    ...(Number.isFinite(Number(t.bid1Price)) ? { bidPrice: num(t.bid1Price) } : {}),
-    ...(Number.isFinite(Number(t.ask1Price)) ? { askPrice: num(t.ask1Price) } : {}),
+    ...(Number.isFinite(Number(t.bid1Price ?? t.bidPr)) ? { bidPrice: num(t.bid1Price ?? t.bidPr) } : {}),
+    ...(Number.isFinite(Number(t.ask1Price ?? t.askPr)) ? { askPrice: num(t.ask1Price ?? t.askPr) } : {}),
     ...(Number.isFinite(Number(t.ts)) ? { timestamp: num(t.ts) } : {}),
   });
 }
@@ -342,10 +369,10 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
       // Bitget's margin instrument list is distinct, but its documented candles,
       // order book and ticker use the underlying SPOT category. Margin fills accept MARGIN.
       const category = p.category === "MARGIN" && endpoint === "trades" ? "MARGIN" : "SPOT";
-      const interval = BITGET_SPOT_GRAN[p.interval];
+      const candle = bitgetCandleRequest(p, BITGET_SPOT_GRAN);
       if (endpoint === "klines") {
-        if (!interval) throw new Unsupported("bitget_spot_interval");
-        return { path: "/api/v3/market/candles", query: { category, symbol: p.symbol, interval, type: "market", limit: String(Math.min(p.limit, 1000)) } };
+        if (!candle.interval) throw new Unsupported("bitget_spot_interval");
+        return { path: "/api/v3/market/candles", query: { category, symbol: p.symbol, interval: candle.interval, type: "market", limit: candle.limit } };
       }
       if (endpoint === "depth") return { path: "/api/v3/market/orderbook", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 100)) } };
       if (endpoint === "trades") return { path: "/api/v3/market/fills", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 100)) } };
@@ -357,10 +384,10 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
     hosts: ["https://api.bitget.com"],
     request(endpoint, p) {
       const category = p.productType ?? (p.category && BITGET_PRODUCT_TYPES.includes(p.category as BitgetProductType) ? p.category as BitgetProductType : bitgetProductFor(p.symbol));
-      const interval = BITGET_MIX_GRAN[p.interval];
+      const candle = bitgetCandleRequest(p, BITGET_MIX_GRAN);
       if (endpoint === "klines") {
-        if (!interval) throw new Unsupported("bitget_futures_interval");
-        return { path: "/api/v3/market/candles", query: { category, symbol: p.symbol, interval, type: "market", limit: String(Math.min(p.limit, 1000)) } };
+        if (!candle.interval) throw new Unsupported("bitget_futures_interval");
+        return { path: "/api/v3/market/candles", query: { category, symbol: p.symbol, interval: candle.interval, type: "market", limit: candle.limit } };
       }
       if (endpoint === "depth") return { path: "/api/v3/market/orderbook", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 100)) } };
       if (endpoint === "trades") return { path: "/api/v3/market/fills", query: { category, symbol: p.symbol, limit: String(Math.min(p.limit, 100)) } };
@@ -523,7 +550,15 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string, 
   return body;
 }
 
-export interface SymbolRow { s: string; b: string; q: string; m: MarketKind; c: string; /** listing venue */ v?: Venue; /** Bitget futures product type */ pt?: BitgetProductType; /** Bybit spot margin eligibility */ marginTrading?: string }
+export interface SymbolRow {
+  s: string; b: string; q: string; m: MarketKind; c: string;
+  /** Listing venue */ v?: Venue;
+  /** Bitget futures product type */ pt?: BitgetProductType;
+  /** Bybit spot margin eligibility */ marginTrading?: string;
+  /** Bitget cross/isolated margin eligibility and max leverage */ marginCrossed?: boolean; marginIsolated?: boolean;
+  maxCrossedLeverage?: number; maxIsolatedLeverage?: number;
+  /** Bitget derivative contract type */ contractType?: "perpetual" | "delivery";
+}
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
 const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
 /** The Binance pair list is re-read at most every 10 minutes per isolate; Bitget spot and futures lists use their own 60-second cache. */
@@ -608,7 +643,10 @@ export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: 
   const categories = market === "spot" ? ["SPOT"] : BITGET_PRODUCT_TYPES;
   const parts = await Promise.all(categories.map(async (category) => ({ category, r: await bitgetGet("/api/v3/market/instruments?category=" + category, fetchImpl) })));
   for (const { category, r } of parts) {
-    if (r.list) r.list.filter((x) => x && BITGET_OK_STATUS.has(String(x.status ?? "").toLowerCase()) && (category === "SPOT" || !x.type || String(x.type).toLowerCase() === "perpetual")).forEach((x) => add(x, category === "SPOT" ? undefined : category));
+    if (r.list) r.list.filter((x) => x && BITGET_OK_STATUS.has(String(x.status ?? "").toLowerCase()) && (category === "SPOT" || !x.type || ["perpetual", "delivery"].includes(String(x.type).toLowerCase()))).forEach((x) => {
+      add(x, category === "SPOT" ? undefined : category);
+      if (category !== "SPOT") rows[rows.length - 1].contractType = String(x.type ?? "perpetual").toLowerCase() === "delivery" ? "delivery" : "perpetual";
+    });
     else attempts.push({ host: BITGET_BASE + " (" + category + ")", status: r.status, errorClass: r.errorClass });
   }
   rows.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : (a.pt ?? "") < (b.pt ?? "") ? -1 : 1));
@@ -623,7 +661,12 @@ export async function listBitgetMarginSymbols(fetchImpl: typeof fetch = fetch, n
   const r = await bitgetGet("/api/v3/market/instruments?category=MARGIN", fetchImpl);
   if (r.list) {
     const rows = r.list.filter(x => x && String(x.status ?? "").toLowerCase() === "online" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol ?? "")))
-      .map(x => ({ s: String(x.symbol), b: String(x.baseCoin ?? "").toUpperCase(), q: String(x.quoteCoin ?? "").toUpperCase(), m: "spot" as MarketKind, c: bitgetCategory(String(x.baseCoin ?? "").toUpperCase(), String(x.quoteCoin ?? "").toUpperCase()), v: "bitget" as const }));
+      .map(x => ({
+        s: String(x.symbol), b: String(x.baseCoin ?? "").toUpperCase(), q: String(x.quoteCoin ?? "").toUpperCase(),
+        m: "spot" as MarketKind, c: bitgetCategory(String(x.baseCoin ?? "").toUpperCase(), String(x.quoteCoin ?? "").toUpperCase()),
+        v: "bitget" as const, marginCrossed: Number(x.maxCrossedLeverage) > 0, marginIsolated: Number(x.maxIsolatedLeverage) > 0,
+        maxCrossedLeverage: Number(x.maxCrossedLeverage) || 0, maxIsolatedLeverage: Number(x.maxIsolatedLeverage) || 0,
+      }));
     if (rows.length) { const entry = { at: now(), rows, host: BITGET_BASE }; bitgetMarginCache = entry; return { rows, host: entry.host, cached: false, stale: false, fetchedAt: entry.at }; }
   }
   if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at };
@@ -713,8 +756,12 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
         else warnings.push({ market: key, venue: "bybit", error: "unavailable" });
       });
     } else if (want === "margin") {
-      const r = await listBitgetMarginSymbols(marketFetch); rows.push(...r.rows);
-      sources.MARGIN = { host: r.host, count: r.rows.length, cached: r.cached, stale: r.stale };
+      try {
+        const r = await listBitgetMarginSymbols(marketFetch); rows.push(...r.rows);
+        sources.MARGIN = { host: r.host, count: r.rows.length, cached: r.cached, stale: r.stale };
+      } catch (e) {
+        warnings.push({ market: "margin", venue: "bitget", error: e instanceof AllProvidersFailed ? "upstream_unavailable" : "catalogue_processing_error" });
+      }
     } else {
       const jobs = want === "all" ? (["spot", "futures"] as MarketKind[]) : [want as MarketKind];
       const settled = await Promise.allSettled(jobs.map(market => listBitgetSymbols(market, marketFetch)));
@@ -729,7 +776,8 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       : want === "margin" ? ["MARGIN"] : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
-      symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : []), ...(x.marginTrading ? [x.marginTrading] : [])]) }, 200, { "cache-control": "public, max-age=45" });
+      symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : []), ...(x.marginTrading ? [x.marginTrading] : []),
+        ...(x.marginCrossed !== undefined ? [x.marginCrossed, x.marginIsolated, x.maxCrossedLeverage, x.maxIsolatedLeverage] : []), ...(x.contractType ? [x.contractType] : [])]) }, 200, { "cache-control": "public, max-age=45" });
   }
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";
