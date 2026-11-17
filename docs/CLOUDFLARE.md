@@ -12,7 +12,9 @@ BACKEND_URL is required for this build.**
 4. Deploy command: `npx wrangler deploy`
 5. Ensure the Worker has Workers Free plan access and Workers Dev subdomain enabled.
 
-### 1. Run the FastAPI app (origin)
+### Optional legacy Python/FastAPI origin (not used by this Cloudflare-only build)
+
+Skip this section for the Cloudflare-native ETI deployment. These commands are only for maintaining the separate Python service:
 
 ```bash
 git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
@@ -25,7 +27,7 @@ curl -s http://localhost:8000/api/system/health
 
 Compose binds the origin to 127.0.0.1:8000 and forces APP_ENV=production. Expose it through a local HTTPS reverse proxy or Cloudflare Tunnel. A containerized proxy can use the Compose network.
 
-### 2. Deploy the edge Worker (no Containers)
+### Deploy the edge Worker (no Containers)
 
 Workers Builds / local:
 
