@@ -40,6 +40,7 @@ export const PORTFOLIO_HTML = `
 <h3>Portfolio Performance</h3>
 <div class="pfperf"><div><canvas id="pfCurve" class="pfcurve" role="img" aria-label="Equity curve from actual fills"></canvas><div id="pfCurveNote" class="muted" style="font-size:11px;margin-top:4px"></div></div><div id="pfStats" class="pfstats"></div></div>
 <h3>AI Portfolio Manager <span class="muted">read-only allocation advisory</span></h3><div id="pfManager" class="pfwrap muted" aria-live="polite">Loading strategy allocation analysis…</div>
+<h3>Bybit &amp; Bitget Account Sync <button type="button" class="mini" id="pfExchangeRefresh">Refresh accounts</button></h3><div id="pfExchanges" class="pfwrap muted" aria-live="polite">Account snapshots require the ETI master execution token or administrator MFA.</div>
 <details style="margin-top:12px"><summary class="muted">Ledger integrity (anomalies and reconciliation)</summary><div id="pfIntegrity" class="muted" style="font-size:12px;margin-top:6px"></div></details>
 </section>
 `;
@@ -50,7 +51,7 @@ export const PLAN_HTML = `
 
 export const PORTFOLIO_JS = `
 /* ===== live portfolio: ledger-backed panels + chart trade layer ===== */
-const pf={env:'internal_paper',state:null,manager:null,managerAt:0,timer:null,fails:0,okAt:0,busy:false,pollMs:15000,allOrders:false,closedRows:null,hits:[],pop:null,lastPx:null,levEdit:null};
+const pf={env:'internal_paper',state:null,manager:null,managerAt:0,exchanges:null,exchangesAt:0,timer:null,fails:0,okAt:0,busy:false,pollMs:15000,allOrders:false,closedRows:null,hits:[],pop:null,lastPx:null,levEdit:null};
 const pfEsc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pfNum=(v,d)=>{if(v==null||!isFinite(v))return '—';const dd=d==null?2:d,m=Math.abs(v)>=1||v===0?dd:Math.max(dd,6);return Number(v).toLocaleString(undefined,{minimumFractionDigits:Math.min(dd,m),maximumFractionDigits:m});};
 const pfQty=v=>v==null||!isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:8});
@@ -98,6 +99,7 @@ async function pfLoadManager(){
   if(r.status===423){target.textContent='Live portfolio management is disabled. No live account or order state is inferred.';pf.managerAt=Date.now();return;}
   if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
   pf.manager=d;pf.managerAt=Date.now();pfRenderManager();
+  if(Date.now()-pf.exchangesAt>60000)pfLoadExchanges();
  }catch(e){if(!pf.manager)target.textContent='Portfolio Manager unavailable: '+e.message;else target.textContent='Showing the last analysis. Refresh pending: '+e.message;}
 }
 function pfRenderManager(){
@@ -109,6 +111,23 @@ function pfRenderManager(){
  const warnings=(c.warnings||[]).map(w=>'<li>'+pfEsc(w.replace(/_/g,' '))+'</li>').join('');
  const venues=(m.venues||[]).map(v=>'<span class="muted">'+pfEsc(v.venue)+': '+money(v.ledgerExposureUsd)+' USDT</span>').join(' · ');
  root.className='pfwrap';root.innerHTML='<div class="pfkpis"><div><span>Equity</span><b>'+money(a.equityUsd)+'</b></div><div><span>Cash</span><b>'+money(a.cashUsd)+'</b></div><div><span>Open risk</span><b>'+pct(a.openRiskPct)+'</b></div><div><span>Allocated target</span><b>'+pct(a.allocatedPct)+'</b></div><div><span>Cash reserve target</span><b>'+pct(a.recommendedReservePct)+'</b></div><div><span>Portfolio exposure</span><b>'+pct(a.exposurePct)+'</b></div></div><div class="muted" style="font-size:11px;margin:8px 0">Advisory only · '+(c.executionReady?'risk data complete':'risk data incomplete / blocked')+' · no orders, leverage or automatic reallocations</div><div class="pfwrap"><table><thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Expectancy</th><th>Target</th><th>Capital</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="muted" style="font-size:11px;margin-top:8px">Recorded venue exposure: '+(venues||'No venue-tagged holdings in this ledger')+'</div>'+(warnings?'<ul class="muted" style="font-size:11px">'+warnings+'</ul>':'<div class="muted" style="font-size:11px;margin-top:6px">No portfolio-level warnings.</div>');
+}
+async function pfLoadExchanges(){
+ const root=$('pfExchanges');if(!root)return;
+ try{const {r,d}=await pfCall('/api/portfolio/exchanges');
+  if(r.status===403){root.textContent='Account snapshots require the ETI master execution token or an administrator session with MFA.';pf.exchangesAt=Date.now();return;}
+  if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
+  pf.exchanges=d;pf.exchangesAt=Date.now();pfRenderExchanges();
+ }catch(e){if(!pf.exchanges)root.textContent='Exchange account sync unavailable: '+e.message;}
+}
+function pfRenderExchanges(){
+ const root=$('pfExchanges'),x=pf.exchanges;if(!root||!x)return;
+ const money=v=>v==null?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+ const esc=pfEsc, by=(x.venues||[]).find(v=>v.venue==='bybit'),bg=(x.venues||[]).find(v=>v.venue==='bitget');
+ const byAssets=(by&&by.assets||[]).slice(0,20).map(a=>'<tr><td>'+esc(a.coin)+'</td><td>'+money(a.walletBalance)+'</td><td>'+money(a.availableToWithdraw)+'</td><td>'+money(a.usdValue)+'</td></tr>').join('');
+ const byPos=(by&&by.positions||[]).slice(0,20).map(p=>'<tr><td>'+esc(p.symbol)+'</td><td>'+esc(p.category+' '+p.side)+'</td><td>'+money(p.size)+'</td><td>'+money(p.positionValue)+'</td><td>'+money(p.unrealizedPnl)+'</td></tr>').join('');
+ const mk=(bg&&bg.markets||[]).map(m=>'<details><summary>'+esc(m.market)+' · '+esc(m.status)+' · '+(m.assets||[]).length+' assets · '+(m.positions||[]).length+' positions</summary><div class="pfwrap"><table><thead><tr><th>Coin</th><th>Balance</th><th>Available</th><th>Equity / USD value</th></tr></thead><tbody>'+((m.assets||[]).map(a=>'<tr><td>'+esc(a.coin)+'</td><td>'+money(a.total)+'</td><td>'+money(a.available)+'</td><td>'+money(a.equity??a.usdValue)+'</td></tr>').join('')||'<tr><td colspan="4">No reported assets or unavailable.</td></tr>')+'</tbody></table><table><thead><tr><th>Symbol</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Unrealized P&amp;L</th><th>Liquidation</th></tr></thead><tbody>'+((m.positions||[]).map(p=>'<tr><td>'+esc(p.symbol)+'</td><td>'+esc(p.side)+'</td><td>'+money(p.size)+'</td><td>'+money(p.entryPrice)+'</td><td>'+money(p.markPrice)+'</td><td>'+money(p.unrealizedPnl)+'</td><td>'+money(p.liquidationPrice)+'</td></tr>').join('')||'<tr><td colspan="7">No open positions reported.</td></tr>')+'</tbody></table></div>'+(m.error?'<div class="muted">'+esc(m.error)+'</div>':'')+'</details>').join('');
+ root.className='pfwrap';root.innerHTML='<div class="pfkpis"><div><span>Bybit status</span><b>'+esc(by&&by.status||'unknown')+'</b></div><div><span>Bybit equity</span><b>'+money(by&&by.equityUsd)+'</b></div><div><span>Bybit available</span><b>'+money(by&&by.availableUsd)+'</b></div><div><span>Bitget status</span><b>'+esc(bg&&bg.status||'unknown')+'</b></div><div><span>Last sync</span><b>'+new Date(x.generatedAt).toLocaleTimeString()+'</b></div></div><p class="muted" style="font-size:11px">Read-only. Bitget product balances remain separate to avoid double-counting shared collateral. Exchange-reported units are retained; combined equity is deliberately not calculated.</p><h4>Bybit assets</h4><div class="pfwrap"><table><thead><tr><th>Coin</th><th>Wallet</th><th>Available to withdraw</th><th>USD value</th></tr></thead><tbody>'+(byAssets||'<tr><td colspan="4">No assets reported or account unavailable.</td></tr>')+'</tbody></table></div><h4>Bybit positions</h4><div class="pfwrap"><table><thead><tr><th>Symbol</th><th>Market</th><th>Size</th><th>Position value</th><th>Unrealized P&amp;L</th></tr></thead><tbody>'+(byPos||'<tr><td colspan="5">No positions reported.</td></tr>')+'</tbody></table></div><h4>Bitget accounts by product</h4>'+mk+'<p class="muted" style="font-size:11px">No orders, leverage changes, transfers or withdrawals are performed by this panel.</p>';
 }
 function pfMark(p){const sym=$('symbol').value;if(p.symbol===sym&&candles.length){const px=candles[candles.length-1][4];if(px>0)return {px,src:'chart'};}return p.markPrice!=null?{px:p.markPrice,src:p.markStale?'stale':'server'}:{px:null,src:'none'};}
 function pfLive(){
@@ -321,7 +340,8 @@ function pfUseSignal(){
 }
 function pfInit(){
  pf.env=pfEnvOfBroker();$('pfEnv').value=pf.env;
- $('pfEnv').onchange=()=>{pf.env=$('pfEnv').value;pf.state=null;pf.manager=null;pf.managerAt=0;pf.closedRows=null;pfRender();$('pfManager').textContent='Loading strategy allocation analysis…';pfLoad();};
+ $('pfExchangeRefresh').onclick=()=>{pf.exchangesAt=0;pfLoadExchanges();};
+ $('pfEnv').onchange=()=>{pf.env=$('pfEnv').value;pf.state=null;pf.manager=null;pf.managerAt=0;pf.exchanges=null;pf.exchangesAt=0;pf.closedRows=null;pfRender();$('pfManager').textContent='Loading strategy allocation analysis…';$('pfExchanges').textContent='Refresh accounts to load exchange snapshots.';pfLoad();};
  $('orderBroker').addEventListener('change',()=>{const e=pfEnvOfBroker();if(e!==pf.env){pf.env=e;pf.state=null;pf.closedRows=null;pfRender();pfLoad();}});
  $('pfAllOrders').onchange=()=>{pf.allOrders=$('pfAllOrders').checked;pfRenderOrders();};
  $('pfSync').onclick=async()=>{$('pfSync').disabled=true;await pfCall('/api/portfolio/sync',{environment:pf.env});$('pfSync').disabled=false;pfKick();};
