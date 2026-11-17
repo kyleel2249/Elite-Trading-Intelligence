@@ -7,10 +7,6 @@ on:
     paths:
       - "worker/**"
       - "app/**"
-      - "fly.toml"
-      - "Dockerfile"
-      - "requirements.txt"
-      - "pyproject.toml"
       - "wrangler.jsonc"
       - "migrations/**"
       - "package.json"
@@ -36,15 +32,6 @@ jobs:
         run: npm ci
       - name: Run full Worker, security and type checks
         run: npm run check
-      - name: Deploy Frankfurt FastAPI origin for Bybit market egress
-        uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Deploy FastAPI backend to Fly.io Frankfurt
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          test -n "$FLY_API_TOKEN" || (echo "::error::Set FLY_API_TOKEN in GitHub Actions secrets to deploy the Frankfurt Bybit egress service"; exit 1)
-          flyctl deploy --remote-only --config fly.toml
-
       - name: Apply pending D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -96,15 +83,15 @@ jobs:
         run: |
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
           failed=0
-          region_response="$(curl --silent --show-error --fail "$base/api/market/region")" || { echo "::error::Could not read the Bybit market execution region"; exit 1; }
+          region_response="$(curl --silent --show-error --fail "$base/api/market/region")" || { echo "::error::Could not read the public market transport diagnostic"; exit 1; }
           printf '%s' "$region_response" | node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s);
-              if(x.transport!=="regional-fastapi-proxy"||x.egress_region!=="fra"||x.region_verified!==true){
-                console.error("Bybit market egress:",JSON.stringify(x));process.exit(1);
+              if(x.transport!=="cloudflare-worker-direct"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
+                console.error("Public market transport:",JSON.stringify(x));process.exit(1);
               }
-              console.log("Bybit public REST requests are routed through the ETI FastAPI origin in Fly.io Frankfurt.");
-            }catch(e){console.error("Invalid Bybit region response:",e.message);process.exit(1);}});' || exit 1
+              console.log("Bybit and Bitget public REST traffic is served directly by Cloudflare Workers; no Fly.io deployment is required.");
+            }catch(e){console.error("Invalid market transport response:",e.message);process.exit(1);}});' || exit 1
           symbols_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
           symbols_status="${symbols_response##*__HTTP_CODE__}"
           symbols="${symbols_response%__HTTP_CODE__*}"
