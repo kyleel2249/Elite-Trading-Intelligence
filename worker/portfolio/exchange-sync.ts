@@ -70,5 +70,5 @@ export async function readExchangeActivity(env:Env,environment:"internal_paper"|
  const state=await st.kvGet<ActivityState>("exchange_activity",{schema:"eti.exchange-activity/1",syncedAt:0,fills:[],openOrders:[],syncs:[]});
  const {ledger}=await st.ledgerFast(now),orders=Object.values(ledger.orders);
  const {unmatched}=matchActivityFills(state.fills,orders);
- return {...state,ageMs:state.syncedAt?now-state.syncedAt:null,unmatchedFills:unmatched.slice(-500)};
+ return {...state,totalFills:state.fills.length,fills:state.fills.slice(-600),ageMs:state.syncedAt?now-state.syncedAt:null,unmatchedFills:unmatched.slice(-500)};
 }
