@@ -90,6 +90,7 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
     return reply(await loadExchangePortfolioSnapshot(env as any, now));
   }
   if (path === "/api/portfolio/exchange-activity") {
+    if (environment === "live") return reply({error:"live_disabled",message:"Live exchange activity synchronization is disabled."},423);
     if (!isOperator(auth)) return reply({ error: "operator_required", message: "Exchange activity sync requires the ETI master execution token or administrator MFA." }, 403);
     if (req.method === "GET") { try { return reply(await readExchangeActivity(env as any, environment as "internal_paper" | "exchange_testnet", now)); } catch(e) { return reply({error:"exchange_activity_unavailable",message:e instanceof Error?e.message:"read_failed"},503); } }
     if (req.method === "POST") { try { const result=await syncExchangeActivity(env as any, environment as "internal_paper" | "exchange_testnet", now, deps); await ((env.ETI_EXECUTION_LOG ?? {put:async()=>undefined}) as KVL).put("exec:audit:"+new Date(now).toISOString()+":exchange_activity_sync",JSON.stringify({at:now,environment,actor:auth.master?"master_token":"administrator",summary:result.summary}),{expirationTtl:60*60*24*90}); return reply(result); } catch(e) { return reply({error:"exchange_activity_sync_failed",message:e instanceof Error?e.message:"sync_failed"},503); } }
