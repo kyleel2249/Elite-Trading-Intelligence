@@ -24,6 +24,7 @@ function fetcherFor(calls: string[], openInterest = 12500, timestamp = NOW) {
 test("Bitget futures loader keeps one venue/category and returns order book plus derivatives context", async () => {
   const calls: string[] = [];
   const r = await loadSignalInputs({} as any, "BTCUSDT", "intraday", "bitget", NOW, "futures", "USDT-FUTURES", fetcherFor(calls));
+  if ("error" in r) throw new Error(JSON.stringify(r));
   assert.equal(r.provider, "bitget_mix");
   assert.equal(r.market, "futures");
   assert.equal(r.category, "USDT-FUTURES");
@@ -37,6 +38,7 @@ test("Bitget futures loader keeps one venue/category and returns order book plus
 test("spot loader does not invent futures funding or open-interest values", async () => {
   const calls: string[] = [];
   const r = await loadSignalInputs({} as any, "BTCUSDT", "intraday", "bitget", NOW, "spot", "SPOT", fetcherFor(calls));
+  if ("error" in r) throw new Error(JSON.stringify(r));
   assert.equal(r.market, "spot");
   assert.equal(r.derivatives, null);
   assert.ok(calls.every(x => !x.includes("/api/v3/market/tickers")));
@@ -50,8 +52,10 @@ test("futures loader compares open interest with the previous short-lived KV sna
   };
   const env = { ETI_EXECUTION_LOG: kv } as any;
   const first = await loadSignalInputs(env, "BTCUSDT", "intraday", "bitget", NOW, "futures", "USDT-FUTURES", fetcherFor([], 10_000, NOW));
+  if ("error" in first) throw new Error(JSON.stringify(first));
   assert.equal(first.derivatives?.previousOpenInterest, undefined);
   const second = await loadSignalInputs(env, "BTCUSDT", "intraday", "bitget", NOW + 60_000, "futures", "USDT-FUTURES", fetcherFor([], 9_000, NOW + 60_000));
+  if ("error" in second) throw new Error(JSON.stringify(second));
   assert.equal(second.derivatives?.previousOpenInterest, 10_000);
   const analysis = analyzeDerivativesContext(second.derivatives, 1, NOW + 60_000);
   assert.equal(analysis.openInterestChangePct, -10);
