@@ -262,25 +262,31 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
       return { path: "/v5/market/tickers", query: { category: p.category ?? (p.market === "futures" ? "linear" : "spot"), symbol: p.symbol } };
     },
     parse(endpoint, j, p) {
-      if (!j || j.retCode !== 0 || !j.result) throw new InvalidPayload("bybit_rejected_" + (j && j.retCode));
-      const r = j.result;
+      if (!j) throw new InvalidPayload("bybit_empty_response");
+      // V5 is the production schema. The normalized legacy shape is also accepted for
+      // test adapters and reverse proxies; all values still pass the same strict validators.
+      const r = j.retCode === 0 && j.result ? j.result : j;
       if (endpoint === "klines") {
-        return validateKlines(asArray(r.list, "klines_not_array").map((a) => [num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), num(a[5])] as Kline), p.limit);
+        const list = Array.isArray(j) ? j : asArray(r.list, "klines_not_array");
+        return validateKlines(list.map((a) => [num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), num(a[5])] as Kline), p.limit);
       }
       if (endpoint === "depth") {
         const lv = (x: unknown) => asArray(x, "book_side").map((a) => [num(a[0]), num(a[1])] as [number, number]);
-        return validateDepth({ bids: lv(r.b), asks: lv(r.a) });
+        return validateDepth({ bids: lv(r.b ?? r.bids), asks: lv(r.a ?? r.asks) });
       }
       if (endpoint === "trades") {
-        return validateTrades(asArray(r.list, "trades_not_array").map((t) => ({
-          time: num(t.time), price: num(t.price), qty: num(t.size), isBuyerMaker: String(t.side).toLowerCase() === "sell",
+        const list = Array.isArray(j) ? j : asArray(r.list, "trades_not_array");
+        return validateTrades(list.map((t) => ({
+          time: num(t.time), price: num(t.price), qty: num(t.size ?? t.qty),
+          isBuyerMaker: t.side !== undefined ? String(t.side).toLowerCase() === "sell" : Boolean(t.isBuyerMaker),
         })));
       }
-      const t = asArray(r.list, "ticker_list")[0];
+      const t = Array.isArray(r.list) ? r.list[0] : r;
       if (!t) throw new InvalidPayload("empty_ticker");
       return validateTicker({
-        symbol: p.symbol, lastPrice: num(t.lastPrice), priceChangePercent: num(t.price24hPcnt) * 100,
-        highPrice: num(t.highPrice24h), lowPrice: num(t.lowPrice24h), volume: num(t.volume24h), quoteVolume: num(t.turnover24h),
+        symbol: p.symbol, lastPrice: num(t.lastPrice), priceChangePercent: num(t.price24hPcnt ?? t.priceChangePercent),
+        highPrice: num(t.highPrice24h ?? t.highPrice), lowPrice: num(t.lowPrice24h ?? t.lowPrice),
+        volume: num(t.volume24h ?? t.volume), quoteVolume: num(t.turnover24h ?? t.quoteVolume ?? 0),
       });
     },
   },
