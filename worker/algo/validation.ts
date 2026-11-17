@@ -48,7 +48,8 @@ export function validateSignal(i: ValidationInput): ValidationResult {
   const rrScore = clamp((i.rewardRiskTP3 / 3.5) * 70 + (i.rewardRiskTP1 >= 1 ? 20 : 0) + (i.stopExceedsMax ? -40 : 10));
   const dataScore = (i.data.fresh ? 40 : 0) + (i.data.providersAgree ? 30 : 0) + (i.data.candlesComplete ? 30 : 0);
   const components = { technical, consensus, volume: clamp(volume), structure: structBias, liquidity: lq.score, regime: regimeFit, riskReward: rrScore, dataIntegrity: dataScore };
-  const derivativesAdjustment = clamp(i.derivativesAdjustment ?? 0, -10, 0);\n  const score = clamp(Object.entries(components).reduce((s, [k, v]) => s + (v * (w as any)[k]) / 100, 0) + derivativesAdjustment);\n  if (derivativesAdjustment < 0) warn.push(`Derivatives positioning adjusted confidence by ${derivativesAdjustment.toFixed(1)} points`);
+  const derivativesAdjustment = clamp(i.derivativesAdjustment ?? 0, -10, 0);
+  const score = clamp(Object.entries(components).reduce((s, [k, v]) => s + (v * (w as any)[k]) / 100, 0) + derivativesAdjustment);\n  if (derivativesAdjustment < 0) warn.push(`Derivatives positioning adjusted confidence by ${derivativesAdjustment.toFixed(1)} points`);
 
   // Independent evidence families: correlated indicators inside a family count once.
   const fam = [
