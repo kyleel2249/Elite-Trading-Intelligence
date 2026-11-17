@@ -134,3 +134,13 @@ test("margin open-order monitoring has no fixed 20-symbol truncation",async()=>{
  const result=await getOpenOrders(ENV,"margin-crossed",symbols,{fetchImpl,now:()=>1700000000000});
  assert.equal(result.length,0);assert.equal(requested.length,27);assert.deepEqual(requested,symbols);
 });
+
+test("futures open-order snapshots paginate beyond the first 100 orders",async()=>{
+ const {getOpenOrders}=await import("./api.ts");const cursors:string[]=[];let call=0;
+ const fetchImpl=(async(u:string)=>{const cursor=new URL(u).searchParams.get("idLessThan")||"";cursors.push(cursor);call++;
+  const rows=Array.from({length:call===1?100:1},(_,i)=>({orderId:"id-"+call+"-"+i,symbol:"BTCUSDT",size:"1",baseVolume:"0",price:"10",side:"buy",status:"live"}));
+  return ok({entrustedList:rows,...(call===1?{endId:"page-2"}:{endId:"page-2"})});
+ }) as any;
+ const orders=await getOpenOrders(ENV,"usdt-futures",[],{fetchImpl});
+ assert.equal(orders.length,101);assert.deepEqual(cursors,["","page-2"]);assert.equal((orders as any).truncated,false);
+});
