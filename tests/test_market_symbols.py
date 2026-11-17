@@ -228,3 +228,35 @@ def test_bybit_derivatives_context_api_rejects_spot_and_invalid_intervals(client
                       params={"symbol": "BTCUSDT", "category": "spot"}).status_code == 422
     assert client.get("/api/market/bybit/derivatives-context",
                       params={"symbol": "BTCUSDT", "category": "linear", "interval": "2h"}).status_code == 422
+
+
+def test_bybit_public_proxy_forwards_only_allowlisted_market_data(client, monkeypatch):
+    async def fake_payload(self, path, params):
+        assert path == "/v5/market/kline"
+        assert params == {"category": "linear", "symbol": "BTCUSDT", "interval": "60", "limit": "10"}
+        return {"retCode": 0, "retMsg": "OK", "result": {"list": [["1", "100", "102", "99", "101", "5"]]}}
+    monkeypatch.setattr("app.api.market_symbols.BybitClient.get_public_payload", fake_payload)
+    response = client.get("/api/market/bybit/proxy/kline",
+                          params={"category": "linear", "symbol": "BTCUSDT", "interval": "60", "limit": "10"})
+    assert response.status_code == 200
+    assert response.json()["retCode"] == 0
+    assert response.json()["result"]["list"][0][4] == "101"
+
+
+def test_bybit_public_proxy_rejects_unapproved_paths_parameters_and_categories(client):
+    assert client.get("/api/market/bybit/proxy/private").status_code == 404
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "linear", "symbol": "BTCUSDT", "interval": "60", "api_key": "leak"}).status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "option", "symbol": "BTCUSDT", "interval": "60"}).status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "linear", "symbol": "../../private", "interval": "60"}).status_code == 422
+
+
+def test_bybit_egress_region_reports_fly_machine_region(client, monkeypatch):
+    monkeypatch.setenv("FLY_REGION", "fra")
+    response = client.get("/api/market/bybit/region")
+    assert response.status_code == 200
+    assert response.json()["egress_region"] == "fra"
+    assert response.json()["read_only"] is True
+    assert response.json()["account_residency_unchanged"] is True
