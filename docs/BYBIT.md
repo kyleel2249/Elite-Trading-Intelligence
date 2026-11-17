@@ -33,7 +33,7 @@ For manually created execution accounts, provider is bybit, credentials are api_
 
 ## Execution safety
 
-ETI sends orders through the Python execution engine and its existing account policy, proposal/approval, risk, idempotency and reconciliation controls. A successful Bybit order acknowledgement means accepted, not necessarily filled. ETI uses orderLinkId for reconciliation and will not blindly retry an ambiguous write. Spot market buys explicitly use base-coin quantity; derivatives use contract quantity. Limit orders use IOC to avoid leaving unmanaged resting orders.
+ETI sends orders through the Python execution engine and its existing account policy, proposal/approval, risk, idempotency and reconciliation controls. A successful Bybit order acknowledgement means accepted, not necessarily filled. ETI uses orderLinkId for reconciliation and will not blindly retry an ambiguous write. Spot market buys explicitly use base-coin quantity; derivatives use contract quantity. Derivative accounts must use Bybit one-way position mode for the current adapter (positionIdx=0); hedge-mode position indexing is not yet configured. ETI does not automatically change leverage; configure the intended leverage in Bybit first and keep it conservative. Limit orders use IOC to avoid leaving unmanaged resting orders.
 
 Testnet is the only recommended initial environment. Live execution requires a separately created environment=live account, the global LIVE_TRADING_ENABLED=true gate, successful key-permission verification and the same ETI risk controls. ETI does not expose transfer or withdrawal endpoints.
 
