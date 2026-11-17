@@ -21,7 +21,7 @@ export interface AgentAutopilotEnv extends ExecutionEnv {
   ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string;
   ETI_AGENT_AUTOPILOT_STRATEGIES?: string;
   ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT?: string;
-  ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE?: string;
+  ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE?: string;\n  ETI_AGENT_AUTOPILOT_CONFIG?: string;
 }
 type App = { fetch(request: Request, env: any): Promise<Response> | Response };
 const ALLOWED_INTERVALS = new Set(["5m", "15m", "30m", "1h", "4h", "1d"]);
@@ -29,6 +29,27 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 const num = (v: unknown, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
 const json = (x: unknown) => JSON.stringify(x);
 const envNum = (v: string | undefined, fallback: number, lo: number, hi: number) => clamp(num(v, fallback), lo, hi);
+
+export interface AutopilotConfig {
+  symbols: string; interval: string; maxPerCycle: number; minConfidence: number; minAgreement: number;
+  maxPositions: number; strategies: string; minStrategyAgreement: number; minOmniConfidence: number;
+}
+export function readAutopilotConfig(env: AgentAutopilotEnv): AutopilotConfig {
+  let raw: any = {};
+  try { raw = JSON.parse(env.ETI_AGENT_AUTOPILOT_CONFIG || "{}"); } catch { raw = {}; }
+  const value = (legacy: string | undefined, key: keyof AutopilotConfig, fallback: unknown) => legacy !== undefined ? legacy : raw[key] ?? fallback;
+  return {
+    symbols: String(value(env.ETI_AGENT_AUTOPILOT_SYMBOLS, "symbols", "BTCUSDT,ETHUSDT,SOLUSDT")),
+    interval: String(value(env.ETI_AGENT_AUTOPILOT_INTERVAL, "interval", "15m")),
+    maxPerCycle: envNum(String(value(env.ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE, "maxPerCycle", 2)), 2, 1, 10),
+    minConfidence: envNum(String(value(env.ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE, "minConfidence", 0.65)), 0.65, 0.5, 0.95),
+    minAgreement: envNum(String(value(env.ETI_AGENT_AUTOPILOT_MIN_AGREEMENT, "minAgreement", 0.65)), 0.65, 0.5, 0.95),
+    maxPositions: envNum(String(value(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS, "maxPositions", 3)), 3, 1, 10),
+    strategies: String(value(env.ETI_AGENT_AUTOPILOT_STRATEGIES, "strategies", "scalp,intraday,swing,position")),
+    minStrategyAgreement: envNum(String(value(env.ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT, "minStrategyAgreement", 3)), 3, 1, 4),
+    minOmniConfidence: envNum(String(value(env.ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE, "minOmniConfidence", 60)), 60, 40, 95),
+  };
+}
 
 function accountFromLedger(ledger: any, symbol: string, now: number) {
   const cash = Number(ledger.cash), start = Number(ledger.startingBalance);
@@ -65,17 +86,16 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
   if (!env.ETI_EXECUTION_TOKEN || !env.ETI_EXECUTION_LOG) return { ...disabled, skipped: "execution_token_or_audit_log_missing" };
   if (!env.ETI_PORTFOLIO_DB && !env.ETI_EXECUTION_LOG) return { ...disabled, skipped: "portfolio_storage_missing" };
 
-  const symbols = [...new Set(String(env.ETI_AGENT_AUTOPILOT_SYMBOLS || "BTCUSDT,ETHUSDT,SOLUSDT")
-    .split(",").map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9]{5,20}$/.test(s)))].slice(0, 30);
-  const interval = String(env.ETI_AGENT_AUTOPILOT_INTERVAL || "15m");
+  const config = readAutopilotConfig(env);
+  const symbols = [...new Set(config.symbols.split(",").map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9]{5,20}$/.test(s)))].slice(0, 30);
+  const interval = config.interval;
   if (!ALLOWED_INTERVALS.has(interval)) return { ...disabled, skipped: "invalid_interval" };
-  const maxPerCycle = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE, 2, 1, 10));
-  const minConfidence = envNum(env.ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE, 0.65, 0.5, 0.95);
-  const minAgreement = envNum(env.ETI_AGENT_AUTOPILOT_MIN_AGREEMENT, 0.65, 0.5, 0.95);
-  const maxPositions = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS, 3, 1, 10));
-  const strategies = [...new Set(String(env.ETI_AGENT_AUTOPILOT_STRATEGIES || "scalp,intraday,swing,position").split(",").map(s => s.trim().toLowerCase()).filter(s => ["scalp", "intraday", "swing", "position"].includes(s)))];
-  const minStrategyAgreement = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT, 3, 1, 4));
-  const minOmniConfidence = envNum(env.ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE, 60, 40, 95);
+  const maxPerCycle = Math.floor(config.maxPerCycle);
+  const minConfidence = config.minConfidence, minAgreement = config.minAgreement;
+  const maxPositions = Math.floor(config.maxPositions);
+  const strategies = [...new Set(config.strategies.split(",").map(s => s.trim().toLowerCase()).filter(s => ["scalp", "intraday", "swing", "position"].includes(s)))];
+  const minStrategyAgreement = Math.floor(config.minStrategyAgreement);
+  const minOmniConfidence = config.minOmniConfidence;
   if (!symbols.length) return { ...disabled, skipped: "no_valid_symbols" };
   if (!strategies.length || minStrategyAgreement > strategies.length) return { ...disabled, skipped: "invalid_strategy_configuration" };
 
