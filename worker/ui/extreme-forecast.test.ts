@@ -103,3 +103,14 @@ test("market context reports structure, momentum, volatility, volume and transpa
   assert.match(context.liquidityProxy, /not order-book depth/);
   assert.ok(context.notIncludedInputs.includes("funding rate"));
 });
+
+test("backtest predictions are isolated from future target candles (no look-ahead)", () => {
+  const h = history(30), baseline = backtest24hExtremes(h.hourly, h.daily, now);
+  if (baseline.status !== "ready") throw new Error("Expected a ready backtest");
+  const first = baseline.samples[0], start = Date.parse(first.evaluatedAt);
+  const mutated = h.hourly.map(k => k[0] >= start && k[0] < start + DAY ? [k[0], k[1], k[2] * 1.2, k[3] * .8, k[4], k[5]] as Kline : k);
+  const changed = backtest24hExtremes(mutated, h.daily, now);
+  if (changed.status !== "ready") throw new Error("Expected a ready backtest after target mutation");
+  assert.equal(changed.samples[0].predictedHighPrice, first.predictedHighPrice);
+  assert.equal(changed.samples[0].predictedLowPrice, first.predictedLowPrice);
+});

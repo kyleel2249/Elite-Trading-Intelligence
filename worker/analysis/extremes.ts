@@ -248,7 +248,7 @@ export function backtest24hExtremes(hourlyRows: Kline[], dailyRows: Kline[], now
   const daily = dailyRows.filter(validKline).slice().sort((a, b) => a[0] - b[0]);
   const count = Math.max(3, Math.min(14, Math.floor(sampleDays)));
   const latestStart = Math.floor(now / HOUR_MS) * HOUR_MS - DAY_MS;
-  const samples: Array<{ evaluatedAt: string; highHit: boolean; lowHit: boolean; highTimeHit: boolean; lowTimeHit: boolean; highErrorPct: number; lowErrorPct: number; highTimeErrorMinutes: number; lowTimeErrorMinutes: number }> = [];
+  const samples: Array<{ evaluatedAt: string; predictedHighPrice: number; actualHighPrice: number; predictedLowPrice: number; actualLowPrice: number; predictedHighAt: string; actualHighAt: string; predictedLowAt: string; actualLowAt: string; highHit: boolean; lowHit: boolean; highTimeHit: boolean; lowTimeHit: boolean; highErrorPct: number; lowErrorPct: number; highTimeErrorMinutes: number; lowTimeErrorMinutes: number }> = [];
   for (let offset = count - 1; offset >= 0; offset--) {
     const start = latestStart - offset * DAY_MS, end = start + DAY_MS;
     const dayStart = Math.floor(start / DAY_MS) * DAY_MS;
@@ -275,6 +275,10 @@ export function backtest24hExtremes(hourlyRows: Kline[], dailyRows: Kline[], now
     const lowWindowStart = Date.parse(prediction.forecast.low.time.windowStart), lowWindowEnd = Date.parse(prediction.forecast.low.time.windowEnd);
     samples.push({
       evaluatedAt: new Date(start).toISOString(),
+      predictedHighPrice: prediction.forecast.high.price, actualHighPrice: highBar[2],
+      predictedLowPrice: prediction.forecast.low.price, actualLowPrice: lowBar[3],
+      predictedHighAt: prediction.forecast.high.time.expectedAt, actualHighAt: new Date(actualHighAt).toISOString(),
+      predictedLowAt: prediction.forecast.low.time.expectedAt, actualLowAt: new Date(actualLowAt).toISOString(),
       highHit: highBar[2] >= prediction.forecast.high.price,
       lowHit: lowBar[3] <= prediction.forecast.low.price,
       highTimeHit: actualHighAt >= highWindowStart && actualHighAt <= highWindowEnd,

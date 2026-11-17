@@ -41,6 +41,10 @@ function render(){
   if(b.status==='ready')parts.push('Rolling 24H backtest · '+b.sampleCount+' completed windows: high level hit '+b.highPriceHitRatePct+'%, low level hit '+b.lowPriceHitRatePct+'%, high timing hit '+b.highTimeWindowHitRatePct+'%, low timing hit '+b.lowTimeWindowHitRatePct+'%.');
   else parts.push('Rolling 24H backtest: '+(b.reason||'not enough completed windows yet')+'.');
   if(m.trend)parts.push('Market context: '+m.trend+' · 24H momentum '+(m.momentum24hPct==null?'—':m.momentum24hPct+'%')+' · 7D momentum '+(m.momentum7dPct==null?'—':m.momentum7dPct+'%')+' · ATR '+(m.atr14Pct==null?'—':m.atr14Pct+'%')+' · volatility '+m.volatilityRegime+' · volume ratio '+(m.volumeVs20DayAverage==null?'—':m.volumeVs20DayAverage+'×')+'.');
+  if(b.status==='ready')parts.push('Mean absolute error: high '+b.meanAbsoluteHighPriceErrorPct+'%, low '+b.meanAbsoluteLowPriceErrorPct+'%; timing error: high '+b.meanAbsoluteHighTimeErrorMinutes+' min, low '+b.meanAbsoluteLowTimeErrorMinutes+' min.');
+  if(m.recentStructureEvents&&m.recentStructureEvents.length){var se=m.recentStructureEvents[m.recentStructureEvents.length-1];parts.push('Latest confirmed structure event: '+se.type+' '+se.direction+' at '+se.level+'.');}
+  if(m.liquidityProxy)parts.push(m.liquidityProxy);
+  if(m.notIncludedInputs&&m.notIncludedInputs.length)parts.push('Not included in this forecast feed: '+m.notIncludedInputs.join(', ')+'.');
   parts.push('Historical hit rates are not probabilities for the next 24 hours. Statistical estimate, not a trade signal or guaranteed price; timing windows are approximate to ±60 minutes.');
   if(note)note.textContent=parts.join(' ');
   stamp.textContent=error?'Last update failed':'History check';
