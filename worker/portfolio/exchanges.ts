@@ -50,9 +50,9 @@ export async function loadExchangePortfolioSnapshot(env: Env, now = Date.now(), 
       ]);
       if (a.status === "rejected") throw a.reason;
       return {
-        assets: assets(market, a.value),
+        assets: assets(a.value),
         positions: p.status === "fulfilled" ? positions(p.value) : [],
-        positionStatus: p.status === "rejected" ? "unavailable" : "connected",
+        positionStatus: !market.endsWith("futures") ? "not_applicable" : p.status === "rejected" ? "unavailable" : "connected",
         positionError: p.status === "rejected" ? (p.reason instanceof Error ? p.reason.message.slice(0, 160) : "positions_unavailable") : null,
       };
     })),
