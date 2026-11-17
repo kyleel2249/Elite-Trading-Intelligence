@@ -52,8 +52,6 @@ import { withCompany } from "./company/route.ts";
 import { withTreasury } from "./treasury/route.ts";
 import { withProfit } from "./profit/route.ts";
 import { runProfitCycle } from "./profit/engine.ts";
-import { withBitget } from "./bitget/route.ts";
-import { syncAll as syncBitget, bitgetCreds } from "./bitget/api.ts";
 import { runJournalCycle } from "./journal/sync.ts";
 import { withIdentity } from "./identity/routes.ts";
 import { withProviders, runProviderProbe } from "./providers/routes.ts";
@@ -84,7 +82,6 @@ const coreLayers: Array<(next: any) => any> = [
   withCompany,
   withTreasury,
   withProfit,
-  withBitget,
   withElite,
   // The guard sits directly outside the sports route: constant-time token check and a short scan cache (see sports/guard.ts).
   (next: any) => withSportsGuard(withSports(next)),
@@ -123,7 +120,6 @@ export default {
       if (env.ETI_UNIVERSE_ENABLED === "true" && env.ETI_EXECUTION_LOG) ctx.waitUntil(runUniverseBatch(env, env.ETI_EXECUTION_LOG, Date.now(), (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday")).then(async b => { const strat = (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday"); const ev = signalAlerts(b.previous, b.newRows ?? [], strat); if (b.universeError) ev.push({ type: "market_data_failure", severity: "warning", title: "Universe refresh failed", detail: b.universeError, dedupeKey: `universe:${new Date().toISOString().slice(0, 13)}` }); await raiseAlerts(env as any, ev); }, e => console.error("universe batch failed", e instanceof Error ? e.message : e))); return; }
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
-      if (bitgetCreds(env).complete && env.ETI_EXECUTION_LOG) ctx.waitUntil(syncBitget(env).then(() => undefined, e => console.error("bitget one-minute sync failed", e instanceof Error ? e.message : e)));
       ctx.waitUntil(runJournalCycle(env).then(() => undefined, () => undefined)); // journal backfill (throttled inside) and prediction evaluation
       ctx.waitUntil(runProfitCycle(env as any).then(() => undefined, e => console.error("profit cycle failed", e instanceof Error ? e.message : e))); // recognise confirmed simulated results and allocate (throttled inside)
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills
