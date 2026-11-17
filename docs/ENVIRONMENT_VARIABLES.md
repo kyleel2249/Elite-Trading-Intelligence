@@ -62,6 +62,9 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_DUPLICATE_WINDOW_SECONDS` | config | Window in which an identical order is refused as a duplicate. |
 | `ETI_EDGE` | config | Adaptive-edge feature switch for the dashboard. |
 | `ETI_EVENTS_JSON` | config | Inline JSON of scheduled market events for the readiness engine. |
+| `BYBIT_API_KEY` | secret | Bybit V5 account-snapshot API key. Read-only wallet/position snapshot access is sufficient; never grant withdrawals. |
+| `BYBIT_API_SECRET` | secret | Secret paired with BYBIT_API_KEY; used only to sign Bybit V5 read-only account requests. |
+| `BYBIT_ACCOUNT_ENV` | config | `mainnet` (default) or `testnet` host selection for the read-only Bybit account snapshot. |
 | `BITGET_API_KEY` | secret | Bitget API key with trade permission enabled and withdrawal permission disabled. Never enable withdrawals. Also accepted: `BITGET_KEY` and `BITGET_ACCESS_KEY`. |
 | `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY` and `BITGET_SECRET`. |
 | `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
