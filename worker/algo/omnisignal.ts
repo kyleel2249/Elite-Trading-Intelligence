@@ -16,6 +16,7 @@ import { assessElite, type EliteAssessment } from "./elite.ts";
 import { assessFvgConfluence, type FvgConfluence } from "./fvg-confluence.ts";
 import { analyzeDerivativesContext, type DerivativesAnalysis } from "./derivatives.ts";
 import { calculateTradePlan, type TradePlan } from "./trade-plan.ts";
+import { evaluateV3Alpha, type V3AlphaResult } from "./v3-alpha.ts";
 
 export interface TimeframeSummary { trend: string; trendScore: number; momentum: number; emaAlignment: string; bandTrend: string; adx: number; atrPercent: number; relativeVolume: number; volumeConfirms: boolean; structureBias: string; divergence: string; choppy: boolean; signalStrength: number; reliability: number }
 const summarize = (a: TimeframeAnalysis | null | undefined): TimeframeSummary | null => (a ? { trend: a.trend, trendScore: a.trendScore, momentum: a.momentum, emaAlignment: a.emaAlignment, bandTrend: a.bandTrend, adx: a.adx, atrPercent: a.atrPercent, relativeVolume: a.relativeVolume, volumeConfirms: a.volumeConfirms, structureBias: a.structure.bias, divergence: a.divergence, choppy: a.choppy, signalStrength: a.signalStrength, reliability: a.reliability } : null);
@@ -23,6 +24,7 @@ export type FinalDecision = "BUY" | "SELL" | "HOLD" | "REJECTED" | "DATA_UNRELIA
 export interface OmnisignalOptions { risk?: RiskContext; expectancyR?: number | null; expectancySamples?: number; providersAgree?: boolean; weights?: Weights; maxSpreadBps?: number; /** Assumed round-trip fees plus slippage in basis points of notional (default 30 = 2x0.10% fee + 2x0.05% slippage). */ roundTripCostBps?: number; maxCostR?: number; /** Fitted reliability table from recorded outcomes. Absent or insufficient means the score stays uncalibrated. */ calibrationTable?: CalibrationTable | null; /** When true, a trade the Elite Trader modules oppose (2+ opposing, none supporting) is downgraded to HOLD. Default false: advisory only. */ eliteGate?: boolean; /** Classification thresholds; merged over DEFAULT_THRESHOLDS. */ thresholds?: Partial<Thresholds>; enabledEngines?: { swift: boolean; gainz: boolean }; equity?: number; riskFraction?: number; maxNotionalFraction?: number; leverage?: number; feeBps?: number; slippageBps?: number; contractType?: "linear" | "inverse"; contractValue?: number; /** When true, active Fair Value Gaps (execution + higher timeframes) adjust the confidence of an already-validated BUY/SELL by at most +/-8 and add an advisory entry note. Never creates, flips or gates a decision. Default false. */ fvg?: boolean }
 export interface OmnisignalResult {
   symbol: string; strategy: string; decision: FinalDecision; fusion: FusionResult; validation: ValidationResult | null; liquidity: LiquidityAnalysis | null;
+  v3Alpha: V3AlphaResult;
   /** Compact per-timeframe evidence for the eight-timeframe matrix (null where fewer than the minimum candles exist). */
   timeframes: Record<string, TimeframeSummary | null>; consensus: Pick<Consensus, "executionEligible" | "direction" | "weightedScore" | "confidence" | "bullish" | "bearish" | "neutral" | "unavailable" | "conflicts" | "degraded" | "dominantTimeframe"> | null;
   /** Volume-footprint evidence: abnormal activity, absorption, buy/sell pressure proxy. Advisory. */ flow: FlowAnalysis | null;
@@ -44,6 +46,7 @@ export function runOmnisignal(ctx: FusionContext, o: OmnisignalOptions = {}): Om
 }
 function runOmnisignalCore(ctx: FusionContext, o: OmnisignalOptions): OmnisignalResult {
   const now = ctx.now ?? Date.now(), execTf = EXECUTION_TF[ctx.strategy], rows = ctx.candles[execTf];
+  const v3Alpha = evaluateV3Alpha({ symbol: ctx.symbol, strategy: ctx.strategy, candles: ctx.candles, now });
   const en = o.enabledEngines ?? { swift: true, gainz: true };
   const disabled = (name: "swift" | "gainz") => ({ engine: name, symbol: ctx.symbol, status: "NEUTRAL" as const, direction: 0 as const, entryZone: null, stopLoss: null, takeProfits: null, confidence: 0, confidenceType: "heuristic_score_not_probability" as const, expectedHolding: "n/a", regime: "unknown", evidence: [`${name} engine is disabled by configuration`], invalidation: [], generatedAt: new Date(now).toISOString(), expiresAt: null, details: {} });
   const swift = en.swift ? swiftEngine({ ...ctx, now }) : disabled("swift"), gainz = en.gainz ? gainzEngine({ ...ctx, now }) : disabled("gainz");
@@ -53,7 +56,7 @@ function runOmnisignalCore(ctx: FusionContext, o: OmnisignalOptions): Omnisignal
   const consensusFull = buildConsensus(analyses, ctx.strategy);
   const consensus = { executionEligible: false as const, direction: consensusFull.direction, weightedScore: consensusFull.weightedScore, confidence: consensusFull.confidence, bullish: consensusFull.bullish, bearish: consensusFull.bearish, neutral: consensusFull.neutral, unavailable: consensusFull.unavailable, conflicts: consensusFull.conflicts, degraded: consensusFull.degraded, dominantTimeframe: consensusFull.dominantTimeframe };
   const timeframes = Object.fromEntries(TIMEFRAMES.map(tf => [tf, summarize(analyses[tf])]));
-  const base = { symbol: ctx.symbol, strategy: ctx.strategy, fusion, timeframes, consensus, derivatives: ctx.derivatives ? analyzeDerivativesContext(ctx.derivatives, 0, now) : null, generatedAt: new Date(now).toISOString(), confidenceType: "heuristic_score_not_probability" as const, calibration: { status: "uncalibrated" as const, note: CAL }, submitsOrder: false as const, liveExecutionAllowed: false as const, intellectualProperty: ENGINE_IP };
+  const base = { symbol: ctx.symbol, strategy: ctx.strategy, fusion, v3Alpha, timeframes, consensus, derivatives: ctx.derivatives ? analyzeDerivativesContext(ctx.derivatives, 0, now) : null, generatedAt: new Date(now).toISOString(), confidenceType: "heuristic_score_not_probability" as const, calibration: { status: "uncalibrated" as const, note: CAL }, submitsOrder: false as const, liveExecutionAllowed: false as const, intellectualProperty: ENGINE_IP };
   const result = (decision: FinalDecision, reasons: string[], extra: Partial<OmnisignalResult> = {}): OmnisignalResult => ({ ...base, decision, validation: null, liquidity: null, flow: null, derivatives: base.derivatives, tradePlan: null, tradeable: false, elite: null, fvg: null, entryZone: null, stopLoss: null, takeProfits: null, riskRewardToTP3: null, confidence: 0, reasons, expiresAt: null, ...extra });
 
   const age = rows && rows.length ? (now - rows.at(-1)![0]) / 1000 : Infinity;
@@ -81,6 +84,8 @@ function runOmnisignalCore(ctx: FusionContext, o: OmnisignalOptions): Omnisignal
   if (cls === "REJECTED") return result("REJECTED", [...reasons, ...validation.hardFailures], ctxOut);
   if (cls === "HOLD") return result("HOLD", reasons, ctxOut);
   if (o.eliteGate === true && elite.alignment === "opposes") return result("HOLD", [...reasons, "Elite Trader gate: documented methodologies oppose this trade, so no entry"], ctxOut);
+  if (v3Alpha.status === "SIGNAL" && v3Alpha.direction !== dir) return result("HOLD", [...reasons, "ETIAlgo V3 Alpha veto: its closed-candle signal opposes the fused direction."], { ...ctxOut, tradeable: false });
+  if (v3Alpha.status === "SIGNAL") reasons.push("ETIAlgo V3 Alpha confirms the fused direction; its score is not added to confidence because indicator families overlap.");
   const expires = now + TF_SECONDS[execTf] * 6 * 1000;
   const decision = dir > 0 ? "BUY" : "SELL";
   return result(decision, reasons, { ...ctxOut, tradeable: !tradePlan || tradePlan.valid, confidence: fvg ? Math.max(1, Math.min(100, Math.round(Math.min(fusion.confidence, validation.score)) + fvg.confidenceDelta)) : Math.round(Math.min(fusion.confidence, validation.score)), expiresAt: new Date(expires).toISOString() });

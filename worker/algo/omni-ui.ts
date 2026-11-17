@@ -71,6 +71,7 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <section class="card s12" id="decision" aria-labelledby="h-dec"><h2 id="h-dec">Independent decision</h2><div id="decision-body" class="muted">Loading…</div></section>
 <section class="card s6" id="swift"><h2>Swift-inspired engine</h2><div id="swift-body" class="muted">–</div></section>
 <section class="card s6" id="gainz"><h2>GainzAlgo-inspired engine</h2><div id="gainz-body" class="muted">–</div></section>
+ <section class="card s12" id="v3-alpha"><h2>ETIAlgo V3 Alpha — closed-candle signal indicator</h2><div id="v3-alpha-body" class="muted">–</div></section>
 <section class="card s6"><h2>Independent evidence families</h2><div id="evidence" class="muted">–</div></section>
 <section class="card s6"><h2>Validation</h2><div id="validation" class="muted">–</div></section>
 <section class="card s12"><h2>Eight-timeframe matrix</h2><div id="matrix" class="scroll muted">–</div></section>
@@ -201,8 +202,19 @@ function renderElite(p){
  box.appendChild(el("div",{class:"small muted",text:"Investor disclosures: "+e.disclosures.reason}));
  box.appendChild(el("div",{class:"small muted",text:e.limitations}));put("elite",box)}
 
-function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p);renderDerivatives(p);renderTradePlan(p);renderElite(p)}
-function clearAll(msg){["decision-body","swift-body","gainz-body","evidence","validation","matrix","indicators","liquidity","derivatives","trade-plan","elite"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
+function renderV3Alpha(p){
+ var a=p.v3Alpha;if(!a){put("v3-alpha-body",el("div",{class:"muted",text:"V3 Alpha data unavailable."}));return}
+ var cls=a.direction>0?"bull":a.direction<0?"bear":"neutral",box=el("div");
+ box.appendChild(kv([["Signal",a.action,cls],["Status",a.status],["Evidence score",a.score+"/100"],["Threshold",a.threshold],["Regime",a.regime],["Closed candle",a.evaluatedCandleTime?when(a.evaluatedCandleTime):"–"]]));
+ if(a.entryZone)box.appendChild(kv([["Entry zone",fmt(a.entryZone[0])+" – "+fmt(a.entryZone[1])],["Stop-loss",fmt(a.stopLoss),"bear"],["TP1 / TP2 / TP3",(a.takeProfits||[]).map(function(t){return fmt(t.price)+" ("+t.rewardRisk+"R)"}).join(" / "),"bull"]]));
+ var scores=a.componentScores||{},t=el("table"),b=el("tbody");t.appendChild(el("thead",null,el("tr",null,el("th",{text:"Evidence family"}),el("th",{text:"Score"}))));
+ Object.keys(scores).forEach(function(k){var v=scores[k];b.appendChild(el("tr",null,el("td",{text:k.replace(/([A-Z])/g," $1")}),el("td",{class:"num "+(v>0?"bull":v<0?"bear":"neutral"),text:num(v,0)})))});t.appendChild(b);box.appendChild(el("div",{class:"scroll"},t));
+ if(a.confirmations&&a.confirmations.length)box.appendChild(el("details",null,el("summary",{text:"Confirmations ("+a.confirmations.length+")"}),list(a.confirmations)));
+ if(a.warnings&&a.warnings.length)box.appendChild(note(a.warnings.join(" "),"warn"));
+ box.appendChild(el("div",{class:"small muted",text:"Closed-candle evidence score, not a win probability. V3 Alpha can veto an opposing setup; the independent validator and execution safeguards retain final authority. No orders are submitted."}));put("v3-alpha-body",box)}
+
+function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderV3Alpha(p);renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p);renderDerivatives(p);renderTradePlan(p);renderElite(p)}
+function clearAll(msg){["decision-body","swift-body","gainz-body","v3-alpha-body","evidence","validation","matrix","indicators","liquidity","derivatives","trade-plan","elite"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
 
 function params(){var sym=$("symbol").value.trim().toUpperCase();var eng=[];if($("e-swift").checked)eng.push("swift");if($("e-gainz").checked)eng.push("gainz");var parts=$("market").value.split(":");var venue=parts[0],category=parts[1],market=(category==="spot"||category==="SPOT")?"spot":"futures";var equityText=$("equity").value.trim();return {symbol:sym,strategy:$("strategy").value,engines:eng,venue:venue,market:market,category:category,equity:equityText?Number(equityText):undefined,riskFraction:equityText?Number($("risk").value)/100:undefined,leverage:Number($("leverage").value)||1,feeBps:$("fee").value.trim()?Number($("fee").value):undefined,slippageBps:$("slippage").value.trim()?Number($("slippage").value):undefined,contractValue:$("contract-value").value.trim()?Number($("contract-value").value):undefined}}
 function analyse(){
