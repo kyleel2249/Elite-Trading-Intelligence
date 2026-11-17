@@ -258,7 +258,7 @@ limits. Do not silently rely on paid Workers features, Containers, or an externa
 - Do not expose API keys, broker credentials, Quiver tokens or Liquid API tokens in frontend
   JavaScript or public environment variables.
 - Withdrawal permissions must never be requested, stored or enabled.
-- There is no live trading path: orders go only to Alpaca Paper and the Binance testnets.
+- Bitget has a separate live order route, but it is fail-closed by default until private API egress from Cloudflare Workers is verified; Alpaca Paper and Binance testnet remain separate environments.
 
 ## Multi-market intelligence
 
@@ -383,7 +383,7 @@ curl 'https://<worker>.<subdomain>.workers.dev/api/intelligence/traders?q=reflex
 
 ## Global Alpha Intelligence
 
-Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and paper/testnet execution through the in-process order safeguards. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Live execution is not available: Alpha orders go through the same paper/testnet handler as every other path, and no live route exists.
+Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and paper/testnet execution through the in-process order safeguards. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Alpha orders remain paper/testnet-only; they do not use the separate Bitget live route, which is fail-closed pending private egress verification.
 
 ## Wallet and profit management
 - `/wallet/chain`: on-chain wallet dashboard with live native-coin balances, block height and gas read from the node over JSON-RPC (see `docs/CHAIN.md`). The custodial wallet itself needs the Python backend (`BACKEND_URL`).
