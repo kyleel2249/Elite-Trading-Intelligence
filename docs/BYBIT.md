@@ -37,30 +37,10 @@ ETI sends orders through the Python execution engine and its existing account po
 
 Testnet is the only recommended initial environment. Live execution requires a separately created environment=live account, the global LIVE_TRADING_ENABLED=true gate, successful key-permission verification and the same ETI risk controls. ETI does not expose transfer or withdrawal endpoints.
 
-## Market data region and live streams
+## Market data transport and account region
 
-- Cloudflare serves ETI at the edge, but all Bybit public REST requests from the Worker are forwarded to the FastAPI market-data proxy hosted in Fly.io Frankfurt (`fra`). This prevents the US-based GitHub Actions runner or a US Cloudflare edge from directly contacting Bybit.
-- The proxy only permits Bybit V5 public market endpoints: server time, instruments, klines, order books, recent trades, tickers, funding history and open interest. It cannot proxy private account or order endpoints.
-- Check the actual upstream egress region with `GET /api/market/region`; a healthy response reports `transport=regional-fastapi-proxy` and `egress_region=fra`.
-- The proxy uses the global Bybit REST hosts (`api.bybit.com` and `api.bytick.com`) from Frankfurt. The Ghana-registered international account continues using its proper global API entitlement. Dedicated regional API domains must only be used when required by the user's actual account registration site; server placement does not change account residency.
-- The Python stream hub also runs from the Fly.io origin and maintains separate public WebSocket connections for Spot, Linear and Inverse.
-- REST snapshots/history use the Bybit V5 public market endpoints.
-- Instruments use /v5/market/instruments-info with pagination for linear/inverse.
-- Public WebSockets: wss://stream.bybit.com/v5/public/spot, /linear, and /inverse.
-- The Python stream hub starts separate public WebSocket connections for Spot, Linear and Inverse. Startup defaults are BTCUSDT/ETHUSDT for Spot and Linear, plus BTCUSD for Inverse.
-- The full instrument catalogue is refreshed on a 60-second cadence. The WebSocket watchlist is selected separately so ETI does not subscribe every listed instrument indiscriminately or exceed venue topic limits.
-- Additional symbols are validated against the current Bybit instrument catalogue and subscribed without reconnecting the existing socket.
-- Spot margin uses the Spot market-data stream; margin eligibility is supplied by the instrument catalogue and account-side borrowing permissions remain separate.
-- Category-aware live quote: `GET /api/market/live?symbol=BTCUSDT&provider=bybit&category=linear`.
-- Category-filtered SSE: `GET /api/stream/sse?symbol=BTCUSDT&category=linear`.
-- Add a live subscription (requires the ETI API key): `POST /api/stream/subscribe` with `{"provider":"bybit","category":"linear","symbols":["BTCUSDT"]}`.
-- Stream status: `GET /api/stream/status`; category-specific connection and subscription state appears under `bybit_categories`.
-- Derivatives context: `GET /api/market/bybit/derivatives-context?symbol=BTCUSDT&category=linear&interval=1h&limit=50` returns the latest funding rate, chronological open-interest observations and the latest open-interest change. The endpoint is public and read-only.
-## Important limitations
-
-- Options are not enabled in ETI's trading adapter in this release.
-- Spot margin borrowing is opt-in and requires the account's own UTA eligibility/collateral setup.
-- Bybit product availability, leverage, margin mode and regional API hosts depend on the user's account jurisdiction and account mode.
-- Public market data and private execution are independent: market-feed health does not prove that credentials or order permissions are valid.
-
-Official references: [V5 introduction](https://bybit-exchange.github.io/docs/v5/intro), [instrument information](https://bybit-exchange.github.io/docs/v5/market/instrument), [place order](https://bybit-exchange.github.io/docs/v5/order/create-order), [WebSocket connection](https://bybit-exchange.github.io/docs/v5/ws/connect).
+- Public REST market data runs directly from the Cloudflare Worker using Bybit's global API hosts `api.bybit.com` and `api.bytick.com` (primary + alternate host). No Fly.io origin, static-IP proxy, VPN, or account-region spoofing is used.
+- Cloudflare Workers are globally distributed and do not provide a guaranteed Ghana egress IP or fixed outbound IP on the free plan. The global Bybit API is the appropriate host for an account registered with Bybit's global entity, subject to that account's KYC and product permissions.
+- The Worker's actual outbound IP geography is controlled by Cloudflare, not ETI. If Bybit rejects that egress with a geo/IP error, the free Worker architecture cannot guarantee a different country egress. Do not change account country or use a proxy to bypass Bybit restrictions.
+- Public market REST requests are read-only and do not require exchange credentials. Account and order routes remain subject to the account's own country, product eligibility, API-key permissions and IP whitelist.
+- The Python WebSocket service is separate from this Cloudflare-only public REST path; it is not a deployment prerequisite for the Worker chart REST endpoints.
