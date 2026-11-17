@@ -1,6 +1,6 @@
 # ETI FastAPI origin in Frankfurt (fra) on PostgreSQL
 
-The FastAPI origin remains in `fra`, outside Bybit's documented US and mainland-China IP blocks. The Cloudflare market-data Worker is separately placed near Frankfurt (`aws:eu-central-1`) so public Bybit market requests do not execute from the US-based CI region. The PostgreSQL origin remains near Frankfurt to avoid adding cross-region database latency.
+The FastAPI origin remains in `fra`, outside Bybit's documented US and mainland-China IP blocks. The Cloudflare Worker forwards public Bybit REST requests to this Frankfurt origin, so public market calls never depend on the GitHub Actions runner or the user's nearest Cloudflare edge for Bybit egress. The PostgreSQL origin remains near Frankfurt to avoid adding cross-region database latency.
 
 What the repo now does:
 
