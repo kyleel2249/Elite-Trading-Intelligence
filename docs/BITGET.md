@@ -12,6 +12,8 @@ ETI's shared chart market API supports Bitget directly from Cloudflare Workers u
 | USDC-margined futures | same route with `category=USDC-FUTURES` | `USDC-FUTURES` |
 | Coin-margined futures | same route with `category=COIN-FUTURES` | `COIN-FUTURES` |
 
+Futures ticker responses also retain Bitget's mark price, index price, funding rate, open interest, best bid/ask and exchange timestamp where supplied. These are available to the analysis layer without estimating them from spot prices.
+
 The common market endpoints accept `venue=bitget`:
 - `GET /api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1m`
 - `GET /api/market/depth?venue=bitget&symbol=BTCUSDT`
