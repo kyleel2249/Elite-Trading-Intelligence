@@ -50,6 +50,7 @@ Testnet is the only recommended initial environment. Live execution requires a s
 - Category-filtered SSE: `GET /api/stream/sse?symbol=BTCUSDT&category=linear`.
 - Add a live subscription (requires the ETI API key): `POST /api/stream/subscribe` with `{"provider":"bybit","category":"linear","symbols":["BTCUSDT"]}`.
 - Stream status: `GET /api/stream/status`; category-specific connection and subscription state appears under `bybit_categories`.
+- Derivatives context: `GET /api/market/bybit/derivatives-context?symbol=BTCUSDT&category=linear&interval=1h&limit=50` returns the latest funding rate, chronological open-interest observations and the latest open-interest change. The endpoint is public and read-only.
 
 Private WebSocket order/fill streaming is not enabled in this change; execution status is reconciled through authenticated REST reads. Do not assume an account stream is connected just because public prices are streaming.
 

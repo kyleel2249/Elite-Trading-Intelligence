@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.market import binance_hosts as bh
 from app.market import symbols as sym
+from app.market.service import MarketService
 
 INFO = {"symbols": [
     {"symbol": "BTCUSDT", "status": "TRADING", "baseAsset": "BTC", "quoteAsset": "USDT", "isSpotTradingAllowed": True},
@@ -197,3 +198,33 @@ def test_bybit_catalogue_paginates_spot_linear_and_inverse_instruments():
     assert next(row for row in items if row["symbol"] == "BTCUSDT" and row["market"] == "spot")["margin_eligible"] is True
     assert next(row for row in items if row["market"] == "linear")["symbol"] == "BTCUSDT"
     assert next(row for row in items if row["market"] == "inverse")["symbol"] == "BTCUSD"
+
+
+def test_bybit_derivatives_context_api_returns_funding_and_open_interest(client, monkeypatch):
+    async def fake(self, symbol, category="linear", interval="1h", limit=50):
+        return {
+            "provider": "bybit", "symbol": symbol, "category": category,
+            "funding": {"funding_rate": 0.0001, "funding_time": 1700000000000},
+            "open_interest": [{"timestamp": 1000, "open_interest": 10.0},
+                              {"timestamp": 2000, "open_interest": 12.0}],
+            "open_interest_interval": interval, "open_interest_sample_count": min(2, limit),
+            "latest_open_interest": {"timestamp": 2000, "open_interest": 12.0},
+            "open_interest_change_fraction": 0.2, "read_only": True,
+        }
+
+    monkeypatch.setattr(MarketService, "get_derivatives_context", fake)
+    response = client.get("/api/market/bybit/derivatives-context",
+                          params={"symbol": "BTCUSDT", "category": "linear", "interval": "1h", "limit": 20})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "bybit" and body["category"] == "linear"
+    assert body["funding"]["funding_rate"] == 0.0001
+    assert body["latest_open_interest"]["open_interest"] == 12.0
+    assert body["read_only"] is True
+
+
+def test_bybit_derivatives_context_api_rejects_spot_and_invalid_intervals(client):
+    assert client.get("/api/market/bybit/derivatives-context",
+                      params={"symbol": "BTCUSDT", "category": "spot"}).status_code == 422
+    assert client.get("/api/market/bybit/derivatives-context",
+                      params={"symbol": "BTCUSDT", "category": "linear", "interval": "2h"}).status_code == 422

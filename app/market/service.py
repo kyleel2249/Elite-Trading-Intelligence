@@ -85,6 +85,44 @@ class MarketService:
             }
         raise ValueError(f"Unknown provider: {provider}")
 
+    async def get_derivatives_context(
+        self,
+        symbol: str,
+        category: str = "linear",
+        interval: str = "1h",
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Read-only funding and open-interest context for Bybit perpetual contracts."""
+        import asyncio
+
+        category = category.lower()
+        if category not in ("linear", "inverse"):
+            raise ValueError("Bybit derivatives context requires linear or inverse category")
+        normalized_symbol = symbol.upper().strip()
+        if not normalized_symbol:
+            raise ValueError("symbol is required")
+        funding, observations = await asyncio.gather(
+            self.bybit.get_funding_rate(normalized_symbol, category=category),
+            self.bybit.get_open_interest(normalized_symbol, interval=interval, limit=limit, category=category),
+        )
+        latest = observations[-1] if observations else None
+        previous = observations[-2] if len(observations) > 1 else None
+        change = None
+        if latest and previous and previous["open_interest"] != 0:
+            change = (latest["open_interest"] - previous["open_interest"]) / previous["open_interest"]
+        return {
+            "provider": "bybit",
+            "symbol": normalized_symbol,
+            "category": category,
+            "funding": funding,
+            "open_interest": observations,
+            "open_interest_interval": interval,
+            "open_interest_sample_count": len(observations),
+            "latest_open_interest": latest,
+            "open_interest_change_fraction": change,
+            "read_only": True,
+        }
+
     async def get_order_book(self, symbol: str, depth: int = 20) -> dict[str, Any]:
         """Bybit public order book depth + liquidity metrics."""
         import httpx
