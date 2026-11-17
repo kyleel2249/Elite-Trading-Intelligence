@@ -10,7 +10,7 @@ const STEP: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "30m": 1
 function mockExchange(opts: { depth?: boolean } = {}) {
   globalThis.fetch = (async (input: any) => {
     const u = new URL(String(input));
-    if (u.pathname.includes("depth")) {
+    if (u.pathname.includes("orderbook") || u.pathname.includes("depth")) {
       if (opts.depth === false) return new Response("{}", { status: 500 });
       const bids = Array.from({ length: 20 }, (_, i) => [String(100 - 0.01 - i * 0.05), "20"]), asks = Array.from({ length: 20 }, (_, i) => [String(100 + 0.01 + i * 0.05), "10"]);
       return new Response(JSON.stringify({ lastUpdateId: 1, bids, asks }), { status: 200 });
