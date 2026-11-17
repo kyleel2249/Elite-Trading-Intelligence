@@ -50,7 +50,7 @@ function mockExchange() {
   const px = series(260, { drift: 1, noise: 2, seed: 1, start: 100, end: Date.now() }).at(-1)![4];
   globalThis.fetch = (async (input: any) => {
     const u = new URL(String(input));
-    if (u.pathname.includes("depth")) { const d = depthAround(px, Date.now()); return new Response(JSON.stringify({ lastUpdateId: 1, bids: d.bids.map(([p, q]) => [String(p), String(q)]), asks: d.asks.map(([p, q]) => [String(p), String(q)]) }), { status: 200 }); }
+    if (u.pathname.includes("orderbook") || u.pathname.includes("depth")) { const d = depthAround(px, Date.now()); return new Response(JSON.stringify({ lastUpdateId: 1, bids: d.bids.map(([p, q]) => [String(p), String(q)]), asks: d.asks.map(([p, q]) => [String(p), String(q)]) }), { status: 200 }); }
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000;
     return new Response(JSON.stringify(series(260, { drift: 1, noise: 2, seed: 1, start: 100, stepMs: step, end: Date.now() }).map(r => [r[0], String(r[1]), String(r[2]), String(r[3]), String(r[4]), String(r[5])])), { status: 200 });
   }) as typeof fetch;
