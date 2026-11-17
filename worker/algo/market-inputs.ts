@@ -17,7 +17,7 @@ export interface SignalInputs {
 /** Only the timeframes the strategy weights plus its execution timeframe are fetched, keeping subrequests inside Workers limits. */
 export async function loadSignalInputs(
   env: MarketEnv, symbol: string, strategy: Strategy, providerParam: string | null,
-  now: number = Date.now(), market: SignalMarket = "spot", categoryParam?: string,
+  now: number = Date.now(), market: SignalMarket = "spot", categoryParam?: string, fetchImpl: typeof fetch = fetch,
 ): Promise<SignalInputs | { error: "market_data_unavailable"; executionTimeframe: Timeframe; failures: Record<string, string> }> {
   const isBitget = providerParam === "bitget" || providerParam === "bitget_mix";
   const order: ProviderId[] = isBitget ? [market === "futures" ? "bitget_mix" : "bitget"] : providerOrder(env, providerParam);
@@ -32,7 +32,7 @@ export async function loadSignalInputs(
   const params = { symbol, market, category };
   await Promise.all(need.map(async tf => {
     try {
-      const r = await getMarketData("klines", { ...params, interval: tf, limit: 300 }, order);
+      const r = await getMarketData("klines", { ...params, interval: tf, limit: 300 }, order, fetchImpl);
       candles[tf] = r.data as Kline[];
       if (tf === exec) provider = r.provider;
     } catch (e) { failures[tf] = e instanceof Error ? e.message : "unknown"; }
@@ -40,13 +40,13 @@ export async function loadSignalInputs(
   if (!candles[exec]) return { error: "market_data_unavailable", executionTimeframe: exec, failures };
   let depth: SignalInputs["depth"] = null;
   try {
-    const d = (await getMarketData("depth", { ...params, interval: "1m", limit: 100 }, order)).data as Depth;
+    const d = (await getMarketData("depth", { ...params, interval: "1m", limit: 100 }, order, fetchImpl)).data as Depth;
     depth = { bids: d.bids, asks: d.asks, timestamp: now };
   } catch (e) { failures.depth = e instanceof Error ? e.message : "unknown"; }
   let derivatives: DerivativesSnapshot | null = null;
   if (market === "futures") {
     try {
-      const r = await getMarketData("ticker", { ...params, interval: "1m", limit: 1 }, order), t = r.data as Ticker;
+      const r = await getMarketData("ticker", { ...params, interval: "1m", limit: 1 }, order, fetchImpl), t = r.data as Ticker;
       derivatives = { fundingRate: t.fundingRate ?? null, openInterest: t.openInterest ?? null, ...(t.timestamp ? { timestamp: t.timestamp } : {}), source: r.provider };
     } catch (e) { failures.derivatives = e instanceof Error ? e.message : "unknown"; }
   }
