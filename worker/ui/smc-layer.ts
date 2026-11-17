@@ -35,7 +35,7 @@ async function load(force){
   var response=await getJson(url),next=response&&response.data;if(!next||!next.status)throw new Error("Invalid SMC response");
   data=next;
  }catch(e){error=e&&e.message?e.message:"SMC request failed";}
- finally{busy=false;renderStatus();try{paint();}catch(_){}}
+ finally{busy=false;renderStatus();try{drawChart();}catch(_){try{paint();}catch(__){}}}
 }
 function paint(){
  if(!data||data.status!=="ready"||!candles.length)return;

@@ -17,6 +17,7 @@ test("SMC layer exposes controls for order blocks, liquidity pools, BOS/CHoCH an
   assert.match(SMC_LAYER_JS, /destination-over/);
   assert.match(SMC_LAYER_JS, /\/api\/analysis\/smc/);
   assert.match(SMC_LAYER_JS, /response&&response\\.data/);
+  assert.match(SMC_LAYER_JS, /finally\\{busy=false;renderStatus\\(\\);try\\{drawChart\\(\\)/);
 });
 test("SMC chart layer is visual-only and never authorises execution", () => {
   assert.match(SMC_LAYER_JS, /window\.etiSmc/);
