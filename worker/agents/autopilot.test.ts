@@ -39,12 +39,13 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
   } };
   const result = await runAgentAutopilotCycle(env, app, 1_800_000);
   assert.equal(result.submitted, 1);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].path, "/api/agents/analyze");
-  assert.equal(calls[0].body.execution, undefined, "preflight must remain read-only");
-  assert.equal(calls[1].path, "/api/agents/execute");
-  assert.equal(calls[1].body.execution.broker, "eti_paper");
-  assert.equal(calls[1].body.execution.executionSource.actorType, "automation");
+  assert.equal(calls.length, 6);
+  assert.equal(calls.slice(0, 4).every(x => x.path === "/api/omnisignal"), true, "all four strategy engines must be consulted");
+  assert.equal(calls[4].path, "/api/agents/analyze");
+  assert.equal(calls[4].body.execution, undefined, "preflight must remain read-only");
+  assert.equal(calls[5].path, "/api/agents/execute");
+  assert.equal(calls[5].body.execution.broker, "eti_paper");
+  assert.equal(calls[5].body.execution.executionSource.actorType, "automation");
   assert.equal(result.liveOrdersAllowed, false);
 });
 
@@ -59,8 +60,9 @@ test("autopilot refuses a trade below configured confidence and agreement", asyn
   } };
   const result = await runAgentAutopilotCycle(env, app, 2_100_000);
   assert.equal(result.submitted, 0);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0], "/api/agents/analyze");
+  assert.equal(calls.length, 5);
+  assert.equal(calls.slice(0, 4).every(x => x === "/api/omnisignal"), true);
+  assert.equal(calls[4], "/api/agents/analyze");
   assert.equal(result.outcomes[0].status, "no_trade");
 });
 
