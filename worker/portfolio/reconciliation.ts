@@ -50,7 +50,7 @@ export function reconcileCrossExchange(snapshot: any, ledger: any, now: number, 
   const spot=bitget.markets?.find((m:any)=>m.market==="spot");
   if(spot?.status==="connected"){const assets=spot.assets??[],unvalued=assets.some((a:any)=>qty(a.available)>0&&finite(a.usdValue)===null),spotUsd=assets.reduce((s:number,a:any)=>s+(finite(a.available)!==null&&finite(a.usdValue)!==null&&qty(a.total)>0?finite(a.usdValue)!*(qty(a.available)/qty(a.total)):0),0);if(!unvalued)verifiedAvailableUsd=finite(bybit.availableUsd)!+spotUsd;else warnings.push("bitget_spot_contains_unvalued_assets");}
  }
- if(verifiedAvailableUsd===null)warnings.push("combined_available_capital_not_verified");
+ if(verifiedAvailableUsd===null){warnings.push("combined_available_capital_not_verified");problems.push("combined_available_capital_not_verified");}
  if(comparisons.some(x=>x.status!=="matched"))problems.push("ledger_and_exchange_positions_do_not_reconcile");
  const exposure=verifiedGrossExposureUsd(snapshot,activity,now);
  warnings.push(...exposure.problems);
