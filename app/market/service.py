@@ -101,11 +101,12 @@ class MarketService:
         symbol: str,
         interval: str = "1h",
         limit: int = 100,
+        category: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         provider = provider.lower()
         if provider in ("bybit", "binance"):
             client = self.bybit if provider == "bybit" else self.binance
-            raw = await client.get_klines(symbol, interval=interval, limit=limit)
+            raw = await client.get_klines(symbol, interval=interval, limit=limit, **({"category": category} if provider == "bybit" and category else {}))
             out = []
             for row in raw:
                 nk = normalize_binance_kline(row, symbol, interval) | {"provider": provider}
