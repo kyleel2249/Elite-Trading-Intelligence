@@ -459,7 +459,7 @@ export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: Prov
     }
     for (const host of spec.hosts) {
       const raw = await fetchHost(host, req, fetchImpl);
-      const base = { provider: id, host: host.replace("https://", ""), status: raw.status, latencyMs: raw.latencyMs };
+      const base = { provider: id, host: raw.headers?.get("x-eti-upstream-host") || host.replace("https://", ""), status: raw.status, latencyMs: raw.latencyMs };
       if (raw.errorClass) {
         const a: Attempt = { ...base, ok: false, errorClass: raw.errorClass, detail: snippet(raw.text) || undefined };
         attempts.push(a); record(a);
@@ -486,7 +486,7 @@ const baseHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
   "access-control-allow-origin": "*",
-  "access-control-expose-headers": "x-eti-provider,x-eti-failover,x-eti-attempts",
+  "access-control-expose-headers": "x-eti-provider,x-eti-failover,x-eti-attempts,x-eti-upstream-host",
 };
 const jsonResp = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), { status, headers: { ...baseHeaders, ...extra } });
@@ -557,6 +557,7 @@ export interface SymbolRow {
   /** Bybit spot margin eligibility */ marginTrading?: string;
   /** Bitget cross/isolated margin eligibility and max leverage */ marginCrossed?: boolean; marginIsolated?: boolean;
   maxCrossedLeverage?: number; maxIsolatedLeverage?: number;
+  marginBaseBorrowable?: boolean; marginQuoteBorrowable?: boolean; marginCrossBorrowable?: boolean;
   /** Bitget derivative contract type */ contractType?: "perpetual" | "delivery";
 }
 interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
@@ -603,7 +604,75 @@ export async function listBinanceSymbols(market: MarketKind = "spot", fetchImpl:
 const bitgetCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
 let bitgetMarginCache: SymbolCacheEntry | null = null;
 const BITGET_BASE = "https://api.bitget.com";
+const BITGET_V2_HOSTS = ["https://capi.bitget.com", "https://api.bitget.com"];
 const BITGET_OK_STATUS = new Set(["online", "normal", "listed", "limit_open", "restrictedapi"]);
+const BITGET_V2_GRAN: Record<string, string> = {
+  "1m": "1min", "3m": "3min", "5m": "5min", "15m": "15min", "30m": "30min",
+  "1H": "1h", "4H": "4h", "6H": "6Hutc", "12H": "12Hutc", "1D": "1Dutc",
+};
+function bitgetV2FallbackUrl(source: string): string | null {
+  const u = new URL(source), category = u.searchParams.get("category") || "SPOT";
+  const symbol = u.searchParams.get("symbol") || "";
+  const limit = u.searchParams.get("limit") || "100";
+  const q = new URLSearchParams();
+  if (symbol) q.set("symbol", symbol);
+  if (u.pathname === "/api/v3/market/instruments") {
+    if (category === "SPOT") return "/api/v2/spot/public/symbols";
+    if (category === "MARGIN") return "/api/v2/margin/currencies";
+    if (BITGET_PRODUCT_TYPES.includes(category as BitgetProductType)) return "/api/v2/mix/market/contracts?productType=" + encodeURIComponent(category);
+    return null;
+  }
+  q.set("limit", limit);
+  const futures = BITGET_PRODUCT_TYPES.includes(category as BitgetProductType);
+  if (u.pathname === "/api/v3/market/candles") {
+    const granularity = BITGET_V2_GRAN[u.searchParams.get("interval") || ""];
+    if (!granularity || !symbol) return null;
+    q.set("granularity", granularity);
+    if (futures) { q.set("productType", category); q.set("limit", String(Math.min(Number(limit) || 100, 200))); return "/api/v2/mix/market/candles?" + q.toString(); }
+    q.set("limit", String(Math.min(Number(limit) || 100, 1000)));
+    return "/api/v2/spot/market/candles?" + q.toString();
+  }
+  if (u.pathname === "/api/v3/market/orderbook") {
+    if (!symbol) return null;
+    if (futures) { q.set("productType", category); return "/api/v2/mix/market/merge-depth?" + q.toString(); }
+    q.set("type", "step0");
+    return "/api/v2/spot/market/orderbook?" + q.toString();
+  }
+  if (u.pathname === "/api/v3/market/fills") {
+    if (!symbol) return null;
+    if (futures) { q.set("productType", category); return "/api/v2/mix/market/fills?" + q.toString(); }
+    return "/api/v2/spot/market/fills?" + q.toString();
+  }
+  if (u.pathname === "/api/v3/market/tickers") {
+    q.delete("limit");
+    if (futures) { q.set("productType", category); return "/api/v2/mix/market/ticker?" + q.toString(); }
+    return "/api/v2/spot/market/tickers?" + q.toString();
+  }
+  return null;
+}
+export async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestInit, fetchImpl: typeof fetch = fetch): Promise<Response> {
+  const source = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const primary = await fetchImpl(input, init);
+  if (primary.status !== 403 || !source.startsWith(BITGET_BASE + "/api/v3/")) return primary;
+  const fallbackPath = bitgetV2FallbackUrl(source);
+  if (!fallbackPath) return primary;
+  let last: Response | null = null;
+  for (const host of BITGET_V2_HOSTS) {
+    try {
+      const response = await fetchImpl(host + fallbackPath, init);
+      if (response.ok) {
+        const body: any = await response.clone().json().catch(() => null);
+        if (!body || body.code !== "00000") { last = response; continue; }
+        const headers = new Headers(response.headers);
+        headers.set("x-eti-upstream-host", new URL(host).host);
+        headers.set("x-eti-api-version", "v2-fallback");
+        return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      }
+      last = response;
+    } catch { /* Try the next documented Bitget host. */ }
+  }
+  return last && last.status !== 403 ? last : primary;
+}
 /** Category for a Bitget pair, decided by the ETI classifier so the chart, the dropdown and the risk review agree. Catalog-confirmed matches only: an unrecognised ticker stays "crypto" rather than being guessed into a stock. */
 export function bitgetCategory(base: string, quote: string): string {
   if (isMetalPair(base, quote)) return "metals";
@@ -621,14 +690,20 @@ export function bitgetCategory(base: string, quote: string): string {
   }
   return "crypto";
 }
-async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list: any[] | null; status: number | null; errorClass: string | null }> {
+async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list: any[] | null; status: number | null; errorClass: string | null; host: string }> {
   try {
     const res = await fetchImpl(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit);
-    if (!res.ok) return { list: null, status: res.status, errorClass: classifyStatus(res.status) };
+    const host = res.headers.get("x-eti-upstream-host") || "api.bitget.com";
+    if (!res.ok) return { list: null, status: res.status, errorClass: classifyStatus(res.status), host };
     const j: any = await res.json();
-    if (!j || j.code !== "00000" || !Array.isArray(j.data)) return { list: null, status: res.status, errorClass: "invalid_payload" };
-    return { list: j.data, status: res.status, errorClass: null };
-  } catch (e) { return { list: null, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" }; }
+    if (!j || j.code !== "00000" || !Array.isArray(j.data)) return { list: null, status: res.status, errorClass: "invalid_payload", host };
+    const list = j.data.map((item: any) => {
+      const rawStatus = String(item?.status ?? item?.symbolStatus ?? "");
+      const status = rawStatus === "1" || rawStatus.toLowerCase() === "normal" ? "online" : rawStatus === "2" ? "maintenance" : rawStatus;
+      return { ...item, status, type: item?.type ?? item?.symbolType };
+    });
+    return { list, status: res.status, errorClass: null, host };
+  } catch (e) { return { list: null, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error", host: "api.bitget.com" }; }
 }
 /** Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined). Uses an independent 60-second cache and the same stale-list safety policy. */
 export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
@@ -648,10 +723,11 @@ export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: 
       add(x, category === "SPOT" ? undefined : category);
       if (category !== "SPOT" && rows.length > before) rows[rows.length - 1].contractType = String(x.type ?? "perpetual").toLowerCase() === "delivery" ? "delivery" : "perpetual";
     });
-    else attempts.push({ host: BITGET_BASE + " (" + category + ")", status: r.status, errorClass: r.errorClass });
+    else attempts.push({ host: r.host + " (" + category + ")", status: r.status, errorClass: r.errorClass });
   }
   rows.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : (a.pt ?? "") < (b.pt ?? "") ? -1 : 1));
-  if (rows.length) { bitgetCache[market] = { at: now(), rows, host: BITGET_BASE }; return { rows, host: BITGET_BASE, cached: false, stale: false, fetchedAt: now(), attempts }; }
+  const actualHost = parts.find(part => part.r.list)?.r.host || BITGET_BASE;
+  if (rows.length) { bitgetCache[market] = { at: now(), rows, host: actualHost }; return { rows, host: actualHost, cached: false, stale: false, fetchedAt: now(), attempts }; }
   if (!attempts.length) attempts.push({ host: BITGET_BASE, status: 200, errorClass: "empty_symbols" });
   if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at, attempts };
   throw new AllProvidersFailed(attempts.map((a) => ({ provider: (market === "futures" ? "bitget_mix" : "bitget") as ProviderId, host: a.host, status: a.status, ok: false, errorClass: a.errorClass, latencyMs: 0 })));
@@ -661,14 +737,20 @@ export async function listBitgetMarginSymbols(fetchImpl: typeof fetch = fetch, n
   if (hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at };
   const r = await bitgetGet("/api/v3/market/instruments?category=MARGIN", fetchImpl);
   if (r.list) {
+    const flag = (v: unknown) => v === true || ["true", "yes", "1"].includes(String(v ?? "").toLowerCase());
     const rows = r.list.filter(x => x && String(x.status ?? "").toLowerCase() === "online" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol ?? "")))
       .map(x => ({
         s: String(x.symbol), b: String(x.baseCoin ?? "").toUpperCase(), q: String(x.quoteCoin ?? "").toUpperCase(),
         m: "spot" as MarketKind, c: bitgetCategory(String(x.baseCoin ?? "").toUpperCase(), String(x.quoteCoin ?? "").toUpperCase()),
-        v: "bitget" as const, marginCrossed: Number(x.maxCrossedLeverage) > 0, marginIsolated: Number(x.maxIsolatedLeverage) > 0,
+        v: "bitget" as const,
+        marginCrossed: x.isCrossBorrowable === undefined ? Number(x.maxCrossedLeverage) > 0 : flag(x.isCrossBorrowable),
+        marginIsolated: x.isIsolatedBaseBorrowable === undefined && x.isIsolatedQuoteBorrowable === undefined
+          ? Number(x.maxIsolatedLeverage) > 0 : flag(x.isIsolatedBaseBorrowable) || flag(x.isIsolatedQuoteBorrowable),
+        marginBaseBorrowable: flag(x.isIsolatedBaseBorrowable), marginQuoteBorrowable: flag(x.isIsolatedQuoteBorrowable),
+        marginCrossBorrowable: x.isCrossBorrowable === undefined ? Number(x.maxCrossedLeverage) > 0 : flag(x.isCrossBorrowable),
         maxCrossedLeverage: Number(x.maxCrossedLeverage) || 0, maxIsolatedLeverage: Number(x.maxIsolatedLeverage) || 0,
       }));
-    if (rows.length) { const entry = { at: now(), rows, host: BITGET_BASE }; bitgetMarginCache = entry; return { rows, host: entry.host, cached: false, stale: false, fetchedAt: entry.at }; }
+    if (rows.length) { const entry = { at: now(), rows, host: r.host }; bitgetMarginCache = entry; return { rows, host: entry.host, cached: false, stale: false, fetchedAt: entry.at }; }
   }
   if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at };
   throw new AllProvidersFailed([{ provider: "bitget", host: BITGET_BASE + "/api/v3/market/instruments?category=MARGIN", status: r.status, ok: false, errorClass: r.errorClass ?? "empty_symbols", latencyMs: 0 }]);
@@ -731,7 +813,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "access-control-allow-methods": "GET,OPTIONS" } });
   if (request.method !== "GET") return jsonResp({ error: "method_not_allowed" }, 405);
   const endpoint = url.pathname.slice("/api/market/".length);
-  const marketFetch = fetch;
+  const marketFetch = (input: RequestInfo | URL, init?: RequestInit) => bitgetAwareFetch(input, init, fetch);
   if (endpoint === "region") return jsonResp({
     service: "eti-public-market-data", transport: "cloudflare-worker-direct", placementHint: "gcp:europe-west1",
     providers: { bybit: PROVIDERS.bybit.hosts, bitget: PROVIDERS.bitget.hosts },
@@ -778,7 +860,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
       symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : []), ...(x.marginTrading ? [x.marginTrading] : []),
-        ...(x.marginCrossed !== undefined ? [x.marginCrossed, x.marginIsolated, x.maxCrossedLeverage, x.maxIsolatedLeverage] : []), ...(x.contractType ? [x.contractType] : [])]) }, 200, { "cache-control": "public, max-age=45" });
+        ...(x.marginCrossed !== undefined ? [x.marginCrossed, x.marginIsolated, x.maxCrossedLeverage, x.maxIsolatedLeverage, x.marginBaseBorrowable, x.marginQuoteBorrowable, x.marginCrossBorrowable] : []), ...(x.contractType ? [x.contractType] : [])]) }, 200, { "cache-control": "public, max-age=45" });
   }
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";
@@ -823,7 +905,8 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   try {
     const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw), market: marketParam, category: categoryParam as Params["category"], productType: ptParam ? ptParam as BitgetProductType : undefined }, order, marketFetch);
     const data = endpoint === "klines" && Array.isArray(r.data) ? (r.data as Kline[]).map(k => k.slice(0, 6)) : r.data; // public contract stays 6 columns; taker volume is internal
-    return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
+    const successfulAttempt = r.attempts.find(a => a.ok);
+    return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts), ...(successfulAttempt?.host ? { "x-eti-upstream-host": successfulAttempt.host } : {}) });
   } catch (e) {
     if (e instanceof AllProvidersFailed) {
       const last = [...e.attempts].reverse().find((a) => a.status !== null);

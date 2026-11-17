@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { handleMarket, listBybitSymbols, listBitgetSymbols, _resetSymbolCache } from "./market.ts";
 
 const realFetch = globalThis.fetch;
+const req = (path: string) => new Request("https://eti.test" + path);
 test.afterEach(() => { globalThis.fetch = realFetch; _resetSymbolCache(); });
 const bybitPayload = (category: string) => new Response(JSON.stringify({ retCode: 0, result: {
   list: category === "spot"
@@ -54,6 +55,88 @@ test("Bitget Coin-M delivery contracts are included in the instrument catalogue"
   };
   const futures = await listBitgetSymbols("futures", fetcher);
   assert.ok(futures.rows.some(row => row.pt === "COIN-FUTURES" && row.contractType === "delivery"));
+});
+
+test("Bitget V2 fallback serves spot ticker when the UTA V3 endpoint is Cloudflare-blocked", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/tickers")
+      return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v2/spot/market/tickers")
+      return new Response(JSON.stringify({ code: "00000", data: [{
+        symbol: "BTCUSDT", lastPr: "60000", open: "59000", high24h: "61000", low24h: "58000",
+        baseVolume: "10", quoteVolume: "590000", bidPr: "59999", askPr: "60001", change24h: "0.0169", ts: "1794940561000"
+      }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const response = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-eti-upstream-host"), "capi.bitget.com");
+  const ticker = await response.json() as any;
+  assert.equal(ticker.lastPrice, 60000);
+  assert.equal(ticker.priceChangePercent, 1.69);
+});
+
+test("Bitget V2 fallback tries the main domain if the legacy host is unavailable", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/tickers")
+      return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com") return new Response("not found", { status: 404 });
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v2/spot/market/tickers")
+      return new Response(JSON.stringify({ code: "00000", data: [{
+        symbol: "BTCUSDT", lastPr: "60000", open: "59000", high24h: "61000", low24h: "58000",
+        baseVolume: "10", quoteVolume: "590000", bidPr: "59999", askPr: "60001", change24h: "0.0169", ts: "1794940561000"
+      }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const response = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-eti-upstream-host"), "api.bitget.com");
+});
+
+test("Bitget spot and futures instrument catalogues fall back to documented V2 endpoints", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/instruments")
+      return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v2/spot/public/symbols")
+      return new Response(JSON.stringify({ code: "00000", data: [{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "online" }] }));
+    if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v2/mix/market/contracts")
+      return new Response(JSON.stringify({ code: "00000", data: [{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", symbolStatus: "normal", symbolType: "perpetual" }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const spot = await handleMarket(req("/api/market/symbols?venue=bitget&market=spot"), {});
+  assert.equal(spot.status, 200);
+  assert.equal((await spot.json() as any).symbols[0][0], "BTCUSDT");
+  const futures = await handleMarket(req("/api/market/symbols?venue=bitget&market=futures&category=USDT-FUTURES"), {});
+  assert.equal(futures.status, 200);
+  assert.equal((await futures.json() as any).symbols[0][6], "USDT-FUTURES");
+});
+
+test("Bitget margin catalogue falls back to V2 and preserves borrowing eligibility", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/instruments")
+      return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v2/margin/currencies")
+      return new Response(JSON.stringify({ code: "00000", data: [{
+        symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "1", maxCrossedLeverage: "3",
+        maxIsolatedLeverage: "10", isCrossBorrowable: true, isIsolatedBaseBorrowable: true, isIsolatedQuoteBorrowable: false
+      }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const response = await handleMarket(req("/api/market/symbols?venue=bitget&market=margin"), {});
+  assert.equal(response.status, 200);
+  const row = (await response.json() as any).symbols[0];
+  assert.equal(row[0], "BTCUSDT");
+  assert.equal(row[6], true);
+  assert.equal(row[7], true);
+  assert.equal(row[8], 3);
+  assert.equal(row[9], 10);
+  assert.equal(row[10], true);
+  assert.equal(row[11], false);
+  assert.equal(row[12], true);
 });
 
 test("Bitget chart route accepts only supported category names and does not route to Bybit", async () => {
