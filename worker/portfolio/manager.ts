@@ -28,7 +28,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 const strategyOf = (v: unknown): ManagedStrategy | null => MANAGED_STRATEGIES.includes(String(v).toLowerCase() as ManagedStrategy) ? String(v).toLowerCase() as ManagedStrategy : null;
 
 function metrics(trades: ClosedTrade[], strategy: ManagedStrategy) {
-  const rows = trades.filter(t => strategyOf(t.strategy) === strategy).sort((a, b) => a.exitAt - b.exitAt).slice(-60);
+  const allRows = trades.filter(t => strategyOf(t.strategy) === strategy).sort((a, b) => a.exitAt - b.exitAt).slice(-60);
+  // Unknown exchange fees can make net expectancy look better than it was; exclude those trades from allocation qualification.
+  const rows = allRows.filter(t => t.unknownFees === 0 && Number.isFinite(t.net));
   const wins = rows.filter(t => t.net > 0), losses = rows.filter(t => t.net < 0);
   const grossWin = wins.reduce((s, t) => s + t.net, 0);
   const grossLoss = -losses.reduce((s, t) => s + t.net, 0);
@@ -46,7 +48,7 @@ function metrics(trades: ClosedTrade[], strategy: ManagedStrategy) {
   if (rows.length < 20) reasons.push("insufficient_verified_trade_history");
   if (expectancyUsd !== null && expectancyUsd <= 0) reasons.push("non_positive_net_expectancy");
   if (profitFactor !== null && profitFactor < 1.15) reasons.push("profit_factor_below_1_15");
-  if (rows.some(t => t.unknownFees > 0)) reasons.push("some_trade_fees_unknown");
+  if (allRows.some(t => t.unknownFees > 0)) reasons.push("trades_with_unknown_fees_excluded_from_sample");
   if (eligible) reasons.push("eligible_for_advisory_allocation_only");
   return { strategy, trades: rows.length, wins: wins.length, losses: losses.length, winRate, profitFactor, expectancyUsd, netPnlUsd, maxDrawdownUsd, eligible, score, reasons };
 }
