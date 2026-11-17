@@ -9,7 +9,7 @@ export interface MarketEnv { MARKET_PROVIDER_ORDER?: string }
 export type ProviderId = "binance" | "bybit" | "okx" | "binance_usdm" | "bitget" | "bitget_mix";
 export type MarketKind = "spot" | "futures";
 /** Where a pair is listed. Binance is the default; Bitget is selected explicitly per request (venue=bitget) and is never silently substituted for Binance data. */
-export type Venue = "binance" | "bitget";
+export type Venue = "binance" | "bybit" | "bitget";
 export type BitgetProductType = "USDT-FUTURES" | "USDC-FUTURES" | "COIN-FUTURES";
 export const BITGET_PRODUCT_TYPES: BitgetProductType[] = ["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"];
 export type Endpoint = "klines" | "depth" | "trades" | "ticker";
@@ -334,7 +334,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   bitget_mix: {
     hosts: ["https://api.bitget.com"],
     request(endpoint, p) {
-      const category = p.productType ?? (p.category && ["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"].includes(p.category) ? p.category as BitgetProductType : bitgetProductFor(p.symbol));
+      const category = p.productType ?? (p.category && BITGET_PRODUCT_TYPES.includes(p.category as BitgetProductType) ? p.category as BitgetProductType : bitgetProductFor(p.symbol));
       const interval = BITGET_MIX_GRAN[p.interval];
       if (endpoint === "klines") {
         if (!interval) throw new Unsupported("bitget_futures_interval");
