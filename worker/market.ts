@@ -250,7 +250,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   },
 
   bybit: {
-    hosts: ["https://api.bybit.com", "https://api.bytick.com"],
+    hosts: ["https://api.bytick.com", "https://api.bybit.com"],
     request(endpoint, p) {
       if (endpoint === "klines") {
         const iv = BYBIT_INTERVAL[p.interval];
@@ -611,30 +611,46 @@ export async function listBybitSymbols(market: MarketKind = "spot", fetchImpl: t
   if ((market === "spot") !== (cat === "spot")) throw new Error("market_category_mismatch");
   const hit = bybitSymbolCache[cat];
   if (hit && now() - hit.at < 60_000) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] as SymbolAttempt[] };
-  const attempts: SymbolAttempt[] = [], rows: SymbolRow[] = [];
-  let cursor = "";
+  const attempts: SymbolAttempt[] = [], rows: SymbolRow[] = [], hosts = PROVIDERS.bybit.hosts;
+  let cursor = "", selectedHost = "";
   for (let page = 0; page < (cat === "spot" ? 1 : 20); page++) {
     const qs = new URLSearchParams({ category: cat, limit: "1000", ...(cursor ? { cursor } : {}) });
-    try {
-      const res = await fetchImpl("https://api.bybit.com/v5/market/instruments-info?" + qs.toString(), { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit);
-      if (!res.ok) { attempts.push({ host: "api.bybit.com", status: res.status, errorClass: classifyStatus(res.status) }); break; }
-      const j: any = await res.json();
-      if (!j || j.retCode !== 0 || !Array.isArray(j.result?.list)) { attempts.push({ host: "api.bybit.com", status: res.status, errorClass: "invalid_payload" }); break; }
-      for (const x of j.result.list) {
-        const sym = String(x?.symbol ?? ""), b = String(x?.baseCoin ?? "").toUpperCase(), q = String(x?.quoteCoin ?? "").toUpperCase();
-        if (x?.status !== "Trading" || !/^[A-Z0-9]{5,24}$/.test(sym) || !b || !q) continue;
-        if (cat !== "spot" && !/Perpetual/i.test(String(x.contractType ?? ""))) continue;
-        rows.push({ s: sym, b, q, m: market, c: isMetalPair(b, q) ? "metals" : cat === "spot" ? bitgetCategory(b, q) : "crypto" });
+    let result: any = null, pageHost = "";
+    for (const host of hosts) {
+      try {
+        const res = await fetchImpl(host + "/v5/market/instruments-info?" + qs.toString(), { headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bybit.com", referer: "https://www.bybit.com/" }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit);
+        if (!res.ok) {
+          attempts.push({ host: host.replace("https://", ""), status: res.status, errorClass: classifyStatus(res.status) });
+          if (res.status === 400 || res.status === 404) break;
+          continue;
+        }
+        const j: any = await res.json().catch(() => null);
+        if (!j || j.retCode !== 0 || !Array.isArray(j.result?.list)) {
+          attempts.push({ host: host.replace("https://", ""), status: res.status, errorClass: "invalid_payload" });
+          continue;
+        }
+        result = j.result; pageHost = host; break;
+      } catch (e) {
+        attempts.push({ host: host.replace("https://", ""), status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" });
       }
-      cursor = String(j.result.nextPageCursor ?? "");
-      if (!cursor || cat === "spot") break;
-    } catch (e) {
-      attempts.push({ host: "api.bybit.com", status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error" });
-      break;
     }
+    if (!result) break;
+    selectedHost = pageHost || selectedHost;
+    for (const x of result.list) {
+      const sym = String(x?.symbol ?? ""), b = String(x?.baseCoin ?? "").toUpperCase(), q = String(x?.quoteCoin ?? "").toUpperCase();
+      if (x?.status !== "Trading" || !/^[A-Z0-9]{5,24}$/.test(sym) || !b || !q) continue;
+      if (cat !== "spot" && !/Perpetual/i.test(String(x.contractType ?? ""))) continue;
+      rows.push({ s: sym, b, q, m: market, c: isMetalPair(b, q) ? "metals" : cat === "spot" ? bitgetCategory(b, q) : "crypto" });
+    }
+    cursor = String(result.nextPageCursor ?? "");
+    if (!cursor || cat === "spot") break;
   }
   rows.sort((a, b) => a.s.localeCompare(b.s));
-  if (rows.length) { bybitSymbolCache[cat] = { at: now(), rows, host: "https://api.bybit.com" }; return { rows, host: "https://api.bybit.com", cached: false, stale: false, fetchedAt: now(), attempts }; }
+  if (rows.length) {
+    const host = selectedHost || hosts[0];
+    bybitSymbolCache[cat] = { at: now(), rows, host };
+    return { rows, host, cached: false, stale: false, fetchedAt: now(), attempts };
+  }
   if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at, attempts };
   throw new AllProvidersFailed(attempts.map(a => ({ provider: "bybit", host: a.host, status: a.status, ok: false, errorClass: a.errorClass ?? "empty_symbols", latencyMs: 0 })));
 }
