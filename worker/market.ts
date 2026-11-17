@@ -703,6 +703,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     const rows: SymbolRow[] = [], sources: Record<string, unknown> = {}, warnings: unknown[] = [];
     if (venueQ === "bybit") {
       const jobs = want === "all" ? [{ m: "spot" as MarketKind, c: "spot" as const }, { m: "futures" as MarketKind, c: "linear" as const }, { m: "futures" as MarketKind, c: "inverse" as const }]
+        : want === "margin" ? [{ m: "spot" as MarketKind, c: "spot" as const }]
         : [{ m: want as MarketKind, c: (categoryQ || (want === "futures" ? "linear" : "spot")) as "spot" | "linear" | "inverse" }];
       if (jobs.some(j => (j.m === "spot") !== (j.c === "spot"))) return jsonResp({ error: "invalid_category" }, 400);
       const settled = await Promise.allSettled(jobs.map(({ m, c }) => listBybitSymbols(m, marketFetch, Date.now, c)));
