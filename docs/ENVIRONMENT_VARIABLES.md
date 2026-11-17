@@ -14,6 +14,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ALPHA_SUBREQUEST_BUDGET` | config | Cap on outbound sub-requests per Global Alpha run. |
 | `ANTHROPIC_API_KEY` | secret | Enables the optional LLM brief. Absent = feature off. |
 | `BACKEND_URL` | config | Origin of the Python backend (`https://host`, no path, credentials, query or fragment). Required for the custodial wallet at /wallet/chain (the Worker forwards /api/chain/* to it with a timeout, a GET retry and a header allowlist) and used as the generic fallback for routes the Worker does not implement. Check it at GET /api/chain-view/backend. The deploy workflow syncs it from a GitHub variable or secret named `BACKEND_URL`. |
+| `BYBIT_MARKET_DATA_ORIGIN` | config | HTTPS origin of the regional FastAPI backend that performs Bybit public REST requests from Fly.io Frankfurt (`fra`). The Worker forwards only allow-listed public V5 market endpoints to this origin; no private account or order routes are exposed. |
 | `BINANCE_API_KEY` | secret | Binance spot **testnet** key (trade-only). |
 | `BINANCE_FUTURES_API_KEY` | secret | Binance futures **testnet** key. |
 | `BINANCE_FUTURES_SECRET_KEY` | secret | Binance futures testnet secret. |
