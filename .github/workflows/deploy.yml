@@ -89,7 +89,7 @@ jobs:
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s),cats=Array.isArray(x.categories)?x.categories:[],warnings=Array.isArray(x.warnings)?x.warnings:[];
               const allRegionBlocked=process.env.HTTP_STATUS==="502"&&cats.length===0&&warnings.length>=3&&warnings.every(w=>Array.isArray(w.attempts)&&w.attempts.length>0&&w.attempts.every(a=>a.status===403&&a.errorClass==="http_403_blocked"));
-              if(allRegionBlocked){console.log("Bybit routes are deployed and both public hosts were attempted. The CI execution region is receiving HTTP 403 from Bybit; live catalogue availability is unverified from this region and must be checked from the user's region.");return;}
+              if(allRegionBlocked){console.log("Bybit routes are deployed and both public hosts were attempted. The CI execution region is receiving HTTP 403 from Bybit; live catalogue availability is unverified from this region and must be checked from the local region.");return;}
               const ok=process.env.HTTP_STATUS==="200"&&x.provider==="bybit"&&Array.isArray(x.symbols)&&x.symbols.length>0&&["spot","linear","inverse"].every(v=>cats.includes(v))&&Number(x.refreshEverySeconds)>0&&Number(x.refreshEverySeconds)<=60;
               if(!ok){console.error("Bybit catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,provider:x.provider,categories:cats,count:x.count,refreshEverySeconds:x.refreshEverySeconds,warnings}));process.exit(1);}
               console.log("Bybit spot, linear and inverse catalogues verified; spot market data also backs the margin-compatible feed.");
