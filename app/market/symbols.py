@@ -1,9 +1,9 @@
-"""Tradable-symbol discovery: every Binance spot pair and every Bitget spot pair (public, no keys), plus Alpaca US
-equities (needs keys).
+"""Tradable-symbol discovery: Bybit spot, linear perpetual and inverse perpetual instruments (public, no keys),
+plus Alpaca US equities (needs keys). Legacy Binance/Bitget fetch helpers remain for existing integrations.
 
 Sync model
 * The exchange lists are the source of truth. The cache expires after 60 seconds and a background task (started on first
-  use) re-reads Binance and Bitget every minute, so a newly listed pair appears within about a minute of the exchange
+  use) re-reads Bybit and Alpaca every minute, so a newly listed pair appears within about a minute of the exchange
   publishing it. Nothing is hard-coded or invented.
 * "New" is relative to this server: the first successful load of a provider is the baseline; any symbol that appears in a
   LATER load is stamped with `first_seen_at` and reported as new for 24 hours. We cannot know a pair's real listing time.
@@ -102,8 +102,10 @@ async def _fetch_bybit(transport: Optional[httpx.AsyncBaseTransport] = None) -> 
                                 "name": None, "asset_class": "crypto", "exchange": "BYBIT",
                                 "market": category, "margin_eligible": category == "spot" and str(row.get("marginTrading") or "none").lower() != "none"})
                 cursor = str(body["result"].get("nextPageCursor") or "")
-                if not cursor or category == "spot":
+                if not cursor:
                     break
+            else:
+                raise RuntimeError(f"Bybit {category} instrument pagination exceeded the 20-page safety limit")
     if not out:
         raise ValueError("Bybit returned no tradable instruments")
     return out
