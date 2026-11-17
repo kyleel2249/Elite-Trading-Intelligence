@@ -57,6 +57,26 @@ test("Bitget Coin-M delivery contracts are included in the instrument catalogue"
   assert.ok(futures.rows.some(row => row.pt === "COIN-FUTURES" && row.contractType === "delivery"));
 });
 
+test("Bitget retries the V3 public endpoint on the legacy host before downgrading to V2", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/tickers")
+      return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v3/market/tickers")
+      return new Response(JSON.stringify({ code: "00000", data: [{
+        symbol: "BTCUSDT", lastPrice: "60000", highPrice24h: "61000", lowPrice24h: "58000",
+        baseVolume: "10", quoteVolume: "590000", bidPrice: "59999", askPrice: "60001", ts: "1794940561000"
+      }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const response = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-eti-upstream-host"), "capi.bitget.com");
+  assert.equal(response.headers.get("x-eti-api-version"), "v3-mirror");
+  const ticker = await response.json() as any;
+  assert.equal(ticker.lastPrice, 60000);
+});
+
 test("Bitget V2 fallback serves spot ticker when the UTA V3 endpoint is Cloudflare-blocked", async () => {
   globalThis.fetch = (async (input: any) => {
     const u = new URL(typeof input === "string" ? input : input.url);
