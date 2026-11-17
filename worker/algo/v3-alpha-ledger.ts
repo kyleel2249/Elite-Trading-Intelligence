@@ -50,6 +50,8 @@ async function trackOpen(db:DB,env:MarketEnv,now:number){
  return{checked:rows.length,resolved:updates.length,updates};
 }
 
+export async function runV3AlphaTrackingCycle(env:Env,now=nowMs()){if(!env.ETI_PORTFOLIO_DB)return{skipped:true,reason:"d1_unavailable"};return trackOpen(env.ETI_PORTFOLIO_DB,env,now)}
+
 export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>{
  const url=new URL(req.url),path=url.pathname,db=env.ETI_PORTFOLIO_DB;
  if(!path.startsWith("/api/algo/v3-alpha/"))return reply({error:"not_found"},404);
