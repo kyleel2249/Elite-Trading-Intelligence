@@ -78,6 +78,9 @@ async function context(opts){
  var results=await Promise.allSettled([request(v3d,[v2d]),request(v3t,[v2t]),request(v3k,[v2k])]),failures={};
  var depth=results[0].status==="fulfilled"?parseDepth(results[0].value.data):null,trades=results[1].status==="fulfilled"?parseTrades(results[1].value.data):[],ticker=results[2].status==="fulfilled"?parseTicker(results[2].value.data):null;
  ["depth","trades","ticker"].forEach(function(k,i){if(results[i].status==="rejected")failures[k]=results[i].reason&&results[i].reason.message||"unavailable"});
+ var now=Date.now();
+ if(depth&&(now-depth.timestamp>180000||depth.timestamp-now>60000)){depth=null;failures.depth="stale order-book snapshot"}
+ if(ticker&&(now-ticker.timestamp>180000||ticker.timestamp-now>60000)){ticker=null;failures.ticker="stale ticker snapshot"}
  return {depth:depth,trades:trades,ticker:ticker,derivatives:futures&&ticker?{fundingRate:ticker.fundingRate,openInterest:ticker.openInterest,timestamp:ticker.timestamp,source:"bitget-browser"}:null,failures:failures};
 }
 async function marketData(opts){
