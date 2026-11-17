@@ -16,7 +16,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px
 details{margin-top:6px}summary{cursor:pointer;color:var(--acc)}.big{font-size:22px;font-weight:700}ul{margin:4px 0;padding-left:18px}.wrap{overflow-x:auto}
 </style></head><body>
 <h1>ETI Agent Intelligence Center</h1>
-<div class='mut'>Every value below is read from the live backend. Agents run <b>on demand</b> (no background jobs exist); auto-refresh is a client-side timer that re-runs the analysis. Analytical only: paper/testnet execution is separate and token-gated.</div>
+<div class='mut'>Twelve specialist agents coordinate through the Commander. Scheduled autopilot can submit approved trades to ETI INTERNAL PAPER only; Bitget live orders are never enabled by this agent controller.</div>
 <h2>Controls</h2>
 <div class='row'>
 <label>Symbol<input id='symbol' value='BTCUSDT' size='10'></label>
@@ -27,6 +27,7 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--acc)}.big{font-size:22
 <button id='run'>Run analysis</button><button id='start'>Start auto</button><button id='pause'>Pause</button><button id='resume'>Resume</button><button id='stop'>Stop</button>
 <span>State: <b id='state'>idle</b> &middot; <span id='last' class='mut'>not run yet</span></span></div>
 <div id='err' class='card' style='display:none;border-color:var(--bad)'></div>
+<h2>Autonomous trading agents</h2><div id='autopilot' class='card mut'>Loading autopilot status&hellip;</div>
 <h2>Commander decision</h2><div id='decision' class='card mut'>No analysis has been run in this session.</div>
 <h2>Agents</h2><div id='agents' class='grid'></div>
 <h2>Risk Manager checks</h2><div id='risk' class='card wrap mut'>Risk Manager has not evaluated a proposal yet.</div>
@@ -65,6 +66,7 @@ function renderRisk(res){var n=$('risk');clear(n);if(!res.risk){n.textContent='N
 function renderProviders(res){var n=$('prov');clear(n);n.className='card wrap';var rows=(res.providers||[]).map(function(p){return [p.provider,p.ok?'ok':'FAILED',fmt(p.latencyMs)+' ms',p.items===undefined?'':p.items,p.detail||'']});var q=res.dataQuality||{};rows.unshift(['market:'+q.provider,'ok','', q.candles+' candles','book: '+q.orderBook+'; cross-check: '+q.priceCrossCheck]);Object.keys(q.failures||{}).forEach(function(k){rows.push(['market:'+k,'FAILED','','',q.failures[k]])});n.appendChild(table(['Provider','Status','Latency','Items','Detail'],rows))}
 function renderMsgs(res){var n=$('msgs');clear(n);n.className='card wrap';n.appendChild(table(['#','From','To','Type','Payload (truncated)'],res.messages.map(function(m){return [m.seq,m.from,m.to,m.type,JSON.stringify(m.payload).slice(0,160)]})))}
 function showErr(t){var e=$('err');e.style.display='block';e.textContent=t}
+function loadAutopilot(){api('/api/agents/autopilot').then(function(r){var n=$('autopilot');clear(n);n.className='card wrap';var mode=r.mode||'unknown';n.appendChild(el('div','big',r.enabled?'ENABLED':'DISABLED'));n.appendChild(el('div','mut','Mode: '+mode+' | Live orders: '+(r.liveOrdersAllowed?'available':'disabled')+' | Kill switch: '+(r.killSwitch?'ACTIVE':'inactive')));n.appendChild(el('div','mut','Symbols: '+(r.symbols||[]).join(', ')+' | Interval: '+r.interval+' | Minimum confidence: '+fmt(r.minConfidence)+' | Minimum agreement: '+fmt(r.minAgreement)+' | Max positions: '+r.maxPositions));if(!r.executionTokenConfigured||!r.auditLogConfigured)n.appendChild(el('div','error','Execution token or audit log is not configured; automatic orders cannot run.'));var x=r.latest;if(x){n.appendChild(el('div',null,'Last cycle: '+x.at+' | Evaluated: '+x.evaluated+' | Paper orders submitted: '+x.submitted));n.appendChild(table(['Symbol','Status','Reason / action'],(x.outcomes||[]).map(function(o){return [o.symbol,o.status,o.reason||o.action||o.error||'']})))}else n.appendChild(el('div','mut','No scheduled cycle has been recorded yet.'))}).catch(function(e){$('autopilot').textContent='Autopilot status unavailable: '+e})}
 function run(){if(busy)return;busy=true;setState('running');$('err').style.display='none';
 var body={symbol:$('symbol').value.trim().toUpperCase(),interval:$('interval').value},b=$('bench').value.trim(),eq=parseFloat($('equity').value);
 if(b)body.benchmark=b.toUpperCase();if(isFinite(eq)&&eq>0)body.account={equityUsd:eq};
@@ -77,6 +79,7 @@ $('run').onclick=run;$('start').onclick=startTimer;
 $('pause').onclick=function(){stopTimer();paused=true;setState('paused')};
 $('resume').onclick=function(){if(paused)startTimer()};
 $('stop').onclick=function(){stopTimer();paused=false;setState('stopped')};
+loadAutopilot();
 api('/api/agents').then(function(r){roster=r.agents||[];renderAgents([]);var a=$('audit');clear(a);var s=r.auditSummary;
 if(!s||!s.resolved){a.textContent='No resolved recorded decisions yet, so there is no measured performance to show. Record decisions with an authorised request and call GET /api/agents/audit.';return}
 a.appendChild(el('div',null,s.resolved+' resolved decisions; win rate '+(s.winRate*100).toFixed(0)+'% (95% CI '+(s.winRateCi95[0]*100).toFixed(0)+'-'+(s.winRateCi95[1]*100).toFixed(0)+'%); avg R '+fmt(s.avgR)));
