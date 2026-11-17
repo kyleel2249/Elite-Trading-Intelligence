@@ -606,9 +606,13 @@ let bitgetMarginCache: SymbolCacheEntry | null = null;
 const BITGET_BASE = "https://api.bitget.com";
 const BITGET_V2_HOSTS = ["https://capi.bitget.com", "https://api.bitget.com"];
 const BITGET_OK_STATUS = new Set(["online", "normal", "listed", "limit_open", "restrictedapi"]);
-const BITGET_V2_GRAN: Record<string, string> = {
+const BITGET_V2_SPOT_GRAN: Record<string, string> = {
   "1m": "1min", "3m": "3min", "5m": "5min", "15m": "15min", "30m": "30min",
   "1H": "1h", "4H": "4h", "6H": "6Hutc", "12H": "12Hutc", "1D": "1Dutc",
+};
+const BITGET_V2_MIX_GRAN: Record<string, string> = {
+  "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+  "1H": "1H", "4H": "4H", "6H": "6H", "12H": "12H", "1D": "1Dutc",
 };
 function bitgetV2FallbackUrl(source: string): string | null {
   const u = new URL(source), category = u.searchParams.get("category") || "SPOT";
@@ -625,10 +629,16 @@ function bitgetV2FallbackUrl(source: string): string | null {
   q.set("limit", limit);
   const futures = BITGET_PRODUCT_TYPES.includes(category as BitgetProductType);
   if (u.pathname === "/api/v3/market/candles") {
-    const granularity = BITGET_V2_GRAN[u.searchParams.get("interval") || ""];
+    const v3Interval = u.searchParams.get("interval") || "";
+    const granularity = (futures ? BITGET_V2_MIX_GRAN : BITGET_V2_SPOT_GRAN)[v3Interval];
     if (!granularity || !symbol) return null;
     q.set("granularity", granularity);
-    if (futures) { q.set("productType", category); q.set("limit", String(Math.min(Number(limit) || 100, 200))); return "/api/v2/mix/market/candles?" + q.toString(); }
+    if (futures) {
+      q.set("productType", category);
+      q.set("limit", String(Math.min(Number(limit) || 100, 200)));
+      const liveGranularity = ["1m", "3m", "5m"].includes(granularity);
+      return (liveGranularity ? "/api/v2/mix/market/candles?" : "/api/v2/mix/market/history-candles?") + q.toString();
+    }
     q.set("limit", String(Math.min(Number(limit) || 100, 1000)));
     return "/api/v2/spot/market/candles?" + q.toString();
   }
