@@ -7,6 +7,8 @@ import { auditorReport, executionReport, prepareTicket, riskManager, riskReport,
 import type { AuditSummary, DecisionRecord, ExecutionRequest, ExecutionReview, RiskDecision, SecurityReport } from "./controls.ts";
 import { commanderReport, deliberate, finalize } from "./commander.ts";
 import type { Deliberation, FinalDecision } from "./commander.ts";
+import { evaluateV3Alpha } from "../algo/v3-alpha.ts";
+import type { Strategy, Timeframe } from "../algo/timeframes.ts";
 
 export interface AnalyzeInput {
   market: MarketInput; supplied?: SuppliedData; account?: AccountState; integrity: Integrity; audit?: AuditSummary | null;
