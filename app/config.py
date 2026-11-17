@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     binance_testnet_enabled: bool = True
     binance_live_trading_enabled: bool = False
 
+    bybit_api_key: Optional[str] = None
+    bybit_api_secret: Optional[str] = None
+    bybit_testnet_enabled: bool = True
+    bybit_live_trading_enabled: bool = False
+
     # OANDA v20 (forex, spot metals, index/commodity CFDs). Paper = OANDA practice account.
     oanda_api_token: Optional[str] = None
     oanda_account_id: Optional[str] = None
@@ -169,6 +174,10 @@ class Settings(BaseSettings):
     @property
     def binance_configured(self) -> bool:
         return bool(self.binance_api_key and self.binance_secret_key)
+
+    @property
+    def bybit_configured(self) -> bool:
+        return bool(self.bybit_api_key and self.bybit_api_secret)
 
     @property
     def oanda_configured(self) -> bool:
