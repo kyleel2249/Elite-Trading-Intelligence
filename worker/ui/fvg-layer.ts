@@ -2,12 +2,15 @@
  * Fair Value Gap layer for the live chart. Layered on the dashboard page like the motion and chart-view layers, so the chart engine is untouched:
  *  - recomputes FVG zones from the chart's own candles on every redraw (so zones follow every live tick and extend/resolve in real time),
  *  - loads the next two higher timeframes (read-only market-data calls, refreshed every minute) and shows their gaps on the lower-timeframe chart,
- *    flagged with their timeframe, dashed borders and a confluence count,
+ *    flagged with their timeframe, dashed borders and a confluence count (the "All timeframes" control of the intelligence layer loads every supported timeframe),
  *  - paints rectangles BEHIND the candles (destination-over), labels each zone, shows exact upper/lower prices and lets the viewer toggle zones,
  *    filter timeframes, show mitigated zones, recolour bullish/bearish gaps, and inspect any zone (click it, or use the zone list).
  * The detection code below is a hand-written mirror of worker/analysis/fvg.ts (a Worker cannot eval or stringify TypeScript); worker/fvg.test.ts
  * runs both over the same candles and requires identical zones. Pure presentation: no orders, no signals, no browser storage.
+ * worker/ui/fvg-intel-layer.ts is injected right after this layer and builds on the hooks exposed here (window.etiFvg, window.etiFvgFilter).
  */
+import { FVG_INTEL_CSS, FVG_INTEL_JS } from "./fvg-intel-layer.ts";
+
 export const FVG_LAYER_CSS = `<style id="eti-fvg">
 .fvgbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:12px;color:var(--muted)}
 .fvgbar label{display:inline-flex;gap:4px;align-items:center;cursor:pointer}
@@ -123,16 +126,16 @@ function analyze(chartTf,inputs,o){
  }
  var by={};active.forEach(function(z){var b=by[z.timeframe]||(by[z.timeframe]={active:0,bullish:0,bearish:0});b.active++;if(z.direction==='bullish')b.bullish++;else b.bearish++;});
  function pick(zs){return zs.sort(function(a,b){return b.relevance-a.relevance;})[0]||null;}
- var summary={active:active.length,unfilledActive:active.filter(function(z){return z.status==='fresh';}).length,partiallyFilledActive:active.filter(function(z){return z.status==='partially_mitigated';}).length,bullishActive:active.filter(function(z){return z.direction==='bullish';}).length,bearishActive:active.filter(function(z){return z.direction==='bearish';}).length,byTimeframe:by,
+ var summary={active:active.length,bullishActive:active.filter(function(z){return z.direction==='bullish';}).length,bearishActive:active.filter(function(z){return z.direction==='bearish';}).length,byTimeframe:by,
   nearestSupport:pick(active.filter(function(z){return z.direction==='bullish'&&z.lower<=price;})),nearestResistance:pick(active.filter(function(z){return z.direction==='bearish'&&z.upper>=price;})),
   inside:active.filter(function(z){return price>=z.lower&&price<=z.upper;}),confluentZones:active.filter(function(z){return z.confluence.length>0;}).length};
- return {chartTimeframe:chartTf,price:price,atr:atr,zones:shown,totalDetected:all.length,summary:summary,canTriggerTrade:false};
+ return {chartTimeframe:chartTf,price:price,atr:atr,zones:shown,totalDetected:all.length,summary:summary,canTriggerTrade:false,all:all};
 }
 
 /* ---------- live state ---------- */
 var FUT=(typeof FUTURE==='number'?FUTURE:14);
 var st={on:true,labels:true,mitigated:false,tf:{},bull:'#21d69a',bear:'#ff637d'};
-var DEF_BULL=st.bull,DEF_BEAR=st.bear;
+var DEF_BULL=st.bull,DEF_BEAR=st.bear,allTf=false;
 var res=null,sigKey='',htf={key:'',rows:{},at:{},busy:{},err:{},ver:0},hits=[],selected=null,barTfs='';
 var stack=document.getElementById('stack'),cv=document.getElementById('chart');
 function esc2(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
@@ -140,9 +143,8 @@ function price(v){return typeof fp==='function'?fp(v):String(rnd(v,4));}
 function hexRgba(h,a){var m=/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h);if(!m)return 'rgba(128,128,128,'+a+')';return 'rgba('+parseInt(m[1],16)+','+parseInt(m[2],16)+','+parseInt(m[3],16)+','+a+')';}
 function curTf(){var e=document.getElementById('interval');return e?e.value:'';}
 function marketKey(){var s=document.getElementById('symbol'),m=(typeof mkt==='function'?mkt():'');return (s?s.value:'')+'|'+m;}
-function higher(tf){var i=ORDER.indexOf(tf);return i<0?[]:ORDER.slice(i+1,i+3);}
+function higher(tf){var i=ORDER.indexOf(tf);if(allTf)return ORDER.filter(function(t){return t!==tf;});return i<0?[]:ORDER.slice(i+1,i+3);}
 var STATUS={fresh:'fresh',partially_mitigated:'partially mitigated',fully_mitigated:'fully mitigated',invalidated:'invalidated',expired:'expired'};
-function statusLabel(z){return z.status==='fresh'?'UNFILLED':z.status==='partially_mitigated'?'PARTIALLY FILLED':STATUS[z.status].toUpperCase();}
 
 function loadHtf(){
  if(!st.on||typeof getJson!=='function')return;
@@ -164,7 +166,7 @@ function compute(){
  var tf=curTf(),n=candles.length;
  if(!n||!TFMS[tf]){res=null;return;}
  var l=candles[n-1],now=Date.now();
- var key=[marketKey(),tf,n,l[0],l[2],l[3],l[4],Math.floor(now/TFMS[tf]),htf.ver,st.mitigated].join('|');
+ var key=[marketKey(),tf,n,l[0],l[2],l[3],l[4],Math.floor(now/TFMS[tf]),htf.ver,st.mitigated,allTf].join('|');
  if(key===sigKey)return;
  sigKey=key;
  var inputs=[{timeframe:tf,rows:candles}];
@@ -173,7 +175,12 @@ function compute(){
 }
 
 function slotOf(t){var lo=0,hi=candles.length;while(lo<hi){var m=(lo+hi)>>1;if(candles[m][0]<t)lo=m+1;else hi=m;}return lo;}
-function visible(z){return st.tf[z.timeframe]!==false;}
+function visible(z){
+ if(st.tf[z.timeframe]===false)return false;
+ var f=window.etiFvgFilter;
+ if(typeof f==='function'){try{return f(z)!==false;}catch(_){return true;}}
+ return true;
+}
 
 function paint(){
  hits=[];
@@ -207,10 +214,9 @@ function paint(){
   texts.forEach(function(t,idx){
    var z=t.z,bull=z.direction==='bullish',lx=Math.max(t.x0+4,4);
    if(t.x1-lx<60||t.h<12||idx>=8)return;
-   var remainingPct=Math.max(0,100-z.mitigationPct);
-   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+statusLabel(z)+' · '+z.mitigationPct+'% FILLED'+(z.active?' · UNFILLED PORTION '+remainingPct+'%':'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
+   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+(z.mitigationPct&&z.active?' '+z.mitigationPct+'%':'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
    x.fillStyle=hexRgba(t.col,1);x.textAlign='left';x.fillText(head,lx,t.y0+8);
-   if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText('gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · '+price(z.upper)+'–'+price(z.lower)+' · formed @'+price(z.formationPrice)+' · '+new Date(z.formationTime).toLocaleString(),lx,t.y0+20);}
+   if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText('gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · formed @'+price(z.formationPrice),lx,t.y0+20);}
    if(t.h>=34&&t.x1-lx>240){x.textAlign='right';x.fillStyle=hexRgba(t.col,1);x.fillText(price(z.upper),t.x1-5,t.y0+8);x.fillText(price(z.lower),t.x1-5,t.y0+t.h-7);x.textAlign='left';}
   });
   x.textBaseline='alphabetic';x.textAlign='left';
@@ -236,12 +242,12 @@ function renderBar(){
  var tf=curTf(),tfs=[tf].concat(higher(tf)),sig=tfs.join(',');
  if(sig!==barTfs){
   barTfs=sig;var h='';
-  tfs.forEach(function(t){h+='<label><input type="checkbox" data-tf="'+esc2(t)+'"'+(st.tf[t]===false?'':' checked')+'> '+esc2(t)+(t===tf?' (chart)':' (higher)')+'</label> ';});
+  tfs.forEach(function(t){h+='<label><input type="checkbox" data-tf="'+esc2(t)+'"'+(st.tf[t]===false?'':' checked')+'> '+esc2(t)+(t===tf?' (chart)':(TFMS[t]>TFMS[tf]?' (higher)':' (lower)'))+'</label> ';});
   $f('fvgTfs').innerHTML=h;
   Array.prototype.forEach.call($f('fvgTfs').querySelectorAll('input'),function(i){i.onchange=function(){st.tf[i.getAttribute('data-tf')]=i.checked;try{drawChart();}catch(_){}};});
  }
  var sm=res?res.summary:null;
- var txt=!st.on?'FVG zones hidden':!sm?'Waiting for candles…':sm.active+' active ('+sm.unfilledActive+' unfilled / '+sm.partiallyFilledActive+' partially filled · '+sm.bullishActive+' bull / '+sm.bearishActive+' bear)'+(sm.confluentZones?' · '+sm.confluentZones+' in multi-timeframe confluence':'')+(sm.inside.length?' · price inside '+sm.inside.length:'');
+ var txt=!st.on?'FVG zones hidden':!sm?'Waiting for candles…':sm.active+' active ('+sm.bullishActive+' bull / '+sm.bearishActive+' bear)'+(sm.confluentZones?' · '+sm.confluentZones+' in multi-timeframe confluence':'')+(sm.inside.length?' · price inside '+sm.inside.length:'');
  if($f('fvgSum').textContent!==txt)$f('fvgSum').textContent=txt;
  var errs=[];higher(tf).forEach(function(h){if(htf.err[h])errs.push(h+' unavailable ('+htf.err[h]+')');});
  var w=errs.length?'Higher-timeframe FVGs: '+errs.join(', '):'';if($f('fvgWarn').textContent!==w)$f('fvgWarn').textContent=w;
@@ -249,7 +255,7 @@ function renderBar(){
  if(ids!==list.getAttribute('data-ids')){
   list.setAttribute('data-ids',ids);
   var zs=res&&st.on?res.zones.filter(visible):[];
-  list.innerHTML='<summary>Zone list ('+zs.length+') — select a zone to inspect it</summary><ul>'+zs.map(function(z){return '<li><button type="button" data-id="'+esc2(z.id)+'">'+esc2(z.timeframe)+' '+(z.direction==='bullish'?'▲':'▼')+' '+esc2(price(z.lower))+'–'+esc2(price(z.upper))+' · '+esc2(statusLabel(z))+' · '+esc2(z.mitigationPct)+'% filled</button></li>';}).join('')+'</ul>';
+  list.innerHTML='<summary>Zone list ('+zs.length+') — select a zone to inspect it</summary><ul>'+zs.map(function(z){return '<li><button type="button" data-id="'+esc2(z.id)+'">'+esc2(z.timeframe)+' '+(z.direction==='bullish'?'▲':'▼')+' '+esc2(price(z.lower))+'–'+esc2(price(z.upper))+' · '+esc2(STATUS[z.status])+'</button></li>';}).join('')+'</ul>';
   Array.prototype.forEach.call(list.querySelectorAll('button'),function(b){b.onclick=function(){select(b.getAttribute('data-id'));};});
  }
 }
@@ -262,8 +268,8 @@ function select(id){
  panel.hidden=false;
  panel.innerHTML='<strong style="color:'+esc2(bull?st.bull:st.bear)+'">FVG '+(bull?'▲ bullish':'▼ bearish')+' · '+esc2(z.timeframe)+(z.timeframe===curTf()?'':' (higher timeframe)')+'</strong> <button type="button" id="fvgClose" aria-label="Close zone details">Close</button><dl>'
   +dt('Upper',price(z.upper))+dt('Lower',price(z.lower))+dt('Midpoint (CE)',price(z.mid))+dt('Gap size',price(z.sizeAbs)+' · '+z.sizePct+'% · '+z.sizeAtr+' ATR')
-  +dt('Formation price',price(z.formationPrice))+dt('Formed',new Date(z.formationTime).toLocaleString())+dt('Status',statusLabel(z)+(z.active?' (active)':''))
-  +dt('Filled',z.mitigationPct+'%')+dt('Unfilled portion',z.active?price(z.remainingLower)+'–'+price(z.remainingUpper)+' ('+(100-z.mitigationPct)+'% remaining)':'none — zone resolved')
+  +dt('Formation price',price(z.formationPrice))+dt('Formed',new Date(z.formationTime).toLocaleString())+dt('Status',STATUS[z.status]+(z.active?' (active)':''))
+  +dt('Mitigation',z.mitigationPct+'%'+(z.active&&z.mitigationPct?' — unfilled '+price(z.remainingLower)+'–'+price(z.remainingUpper):''))
   +dt('Touches',z.touches+(z.ceTouched?' (midpoint reached)':''))+dt('Age',z.ageBars+' bars')+dt('Strength',z.strength+'/100')+dt('Freshness',Math.round(z.freshness*100)+'%')
   +dt('Displacement',z.displacementAtr+' ATR body')+dt('Volume vs average',z.volumeRatio+'×')
   +dt('Confluence',z.confluence.length?z.confluence.map(function(c){return c.timeframe+' ('+c.overlapPct+'% overlap)';}).join(', '):'none')
@@ -288,14 +294,20 @@ drawChart=function(){
   if(selected&&!panel.hidden)select(selected);
  }catch(e){if(window.console)console.warn('FVG layer error',e);}
 };
-window.etiFvg={detect:detect,analyze:analyze,rules:RULES,state:function(){return {on:st.on,zones:res?res.zones:[],hits:hits.length};}};
+window.etiFvg={detect:detect,analyze:analyze,rules:RULES,tfms:TFMS,
+ setAllTf:function(v){allTf=!!v;barTfs='';sigKey='';if(st.on)loadHtf();try{drawChart();}catch(_){}},
+ state:function(){
+  var rows={};rows[curTf()]=candles;
+  if(htf.key===marketKey())Object.keys(htf.rows).forEach(function(t){if(t!==curTf())rows[t]=htf.rows[t];});
+  return {on:st.on,zones:res?res.zones:[],hits:hits.length,hitsList:hits,all:res?res.all:[],rows:rows,market:marketKey(),tf:curTf(),colors:{bull:st.bull,bear:st.bear}};
+ }};
 drawChart();
 }catch(e){if(window.console)console.warn('FVG layer unavailable',e);}
 })();
 </script>`;
 
-/** Applies the FVG layer to the dashboard page. A page without the expected markup is returned unchanged. */
+/** Applies the FVG layer (and the unfilled-gap intelligence layer on top of it) to the dashboard page. A page without the expected markup is returned unchanged. */
 export function withFvgLayer(page: string): string {
   if (!page.includes('id="stack"') || !page.includes('id="chart"') || !page.includes("</body>")) return page;
-  return page.replace("</head>", FVG_LAYER_CSS + "</head>").replace("</body>", FVG_LAYER_JS + "</body>");
+  return page.replace("</head>", FVG_LAYER_CSS + FVG_INTEL_CSS + "</head>").replace("</body>", FVG_LAYER_JS + FVG_INTEL_JS + "</body>");
 }

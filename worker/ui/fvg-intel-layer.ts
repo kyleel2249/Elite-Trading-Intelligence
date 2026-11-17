@@ -151,19 +151,20 @@ window.etiFvgFilter=function(z){
 
 /* ---------- painting ---------- */
 function slotOf(t){var lo=0,hi=candles.length;while(lo<hi){var m=(lo+hi)>>1;if(candles[m][0]<t)lo=m+1;else hi=m;}return lo;}
+/* zones whose gap was reached by a still-forming candle: kept on the chart, flagged FILL PENDING CLOSE, until the candle closes */
 function pendingHits(st){
  var s=chartScale,out=[];
  if(!s||!candles.length||!(s.hi>s.lo))return out;
  var n=candles.length,FUT=(typeof FUTURE==='number'?FUTURE:14),step=s.plotW/(n+FUT),tf=curTf(),shown={};
  (st.hitsList||[]).forEach(function(h){shown[h.z.id]=1;});
  records(st.market).forEach(function(r){
-  var z=r.zone;if(r.lifecycle!=='filled_pending'||z.timeframe!==tf||shown[z.id])return;
-  if(!(S.par)||(z.direction==='bullish'?!S.bull:!S.bear))return;
-  var i0=slotOf(z.formationTime),x0=i0>=n?s.plotW:i0*step,x1=s.plotW;if(x1<=x0)return;
+  var z=r.zone;
+  if(r.lifecycle!=='filled_pending'||z.timeframe!==tf||shown[z.id]||!S.par||(z.direction==='bullish'?!S.bull:!S.bear))return;
+  var i0=slotOf(z.formationTime),x0=i0>=n?s.plotW:i0*step,x1=s.plotW;
+  if(x1<=x0)return;
   var yu=s.bot-(z.upper-s.lo)/(s.hi-s.lo)*(s.bot-s.top),yl=s.bot-(z.lower-s.lo)/(s.hi-s.lo)*(s.bot-s.top),y0=Math.min(yu,yl),h=Math.max(1,Math.abs(yl-yu));
-  if(y0+h<s.top-6||y0>s.bot+6)continue2();
+  if(y0+h<s.top-6||y0>s.bot+6)return;
   out.push({z:z,x0:x0,x1:x1,y0:y0,y1:y0+h,pending:true});
-  function continue2(){}
  });
  return out;
 }
