@@ -725,8 +725,8 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       });
     }
     if (!rows.length) return jsonResp({ error: "symbols_unavailable", detail: venueQ + " did not return the requested instrument list.", warnings }, 502);
-    const categories = venueQ === "bybit" ? (want === "all" ? ["spot", "linear", "inverse"] : [categoryQ || (want === "futures" ? "linear" : "spot")])
-      : want === "margin" ? (venueQ === "bybit" ? ["spot-margin"] : ["MARGIN"]) : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
+    const categories = venueQ === "bybit" ? (want === "margin" ? ["spot-margin"] : want === "all" ? ["spot", "linear", "inverse"] : [categoryQ || (want === "futures" ? "linear" : "spot")])
+      : want === "margin" ? ["MARGIN"] : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
       symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : []), ...(x.marginTrading ? [x.marginTrading] : [])]) }, 200, { "cache-control": "public, max-age=45" });
