@@ -28,7 +28,7 @@ test("Bybit linear and inverse instrument lists use separate categories and curs
   const seen: string[] = [];
   const fetcher: any = async (url: string) => {
     const u = new URL(url); seen.push(u.searchParams.get("category") || "");
-    if (u.searchParams.get("category") === "linear" && !u.searchParams.has("cursor")) return page(linear, "next");
+    if (u.searchParams.get("category") === "linear") return page(linear, u.searchParams.has("cursor") ? "" : "next");
     return page(inverse);
   };
   const a = await listBybitSymbols("futures", fetcher, Date.now, "linear");
