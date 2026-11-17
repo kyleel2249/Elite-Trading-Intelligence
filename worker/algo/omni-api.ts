@@ -61,13 +61,15 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const leverage = body.leverage === undefined ? undefined : Number(body.leverage);
   const feeBps = body.feeBps === undefined ? undefined : Number(body.feeBps);
   const slippageBps = body.slippageBps === undefined ? undefined : Number(body.slippageBps);
+  const contractValue = body.contractValue === undefined ? undefined : Number(body.contractValue);
   if ((equity === undefined) !== (riskFraction === undefined) ||
       (equity !== undefined && (!Number.isFinite(equity) || equity <= 0 || equity > 1e12)) ||
       (riskFraction !== undefined && (!Number.isFinite(riskFraction) || riskFraction <= 0 || riskFraction > 0.05)) ||
       (maxNotionalFraction !== undefined && (!Number.isFinite(maxNotionalFraction) || maxNotionalFraction <= 0 || maxNotionalFraction > 1)) ||
       (leverage !== undefined && (!Number.isFinite(leverage) || leverage < 1 || leverage > 100)) ||
       (feeBps !== undefined && (!Number.isFinite(feeBps) || feeBps < 0 || feeBps > 500)) ||
-      (slippageBps !== undefined && (!Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps > 500)))
+      (slippageBps !== undefined && (!Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps > 500)) ||
+      (contractValue !== undefined && (!Number.isFinite(contractValue) || contractValue <= 0 || contractValue > 1e12)))
     return reply({ error: "invalid_trade_plan_inputs", message: "Supply equity and riskFraction together; riskFraction must be <= 5%, leverage 1-100x, and fee/slippage 0-500 bps." }, 400);
   let active; try { active = await activeOptions((env as any).ETI_EXECUTION_LOG); } catch { return reply({ error: "params_unavailable", submitsOrder: false }, 503); }
   const { version, name, ...opts } = active;
@@ -75,7 +77,8 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   if ("error" in inputs) return reply({ decision: "DATA_UNRELIABLE", error: inputs.error, executionTimeframe: inputs.executionTimeframe, failures: inputs.failures, submitsOrder: false, liveExecutionAllowed: false }, 503);
   const { candles, depth, derivatives, provider, failures } = inputs;
   const now = Date.now(), exp = await expectancyFor(env, strategy, symbol, now);
-  const planOptions = equity !== undefined && riskFraction !== undefined ? { equity, riskFraction, maxNotionalFraction, leverage, feeBps, slippageBps } : {};
+  const contractType = market === "futures" && (category === "inverse" || category === "COIN-FUTURES") ? "inverse" as const : "linear" as const;
+  const planOptions = equity !== undefined && riskFraction !== undefined ? { equity, riskFraction, maxNotionalFraction, leverage, feeBps, slippageBps, contractType, contractValue } : {};
   const result = runOmnisignal({ symbol, strategy, candles, depth, derivatives, now }, { ...opts, ...planOptions, roundTripCostBps: costBpsFrom(env as any), fvg: (env as any)?.ETI_FVG_CONFLUENCE !== "off", enabledEngines: { swift: engines.includes("swift"), gainz: engines.includes("gainz") }, ...expectancyOptions(exp) });
   const journal = await journalFromRoute(env, result, strategy, now, { status: exp.status, expectancyR: exp.expectancyR, samples: exp.samples });
   return reply({ ...result, parameters: { version, name }, dataQuality: { provider, venue, market, category, timeframesLoaded: Object.keys(candles), failures, orderBook: depth ? "rest_snapshot" : "unavailable", derivatives: derivatives ? "ticker_snapshot" : "unavailable", providerCrossCheck: "not_performed",
