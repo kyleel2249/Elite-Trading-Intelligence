@@ -126,6 +126,11 @@ function stability(values: number[]): number {
 }
 const round = (v: number, n = 6) => Number(v.toFixed(n));
 
+export function inferBybitCategory(symbol: string, market: "spot" | "futures"): "spot" | "linear" | "inverse" {
+  if (market === "spot") return "spot";
+  return /USD$/.test(symbol.toUpperCase()) && !/(USDT|USDC)$/.test(symbol.toUpperCase()) ? "inverse" : "linear";
+}
+
 export function forecast24hExtremes(
   hourlyRows: Kline[],
   dailyRows: Kline[],
@@ -203,8 +208,7 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv): 
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) return reply({ error: "invalid_symbol" }, 400);
   const market = url.searchParams.get("market") || "spot";
   if (market !== "spot" && market !== "futures") return reply({ error: "invalid_market" }, 400);
-  const inferredInverse = market === "futures" && /USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol);
-  const category = url.searchParams.get("category") || (market === "futures" ? (inferredInverse ? "inverse" : "linear") : "spot");
+  const category = url.searchParams.get("category") || inferBybitCategory(symbol, market);
   if (!(["spot", "linear", "inverse"] as string[]).includes(category) || (market === "spot" && category !== "spot") || (market === "futures" && category === "spot"))
     return reply({ error: "invalid_category" }, 400);
   const params = { symbol, interval: "1h", limit: 1000, market: market as "spot" | "futures", category: category as "spot" | "linear" | "inverse" };
