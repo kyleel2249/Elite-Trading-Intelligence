@@ -207,7 +207,8 @@ function paint(){
   texts.forEach(function(t,idx){
    var z=t.z,bull=z.direction==='bullish',lx=Math.max(t.x0+4,4);
    if(t.x1-lx<60||t.h<12||idx>=8)return;
-   var remainingPct=Math.max(0,100-z.mitigationPct);\n   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+statusLabel(z)+' · '+z.mitigationPct+'% FILLED'+(z.active?' · UNFILLED PORTION '+remainingPct+'%':'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
+   var remainingPct=Math.max(0,100-z.mitigationPct);
+   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+statusLabel(z)+' · '+z.mitigationPct+'% FILLED'+(z.active?' · UNFILLED PORTION '+remainingPct+'%':'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
    x.fillStyle=hexRgba(t.col,1);x.textAlign='left';x.fillText(head,lx,t.y0+8);
    if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText('gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · '+price(z.upper)+'–'+price(z.lower)+' · formed @'+price(z.formationPrice)+' · '+new Date(z.formationTime).toLocaleString(),lx,t.y0+20);}
    if(t.h>=34&&t.x1-lx>240){x.textAlign='right';x.fillStyle=hexRgba(t.col,1);x.fillText(price(z.upper),t.x1-5,t.y0+8);x.fillText(price(z.lower),t.x1-5,t.y0+t.h-7);x.textAlign='left';}
