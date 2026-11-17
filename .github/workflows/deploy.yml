@@ -118,6 +118,47 @@ jobs:
               }catch(e){console.error("Invalid Bybit ticker response:",e.message);process.exit(1);}});' || failed=1
           done
 
+          # Bitget public market verification (no API key required).
+          bitget_symbols="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?venue=bitget&market=all")" || { echo "::error::Could not contact Bitget symbol catalogue"; failed=1; bitget_symbols='{}__HTTP_CODE__000'; }
+          bitget_symbols_status="${bitget_symbols##*__HTTP_CODE__}"
+          bitget_symbols_body="${bitget_symbols%__HTTP_CODE__*}"
+          printf '%s' "$bitget_symbols_body" | HTTP_STATUS="$bitget_symbols_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s), rows=Array.isArray(x.symbols)?x.symbols:[];
+              const hasSpot=rows.some(r=>r[5]==="bitget"&&r[0]&&r[2]);
+              const hasUsdt=rows.some(r=>r[6]==="USDT-FUTURES");
+              const hasUsdc=rows.some(r=>r[6]==="USDC-FUTURES");
+              const hasCoin=rows.some(r=>r[6]==="COIN-FUTURES");
+              if(process.env.HTTP_STATUS!=="200"||x.provider!=="bitget"||!hasSpot||!hasUsdt||!hasUsdc||!hasCoin){
+                console.error("Bitget instrument catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,count:x.count,categories:x.categories,hasSpot,hasUsdt,hasUsdc,hasCoin,warnings:x.warnings}));process.exit(1);
+              }
+              console.log("Bitget spot and USDT/USDC/Coin-M perpetual instrument catalogues verified.");
+            }catch(e){console.error("Invalid Bitget catalogue response:",e.message);process.exit(1);}});' || failed=1
+
+          bitget_margin="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?venue=bitget&market=margin")" || { echo "::error::Could not contact Bitget margin catalogue"; failed=1; bitget_margin='{}__HTTP_CODE__000'; }
+          bitget_margin_status="${bitget_margin##*__HTTP_CODE__}"
+          bitget_margin_body="${bitget_margin%__HTTP_CODE__*}"
+          printf '%s' "$bitget_margin_body" | HTTP_STATUS="$bitget_margin_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s), rows=Array.isArray(x.symbols)?x.symbols:[];
+              if(process.env.HTTP_STATUS!=="200"||x.provider!=="bitget"||!rows.length||!x.categories.includes("MARGIN")){
+                console.error("Bitget margin catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,count:x.count,categories:x.categories,error:x.error}));process.exit(1);
+              }
+              console.log("Bitget margin-eligible pair catalogue verified.");
+            }catch(e){console.error("Invalid Bitget margin catalogue:",e.message);process.exit(1);}});' || failed=1
+
+          for suffix in "" "&market=futures&category=USDT-FUTURES"; do
+            bitget_ticker="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/ticker?venue=bitget&symbol=BTCUSDT$suffix")" || { echo "::error::Could not contact Bitget ticker"; failed=1; bitget_ticker='{}__HTTP_CODE__000'; }
+            bitget_ticker_status="${bitget_ticker##*__HTTP_CODE__}"
+            bitget_ticker_body="${bitget_ticker%__HTTP_CODE__*}"
+            printf '%s' "$bitget_ticker_body" | HTTP_STATUS="$bitget_ticker_status" node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                const x=JSON.parse(s),ok=process.env.HTTP_STATUS==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0;
+                if(!ok){console.error("Bitget live ticker:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice}));process.exit(1);}
+                console.log("Bitget ticker verified for requested market.");
+              }catch(e){console.error("Invalid Bitget ticker:",e.message);process.exit(1);}});' || failed=1
+          done
+
           forecast_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }
           forecast_status="${forecast_response##*__HTTP_CODE__}"
           forecast="${forecast_response%__HTTP_CODE__*}"
