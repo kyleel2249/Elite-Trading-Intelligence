@@ -72,6 +72,7 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <section class="card s6" id="swift"><h2>Swift-inspired engine</h2><div id="swift-body" class="muted">–</div></section>
 <section class="card s6" id="gainz"><h2>GainzAlgo-inspired engine</h2><div id="gainz-body" class="muted">–</div></section>
  <section class="card s12" id="v3-alpha"><h2>ETIAlgo V3 Alpha — closed-candle signal indicator</h2><div id="v3-alpha-body" class="muted">–</div></section>
+<section class="card s12" id="v3-ledger"><h2>V3 Alpha signal history & forward performance</h2><div id="v3-ledger-body" class="muted">Signal history loads after analysis.</div></section>
 <section class="card s6"><h2>Independent evidence families</h2><div id="evidence" class="muted">–</div></section>
 <section class="card s6"><h2>Validation</h2><div id="validation" class="muted">–</div></section>
 <section class="card s12"><h2>Eight-timeframe matrix</h2><div id="matrix" class="scroll muted">–</div></section>
