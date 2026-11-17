@@ -15,6 +15,7 @@ import { present, type ClosedTrade, type Environment } from "./ledger.ts";
 import { PortfolioStore, importKvToD1, isD1, openStore, storageConfigured, type KVL } from "./store.ts";
 import { loadMinuteBars } from "../algo/market-inputs.ts";
 import { buildPortfolioManager } from "./manager.ts";
+import { loadExchangePortfolioSnapshot } from "./exchanges.ts";
 
 export type PortfolioEnv = EngineEnv & { ETI_PORTFOLIO_DB?: any } & { ETI_EXECUTION_TOKEN?: string; ETI_SESSION_SECRET?: string; ETI_SESSION_SECRET_PREVIOUS?: string; ETI_AUTO_SESSIONS?: string; ETI_KEY_ROTATION_DAYS?: string; ETI_KILL_SWITCH?: string };
 const H = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -81,6 +82,11 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   const need = scopeOf(environment);
   if (need && !can(auth, need)) return reply({ error: "environment_scope_mismatch", required_session: need, environment, message: "This view needs an " + LABEL[environment].toUpperCase() + " session. Sessions are isolated per environment." }, 403);
   if (path === "/api/portfolio/manager" && req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+  if (path === "/api/portfolio/exchanges" && req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+  if (path === "/api/portfolio/exchanges") {
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Exchange account snapshots require the ETI master execution token or an administrator session with MFA." }, 403);
+    return reply(await loadExchangePortfolioSnapshot(env as any, now));
+  }
   if (path === "/api/portfolio/manager" && environment === "live") return reply({ environment, disabled: true, mode: "read_only_disabled", executionEnabled: false, message: "Live portfolio management is disabled; no live account data or orders are accessed." }, 423);
   if (environment === "live") return reply(post ? { error: "live_disabled", message: "Live trading is disabled; there is nothing to change." } : await buildState(env, deps, "live", now), post ? 423 : 200);
   if (!storageConfigured(env)) return reply({ error: "storage_not_configured", message: "Bind the ETI_PORTFOLIO_DB D1 database (preferred) or the ETI_EXECUTION_LOG KV namespace to store the portfolio." }, 503);
