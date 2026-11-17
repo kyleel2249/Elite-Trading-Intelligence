@@ -61,6 +61,7 @@ import { withWallets } from "./wallets/routes.ts";
 import { withPerp, runPerpCycle } from "./perp/routes.ts";
 import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
+import { withBybitAccount } from "./bybit/route.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
 
@@ -90,7 +91,7 @@ const coreLayers: Array<(next: any) => any> = [
 const core: any = coreLayers.reduce((next: any, layer) => layer(next), base as any);
 
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
-const outerLayers: Array<(next: any) => any> = [withPerp, withWallets, withBackup, withProviders, withIdentity, withSecurityHeaders];
+const outerLayers: Array<(next: any) => any> = [withPerp, withWallets, withBackup, withProviders, withIdentity, withBybitAccount, withSecurityHeaders];
 const app: any = outerLayers.reduce((next: any, layer) => layer(next), core);
 const inner: any = base;
 const MONITOR_CRON = "* * * * *";
