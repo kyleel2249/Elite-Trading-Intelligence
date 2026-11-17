@@ -43,6 +43,9 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE` | config | Minimum Commander confidence required before an internal-paper order (default 0.65; heuristic, not a win probability). |
 | `ETI_AGENT_AUTOPILOT_MIN_AGREEMENT` | config | Minimum directional consensus agreement required before an internal-paper order (default 0.65). |
 | `ETI_AGENT_AUTOPILOT_MAX_POSITIONS` | config | Maximum open internal-paper positions managed by this autopilot (default 3). |
+| `ETI_AGENT_AUTOPILOT_STRATEGIES` | config | Comma-separated Omnisignal strategies evaluated by the autopilot (default scalp,intraday,swing,position). |
+| `ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT` | config | Minimum number of configured strategies that must produce an aligned tradeable decision (default 3). |
+| `ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE` | config | Minimum Omnisignal confidence score on its 0–100 heuristic scale (default 60; not a win probability). |
 | `ETI_ALPHA_KV` | binding | KV namespace for Global Alpha (falls back to ETI_EXECUTION_LOG). |
 | `ETI_ALPHA_TOKEN` | secret | Token for Global Alpha write routes (falls back to ETI_EXECUTION_TOKEN). |
 | `ETI_ANALYSIS_ALLOW_FULL` | config | `true` lets a Free-plan deployment serve `detail=full` analysis (only if you raised your own CPU limit). Default off. |
