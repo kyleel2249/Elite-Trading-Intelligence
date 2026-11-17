@@ -6,7 +6,7 @@
  * are reported as observed context, never substituted for a forward forecast.
  * This is a read-only statistical estimate, not a trade signal.
  */
-import { getMarketData, type Kline, type MarketEnv, type Ticker } from "../market.ts";
+import { AllProvidersFailed, getMarketData, type Kline, type MarketEnv, type Ticker } from "../market.ts";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -219,7 +219,8 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv): 
   ]);
   if (hourly.status !== "fulfilled" || tick.status !== "fulfilled") {
     const failure = hourly.status === "rejected" ? hourly.reason : tick.status === "rejected" ? tick.reason : null;
-    return reply({ error: "market_data_unavailable", detail: failure instanceof Error ? failure.message : "Bybit history or ticker unavailable.", provider: "bybit" }, 502);
+    const attempts = failure instanceof AllProvidersFailed ? failure.attempts.map(({ provider, host, status, errorClass, latencyMs }) => ({ provider, host, status, errorClass, latencyMs })) : [];
+    return reply({ error: "market_data_unavailable", detail: failure instanceof Error ? failure.message : "Bybit history or ticker unavailable.", provider: "bybit", attempts }, 502);
   }
   const hourRows = Array.isArray(hourly.value.data) ? hourly.value.data as Kline[] : [];
   const dayRows = daily.status === "fulfilled" && Array.isArray(daily.value.data) ? daily.value.data as Kline[] : [];
