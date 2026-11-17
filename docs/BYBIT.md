@@ -39,7 +39,7 @@ Testnet is the only recommended initial environment. Live execution requires a s
 
 ## Market data transport and account region
 
-- Public REST market data runs directly from the Cloudflare Worker using Bybit's global API hosts `api.bybit.com` and `api.bytick.com` (primary + alternate host). No Fly.io origin, static-IP proxy, VPN, or account-region spoofing is used.
+- Public REST market data runs directly from the Cloudflare Worker using Bybit's global API hosts `api.bybit.com` and `api.bytick.com` (primary + alternate host). The margin pair catalogue is filtered using Bybit's `marginTrading` instrument field; candles, ticker and depth use the spot category because margin trading is based on the spot pair. No Fly.io origin, static-IP proxy, VPN, or account-region spoofing is used.
 - Cloudflare Workers are globally distributed and do not provide a guaranteed Ghana egress IP or fixed outbound IP on the free plan. The global Bybit API is the appropriate host for an account registered with Bybit's global entity, subject to that account's KYC and product permissions.
 - The Worker's actual outbound IP geography is controlled by Cloudflare, not ETI. If Bybit rejects that egress with a geo/IP error, the free Worker architecture cannot guarantee a different country egress. Do not change account country or use a proxy to bypass Bybit restrictions.
 - Public market REST requests are read-only and do not require exchange credentials. Account and order routes remain subject to the account's own country, product eligibility, API-key permissions and IP whitelist.
