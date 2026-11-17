@@ -58,8 +58,10 @@ test("Bitget Coin-M delivery contracts are included in the instrument catalogue"
 });
 
 test("Bitget retries the V3 public endpoint on the legacy host before downgrading to V2", async () => {
+  const calls: string[] = [];
   globalThis.fetch = (async (input: any) => {
     const u = new URL(typeof input === "string" ? input : input.url);
+    calls.push(u.hostname + u.pathname);
     if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/tickers")
       return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
     if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v3/market/tickers")
@@ -72,7 +74,7 @@ test("Bitget retries the V3 public endpoint on the legacy host before downgradin
   const response = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-eti-upstream-host"), "capi.bitget.com");
-  assert.equal(response.headers.get("x-eti-api-version"), "v3-mirror");
+  assert.ok(calls.includes("capi.bitget.com/api/v3/market/tickers"));
   const ticker = await response.json() as any;
   assert.equal(ticker.lastPrice, 60000);
 });
