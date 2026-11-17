@@ -106,12 +106,13 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const body = {
         symbol, interval, account: {
           equityUsd: account.equityUsd, availableUsd: account.availableUsd,
-          positionQuantity: account.positionQuantity, availableUsd: expectedAction === "SELL" ? account.equityUsd : account.availableUsd, dailyPnlPct: account.dailyPnlPct,
+          positionQuantity: account.positionQuantity, dailyPnlPct: account.dailyPnlPct,
           drawdownPct: account.drawdownPct, openRiskPct: account.openRiskPct,
         },
       };
       const headers = { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "content-type": "application/json" };
       const expectedAction = account.positionQuantity > 0 ? "SELL" : "BUY";
+      body.account.availableUsd = expectedAction === "SELL" ? account.equityUsd : account.availableUsd;
       if (expectedAction === "BUY" && account.unknownOpenRisk) { outcomes.push({ symbol, status: "blocked", reason: "existing_position_has_no_protective_stop" }); continue; }
       // Omnisignal runs the existing Swift + GainzAlgo engines, FVG, liquidity, flow,
       // multi-timeframe and validation stack independently for each configured strategy.
