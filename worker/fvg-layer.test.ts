@@ -98,7 +98,7 @@ test("zones are painted behind the candles at exact price positions and labelled
   assert.ok(Math.abs(x + w - sc.plotW) < 1e-6, "an active zone extends to the live edge");
   assert.match(fills[0].fill, /^rgba\(33, ?214, ?154/, "bullish zones use the bullish colour");
   const text = h.log.filter(l => l.fn === "fillText").map(l => l.a[0]).join("\n");
-  assert.match(text, /FVG ▲ BULL 1h · fresh/);
+  assert.match(text, /FVG ▲ BULL 1h · UNFILLED · 0% FILLED/);
   assert.match(text, /gap 2 \(/); assert.match(text, /formed @103.5/);
   assert.equal(h.api.state().hits, 1);
 });
