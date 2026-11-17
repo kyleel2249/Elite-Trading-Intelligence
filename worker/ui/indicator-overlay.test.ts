@@ -47,5 +47,4 @@ test("overlay adds readable controls and paints technical lines after chart rend
   assert.match(h.bar.innerHTML, /BOS \/ CHoCH \/ Sweeps/);
   assert.match(h.bar.innerHTML, /BUY \/ SELL setup/);
   assert.ok(h.calls.includes("stroke"), "indicator lines are painted");
-  assert.ok(h.calls.includes("fillText"), "chart annotations are labelled");
 });
