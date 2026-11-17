@@ -41,6 +41,8 @@ export const PORTFOLIO_HTML = `
 <div class="pfperf"><div><canvas id="pfCurve" class="pfcurve" role="img" aria-label="Equity curve from actual fills"></canvas><div id="pfCurveNote" class="muted" style="font-size:11px;margin-top:4px"></div></div><div id="pfStats" class="pfstats"></div></div>
 <h3>AI Portfolio Manager <span class="muted">read-only allocation advisory</span></h3><div id="pfManager" class="pfwrap muted" aria-live="polite">Loading strategy allocation analysis…</div>
 <h3>Bybit &amp; Bitget Account Sync <button type="button" class="mini" id="pfExchangeRefresh">Refresh accounts</button></h3><div id="pfExchanges" class="pfwrap muted" aria-live="polite">Account snapshots require the ETI master execution token or administrator MFA.</div>
+<h3>Exchange Fill &amp; Open-Order Synchronization <button type="button" class="mini" id="pfActivitySync">Sync exchange activity</button><button type="button" class="mini" id="pfActivityRefresh">Refresh activity</button></h3>
+<div id="pfActivity" class="pfwrap muted" aria-live="polite">Exchange executions and open orders have not been synchronized.</div>
 <h3>Cross-Exchange Risk Reconciliation <button type="button" class="mini" id="pfCrossRefresh">Reconcile Bybit + Bitget</button></h3><div id="pfCrossRisk" class="pfwrap muted" aria-live="polite">No cross-exchange reconciliation has been run.</div>
 <h3>Autonomous Execution Authorization <span class="muted">separate permission · order dispatch locked</span></h3>
 <div class="pfinfo">Authorization records agent limits for 15 minutes. This does not activate live orders. Every future order must receive Risk Manager approval; its veto cannot be overridden.</div>
@@ -342,6 +344,24 @@ function pfUseSignal(){
  $('planStop').value=L.stopLoss;$('planTp1').value=L.targets[0]!=null?L.targets[0]:'';$('planTp2').value=L.targets[1]!=null?L.targets[1]:'';$('planTp3').value=L.targets[2]!=null?L.targets[2]:'';
  n.textContent='Copied the ETI engine levels (entry '+fp(L.entry)+'). They apply to BUY orders only.';
 }
+async function pfLoadExchangeActivity(){
+ const root=$('pfActivity');if(!root)return;root.textContent='Loading persisted exchange activity…';
+ const {r,d}=await pfCall('/api/portfolio/exchange-activity?environment='+encodeURIComponent(pf.env));
+ if(!r.ok){root.textContent=d.message||d.error||'Exchange activity unavailable.';return;}
+ const fills=d.fills||[],orders=d.openOrders||[];
+ const recent=fills.slice(-30).reverse();
+ const fillRows=recent.map(f=>'<tr><td>'+pfEsc(f.venue)+'</td><td>'+pfEsc(f.market)+'</td><td>'+pfEsc(f.symbol)+'</td><td>'+pfEsc(f.side)+'</td><td class="num">'+pfQty(f.qty)+'</td><td class="num">'+pfNum(f.price,6)+'</td><td class="num">'+pfMoney(f.fee)+'</td><td>'+pfTime(f.at)+'</td></tr>').join('');
+ const orderRows=orders.slice(0,40).map(o=>'<tr><td>'+pfEsc(o.venue)+'</td><td>'+pfEsc(o.market)+'</td><td>'+pfEsc(o.symbol)+'</td><td>'+pfEsc(o.side)+'</td><td class="num">'+pfQty(o.leavesQty)+'</td><td>'+pfEsc(o.status)+'</td><td>'+pfEsc(o.orderId)+'</td></tr>').join('');
+ root.innerHTML='<div class="pfkpis"><div><span>Last sync</span><b>'+pfEsc(d.syncedAt?pfTime(d.syncedAt):'Never')+'</b></div><div><span>Stored executions</span><b>'+fills.length+'</b></div><div><span>Current open orders</span><b>'+orders.length+'</b></div><div><span>Unmatched executions</span><b class="neg">'+(d.unmatchedFills||[]).length+'</b></div></div><p class="muted">Activity journal is separate from the position ledger. Futures hedge/reduce-only and margin fills are not force-converted into long-only spot positions.</p><b>Current open orders</b><div class="pfwrap"><table><thead><tr><th>Venue</th><th>Market</th><th>Symbol</th><th>Side</th><th class="num">Remaining</th><th>Status</th><th>Order ID</th></tr></thead><tbody>'+(orderRows||'<tr><td colspan="7">No open orders returned.</td></tr>')+'</tbody></table></div><b>Latest executions</b><div class="pfwrap"><table><thead><tr><th>Venue</th><th>Market</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fee</th><th>Time</th></tr></thead><tbody>'+(fillRows||'<tr><td colspan="8">No executions stored.</td></tr>')+'</tbody></table></div><div class="pfnote">'+(d.unmatchedFills||[]).slice(-10).map(f=>pfEsc(f.venue+' '+f.market+' '+f.symbol+' order '+f.orderId+' unmatched')).join('<br>')+'</div>';
+}
+async function pfSyncExchangeActivity(){
+ const b=$('pfActivitySync');b.disabled=true;b.textContent='Syncing…';
+ const {r,d}=await pfCall('/api/portfolio/exchange-activity',{environment:pf.env});
+ b.disabled=false;b.textContent='Sync exchange activity';
+ if(!r.ok){alert(d.message||d.error||'Exchange activity sync failed');return;}
+ await pfLoadExchangeActivity();
+ const s=d.summary||{};if(s.unmatchedExchangeFills)alert(s.unmatchedExchangeFills+' exchange fills could not be matched to ETI ledger orders. They remain in the separate activity journal.');
+}
 async function pfLoadCrossRisk(){
  const root=$('pfCrossRisk');if(!root)return;root.textContent='Reconciling exchange positions with the ETI ledger…';
  const {r,d}=await pfCall('/api/portfolio/reconciliation?environment='+encodeURIComponent(pf.env));
@@ -363,6 +383,9 @@ function pfInit(){
  pf.env=pfEnvOfBroker();$('pfEnv').value=pf.env;
  $('pfExchangeRefresh').onclick=()=>{pf.exchangesAt=0;pfLoadExchanges();};
  $('pfCrossRefresh').onclick=pfLoadCrossRisk;
+ $('pfActivitySync').onclick=pfSyncExchangeActivity;
+ $('pfActivityRefresh').onclick=pfLoadExchangeActivity;
+ pfLoadExchangeActivity();
  $('pfAutoEnable').onclick=()=>pfSetAutonomy(true);
  $('pfAutoDisable').onclick=()=>pfSetAutonomy(false);
  pfLoadAutonomy();
