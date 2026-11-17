@@ -66,7 +66,7 @@ test("Bitget retries the V3 public endpoint on the legacy host before downgradin
       return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
     if (u.hostname === "capi.bitget.com" && u.pathname === "/api/v3/market/tickers")
       return new Response(JSON.stringify({ code: "00000", data: [{
-        symbol: "BTCUSDT", lastPr: "60000", high24h: "61000", low24h: "58000",
+        symbol: "BTCUSDT", lastPr: "60000", open: "59000", high24h: "61000", low24h: "58000",
         baseVolume: "10", quoteVolume: "590000", bidPr: "59999", askPr: "60001", ts: "1794940561000"
       }] }));
     return new Response("not found", { status: 404 });
