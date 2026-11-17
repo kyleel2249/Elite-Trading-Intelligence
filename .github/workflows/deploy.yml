@@ -182,14 +182,18 @@ jobs:
                 const h = JSON.parse(input), odd = h.providers?.oddspapi || h.provider;
                 const ready = h.database?.ready === true
                   && h.sports_paper_token_configured === true
-                  && odd?.reachable === true
-                  && Number(odd?.active_subscription_count) > 0
-                  && Number(odd?.bookmaker_count) > 0;
-                if (!ready) {
+                  && odd?.configured === true;
+                const subscriptionReady = odd?.reachable !== true
+                  || (Number(odd?.active_subscription_count) > 0 && Number(odd?.bookmaker_count) > 0);
+                if (!ready || !subscriptionReady) {
                   console.error(JSON.stringify({database:h.database,provider:odd,paper_token_configured:h.sports_paper_token_configured}));
                   process.exit(1);
                 }
-                console.log("Sports D1, paper token, OddsPapi reachability and active bookmaker subscription verified.");
+                if (odd.reachable !== true) {
+                  console.log("WARNING: Sports D1, paper token and OddsPapi configuration are ready, but the external provider is temporarily unreachable. Fixture checks will distinguish an upstream outage from a broken ETI route.");
+                } else {
+                  console.log("Sports D1, paper token, OddsPapi reachability and active bookmaker subscription verified.");
+                }
               });
             '; then health_ok=1; break; fi
             sleep 3
@@ -197,20 +201,48 @@ jobs:
           test "$health_ok" -eq 1 || { echo "::error::ETI Sports health check failed. Verify ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN and D1 migrations."; exit 1; }
 
           football_ok=0
+          provider_degraded=0
           for attempt in $(seq 1 5); do
-            football="$(curl --silent --show-error --fail "$base/api/sports/football/next?limit=1")" || { sleep 3; continue; }
-            if printf '%s' "$football" | node -e '
+            football_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/sports/football/next?limit=1" || true)"
+            football_status="${football_response##*__HTTP_CODE__}"
+            football="${football_response%__HTTP_CODE__*}"
+            if printf '%s' "$football" | HTTP_STATUS="$football_status" node -e '
               let input = "";
               process.stdin.on("data", chunk => input += chunk);
               process.stdin.on("end", () => {
-                const x = JSON.parse(input);
-                const ready = x.provider === "OddsPapi" && x.sport === "football"
-                  && Array.isArray(x.events) && Number.isFinite(Number(x.fixture_candidates))
-                  && Number.isFinite(Number(x.fixture_count));
-                if (!ready) { console.error(JSON.stringify({provider:x.provider,sport:x.sport,error:x.error,fixture_candidates:x.fixture_candidates})); process.exit(1); }
-                console.log("Live football fixture route verified; zero upcoming fixtures is accepted as a valid empty result.");
+                let x;
+                try { x = JSON.parse(input); } catch { console.error("Football route returned non-JSON output"); process.exit(1); }
+                const status = process.env.HTTP_STATUS;
+                if (status === "200") {
+                  const ready = x.provider === "OddsPapi" && x.sport === "football"
+                    && Array.isArray(x.events) && Number.isFinite(Number(x.fixture_candidates))
+                    && Number.isFinite(Number(x.fixture_count));
+                  if (!ready) { console.error(JSON.stringify({provider:x.provider,sport:x.sport,error:x.error})); process.exit(1); }
+                  console.log("Football fixture route verified; zero upcoming fixtures is accepted as a valid empty result.");
+                  return;
+                }
+                // A structured upstream 5xx proves the route is deployed and handling the provider failure.
+                // It is degraded market data, not a reason to report a broken ETI deployment.
+                const upstreamFailure = status === "502" && x.error === "global_football_scan_failed"
+                  && Number(x.provider_status) >= 500 && x.retryable === true
+                  && typeof x.hint === "string" && x.hint.length > 0;
+                if (upstreamFailure) {
+                  console.log("WARNING: ETI football route is deployed and returns a structured OddsPapi upstream failure (HTTP " + x.provider_status + "). Deployment readiness passes; live fixture data remains degraded until the provider recovers.");
+                  process.exit(2);
+                }
+                console.error("Football route failure:", JSON.stringify({httpStatus:status,error:x.error,provider_status:x.provider_status,kind:x.kind}));
+                process.exit(1);
               });
-            '; then football_ok=1; break; fi
+            '; then
+              football_ok=1
+              break
+            else
+              code=$?
+              if [ "$code" -eq 2 ]; then provider_degraded=1; football_ok=1; break; fi
+            fi
             sleep 3
           done
-          test "$football_ok" -eq 1 || { echo "::error::ETI football fixture route is not healthy. Verify the active OddsPapi football subscription."; exit 1; }
+          test "$football_ok" -eq 1 || { echo "::error::ETI football route failed its application-level readiness check. Verify the route, active OddsPapi football subscription and provider response."; exit 1; }
+          if [ "$provider_degraded" -eq 1 ]; then
+            echo "::warning::ETI Sports is deployed, but OddsPapi currently has an upstream outage. Fixture scanning must be rechecked after provider recovery."
+          fi
