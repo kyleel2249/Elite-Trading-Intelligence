@@ -46,7 +46,7 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const symbol = String(body.symbol ?? url.searchParams.get("symbol") ?? "BTCUSDT").toUpperCase();
   const strategy = String(body.strategy ?? url.searchParams.get("strategy") ?? "intraday") as Strategy;
   const engines = String(body.engines ?? url.searchParams.get("engines") ?? "swift,gainz").toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
-  const venue = String(body.venue ?? url.searchParams.get("venue") ?? "bybit");
+  const venue = String(body.venue ?? url.searchParams.get("venue") ?? url.searchParams.get("provider") ?? "bybit");
   const market = String(body.market ?? url.searchParams.get("market") ?? "spot");
   const category = String(body.category ?? url.searchParams.get("category") ?? (market === "futures" ? (venue === "bitget" ? "USDT-FUTURES" : "linear") : (venue === "bitget" ? "SPOT" : "spot")));
   if (!/^[A-Z0-9]{5,20}$/.test(symbol) || !STRATEGIES.includes(strategy) || !engines.length || engines.some(e => e !== "swift" && e !== "gainz") ||
