@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import type { Kline } from "../market.ts";
-import { forecast24hExtremes } from "../analysis/extremes.ts";
+import { forecast24hExtremes, inferBybitCategory } from "../analysis/extremes.ts";
 import { EXTREME_FORECAST_JS, withExtremeForecastLayer } from "./extreme-forecast.ts";
 
 const DAY = 86_400_000, HOUR = 3_600_000;
@@ -25,6 +25,12 @@ function history(days = 30): { hourly: Kline[]; daily: Kline[] } {
   return { hourly, daily };
 }
 const ticker = { symbol: "BTCUSDT", lastPrice: 120, highPrice: 122, lowPrice: 117, priceChangePercent: 1.2, volume: 100, quoteVolume: 12000 };
+
+test("forecast selects the correct Bybit market category for spot, linear and inverse symbols", () => {
+  assert.equal(inferBybitCategory("BTCUSDT", "spot"), "spot");
+  assert.equal(inferBybitCategory("ETHUSDC", "futures"), "linear");
+  assert.equal(inferBybitCategory("BTCUSD", "futures"), "inverse");
+});
 
 test("24-hour forecast uses completed daily ranges and hourly high/low timing patterns", () => {
   const h = history();
