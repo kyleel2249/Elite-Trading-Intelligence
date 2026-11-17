@@ -26,7 +26,7 @@ def test_page_is_served_and_uses_only_local_scripts(client):
 
 def test_market_selector_offers_every_supported_market(client):
     html = client.get("/static/market3d.html").text
-    for value in ("binance", "bitget", "alpaca", "oanda", "twelvedata"):
+    for value in ("bybit", "alpaca", "oanda", "twelvedata"):
         assert f'<option value="{value}"' in html, value
     js = client.get("/static/market3d.js").text
     for value in ("binance", "bitget", "alpaca", "oanda", "twelvedata"):

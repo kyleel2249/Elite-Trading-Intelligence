@@ -6,6 +6,7 @@ from typing import Any, Optional
 from app.config import Settings, get_settings
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.bybit import BybitClient
 from app.integrations.oanda import OandaClient
 from app.market.data_quality import assess_quote, assess_kline
 from app.market.normalization import normalize_order_book, normalize_binance_kline
@@ -16,12 +17,14 @@ class MarketService:
         self.settings = settings or get_settings()
         self.alpaca = AlpacaClient(self.settings)
         self.binance = BinanceClient(self.settings)
+        self.bybit = BybitClient(self.settings)
         self.oanda = OandaClient(self.settings)
 
     async def get_snapshot(self, provider: str, symbol: str) -> dict[str, Any]:
         provider = provider.lower()
-        if provider == "binance":
-            q = await self.binance.get_quote(symbol)
+        if provider in ("bybit", "binance"):
+            client = self.bybit if provider == "bybit" else self.binance
+            q = await client.get_quote(symbol)
             q = assess_quote(q, self.settings.data_max_age_seconds)
             return {
                 "provider": q.provider,
@@ -83,21 +86,14 @@ class MarketService:
         raise ValueError(f"Unknown provider: {provider}")
 
     async def get_order_book(self, symbol: str, depth: int = 20) -> dict[str, Any]:
-        """Binance order book depth + liquidity metrics."""
+        """Bybit public order book depth + liquidity metrics."""
         import httpx
 
         symbol = symbol.upper()
-        client = self.binance
-        async with httpx.AsyncClient(timeout=12.0) as http:
-            r = await http.get(
-                f"{client.base_url}/api/v3/depth",
-                params={"symbol": symbol, "limit": min(depth, 100)},
-            )
-            r.raise_for_status()
-            data = r.json()
+        data = await self.bybit.get_order_book_raw(symbol, limit=depth)
         bids = [[float(p), float(q)] for p, q in data.get("bids", [])]
         asks = [[float(p), float(q)] for p, q in data.get("asks", [])]
-        return normalize_order_book("binance", symbol, bids, asks, depth=depth)
+        return normalize_order_book("bybit", symbol, bids, asks, depth=depth)
 
     async def get_history(
         self,
@@ -105,13 +101,15 @@ class MarketService:
         symbol: str,
         interval: str = "1h",
         limit: int = 100,
+        category: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         provider = provider.lower()
-        if provider == "binance":
-            raw = await self.binance.get_klines(symbol, interval=interval, limit=limit)
+        if provider in ("bybit", "binance"):
+            client = self.bybit if provider == "bybit" else self.binance
+            raw = await client.get_klines(symbol, interval=interval, limit=limit, **({"category": category} if provider == "bybit" and category else {}))
             out = []
             for row in raw:
-                nk = normalize_binance_kline(row, symbol, interval)
+                nk = normalize_binance_kline(row, symbol, interval) | {"provider": provider}
                 out.append(assess_kline(nk))
             return out
         if provider == "oanda":

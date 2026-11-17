@@ -87,8 +87,8 @@ def _meta(n, status="ok", message=None):
 
 def test_symbols_all_merges_every_source_filters_by_exchange_and_new(client, monkeypatch):
     rows = {
-        "binance": [{"provider": "binance", "symbol": "BTCUSDT", "quote": "USDT", "exchange": "BINANCE", "is_new": False}],
-        "bitget": [{"provider": "bitget", "symbol": "FRESHUSDT", "quote": "USDT", "exchange": "BITGET", "is_new": True,
+        "bybit": [{"provider": "bybit", "symbol": "BTCUSDT", "quote": "USDT", "exchange": "BYBIT", "is_new": False},
+                  {"provider": "bybit", "symbol": "FRESHUSDT", "quote": "USDT", "exchange": "BYBIT", "is_new": True,
                     "first_seen_at": "2026-11-14T00:00:00+00:00"}],
         "alpaca": [],
         "oanda": [{"provider": "oanda", "symbol": "EUR_USD", "quote": "USD", "exchange": "OANDA", "is_new": None}],
@@ -103,7 +103,7 @@ def test_symbols_all_merges_every_source_filters_by_exchange_and_new(client, mon
     monkeypatch.setattr(sym, "get_source", core)
     monkeypatch.setattr(ex, "get_source", extra)
     j = client.get("/api/market/symbols", params={"limit": 50}).json()
-    assert j["total"] == 4 and set(j["sources"]) == {"binance", "bitget", "alpaca", "oanda", "twelvedata"}
+    assert j["total"] == 4 and set(j["sources"]) == {"bybit", "alpaca", "oanda", "twelvedata"}
     assert j["sources"]["alpaca"]["status"] == "not_configured" and "XLON" in j["sources"]["twelvedata"]["message"]
     assert [i["symbol"] for i in client.get("/api/market/symbols", params={"exchange": "xetr"}).json()["items"]] == ["SAP:XETR"]
     assert [i["symbol"] for i in client.get("/api/market/symbols", params={"new_only": "true"}).json()["items"]] == ["FRESHUSDT"]

@@ -65,7 +65,7 @@ async def test_crypto_calibration_uses_measured_inputs():
     cal = out["calibration"]
     assert set(cal["used"]) == {"price", "measured_spread_bps", "atr", "avg_daily_volume_usd"} and not cal["errors"]
     assert out["costs"]["spread_source"] == "measured" and out["costs"]["spread_bps"] == pytest.approx(10.0, rel=1e-3)
-    assert ("hist", "binance", "BTCUSDT", "1d") in ms.calls
+    assert ("hist", "bybit", "BTCUSDT", "1d") in ms.calls
 
 
 @pytest.mark.asyncio

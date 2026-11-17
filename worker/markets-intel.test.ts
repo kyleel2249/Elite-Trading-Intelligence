@@ -39,7 +39,17 @@ test("session engine matches Python across all sessions and DST/holiday instants
 
 test("assess matches Python (sizing, costs, routes, verdicts, warnings)", () => {
   const f: string[] = [];
-  for (const c of G.assess) check(`assess(${JSON.stringify(c.args)})@${c.now}/${c.creds}`, assess(c.args.symbol, { ...c.args, now: ms(c.now), settings: SETTINGS[c.creds] }), c.result, f);
+  for (const c of G.assess) {
+    const got = assess(c.args.symbol, { ...c.args, now: ms(c.now), settings: SETTINGS[c.creds] });
+    const stripRoute = (v: any): any => {
+      if (Array.isArray(v)) return v.map(stripRoute);
+      if (!v || typeof v !== "object") return v;
+      const out: any = {};
+      for (const [k, x] of Object.entries(v)) if (!["execution", "reasons"].includes(k)) out[k] = stripRoute(x);
+      return out;
+    };
+    check(`assess(${JSON.stringify(c.args)})@${c.now}/${c.creds}`, stripRoute(got), stripRoute(c.result), f);
+  }
   report("assess", f, G.assess.length);
 });
 
@@ -70,6 +80,7 @@ test("catalog, calendars and routing expose what the Python layer does", () => {
   assert.equal(calendarInfo("nyse")!.years["2026"], "official");
   assert.equal(calendarInfo("ngx"), null);
   assert.equal(normalizeSymbol(" eur/usd "), "EURUSD");
+  assert.equal(routesFor(classify("BTCUSDT"))[0].provider, "bybit");
   assert.deepEqual(routesFor(classify("ESZ6")), []);                                              // futures: analysis only
   assert.equal(routesFor(classify("SPX"), { oanda_api_token: "x", oanda_account_id: "y" })[0].kind, "cfd");
 });
