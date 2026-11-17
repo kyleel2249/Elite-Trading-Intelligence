@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { handleMarket, listBybitSymbols, listBitgetSymbols, _resetSymbolCache } from "./market.ts";
 
 const realFetch = globalThis.fetch;
+const req = (path: string) => new Request("https://eti.test" + path);
 test.afterEach(() => { globalThis.fetch = realFetch; _resetSymbolCache(); });
 const bybitPayload = (category: string) => new Response(JSON.stringify({ retCode: 0, result: {
   list: category === "spot"
@@ -74,6 +75,24 @@ test("Bitget V2 fallback serves spot ticker when the UTA V3 endpoint is Cloudfla
   const ticker = await response.json() as any;
   assert.equal(ticker.lastPrice, 60000);
   assert.equal(ticker.priceChangePercent, 1.69);
+});
+
+test("Bitget V2 fallback tries the main domain if the legacy host is unavailable", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/tickers")
+      return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
+    if (u.hostname === "capi.bitget.com") return new Response("not found", { status: 404 });
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v2/spot/market/tickers")
+      return new Response(JSON.stringify({ code: "00000", data: [{
+        symbol: "BTCUSDT", lastPr: "60000", open: "59000", high24h: "61000", low24h: "58000",
+        baseVolume: "10", quoteVolume: "590000", bidPr: "59999", askPr: "60001", change24h: "0.0169", ts: "1794940561000"
+      }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const response = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-eti-upstream-host"), "api.bitget.com");
 });
 
 test("Bitget spot and futures instrument catalogues fall back to documented V2 endpoints", async () => {
