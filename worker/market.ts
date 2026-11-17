@@ -650,16 +650,16 @@ function bitgetV2FallbackUrl(source: string): string | null {
   }
   return null;
 }
-async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestInit, fetchImpl: typeof fetch = fetch): Promise<Response> {
   const source = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-  const primary = await fetch(input, init);
+  const primary = await fetchImpl(input, init);
   if (primary.status !== 403 || !source.startsWith(BITGET_BASE + "/api/v3/")) return primary;
   const fallbackPath = bitgetV2FallbackUrl(source);
   if (!fallbackPath) return primary;
   let last: Response | null = null;
   for (const host of BITGET_V2_HOSTS) {
     try {
-      const response = await fetch(host + fallbackPath, init);
+      const response = await fetchImpl(host + fallbackPath, init);
       if (response.ok) {
         const body: any = await response.clone().json().catch(() => null);
         if (!body || body.code !== "00000") { last = response; continue; }
@@ -813,7 +813,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "access-control-allow-methods": "GET,OPTIONS" } });
   if (request.method !== "GET") return jsonResp({ error: "method_not_allowed" }, 405);
   const endpoint = url.pathname.slice("/api/market/".length);
-  const marketFetch = bitgetAwareFetch;
+  const marketFetch = (input: RequestInfo | URL, init?: RequestInit) => bitgetAwareFetch(input, init, fetch);
   if (endpoint === "region") return jsonResp({
     service: "eti-public-market-data", transport: "cloudflare-worker-direct", placementHint: "gcp:europe-west1",
     providers: { bybit: PROVIDERS.bybit.hosts, bitget: PROVIDERS.bitget.hosts },
