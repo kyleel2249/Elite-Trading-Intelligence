@@ -1,7 +1,8 @@
 import type { MarketEnv, Kline } from "../market.ts";
 import { getMarketData, providerOrder } from "../market.ts";
 import { authorized } from "../execution.ts";
-import { EXECUTION_TF, TF_SECONDS, type Strategy, type Timeframe } from "./timeframes.ts";
+import { DEFAULT_WEIGHTS, EXECUTION_TF, TF_SECONDS, TIMEFRAMES, type Strategy, type Timeframe } from "./timeframes.ts";
+import { evaluateSynchronizedV3Alpha, evaluateAgentGates, monteCarloRisk, thresholdSensitivity, type OutcomeSample } from "./v3-alpha-intelligence.ts";
 import type { V3AlphaResult } from "./v3-alpha.ts";
 import { backtestV3Alpha } from "./v3-alpha-backtest.ts";
 
@@ -71,6 +72,24 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
  if(path==="/api/algo/v3-alpha/track"&&req.method==="POST"){
   if(!(await authorized(req,env as any)))return reply({error:"unauthorized"},401);
   try{return reply({...await trackOpen(db,env,nowMs()),submitsOrder:false});}catch(e){return reply({error:"tracking_failed",message:e instanceof Error?e.message:"unknown"},500);}
+ }
+ if(path==="/api/algo/v3-alpha/intelligence"&&req.method==="GET"){
+  const symbol=(url.searchParams.get("symbol")??"BTCUSDT").toUpperCase(),strategy=(url.searchParams.get("strategy")??"intraday") as Strategy;
+  const simulations=Number(url.searchParams.get("simulations")??3000),riskPct=Number(url.searchParams.get("riskPct")??1);
+  if(!validSymbol(symbol)||!strategies.includes(strategy)||!Number.isFinite(simulations)||simulations<100||simulations>10000||!Number.isFinite(riskPct)||riskPct<0.1||riskPct>2)return reply({error:"invalid_parameters",riskPctRange:[0.1,2],simulationRange:[100,10000]},400);
+  const required=TIMEFRAMES.filter(tf=>DEFAULT_WEIGHTS[strategy][tf]>0||tf===tfFor(strategy));
+  const candles:Partial<Record<Timeframe,Kline[]>>={},fetchFailures:Record<string,string>={};
+  for(const tf of required){
+   try{candles[tf]=(await getMarketData("klines",{symbol,interval:tf,limit:300},providerOrder(env))).data as Kline[];}
+   catch(e){fetchFailures[tf]=e instanceof Error?e.message:"market_data_unavailable";}
+  }
+  const snapshot=evaluateSynchronizedV3Alpha({symbol,strategy,candles,now:nowMs()});
+  const q=await db.prepare("SELECT strategy,regime,score,outcome,outcome_r,signal_time,entry,stop_loss FROM eti_v3_alpha_signals WHERE outcome IN ('win','loss') ORDER BY signal_time ASC LIMIT 2000").all();
+  const samples=(q.results??[]) as OutcomeSample[];
+  const strategySamples=samples.filter(x=>x.strategy===strategy);
+  const regimeSamples=snapshot.signal.regime==="unknown"?strategySamples:strategySamples.filter(x=>x.regime===snapshot.signal.regime);
+  const riskSamples=regimeSamples.length>=30?regimeSamples:strategySamples;
+  return reply({symbol,strategy,snapshot:{...snapshot,fetchFailures},agentEvaluation:evaluateAgentGates(samples),parameterSensitivity:thresholdSensitivity(strategySamples),monteCarlo:monteCarloRisk({rMultiples:riskSamples.map(x=>Number(x.outcome_r)),simulations,riskPct}),sampleContext:{strategySamples:strategySamples.length,matchingRegimeSamples:regimeSamples.length,riskSimulationSamples:riskSamples.length,minimumSample:30},submitsOrder:false,liveExecutionAllowed:false,note:"Multi-timeframe analysis is synchronized to the last fully closed execution candle. Parameter results are sensitivity research, not auto-deployed settings. AI agent gates authorize paper evaluation only."});
  }
  if(path==="/api/algo/v3-alpha/backtest"&&req.method==="GET"){
   const symbol=(url.searchParams.get("symbol")??"BTCUSDT").toUpperCase(),strategy=(url.searchParams.get("strategy")??"intraday") as Strategy,interval=url.searchParams.get("interval")??"15m";
