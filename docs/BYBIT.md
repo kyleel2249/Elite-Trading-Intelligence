@@ -42,8 +42,14 @@ Testnet is the only recommended initial environment. Live execution requires a s
 - REST snapshots/history use the Bybit V5 public market endpoints.
 - Instruments use /v5/market/instruments-info with pagination for linear/inverse.
 - Public WebSockets: wss://stream.bybit.com/v5/public/spot, /linear, and /inverse.
-- ETI's 3D chart can select Spot/Margin, Linear perpetual and Inverse perpetual and uses Bybit ticker/trade WebSocket topics for live candle updates.
-- The Python stream hub currently starts a Spot stream for BTCUSDT and ETHUSDT by default; additional symbols are restricted by its market-data allowlist.
+- The Python stream hub starts separate public WebSocket connections for Spot, Linear and Inverse. Startup defaults are BTCUSDT/ETHUSDT for Spot and Linear, plus BTCUSD for Inverse.
+- The full instrument catalogue is refreshed on a 60-second cadence. The WebSocket watchlist is selected separately so ETI does not subscribe every listed instrument indiscriminately or exceed venue topic limits.
+- Additional symbols are validated against the current Bybit instrument catalogue and subscribed without reconnecting the existing socket.
+- Spot margin uses the Spot market-data stream; margin eligibility is supplied by the instrument catalogue and account-side borrowing permissions remain separate.
+- Category-aware live quote: `GET /api/market/live?symbol=BTCUSDT&provider=bybit&category=linear`.
+- Category-filtered SSE: `GET /api/stream/sse?symbol=BTCUSDT&category=linear`.
+- Add a live subscription (requires the ETI API key): `POST /api/stream/subscribe` with `{"provider":"bybit","category":"linear","symbols":["BTCUSDT"]}`.
+- Stream status: `GET /api/stream/status`; category-specific connection and subscription state appears under `bybit_categories`.
 
 Private WebSocket order/fill streaming is not enabled in this change; execution status is reconciled through authenticated REST reads. Do not assume an account stream is connected just because public prices are streaming.
 
