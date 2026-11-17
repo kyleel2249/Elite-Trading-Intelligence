@@ -886,11 +886,12 @@ async function loadSymbols(){
   const results=await Promise.allSettled([
    getJson('/api/market/symbols?venue=bybit&market=all'),
    getJson('/api/market/symbols?venue=bitget&market=all'),
-   getJson('/api/market/symbols?venue=bitget&market=margin')
+   getJson('/api/market/symbols?venue=bitget&market=margin'),
+   getJson('/api/market/symbols?venue=bybit&market=margin')
   ]);
   SYM.all=[];
   const warnings=[];
-  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0?'Bybit': 'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)warnings.push(k+' symbol list is stale');});}else warnings.push((i===0?'Bybit': 'Bitget')+' catalogue unavailable');});
+  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0||i===3?'Bybit': 'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)warnings.push(k+' symbol list is stale');});}else warnings.push((i===0||i===3?'Bybit': 'Bitget')+' catalogue unavailable');});
   SYM.at=Date.now();
   SYM.warn=warnings.join('; ');
   if(!SYM.all.some(r=>symV(r)==='bybit'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bybit pairs unavailable.';
@@ -899,7 +900,7 @@ async function loadSymbols(){
  }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any valid exchange symbol in Order Execution.';}
 }
 function symMarketChanged(){
- SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';if(SYM.market==='margin'&&SYM.venue!=='bitget'){SYM.venue='bitget';$('symVenue').value='bitget';}if(SYM.market==='futures'&&symVenueOf()==='bitget'){const r=symInfo().row;if(r&&r[6])$('orderBitgetMarket').value=String(r[6]).toLowerCase();else $('orderBitgetMarket').value='usdt-futures';}else if(SYM.market==='margin')$('orderBitgetMarket').value='margin-crossed';else if(SYM.market==='spot'&&symVenueOf()==='bitget')$('orderBitgetMarket').value='spot';symFilters();
+ SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';if(SYM.market==='futures'&&symVenueOf()==='bitget'){const r=symInfo().row;if(r&&r[6])$('orderBitgetMarket').value=String(r[6]).toLowerCase();else $('orderBitgetMarket').value='usdt-futures';}else if(SYM.market==='margin'&&symVenueOf()==='bitget')$('orderBitgetMarket').value='margin-crossed';else if(SYM.market==='spot'&&symVenueOf()==='bitget')$('orderBitgetMarket').value='spot';symFilters();
  const rows=symRows(),cur=$('symbol').value;let want='';
  if(rows.length&&!rows.some(r=>r[0]===cur)){const d=SYM.market==='metals'?(rows.find(r=>r[1]==='XAU')||rows.find(r=>r[1]==='PAXG')||rows[0]):(rows.find(r=>r[0]==='BTCUSDT')||rows[0]);$('symbol').value=d[0];want=d[0];}
  symRebuild(want);$('orderSymbol').value=$('symbol').value;if(SYM.market==='futures'&&symVenueOf()==='bitget'){const br=symInfo().row;$('orderBitgetMarket').value=br&&br[6]?String(br[6]).toLowerCase():'usdt-futures';}resetAndLoad();syncOrderMarket();
