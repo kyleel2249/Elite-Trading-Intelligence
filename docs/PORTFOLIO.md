@@ -61,3 +61,11 @@ GET /api/portfolio/manager?environment=internal_paper is an authenticated, read-
 The response includes current ledger equity, cash, position exposure, estimated open risk, venue exposure recorded in the selected ledger, stale marks, missing protective stops and ledger anomalies. Missing/stale account information is never guessed into available capital. Venue exposure is limited to fills recorded in that ledger; it is not a live Bybit/Bitget account-balance aggregator.
 
 This service is advisory only: executionEnabled, live orders, leverage and automatic reallocation remain disabled. It does not call exchange order endpoints or modify the portfolio.
+
+## Cross-exchange account snapshots
+
+`GET /api/portfolio/exchanges` returns a read-only Bybit unified-wallet and linear/inverse-position snapshot plus separate Bitget spot, cross-margin, isolated-margin, USDT-futures, USDC-futures and coin-futures account snapshots. This endpoint requires the ETI master execution token or an administrator session with MFA. It calls only the existing allowlisted GET account endpoints. It never submits, amends or cancels orders, changes leverage, transfers assets or withdraws funds.
+
+Bitget balances are deliberately kept separate by product. Shared collateral can appear in more than one product response, so the API does not add those balances into a synthetic total. Non-USD coin balances remain in their exchange-reported units; they are not assigned an invented USD value. Missing credentials, rejected permissions, regional/IP restrictions and unavailable product endpoints are reported as missing/partial/unavailable data, never as zero balances. The Bybit and Bitget API keys should be configured as Worker secrets with read-only account permissions; withdrawal and transfer permissions should remain disabled.
+
+The portfolio UI refreshes exchange snapshots on request and at a 60-second minimum interval while the manager panel is active. Account snapshots are informational only and are not currently used as deployable capital for the strategy allocator. Live multi-exchange order routing and automatic capital transfers remain disabled pending explicit authorization and reconciliation tests.
