@@ -341,24 +341,24 @@ def test_credential_validation_timeout_is_unverifiable_not_valid():
 
 
 def test_credentials_are_loaded_from_secrets_never_fabricated(monkeypatch):
-    for name in ("BINANCE_TESTNET_API_KEY", "BINANCE_TESTNET_SECRET_KEY"):
+    for name in ("BYBIT_TESTNET_API_KEY", "BYBIT_TESTNET_API_SECRET"):
         monkeypatch.delenv(name, raising=False)
-    none = SimpleNamespace(binance_api_key=None, binance_secret_key=None, binance_testnet_enabled=True, binance_live_trading_enabled=False)
+    none = SimpleNamespace(bybit_api_key=None, bybit_api_secret=None, bybit_testnet_enabled=True, bybit_live_trading_enabled=False)
     assert xc.load_testnet_credentials(none) is None
     xc.reset_cache()
     assert asyncio.run(xc.get_credential_state(none)).status == "missing"
 
-    generic = SimpleNamespace(binance_api_key="gk-generic-123", binance_secret_key="gs-generic-456", binance_testnet_enabled=True,
-                              binance_live_trading_enabled=False)
-    assert xc.load_testnet_credentials(generic)[1] == "env:BINANCE_*"
-    live_flag = SimpleNamespace(**{**generic.__dict__, "binance_live_trading_enabled": True})
+    generic = SimpleNamespace(bybit_api_key="gk-generic-123", bybit_api_secret="gs-generic-456", bybit_testnet_enabled=True,
+                              bybit_live_trading_enabled=False)
+    assert xc.load_testnet_credentials(generic)[1] == "env:BYBIT_*"
+    live_flag = SimpleNamespace(**{**generic.__dict__, "bybit_live_trading_enabled": True})
     assert xc.load_testnet_credentials(live_flag) is None, "a live-capable key must never be reused as a testnet key"
 
-    monkeypatch.setenv("BINANCE_TESTNET_API_KEY", "tk-testnet-key-1")
-    monkeypatch.setenv("BINANCE_TESTNET_SECRET_KEY", "ts-testnet-secret-1")
+    monkeypatch.setenv("BYBIT_TESTNET_API_KEY", "tk-testnet-key-1")
+    monkeypatch.setenv("BYBIT_TESTNET_API_SECRET", "ts-testnet-secret-1")
     xc.reset_cache()
     state = asyncio.run(xc.get_credential_state(none, force=True, adapter_factory=lambda c: FakeAdapter("ok")))
-    assert state.status == "valid" and state.source == "env:BINANCE_TESTNET_*"
+    assert state.status == "valid" and state.source == "env:BYBIT_TESTNET_*"
     dumped = str(state.to_dict())
     assert "tk-testnet" not in dumped and "ts-testnet" not in dumped
     xc.reset_cache()
