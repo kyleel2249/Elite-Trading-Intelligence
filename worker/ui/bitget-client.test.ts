@@ -14,6 +14,7 @@ test("Bitget browser adapter parses and exposes public REST helpers", () => {
 
 test("Bitget browser adapter falls back from a blocked V3 request to the V2 public endpoint", async () => {
   const calls: string[] = [];
+  const now = Date.now();
   const sandbox: any = {
     window: {},
     AbortSignal,
@@ -22,17 +23,17 @@ test("Bitget browser adapter falls back from a blocked V3 request to the V2 publ
       calls.push(url);
       if (url.includes("/api/v3/")) return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
       return new Response(JSON.stringify({ code: "00000", data: [
-        ["3000", "3", "3.5", "2.5", "3.2", "4"],
-        ["1000", "1", "1.5", "0.5", "1.2", "2"],
-        ["2000", "2", "2.5", "1.5", "2.2", "3"]
+        [String(now), "3", "3.5", "2.5", "3.2", "4"],
+        [String(now - 120000), "1", "1.5", "0.5", "1.2", "2"],
+        [String(now - 60000), "2", "2.5", "1.5", "2.2", "3"]
       ] }), { status: 200 });
     }
   };
   vm.runInNewContext(BITGET_CLIENT_JS, sandbox);
   const rows = await sandbox.window.ETIBitget.candles({ symbol: "BTCUSDT", interval: "1m", limit: 210, market: "spot" });
   assert.equal(rows.length, 3);
-  assert.equal(rows[0][0], 1000);
-  assert.equal(rows[2][0], 3000);
+  assert.equal(rows[0][0], now - 120000);
+  assert.equal(rows[2][0], now);
   assert.ok(calls.some(url => url.includes("/api/v3/market/candles")));
   assert.ok(calls.some(url => url.includes("/api/v2/spot/market/candles")));
 });
