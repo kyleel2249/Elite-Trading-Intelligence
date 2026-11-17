@@ -19,7 +19,6 @@ class SubscribeRequest(BaseModel):
     symbols: list[str] = Field(..., min_length=1, max_length=10)
     provider: str = "bybit"
     category: Literal["spot", "linear", "inverse"] = "spot"
-    category: Literal["spot", "linear", "inverse"] = "spot"
 
 
 @router.get("/api/market/live")
@@ -99,7 +98,7 @@ async def stream_sse(
 @router.post("/api/stream/subscribe")
 async def stream_subscribe(body: SubscribeRequest, _auth=Depends(require_api_key)):
     """
-    Dynamically subscribe allowlisted symbols (market data only).
+    Dynamically subscribe listed Bybit instruments or allowlisted Alpaca symbols (market data only).
     Requires API key when configured — still never places orders.
     """
     provider = body.provider.lower().strip()
