@@ -216,11 +216,11 @@ function mockBinance(opts: { depthOk?: boolean; stale?: boolean } = {}) {
   globalThis.fetch = (async (input: any) => {
     const u = new URL(String(input));
     if (u.host !== "data-api.binance.vision") return new Response("down", { status: 500 });
-    if (u.pathname.includes("klines")) {
+    if (u.pathname.includes("kline")) {
       const step = INTERVAL_MS[u.searchParams.get("interval") || "1h"], end = Date.now() - (opts.stale ? step * 40 : step * 0.5);
       return new Response(JSON.stringify(series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: step, end }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"])), { status: 200 });
     }
-    if (u.pathname.includes("depth") && opts.depthOk) {
+    if (u.pathname.includes("orderbook") || u.pathname.includes("depth") && opts.depthOk) {
       const mid = 100; return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(mid - 0.01 - i * 0.01), "5"]), asks: Array.from({ length: 50 }, (_, i) => [String(mid + 0.01 + i * 0.01), "5"]) }), { status: 200 });
     }
     return new Response("down", { status: 500 });
