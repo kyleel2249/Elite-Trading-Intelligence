@@ -64,12 +64,16 @@ class BybitWebSocketManager:
         desired = set(self._topics)
         removed = sorted(self._sent_topics - desired)
         added = sorted(desired - self._sent_topics)
-        if removed:
-            await self._ws.send(json.dumps({"op": "unsubscribe", "args": removed}))
-            self._sent_topics.difference_update(removed)
-        if added:
-            await self._ws.send(json.dumps({"op": "subscribe", "args": added}))
-            self._sent_topics.update(added)
+        # Keep each V5 subscription operation bounded; large watchlist changes are
+        # sent as small batches instead of one oversized request.
+        for offset in range(0, len(removed), 10):
+            batch = removed[offset:offset + 10]
+            await self._ws.send(json.dumps({"op": "unsubscribe", "args": batch}))
+            self._sent_topics.difference_update(batch)
+        for offset in range(0, len(added), 10):
+            batch = added[offset:offset + 10]
+            await self._ws.send(json.dumps({"op": "subscribe", "args": batch}))
+            self._sent_topics.update(batch)
 
     async def reconnect(self) -> None:
         if self._ws:
