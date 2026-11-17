@@ -85,7 +85,7 @@ test("forecast overlay parses and is added only to the live dashboard chart", ()
 
 test("rolling 24-hour validation reports out-of-sample price and timing hit rates", () => {
   const h = history(30), result = backtest24hExtremes(h.hourly, h.daily, now);
-  assert.equal(result.status, "ready");
+  if (result.status !== "ready") throw new Error("Expected rolling backtest, received " + result.status);
   assert.ok(result.sampleCount >= 3);
   for (const key of ["highPriceHitRatePct", "lowPriceHitRatePct", "highTimeWindowHitRatePct", "lowTimeWindowHitRatePct"] as const) {
     assert.ok(result[key] >= 0 && result[key] <= 100, key);
