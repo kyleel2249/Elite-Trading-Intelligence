@@ -486,7 +486,7 @@ const baseHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
   "access-control-allow-origin": "*",
-  "access-control-expose-headers": "x-eti-provider,x-eti-failover,x-eti-attempts",
+  "access-control-expose-headers": "x-eti-provider,x-eti-failover,x-eti-attempts,x-eti-upstream-host",
 };
 const jsonResp = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), { status, headers: { ...baseHeaders, ...extra } });
@@ -903,7 +903,8 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   try {
     const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw), market: marketParam, category: categoryParam as Params["category"], productType: ptParam ? ptParam as BitgetProductType : undefined }, order, marketFetch);
     const data = endpoint === "klines" && Array.isArray(r.data) ? (r.data as Kline[]).map(k => k.slice(0, 6)) : r.data; // public contract stays 6 columns; taker volume is internal
-    return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts) });
+    const successfulAttempt = r.attempts.find(a => a.ok);
+    return jsonResp(data, 200, { "x-eti-provider": r.provider, "x-eti-failover": String(r.failover), "x-eti-attempts": summary(r.attempts), ...(successfulAttempt?.host ? { "x-eti-upstream-host": successfulAttempt.host } : {}) });
   } catch (e) {
     if (e instanceof AllProvidersFailed) {
       const last = [...e.attempts].reverse().find((a) => a.status !== null);
