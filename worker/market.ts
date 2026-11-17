@@ -458,7 +458,8 @@ export async function getMarketData(endpoint: Endpoint, p: Params, orderIn: Prov
       continue; // not compatible -> skip, never substitute data
     }
     for (const host of spec.hosts) {
-      const raw = await fetchHost(host, req, fetchImpl);
+      const transport = host.includes("bitget.com") ? ((input: RequestInfo | URL, init?: RequestInit) => bitgetAwareFetch(input, init, fetchImpl)) : fetchImpl;
+      const raw = await fetchHost(host, req, transport);
       const base = { provider: id, host: raw.headers?.get("x-eti-upstream-host") || host.replace("https://", ""), status: raw.status, latencyMs: raw.latencyMs };
       if (raw.errorClass) {
         const a: Attempt = { ...base, ok: false, errorClass: raw.errorClass, detail: snippet(raw.text) || undefined };
