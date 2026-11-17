@@ -55,11 +55,11 @@ export async function loadSignalInputs(
         if (currentTs <= now + 30_000 && now - currentTs <= 180_000) {
           try {
             const raw = await kv.get(key), previous = typeof raw === "string" ? JSON.parse(raw) : raw;
-            if (previous && Number.isFinite(Number(previous.openInterest)) && Number.isFinite(Number(previous.timestamp))) {
-              const previousTs = Number(previous.timestamp) < 1e12 ? Number(previous.timestamp) * 1000 : Number(previous.timestamp);
-              if (currentTs > previousTs && currentTs - previousTs <= 86_400_000) derivatives.previousOpenInterest = Number(previous.openInterest);
-            }
-            if (!previous || currentTs >= (Number(previous.timestamp) < 1e12 ? Number(previous.timestamp) * 1000 : Number(previous.timestamp)))
+            const previousRawTs = Number(previous?.timestamp);
+            const previousTs = Number.isFinite(previousRawTs) ? (previousRawTs < 1e12 ? previousRawTs * 1000 : previousRawTs) : null;
+            if (previous && Number.isFinite(Number(previous.openInterest)) && previousTs !== null && currentTs > previousTs && currentTs - previousTs <= 86_400_000)
+              derivatives.previousOpenInterest = Number(previous.openInterest);
+            if (!previous || previousTs === null || currentTs >= previousTs)
               await kv.put(key, JSON.stringify({ openInterest: derivatives.openInterest, timestamp: currentTs }), { expirationTtl: 86_400 });
           } catch { /* Historical OI is advisory; KV failure must never block the signal. */ }
         }
