@@ -19,6 +19,7 @@ class SubscribeRequest(BaseModel):
     symbols: list[str] = Field(..., min_length=1, max_length=10)
     provider: str = "bybit"
     category: Literal["spot", "linear", "inverse"] = "spot"
+    category: Literal["spot", "linear", "inverse"] = "spot"
 
 
 @router.get("/api/market/live")
