@@ -1,6 +1,6 @@
 /* ETI 3D market view.
  * Dependency-free canvas renderer with a manual 3D projection (works offline, no CDN, CSP-friendly).
- * Data comes only from the ETI API: candles via GET /api/market/public-history?provider=... (Binance, Bitget, Alpaca,
+ * Data comes only from the ETI API: candles via GET /api/market/public-history?provider=... (Bybit, Alpaca,
  * OANDA, Twelve Data); symbols are discovered with GET /api/market/symbols.
  * Nothing is generated or simulated: on any failure the view shows an "unavailable" state with the server's reason, and
  * stale data is labelled stale.
@@ -15,16 +15,16 @@
   var INTERVAL_MS = { '1m': 6e4, '5m': 3e5, '15m': 9e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
   var LIMIT = 60, REFRESH_MS = 30000;
   var DEFAULT_VIEW = { yaw: -0.6, pitch: 0.45, zoom: 1 };
-  var LABEL = { binance: 'Binance', bitget: 'Bitget', alpaca: 'Alpaca', oanda: 'OANDA', twelvedata: 'Twelve Data' };
-  var DEFAULT_SYMBOL = { binance: 'BTCUSDT', bitget: 'BTCUSDT', alpaca: 'AAPL', oanda: 'EUR_USD', twelvedata: 'SAP:XETR' };
+  var LABEL = { bybit: 'Bybit', alpaca: 'Alpaca', oanda: 'OANDA', twelvedata: 'Twelve Data' };
+  var DEFAULT_SYMBOL = { bybit: 'BTCUSDT', alpaca: 'AAPL', oanda: 'EUR_USD', twelvedata: 'SAP:XETR' };
   var SYM_RE = {
-    binance: /^[A-Z0-9]{3,20}$/, bitget: /^[A-Z0-9]{3,20}$/, alpaca: /^[A-Z0-9.\-]{1,12}$/, oanda: /^[A-Z0-9_]{3,20}$/,
+    bybit: /^[A-Z0-9]{3,20}$/, alpaca: /^[A-Z0-9.\-]{1,12}$/, oanda: /^[A-Z0-9_]{3,20}$/,
     twelvedata: /^([A-Z0-9.\-]{1,12}(:[A-Z0-9]{3,6})?|[A-Z]{3}\/[A-Z]{3})$/
   };
-  var CRYPTO = { binance: 1, bitget: 1 };
+  var CRYPTO = { bybit: 1 };
 
   var S = { candles: [], status: 'loading', yaw: DEFAULT_VIEW.yaw, pitch: DEFAULT_VIEW.pitch, zoom: 1,
-            auto: false, drag: null, W: 300, H: 300, req: 0, timer: 0, raf: 0, prov: 'binance', symReq: 0, symTimer: 0 };
+            auto: false, drag: null, W: 300, H: 300, req: 0, timer: 0, raf: 0, prov: 'bybit', symReq: 0, symTimer: 0 };
 
   function setBanner(kind, text) {
     var b = el('banner');
@@ -85,7 +85,7 @@
     var prov = el('prov').value;
     var sym = (el('sym').value || '').trim().toUpperCase();
     var iv = el('int').value;
-    var okSym = (SYM_RE[prov] || SYM_RE.binance).test(sym);
+    var okSym = (SYM_RE[prov] || SYM_RE.bybit).test(sym);
     if (!okSym || !INTERVAL_MS[iv]) {
       S.candles = []; S.status = 'invalid';
       setBanner('bad', 'Enter a valid symbol such as ' + DEFAULT_SYMBOL[prov] + '.');
