@@ -24,3 +24,9 @@ The new database starts empty. Nothing copies the old file automatically. If you
 ## Not changed
 
 The Cloudflare Worker (D1) is separate and is not affected. Trading stays paper/testnet unless every live gate is opened.
+
+
+## Automated deployment
+
+The production GitHub Actions workflow deploys the FastAPI origin to the `fra` region before deploying the Cloudflare Worker whenever backend files change. Add a Fly.io deploy token as the repository Actions secret `FLY_API_TOKEN`; the workflow does not store or print its value. Existing application secrets such as `DATABASE_URL` stay in Fly's secret store.
+
