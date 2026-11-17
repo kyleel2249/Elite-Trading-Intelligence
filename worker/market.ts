@@ -664,7 +664,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     const placement = request.headers.get("cf-placement");
     return jsonResp({
       service: "eti-bybit-market-data",
-      configured_region: "aws:af-south-1",
+      configured_region: "aws:eu-central-1",
       placement,
       placement_verified: typeof placement === "string" && placement.endsWith("-CPT"),
       provider_hosts: PROVIDERS.bybit.hosts.map(host => host.replace("https://", "")),
