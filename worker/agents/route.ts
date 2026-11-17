@@ -26,8 +26,9 @@ import { applyFilters, loadBinanceFilters } from "./filters.ts";
 import type { SymbolFilters } from "./filters.ts";
 import { DASHBOARD_HTML } from "./dashboard.ts";
 import { withLlmBrief } from "./llm-route.ts";
+import { readAutopilotConfig } from "./autopilot.ts";
 
-export type AgentsEnv = MarketEnv & ExecutionEnv & ProviderEnv & { ETI_PORTFOLIO_DB?: any; ETI_AGENT_AUTOPILOT_ENABLED?: string; ETI_AGENT_AUTOPILOT_SYMBOLS?: string; ETI_AGENT_AUTOPILOT_INTERVAL?: string; ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE?: string; ETI_AGENT_AUTOPILOT_MIN_AGREEMENT?: string; ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string };
+export type AgentsEnv = MarketEnv & ExecutionEnv & ProviderEnv & { ETI_PORTFOLIO_DB?: any; ETI_AGENT_AUTOPILOT_ENABLED?: string; ETI_AGENT_AUTOPILOT_SYMBOLS?: string; ETI_AGENT_AUTOPILOT_INTERVAL?: string; ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE?: string; ETI_AGENT_AUTOPILOT_MIN_AGREEMENT?: string; ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string; ETI_AGENT_AUTOPILOT_CONFIG?: string };
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 export type MarketLoader = (env: AgentsEnv, symbol: string, interval: string, opts: { provider?: string | null; benchmark?: string | null }) => Promise<MarketInput>;
 export type ProviderLoader = (env: AgentsEnv, symbol: string, now: number) => Promise<{ supplied: SuppliedData; status: ProviderStatus[] }>;
@@ -120,18 +121,16 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
         let latest: unknown = null;
         try { latest = env.ETI_EXECUTION_LOG ? JSON.parse((await env.ETI_EXECUTION_LOG.get("agent-autopilot:last")) || "null") : null; } catch { latest = null; }
+        const config = readAutopilotConfig(env);
         return reply({
           enabled: env.ETI_AGENT_AUTOPILOT_ENABLED === "true", mode: "internal_paper_only",
           liveOrdersAllowed: false, killSwitch: integrity.killSwitch,
           executionTokenConfigured: integrity.executionTokenConfigured, auditLogConfigured: integrity.auditLogConfigured,
-          symbols: String(env.ETI_AGENT_AUTOPILOT_SYMBOLS || "BTCUSDT,ETHUSDT,SOLUSDT").split(",").map((s) => s.trim()).filter(Boolean),
-          interval: env.ETI_AGENT_AUTOPILOT_INTERVAL || "15m",
-          minConfidence: Number(env.ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE || "0.65"),
-          minAgreement: Number(env.ETI_AGENT_AUTOPILOT_MIN_AGREEMENT || "0.65"),
-          maxPositions: Number(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS || "3"),
-          strategies: String((env as any).ETI_AGENT_AUTOPILOT_STRATEGIES || "scalp,intraday,swing,position").split(",").map((s) => s.trim()).filter(Boolean),
-          minStrategyAgreement: Number((env as any).ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT || "3"),
-          minOmniConfidence: Number((env as any).ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE || "60"), latest,
+          symbols: config.symbols.split(",").map((s) => s.trim()).filter(Boolean),
+          interval: config.interval, maxPerCycle: config.maxPerCycle,
+          minConfidence: config.minConfidence, minAgreement: config.minAgreement,
+          maxPositions: config.maxPositions, strategies: config.strategies.split(",").map((s) => s.trim()).filter(Boolean),
+          minStrategyAgreement: config.minStrategyAgreement, minOmniConfidence: config.minOmniConfidence, latest,
         });
       }
 
