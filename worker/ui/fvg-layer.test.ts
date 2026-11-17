@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { FVG_LAYER_JS, withFvgLayer } from "./fvg-layer.ts";
 
-const script = FVG_LAYER_JS.replace(/^<script[^>]*>/, "").replace(/<\\/script>$/, "");
+const script = FVG_LAYER_JS.replace(/^<script[^>]*>/, "").replace(/<[/]script>$/, "");
 
 test("FVG browser layer parses and is injected only into the dashboard chart", () => {
   assert.doesNotThrow(() => new vm.Script(script));
