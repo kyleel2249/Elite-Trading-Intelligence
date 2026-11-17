@@ -71,8 +71,12 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
   const maxPerCycle = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE, 2, 1, 10));
   const minConfidence = envNum(env.ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE, 0.65, 0.5, 0.95);
   const minAgreement = envNum(env.ETI_AGENT_AUTOPILOT_MIN_AGREEMENT, 0.65, 0.5, 0.95);
-  const maxPositions = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS, 3, 1, 10));\n  const strategies = [...new Set(String(env.ETI_AGENT_AUTOPILOT_STRATEGIES || "scalp,intraday,swing,position").split(",").map(s => s.trim().toLowerCase()).filter(s => ["scalp", "intraday", "swing", "position"].includes(s)))];\n  const minStrategyAgreement = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT, 3, 1, 4));\n  const minOmniConfidence = envNum(env.ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE, 60, 40, 95);
-  if (!symbols.length) return { ...disabled, skipped: "no_valid_symbols" };\n  if (!strategies.length || minStrategyAgreement > strategies.length) return { ...disabled, skipped: "invalid_strategy_configuration" };
+  const maxPositions = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MAX_POSITIONS, 3, 1, 10));
+  const strategies = [...new Set(String(env.ETI_AGENT_AUTOPILOT_STRATEGIES || "scalp,intraday,swing,position").split(",").map(s => s.trim().toLowerCase()).filter(s => ["scalp", "intraday", "swing", "position"].includes(s)))];
+  const minStrategyAgreement = Math.floor(envNum(env.ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT, 3, 1, 4));
+  const minOmniConfidence = envNum(env.ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE, 60, 40, 95);
+  if (!symbols.length) return { ...disabled, skipped: "no_valid_symbols" };
+  if (!strategies.length || minStrategyAgreement > strategies.length) return { ...disabled, skipped: "invalid_strategy_configuration" };
 
   const store = openStore(env as any, "internal_paper");
   if (!store) return { ...disabled, skipped: "portfolio_storage_missing" };
