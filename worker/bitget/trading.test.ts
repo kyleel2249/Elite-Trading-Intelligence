@@ -13,6 +13,12 @@ test("Bitget live fails closed until Cloudflare private API egress is verified",
  assert.equal(r.status,423);assert.equal((await r.json() as any).error,"bitget_worker_egress_unverified");assert.equal(calls,0);
 });
 
+test("Bitget signed orders retry the official legacy host only after an explicit Cloudflare block", async () => {
+ const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};const hosts:string[]=[];
+ const r=await placeBitgetLiveOrder(env,orderBody(),{now:()=>1700000000000,fetchImpl:(async(url:any)=>{hosts.push(new URL(String(url)).hostname);return hosts.length===1?new Response(JSON.stringify({cloudflare:"block"}),{status:403}):ok();}) as any});
+ assert.equal(r.status,201);assert.deepEqual(hosts,["api.bitget.com","capi.bitget.com"]);
+});
+
 test("Bitget spot market buy sends quote-denominated size and records live execution",async()=>{
  const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};let seen:any;
  const r=await placeBitgetLiveOrder(env,orderBody(),{now:()=>1700000000000,fetchImpl:(async(url:any,init:any)=>{seen={url,init};return ok();}) as any});
