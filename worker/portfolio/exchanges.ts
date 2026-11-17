@@ -36,13 +36,13 @@ async function safe<T>(fn: () => Promise<T>) {
   try { return { status: "connected" as const, data: await fn(), error: null }; }
   catch (e) { return { status: "unavailable" as const, data: null, error: e instanceof Error ? e.message.slice(0, 160) : "request_failed" }; }
 }
-export async function loadExchangePortfolioSnapshot(env: Env, now = Date.now()) {
+export async function loadExchangePortfolioSnapshot(env: Env, now = Date.now(), deps: { fetchImpl?: typeof fetch } = {}) {
   const [bybit, ...bg] = await Promise.all([
-    safe(() => loadBybitAccountSnapshot(env, { now: () => now })),
+    safe(() => loadBybitAccountSnapshot(env, { now: () => now, fetchImpl: deps.fetchImpl })),
     ...MARKETS.map(market => safe(async () => {
       const [a, p] = await Promise.all([
-        getAssets(env, market),
-        market.endsWith("futures") ? getPositions(env, market).catch(() => []) : Promise.resolve([]),
+        getAssets(env, market, { now: () => now, fetchImpl: deps.fetchImpl }),
+        market.endsWith("futures") ? getPositions(env, market, { now: () => now, fetchImpl: deps.fetchImpl }).catch(() => []) : Promise.resolve([]),
       ]);
       return { assets: assets(market, a), positions: positions(p) };
     })),
