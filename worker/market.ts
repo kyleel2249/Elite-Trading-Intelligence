@@ -704,7 +704,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       : want === "margin" ? ["MARGIN"] : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
-      symbols: rows.map(x => [x.s, x.b, x.q, x.m, x.c, venueQ, ...(x.pt ? [x.pt] : [])]) }, 200, { "cache-control": "public, max-age=45" });
+      symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : [])]) }, 200, { "cache-control": "public, max-age=45" });
   }
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
   const interval = url.searchParams.get("interval") || "1m";
