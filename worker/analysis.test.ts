@@ -611,3 +611,30 @@ test("crypto pipeline: a honeypot found by GoPlus drives the intelligence verdic
     const b = centralIntelligence({ symbol: "TSTUSDT", assetClass: "crypto", strategy: "swing", mtf: mtfUp(), fundamental: f, now: NOW }); assert.equal(b.verdict, "AVOID");
   });
 });
+
+test("SMC API returns confirmed structure, liquidity and order-block evidence without enabling trades", async () => {
+  const candles = reindex(flat(80, 100));
+  const req = new Request("https://eti.test/api/analysis/smc?symbol=BTCUSDT&timeframe=1h", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", timeframe: "1h", candles }),
+  });
+  const res = await handleAnalysis(req, {} as any), body: any = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, "ready");
+  assert.equal(body.timeframe, "1h");
+  assert.ok(Array.isArray(body.structure.events));
+  assert.ok(Array.isArray(body.liquidityPools));
+  assert.ok(Array.isArray(body.liquiditySweeps));
+  assert.ok(Array.isArray(body.orderBlocks));
+  assert.ok(Array.isArray(body.displacement));
+  assert.equal(body.canTriggerTrade, false);
+  assert.equal(body.submitsOrder, false);
+  assert.equal(body.liveExecutionAllowed, false);
+});
+test("SMC API rejects unsupported timeframes and malformed candles", async () => {
+  const post = (timeframe: string, candles: unknown) => handleAnalysis(new Request("https://eti.test/api/analysis/smc?symbol=BTCUSDT", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ symbol: "BTCUSDT", timeframe, candles }),
+  }), {} as any);
+  assert.equal((await post("7h", flat(80))).status, 400);
+  assert.equal((await post("1h", [[1, 2]])).status, 400);
+});
