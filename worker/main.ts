@@ -101,6 +101,7 @@ const AGENT_AUTOPILOT_CRON = "*/5 * * * *";
 export default {
   fetch: (request: Request, env: any) => app.fetch(request, env),
   async scheduled(event: { cron?: string }, env: any, ctx: { waitUntil(p: Promise<unknown>): void }) {
+    if (event.cron === "*/15 * * * *" && env.ETI_PORTFOLIO_DB) ctx.waitUntil(runV3AlphaTrackingCycle(env).then(r => { if (r.resolved) console.log("V3 Alpha forward outcomes resolved", r.resolved); }, e => console.error("V3 Alpha tracking failed", e instanceof Error ? e.message : e)));
     // Autonomous football scan and result-history collection are quota-throttled in D1 (scan >= 60 min, history >= 360 min),
     // so they are skipped on the every-minute monitor cron instead of costing two D1 writes and a 2s wait every minute.
     if (event.cron !== MONITOR_CRON && env.ODDSPAPI_API_KEY && env.ETI_SPORTS_PAPER_TOKEN && env.ETI_PORTFOLIO_DB) {
