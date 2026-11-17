@@ -2,6 +2,7 @@ import { handleAlgoSignal } from "./api.ts";
 import { handleAlgoBacktest } from "./backtest-api.ts";
 import { handleAlgoRegistry } from "./registry-api.ts";
 import type { MarketEnv } from "../market.ts";
+import { handleV3AlphaLedger } from "./v3-alpha-ledger.ts";
 
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 /** Serve /api/algo/signal here and delegate every other route to the wrapped application untouched. */
