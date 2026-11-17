@@ -88,6 +88,25 @@ test("Bitget spot candles, ticker and margin market data use the global public A
   assert.equal(tickerData.askPrice, 102.01);
 });
 
+test("Bitget weekly candles are built from documented daily V3 candles", async () => {
+  const urls: string[] = [];
+  const monday = Date.UTC(2026, 0, 5);
+  globalThis.fetch = (async (input: any) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify({ code: "00000", data: [
+      [String(monday), "100", "105", "98", "102", "10", "1000"],
+      [String(monday + 86400000), "102", "110", "101", "108", "5", "500"]
+    ] }));
+  }) as any;
+  const response = await handleMarket(req("/api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1w&limit=10"), {});
+  assert.equal(response.status, 200);
+  assert.match(urls[0], /interval=1D/);
+  assert.match(urls[0], /limit=70/);
+  const rows = await response.json() as number[][];
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], [monday, 100, 110, 98, 108, 15]);
+});
+
 test("Bitget USDT, USDC and Coin-M futures remain explicit and never cross-substitute", async () => {
   const urls: string[] = [];
   globalThis.fetch = (async (input: any) => { urls.push(String(input)); return new Response(JSON.stringify(bitgetKline)); }) as any;
@@ -147,4 +166,5 @@ test("free Cloudflare-only market routing does not require Fly.io or a fixed egr
   assert.equal(body.transport, "cloudflare-worker-direct");
   assert.equal(body.fixedEgressIp, false);
   assert.equal(body.accountResidencyIsNotChanged, true);
+  assert.equal(body.placementHint, "gcp:europe-west1");
 });
