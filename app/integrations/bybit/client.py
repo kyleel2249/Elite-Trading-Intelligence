@@ -12,14 +12,16 @@ from app.integrations.base import BaseProvider, NormalizedQuote
 
 class BybitClient(BaseProvider):
     name = "bybit"
+    CATEGORIES = ("spot", "linear", "inverse")
 
     def __init__(self, settings: Optional[Settings] = None, category: str = "spot"):
         self.settings = settings or get_settings()
-        self.category = category if category in ("spot", "linear", "inverse") else "spot"
+        self.category = category if category in self.CATEGORIES else "spot"
         self.base_url = "https://api.bybit.com"
 
     @property
     def configured(self) -> bool:
+        # Public market data is available without API credentials.
         return True
 
     async def _get(self, path: str, params: dict[str, Any]):
@@ -60,7 +62,7 @@ class BybitClient(BaseProvider):
 
     async def get_klines(self, symbol: str, interval: str = "1h", limit: int = 100,
                         category: Optional[str] = None) -> list[dict[str, Any]]:
-        cat = category if category in ("spot", "linear", "inverse") else self.category
+        cat = category if category in self.CATEGORIES else self.category
         iv = {"1m": "1", "3m": "3", "5m": "5", "15m": "15", "30m": "30", "1h": "60",
               "2h": "120", "4h": "240", "6h": "360", "12h": "720", "1d": "D", "1w": "W", "1M": "M"}.get(interval)
         if not iv:
@@ -79,7 +81,50 @@ class BybitClient(BaseProvider):
         return out
 
     async def get_order_book_raw(self, symbol: str, limit: int = 20, category: Optional[str] = None):
-        cat = category if category in ("spot", "linear", "inverse") else self.category
+        cat = category if category in self.CATEGORIES else self.category
         result = await self._get("/v5/market/orderbook", {"category": cat, "symbol": symbol.upper(),
                                                           "limit": min(200, max(1, limit))})
         return {"bids": result.get("b") or [], "asks": result.get("a") or [], "ts": result.get("ts")}
+
+    async def get_funding_rate(self, symbol: str, category: Optional[str] = None) -> dict[str, Any]:
+        """Latest published funding observation for a linear or inverse perpetual contract."""
+        cat = category if category in ("linear", "inverse") else self.category
+        if cat not in ("linear", "inverse"):
+            raise ValueError("Funding rates are available only for Bybit linear or inverse derivatives")
+        result = await self._get("/v5/market/funding/history", {
+            "category": cat, "symbol": symbol.upper(), "limit": 1,
+        })
+        rows = result.get("list") or []
+        if not rows:
+            raise RuntimeError(f"Bybit returned no funding history for {symbol.upper()} ({cat})")
+        row = rows[0]
+        try:
+            return {
+                "provider": "bybit", "category": cat, "symbol": symbol.upper(),
+                "funding_rate": float(row["fundingRate"]),
+                "funding_time": int(row["fundingRateTimestamp"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError("Bybit funding history payload is malformed") from None
+
+    async def get_open_interest(self, symbol: str, interval: str = "1h", limit: int = 50,
+                                category: Optional[str] = None) -> list[dict[str, Any]]:
+        """Chronological open-interest observations for a linear or inverse contract."""
+        cat = category if category in ("linear", "inverse") else self.category
+        if cat not in ("linear", "inverse"):
+            raise ValueError("Open interest is available only for Bybit linear or inverse derivatives")
+        if interval not in ("5min", "15min", "30min", "1h", "4h", "1d"):
+            raise ValueError("Unsupported Bybit open-interest interval")
+        result = await self._get("/v5/market/open-interest", {
+            "category": cat, "symbol": symbol.upper(), "intervalTime": interval,
+            "limit": min(200, max(1, limit)),
+        })
+        rows = result.get("list") or []
+        try:
+            return [{
+                "provider": "bybit", "category": cat, "symbol": symbol.upper(),
+                "timestamp": int(row["timestamp"]), "open_interest": float(row["openInterest"]),
+                "interval": interval,
+            } for row in sorted(rows, key=lambda item: int(item["timestamp"]))]
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError("Bybit open-interest payload is malformed") from None
