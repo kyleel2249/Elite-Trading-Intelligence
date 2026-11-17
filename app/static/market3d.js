@@ -23,7 +23,7 @@
   };
   var CRYPTO = { bybit: 1 };
 
-  var S = { candles: [], status: 'loading', yaw: DEFAULT_VIEW.yaw, pitch: DEFAULT_VIEW.pitch, zoom: 1,
+  var S = { candles: [], status: 'loading', ws: null, wsPing: 0, wsRetry: 0, category: 'spot', yaw: DEFAULT_VIEW.yaw, pitch: DEFAULT_VIEW.pitch, zoom: 1,
             auto: false, drag: null, W: 300, H: 300, req: 0, timer: 0, raf: 0, prov: 'bybit', symReq: 0, symTimer: 0 };
 
   function setBanner(kind, text) {
@@ -39,14 +39,14 @@
 
   /* ---------- symbol discovery ---------- */
   function searchSymbols(refresh) {
-    var prov = el('prov').value, q = (el('sym').value || '').trim().toUpperCase(), my = ++S.symReq;
+    var prov = el('prov').value, cat = el('category') ? el('category').value : 'spot', q = (el('sym').value || '').trim().toUpperCase(), my = ++S.symReq;
     var url = '/api/market/symbols?provider=' + encodeURIComponent(prov) + '&q=' + encodeURIComponent(q) + '&limit=40' + (refresh ? '&refresh=true' : '');
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (j) {
         if (my !== S.symReq) return;
         var dl = el('symlist'); dl.textContent = '';
-        (j.items || []).forEach(function (it) {
+        (j.items || []).filter(function (it) { return prov !== 'bybit' || !it.market || it.market === cat; }).forEach(function (it) {
           var o = document.createElement('option'); o.value = it.symbol;
           var lab = it.name ? it.name : (it.base && it.quote ? it.base + '/' + it.quote : '');
           o.label = (it.is_new ? 'NEW · ' : '') + lab + (it.exchange && prov === 'twelvedata' ? ' (' + it.exchange + ')' : '');
@@ -81,10 +81,70 @@
     return { out: out, bad: bad };
   }
 
+  function closeBybitStream() {
+    if (S.wsPing) clearInterval(S.wsPing);
+    if (S.wsRetry) clearTimeout(S.wsRetry);
+    S.wsPing = 0; S.wsRetry = 0;
+    if (S.ws) { try { S.ws.close(); } catch (_) {} }
+    S.ws = null;
+  }
+  function applyLivePrice(price, qty) {
+    if (!finite(price) || price <= 0 || !S.candles.length) return;
+    var last = S.candles[S.candles.length - 1], now = Date.now(), span = INTERVAL_MS[S.iv] || 60000;
+    if (now > last.ct) {
+      var openAt = Math.floor(now / span) * span;
+      last = { o: last.c, h: Math.max(last.c, price), l: Math.min(last.c, price), c: price,
+               v: 0, ct: openAt + span - 1, q: 'live' };
+      S.candles.push(last);
+      if (S.candles.length > LIMIT) S.candles.shift();
+    } else {
+      last.h = Math.max(last.h, price); last.l = Math.min(last.l, price); last.c = price; last.q = 'live';
+    }
+    if (finite(qty) && qty > 0) last.v += qty;
+    S.status = 'live';
+    setBanner('ok', 'Bybit live ' + S.category + ' feed · ' + S.sym + ' · ' + new Date().toISOString().slice(11, 19) + ' UTC.');
+    table(); render();
+  }
+  function connectBybitStream(symbol, category) {
+    closeBybitStream();
+    if (!window.WebSocket) return;
+    var host = 'wss://stream.bybit.com/v5/public/' + (category || 'spot');
+    var ws;
+    try { ws = new WebSocket(host); } catch (_) { return; }
+    S.ws = ws;
+    ws.onopen = function () {
+      ws.send(JSON.stringify({ op: 'subscribe', args: ['tickers.' + symbol, 'publicTrade.' + symbol] }));
+      S.wsPing = setInterval(function () {
+        if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ op: 'ping' }));
+      }, 20000);
+    };
+    ws.onmessage = function (event) {
+      var msg; try { msg = JSON.parse(event.data); } catch (_) { return; }
+      if (!msg || !msg.topic || !msg.data) return;
+      var rows = Array.isArray(msg.data) ? msg.data : [msg.data];
+      rows.forEach(function (row) {
+        if (msg.topic.indexOf('tickers.') === 0) applyLivePrice(+row.lastPrice, 0);
+        else if (msg.topic.indexOf('publicTrade.') === 0) applyLivePrice(+row.p, +row.v);
+      });
+    };
+    ws.onerror = function () { try { ws.close(); } catch (_) {} };
+    ws.onclose = function () {
+      if (S.wsPing) clearInterval(S.wsPing);
+      S.wsPing = 0;
+      if (S.ws === ws) {
+        S.ws = null;
+        S.wsRetry = setTimeout(function () {
+          if (S.prov === 'bybit' && S.sym === symbol && S.category === category) connectBybitStream(symbol, category);
+        }, 3000);
+      }
+    };
+  }
+
   function load() {
     var prov = el('prov').value;
     var sym = (el('sym').value || '').trim().toUpperCase();
     var iv = el('int').value;
+    var category = el('category') ? el('category').value : 'spot';
     var okSym = (SYM_RE[prov] || SYM_RE.bybit).test(sym);
     if (!okSym || !INTERVAL_MS[iv]) {
       S.candles = []; S.status = 'invalid';
@@ -93,7 +153,7 @@
     }
     var token = ++S.req;
     var url = '/api/market/public-history?provider=' + encodeURIComponent(prov) + '&symbol=' + encodeURIComponent(sym) +
-              '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT;
+              '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT + (prov === 'bybit' ? '&category=' + encodeURIComponent(category) : '');
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(function (r) {
         if (r.ok) return r.json();
@@ -105,7 +165,8 @@
         if (token !== S.req) return; // a newer request superseded this one
         var c = clean(rows);
         if (c.out.length < 5) throw new Error('too few valid candles (' + c.out.length + ')');
-        S.candles = c.out; S.sym = sym; S.iv = iv; S.bad = c.bad; S.prov = prov;
+        S.candles = c.out; S.sym = sym; S.iv = iv; S.bad = c.bad; S.prov = prov; S.category = category;
+        if (prov === 'bybit') connectBybitStream(sym, category); else closeBybitStream();
         var last = c.out[c.out.length - 1];
         var lag = Date.now() - last.ct; // >0 means the newest candle already closed
         var stale = lag > INTERVAL_MS[iv] * 1.5;
@@ -278,6 +339,7 @@
   el('sym').addEventListener('input', searchLater);
   el('sym').addEventListener('change', load);   // picking an item from the suggestion list loads it
   el('int').addEventListener('change', load);
+  el('category').addEventListener('change', function () { searchSymbols(false); load(); });
   el('prov').addEventListener('change', function () {
     el('sym').value = DEFAULT_SYMBOL[el('prov').value];
     searchSymbols(false); load();
@@ -311,5 +373,6 @@
     if (!document.hidden) { load(); if (S.auto) spin(); }
   });
 
+  window.addEventListener('beforeunload', closeBybitStream);
   resize(); searchSymbols(false); load(); schedule();
 })();
