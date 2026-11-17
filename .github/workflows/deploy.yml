@@ -87,7 +87,7 @@ jobs:
           printf '%s' "$region_response" | node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s);
-              if(x.transport!=="cloudflare-worker-direct"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
+              if(x.transport!=="cloudflare-worker-direct"||x.placementHint!=="gcp:europe-west1"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
                 console.error("Public market transport:",JSON.stringify(x));process.exit(1);
               }
               console.log("Bybit and Bitget public REST traffic is served directly by Cloudflare Workers; no Fly.io deployment is required.");
@@ -154,7 +154,7 @@ jobs:
             printf '%s' "$bitget_ticker_body" | HTTP_STATUS="$bitget_ticker_status" node -e '
               let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
                 const x=JSON.parse(s),ok=process.env.HTTP_STATUS==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0;
-                if(!ok){console.error("Bitget live ticker:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice}));process.exit(1);}
+                if(!ok){console.error("Bitget live ticker:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error,attempts:x.attempts,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice}));process.exit(1);}
                 console.log("Bitget ticker verified for requested market.");
               }catch(e){console.error("Invalid Bitget ticker:",e.message);process.exit(1);}});' || failed=1
           done

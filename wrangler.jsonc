@@ -7,6 +7,9 @@
   },
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
+  "placement": {
+    "region": "gcp:europe-west1"
+  },
   "observability": {
     "enabled": true
   },
