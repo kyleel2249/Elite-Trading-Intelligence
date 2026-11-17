@@ -77,6 +77,26 @@ test("Bitget V2 fallback serves spot ticker when the UTA V3 endpoint is Cloudfla
   assert.equal(ticker.priceChangePercent, 1.69);
 });
 
+test("Bitget futures ticker maps funding rate and holdingAmount into derivatives context", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "api.bitget.com" && u.pathname === "/api/v3/market/tickers")
+      return new Response(JSON.stringify({ code: "00000", data: [{
+        symbol: "BTCUSDT", lastPr: "60000", open: "59000", high24h: "61000", low24h: "58000",
+        baseVolume: "10", quoteVolume: "590000", fundingRate: "0.0008", holdingAmount: "12500",
+        markPrice: "60010", indexPrice: "59990", bidPr: "59999", askPr: "60001", ts: "1794940561000"
+      }] }));
+    return new Response("not found", { status: 404 });
+  }) as any;
+  const response = await handleMarket(req("/api/market/ticker?venue=bitget&market=futures&category=USDT-FUTURES&symbol=BTCUSDT"), {});
+  assert.equal(response.status, 200);
+  const ticker = await response.json() as any;
+  assert.equal(ticker.fundingRate, 0.0008);
+  assert.equal(ticker.openInterest, 12500);
+  assert.equal(ticker.markPrice, 60010);
+  assert.equal(ticker.indexPrice, 59990);
+});
+
 test("Bitget V2 candles use the documented spot and futures endpoints and granularities", async () => {
   const fallbackUrls: string[] = [];
   globalThis.fetch = (async (input: any) => {
