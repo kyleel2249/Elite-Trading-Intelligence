@@ -126,9 +126,11 @@ jobs:
           bitget_client="$(curl --silent --show-error --fail "$base/bitget-client.js")" || { echo "::error::Bitget browser adapter asset is unavailable"; failed=1; bitget_client=''; }
           printf '%s' "$bitget_client" | grep -q 'window.ETIBitget' || { echo "::error::Bitget browser adapter export is missing"; failed=1; }
           printf '%s' "$bitget_client" | grep -q 'https://api.bitget.com' || { echo "::error::Bitget official API host is missing from browser adapter"; failed=1; }
-          curl --silent --show-error --fail "$base/" | grep -q 'bitget-client.js' || { echo "::error::Dashboard does not load the Bitget browser adapter"; failed=1; }
-          curl --silent --show-error --fail "$base/omnisignal" | grep -q 'bitget-client.js' || { echo "::error::Omnisignal does not load the Bitget browser adapter"; failed=1; }
-          bitget_probe_code="$(curl --silent --show-error -o /tmp/eti-bitget-probe.json -w '%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")"
+          curl --silent --show-error --fail "$base/" -o /tmp/eti-home.html || { echo "::error::Dashboard HTML is unavailable"; failed=1; }
+          grep -q 'bitget-client.js' /tmp/eti-home.html || { echo "::error::Dashboard does not load the Bitget browser adapter"; failed=1; }
+          curl --silent --show-error --fail "$base/omnisignal" -o /tmp/eti-omnisignal.html || { echo "::error::Omnisignal HTML is unavailable"; failed=1; }
+          grep -q 'bitget-client.js' /tmp/eti-omnisignal.html || { echo "::error::Omnisignal does not load the Bitget browser adapter"; failed=1; }
+          bitget_probe_code="$(curl --silent --show-error -o /tmp/eti-bitget-probe.json -w '%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","engines":["swift","gainz"],"venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")"
           [ "$bitget_probe_code" = "400" ] && grep -q 'bitget_browser_market_data_required' /tmp/eti-bitget-probe.json || { echo "::error::Omnisignal did not enforce the validated browser-feed boundary for Bitget"; failed=1; }
           echo "Bitget browser-direct public market feed is wired into the dashboard and Omnisignal; Worker-side public egress is not assumed.";
           
