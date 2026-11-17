@@ -39,6 +39,7 @@ export const PORTFOLIO_HTML = `
 <div class="pfwrap"><div id="pfClosed"></div></div>
 <h3>Portfolio Performance</h3>
 <div class="pfperf"><div><canvas id="pfCurve" class="pfcurve" role="img" aria-label="Equity curve from actual fills"></canvas><div id="pfCurveNote" class="muted" style="font-size:11px;margin-top:4px"></div></div><div id="pfStats" class="pfstats"></div></div>
+<h3>AI Portfolio Manager <span class="muted">read-only allocation advisory</span></h3><div id="pfManager" class="pfwrap muted" aria-live="polite">Loading strategy allocation analysis…</div>
 <details style="margin-top:12px"><summary class="muted">Ledger integrity (anomalies and reconciliation)</summary><div id="pfIntegrity" class="muted" style="font-size:12px;margin-top:6px"></div></details>
 </section>
 `;
@@ -49,7 +50,7 @@ export const PLAN_HTML = `
 
 export const PORTFOLIO_JS = `
 /* ===== live portfolio: ledger-backed panels + chart trade layer ===== */
-const pf={env:'internal_paper',state:null,timer:null,fails:0,okAt:0,busy:false,pollMs:15000,allOrders:false,closedRows:null,hits:[],pop:null,lastPx:null,levEdit:null};
+const pf={env:'internal_paper',state:null,manager:null,managerAt:0,timer:null,fails:0,okAt:0,busy:false,pollMs:15000,allOrders:false,closedRows:null,hits:[],pop:null,lastPx:null,levEdit:null};
 const pfEsc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pfNum=(v,d)=>{if(v==null||!isFinite(v))return '—';const dd=d==null?2:d,m=Math.abs(v)>=1||v===0?dd:Math.max(dd,6);return Number(v).toLocaleString(undefined,{minimumFractionDigits:Math.min(dd,m),maximumFractionDigits:m});};
 const pfQty=v=>v==null||!isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:8});
@@ -83,12 +84,32 @@ async function pfLoad(){
   if(r.status===403){pf.state=null;pfSetStatus('off','No '+pf.env.replace('_',' ')+' session');pfRender();pf.fails=0;pfSchedule(20000);return;}
   if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
   pf.state=d;pf.fails=0;pf.okAt=Date.now();pf.pollMs=pfNextDelay();
+  if(Date.now()-pf.managerAt>30000)pfLoadManager();
   pfSetStatus(document.hidden?'poll':'ok',d.disabled?'Disabled':'Synced · every '+Math.round(pf.pollMs/1000)+'s');
   pfRender();drawChart();pfSchedule(pf.pollMs);
  }catch(e){pf.fails++;const d=pfNextDelay();pfSetStatus('off','Offline · retrying in '+Math.round(d/1000)+'s'+(pf.state?' · showing last data':''));pfSchedule(d);}
  finally{pf.busy=false;if(pf.again){pf.again=false;setTimeout(pfLoad,50);}}
 }
 function pfKick(){clearTimeout(pf.timer);pfLoad();setTimeout(pfLoad,2500);}
+async function pfLoadManager(){
+ const target=$('pfManager');if(!target)return;
+ try{
+  const q='/api/portfolio/manager?environment='+encodeURIComponent(pf.env),{r,d}=await pfCall(q);
+  if(r.status===423){target.textContent='Live portfolio management is disabled. No live account or order state is inferred.';pf.managerAt=Date.now();return;}
+  if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
+  pf.manager=d;pf.managerAt=Date.now();pfRenderManager();
+ }catch(e){if(!pf.manager)target.textContent='Portfolio Manager unavailable: '+e.message;else target.textContent='Showing the last analysis. Refresh pending: '+e.message;}
+}
+function pfRenderManager(){
+ const root=$('pfManager'),m=pf.manager;if(!root||!m)return;
+ const a=m.account||{},c=m.controls||{};
+ const money=v=>v==null?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+ const pct=v=>v==null?'—':Number(v).toFixed(2)+'%';
+ const rows=(m.strategies||[]).map(s=>'<tr><td>'+pfEsc(s.strategy)+'</td><td>'+s.trades+'</td><td>'+pct(s.winRate==null?null:s.winRate*100)+'</td><td>'+money(s.expectancyUsd)+'</td><td>'+pct(s.targetWeightPct)+'</td><td>'+money(s.targetCapitalUsd)+'</td><td>'+pfEsc(s.eligible?'Eligible':'Building sample')+'</td></tr>').join('');
+ const warnings=(c.warnings||[]).map(w=>'<li>'+pfEsc(w.replace(/_/g,' '))+'</li>').join('');
+ const venues=(m.venues||[]).map(v=>'<span class="muted">'+pfEsc(v.venue)+': '+money(v.ledgerExposureUsd)+' USDT</span>').join(' · ');
+ root.className='pfwrap';root.innerHTML='<div class="pfkpis"><div><span>Equity</span><b>'+money(a.equityUsd)+'</b></div><div><span>Cash</span><b>'+money(a.cashUsd)+'</b></div><div><span>Open risk</span><b>'+pct(a.openRiskPct)+'</b></div><div><span>Allocated target</span><b>'+pct(a.allocatedPct)+'</b></div><div><span>Cash reserve target</span><b>'+pct(a.recommendedReservePct)+'</b></div><div><span>Portfolio exposure</span><b>'+pct(a.exposurePct)+'</b></div></div><div class="muted" style="font-size:11px;margin:8px 0">Advisory only · '+(c.executionReady?'risk data complete':'risk data incomplete / blocked')+' · no orders, leverage or automatic reallocations</div><div class="pfwrap"><table><thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Expectancy</th><th>Target</th><th>Capital</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="muted" style="font-size:11px;margin-top:8px">Recorded venue exposure: '+(venues||'No venue-tagged holdings in this ledger')+'</div>'+(warnings?'<ul class="muted" style="font-size:11px">'+warnings+'</ul>':'<div class="muted" style="font-size:11px;margin-top:6px">No portfolio-level warnings.</div>');
+}
 function pfMark(p){const sym=$('symbol').value;if(p.symbol===sym&&candles.length){const px=candles[candles.length-1][4];if(px>0)return {px,src:'chart'};}return p.markPrice!=null?{px:p.markPrice,src:p.markStale?'stale':'server'}:{px:null,src:'none'};}
 function pfLive(){
  const s=pf.state;if(!s||!s.positions)return null;let unreal=0,value=0,ok=true;
@@ -300,7 +321,7 @@ function pfUseSignal(){
 }
 function pfInit(){
  pf.env=pfEnvOfBroker();$('pfEnv').value=pf.env;
- $('pfEnv').onchange=()=>{pf.env=$('pfEnv').value;pf.state=null;pf.closedRows=null;pfRender();pfLoad();};
+ $('pfEnv').onchange=()=>{pf.env=$('pfEnv').value;pf.state=null;pf.manager=null;pf.managerAt=0;pf.closedRows=null;pfRender();$('pfManager').textContent='Loading strategy allocation analysis…';pfLoad();};
  $('orderBroker').addEventListener('change',()=>{const e=pfEnvOfBroker();if(e!==pf.env){pf.env=e;pf.state=null;pf.closedRows=null;pfRender();pfLoad();}});
  $('pfAllOrders').onchange=()=>{pf.allOrders=$('pfAllOrders').checked;pfRenderOrders();};
  $('pfSync').onclick=async()=>{$('pfSync').disabled=true;await pfCall('/api/portfolio/sync',{environment:pf.env});$('pfSync').disabled=false;pfKick();};
