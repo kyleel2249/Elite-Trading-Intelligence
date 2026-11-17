@@ -4,7 +4,7 @@ import { AGENT_IDS, AGENT_ROSTER, makeReport, noData, validateReport } from "./t
 import type { Depth, Integrity, Kline, MarketInput } from "./types.ts";
 import { buildProposal } from "./analysts.ts";
 import { fundamentalAnalyst } from "./fundamental.ts";
-import { evaluateDecision, riskManager, securityAnalyst } from "./controls.ts";
+import { evaluateDecision, prepareTicket, riskManager, securityAnalyst } from "./controls.ts";
 import type { DecisionRecord } from "./controls.ts";
 import { deliberate, finalize } from "./commander.ts";
 import { analyze } from "./orchestrator.ts";
@@ -66,6 +66,16 @@ test("risk manager approves/reduces a sane trade and sizes within limits", () =>
   const r = riskManager({ proposal, market: m, account, integrity, security: { severity: "none" }, hazard: null, now: NOW });
   assert.equal(r.approved, true, JSON.stringify(r.vetoes));
   assert.ok(r.sizing && r.sizing.quantity > 0 && r.sizing.notionalUsd <= 20_000 + 1 && r.sizing.riskPctOfEquity <= 1 + 1e-9);
+});
+
+test("Execution Specialist creates internal-paper tickets with attached protective levels", () => {
+  const cs = candles(300, 0.002, 0.004), m = market(cs), proposal = buildProposal("BTCUSDT", "buy", cs)!;
+  const risk = riskManager({ proposal, market: m, account, integrity, security: { severity: "none" }, hazard: null, now: NOW });
+  const review = prepareTicket({ request: { broker: "eti_paper", clientOrderId: "eti-agent-order-0001", riskConfirmed: true }, action: "BUY", proposal, risk, account, integrity, decisionId: "agent-decision-1" });
+  assert.equal(review.eligible, true, JSON.stringify(review.blockers));
+  assert.equal(review.ticket?.broker, "eti_paper");
+  assert.equal(review.ticket?.plan?.stop, proposal.stop);
+  assert.deepEqual([review.ticket?.plan?.tp1, review.ticket?.plan?.tp2, review.ticket?.plan?.tp3], proposal.targets);
 });
 
 test("risk manager vetoes: kill switch, missing account, event hazard, high security severity, stale data", () => {
