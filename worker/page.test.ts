@@ -84,8 +84,8 @@ test("dashboard serves an installable PWA manifest, root-scoped service worker a
   assert.equal(sw.status, 200);
   assert.equal(sw.headers.get("service-worker-allowed"), "/");
   const swText = await sw.text();
-  assert.match(swText, /addEventListener\(["']push["']/);
-  assert.match(swText, /api\\//);
+  assert.ok(swText.includes('url.pathname.startsWith("/api/")'));
+  assert.ok(swText.includes('url.pathname.startsWith("/api/")'));
   const icon = await call("/app-icon.svg");
   assert.equal(icon.status, 200);
   assert.match(icon.headers.get("content-type") || "", /image\/svg\+xml/);

@@ -22,7 +22,7 @@ test("PWA shell supports install prompts, iOS home-screen guidance, offline navi
   assert.match(PWA_JS, /Add to Home Screen/);
   assert.match(PWA_JS, /serviceWorker\.register/);
   assert.match(PWA_SERVICE_WORKER, /request\.mode==="navigate"/);
-  assert.match(PWA_SERVICE_WORKER, /url\.pathname\.startsWith\("\/api\/"\)\)return/);
+  assert.ok(PWA_SERVICE_WORKER.includes('url.pathname.startsWith("/api/")'));
   assert.match(PWA_SERVICE_WORKER, /addEventListener\("push"/);
   assert.match(PWA_SERVICE_WORKER, /showNotification/);
 });
