@@ -32,7 +32,7 @@ async function load(force){
  try{
   var sym=(document.getElementById("symbol")||{}).value||"BTCUSDT";
   var url="/api/analysis/smc?symbol="+encodeURIComponent(sym)+"&timeframe="+encodeURIComponent(tf())+(typeof mkt==="function"?mkt():"");
-  var next=await getJson(url);if(!next||!next.status)throw new Error("Invalid SMC response");
+  var response=await getJson(url),next=response&&response.data;if(!next||!next.status)throw new Error("Invalid SMC response");
   data=next;
  }catch(e){error=e&&e.message?e.message:"SMC request failed";}
  finally{busy=false;renderStatus();try{paint();}catch(_){}}
