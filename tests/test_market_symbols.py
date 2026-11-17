@@ -244,7 +244,7 @@ def test_bybit_public_proxy_forwards_only_allowlisted_market_data(client, monkey
 
 
 def test_bybit_public_proxy_rejects_unapproved_paths_parameters_and_categories(client):
-    assert client.get("/api/market/bybit/proxy/private").status_code == 404
+    assert client.get("/api/market/bybit/proxy/private").status_code == 422
     assert client.get("/api/market/bybit/proxy/kline",
                       params={"category": "linear", "symbol": "BTCUSDT", "interval": "60", "api_key": "leak"}).status_code == 422
     assert client.get("/api/market/bybit/proxy/kline",
