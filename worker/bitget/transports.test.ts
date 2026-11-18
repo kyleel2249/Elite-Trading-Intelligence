@@ -1,48 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  BITGET_WS_ENDPOINTS, bitgetWsEndpoint, bitgetUtaPublicArgs, bitgetClassicPublicArgs,
-  bitgetClassicPrivateSubscriptions, bitgetPrivateCredentialSet, decodeBitgetSbe
+  BITGET_WS_ENDPOINTS, bitgetWsEndpoint, bitgetUtaPublicArgs,
+  bitgetPrivateCredentialSet, decodeBitgetSbe
 } from "./transports.ts";
 
-test("all documented production/demo UTA, SBE and Classic endpoints are explicit", () => {
+test("only Production UTA V3 JSON and SBE endpoints are enabled", () => {
   assert.equal(bitgetWsEndpoint("production","uta","public"),"wss://ws.bitget.com/v3/ws/public");
   assert.equal(bitgetWsEndpoint("production","uta","private"),"wss://ws.bitget.com/v3/ws/private");
   assert.equal(bitgetWsEndpoint("production","uta","public",true),"wss://ws.bitget.com/v3/ws/public/sbe");
-  assert.equal(bitgetWsEndpoint("demo","uta","public"),"wss://wspap.bitget.com/v3/ws/public");
-  assert.equal(bitgetWsEndpoint("demo","uta","private"),"wss://wspap.bitget.com/v3/ws/private");
-  assert.equal(bitgetWsEndpoint("production","classic","public"),"wss://ws.bitget.com/v2/ws/public");
-  assert.equal(bitgetWsEndpoint("production","classic","private"),"wss://ws.bitget.com/v2/ws/private");
-  assert.throws(()=>bitgetWsEndpoint("demo","classic","public"),/unsupported_environment_account_combination/);
-  assert.throws(()=>bitgetWsEndpoint("demo","classic","public",true),/sbe_public_uta_only/);
-  assert.ok(BITGET_WS_ENDPOINTS);
+  assert.ok(BITGET_WS_ENDPOINTS.production.uta);
 });
 
-test("UTA and Classic public subscriptions use their respective wire schemas", () => {
+test("UTA public subscriptions use the V3 topic schema", () => {
   const uta=bitgetUtaPublicArgs("usdt-futures","BTCUSDT","1m");
   assert.deepEqual(uta[0],{instType:"usdt-futures",topic:"ticker",symbol:"BTCUSDT"});
   assert.ok(uta.some(x=>x.topic==="kline"&&x.interval==="1m"));
-  const classic=bitgetClassicPublicArgs("USDT-FUTURES","BTCUSDT","1m");
-  assert.deepEqual(classic[0],{instType:"USDT-FUTURES",channel:"ticker",instId:"BTCUSDT"});
-  assert.ok(classic.some(x=>x.channel==="candle1m"&&x.instId==="BTCUSDT"));
-  assert.ok(!("topic" in classic[0]));
 });
 
-test("Classic private subscriptions cover spot account, orders and all futures positions/orders",()=>{
-  const s=bitgetClassicPrivateSubscriptions();
-  assert.ok(s.some(x=>x.instType==="SPOT"&&x.channel==="account"));
-  assert.ok(s.some(x=>x.instType==="SPOT"&&x.channel==="orders"));
-  for(const type of ["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"]){
-    assert.ok(s.some(x=>x.instType===type&&x.channel==="orders"));
-    assert.ok(s.some(x=>x.instType===type&&x.channel==="positions"));
-  }
-});
-
-test("environment-scoped private credentials are isolated",()=>{
-  const env={BITGET_API_KEY:"live",BITGET_API_SECRET:"ls",BITGET_API_PASSPHRASE:"lp",BITGET_DEMO_API_KEY:"demo",BITGET_DEMO_API_SECRET:"ds",BITGET_DEMO_API_PASSPHRASE:"dp",BITGET_CLASSIC_API_KEY:"classic",BITGET_CLASSIC_API_SECRET:"cs",BITGET_CLASSIC_API_PASSPHRASE:"cp"};
-  assert.equal(bitgetPrivateCredentialSet(env,"production","uta").key,"live");
-  assert.equal(bitgetPrivateCredentialSet(env,"demo","uta").key,"demo");
-  assert.equal(bitgetPrivateCredentialSet(env,"production","classic").key,"classic");
+test("private credentials resolve only the production UTA key set",()=>{
+  const env={BITGET_API_KEY:"live",BITGET_API_SECRET:"ls",BITGET_API_PASSPHRASE:"lp"};
+  assert.equal(bitgetPrivateCredentialSet(env).key,"live");
 });
 
 function frame(template:number,block:number,version:number,body:number[]) {
