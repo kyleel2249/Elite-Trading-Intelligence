@@ -225,7 +225,7 @@ test("UTA private browser adapter authenticates through ETI proxy and normalizes
   sandbox.window.ETIBitget.subscribePrivate({}, {
     onMessage: (m: any) => messages.push(m), onStatus: (s: any) => states.push(s)
   });
-  assert.equal(sockets[0].url, "wss://eti.test/api/bitget/ws/private?environment=production&account=uta");
+  assert.equal(sockets[0].url, "wss://eti.test/api/bitget/ws/private", "the ETI relay is intentionally fixed to production UTA");
   sockets[0].readyState = 1; sockets[0].onopen();
   assert.equal(sockets[0].sent.length, 0, "browser must not send a master token or Bitget API secret");
   sockets[0].onmessage({ data: JSON.stringify({ event: "status", state: "authenticated", topics: ["account","order","position","fill"] }) });

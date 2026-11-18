@@ -35,9 +35,19 @@ const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-cont
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (k, v) => (v === Infinity ? "Infinity" : v)), { status, headers: HEADERS });
 
 /** Apply the shared, hard-ceiling risk policy to every paper entry path (scheduled and authenticated API). */
-export function paperConfigFrom(env: ExecutionEnv): Partial<PaperConfig> {
+export function paperConfigFrom(env: PaperEnv): Partial<PaperConfig> {
   const cap = Number(env.ETI_MAX_ORDER_QUANTITY);
-  const policy = parsePolicy(env as unknown as Record<string, unknown>);
+  // Paper-specific overrides take precedence, while the shared ETI_RISK_* settings remain fallbacks.
+  // parsePolicy applies the same hard ceilings to either configuration surface.
+  const policy = parsePolicy({
+    ETI_RISK_PER_TRADE: env.ETI_PAPER_RISK_FRACTION ?? env.ETI_RISK_PER_TRADE,
+    ETI_RISK_MAX_NOTIONAL: env.ETI_PAPER_MAX_NOTIONAL_FRACTION ?? env.ETI_RISK_MAX_NOTIONAL,
+    ETI_RISK_MAX_POSITIONS: env.ETI_PAPER_MAX_OPEN_POSITIONS ?? env.ETI_RISK_MAX_POSITIONS,
+    ETI_RISK_MAX_DAILY_LOSS: env.ETI_PAPER_MAX_DAILY_LOSS_PCT !== undefined
+      ? Number(env.ETI_PAPER_MAX_DAILY_LOSS_PCT) / 100
+      : env.ETI_RISK_MAX_DAILY_LOSS,
+    ETI_RISK_MAX_CONSECUTIVE_LOSSES: env.ETI_PAPER_MAX_CONSECUTIVE_LOSSES ?? env.ETI_RISK_MAX_CONSECUTIVE_LOSSES,
+  });
   return {
     riskFraction: policy.riskPerTrade,
     maxNotionalFraction: policy.maxPositionNotional,

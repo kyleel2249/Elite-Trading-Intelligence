@@ -107,6 +107,11 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_MANAGE_AUTOCLOSE` | config | `true` lets the monitor close positions on confirmed invalidation. |
 | `ETI_MANAGE_STRATEGY` | config | Strategy used by the position monitor. |
 | `ETI_MAX_ORDER_QUANTITY` | config | Maximum order quantity; unset means no extra cap. |
+| `ETI_PAPER_RISK_FRACTION` | config | Paper-only risk per trade as a fraction of equity; capped by the shared risk-policy hard ceiling. |
+| `ETI_PAPER_MAX_NOTIONAL_FRACTION` | config | Paper-only maximum position notional as a fraction of equity; capped by the shared hard ceiling. |
+| `ETI_PAPER_MAX_OPEN_POSITIONS` | config | Paper-only maximum concurrent open positions; capped by the shared hard ceiling. |
+| `ETI_PAPER_MAX_DAILY_LOSS_PCT` | config | Paper-only daily loss stop as a percentage (for example `2` means 2%); capped by the shared hard ceiling. |
+| `ETI_PAPER_MAX_CONSECUTIVE_LOSSES` | config | Paper-only consecutive-loss stop; capped by the shared hard ceiling. |
 | `ETI_PAPER_AUTOEXECUTE` | config | `true` lets the scheduled paper run open positions. |
 | `ETI_PAPER_FEE_BPS` | config | Simulated fee (basis points) for internal paper fills. |
 | `ETI_PAPER_SLIPPAGE_BPS` | config | Simulated slippage (basis points) for internal paper fills. |

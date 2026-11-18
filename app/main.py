@@ -52,6 +52,7 @@ from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
 from app.security.auth import PROTECTED_ENVS, require_api_key, require_persistence_auth
 from app.api.pretrade import router as pretrade_router
+from app.api.capital_protection import router as capital_protection_router
 from app.api.execution import router as execution_router
 from app.api.paper import router as paper_router
 from app.api.markets import router as markets_router
