@@ -19,6 +19,7 @@ export const BITGET_WS_ENDPOINTS = {
 
 export function bitgetWsEndpoint(environment: BitgetWsEnvironment, account: BitgetWsAccount, channel: "public" | "private", sbe = false) {
   if (sbe && (account !== "uta" || channel !== "public")) throw new Error("sbe_public_uta_only");
+  if (sbe && environment !== "production") throw new Error("sbe_demo_endpoint_not_documented");
   const endpoints = BITGET_WS_ENDPOINTS[environment][account] as any;
   if (!endpoints) throw new Error("unsupported_environment_account_combination");
   return sbe ? endpoints.sbe : endpoints[channel];
