@@ -29,14 +29,15 @@ export interface JarvisCommand {
 }
 export function parseJarvisCommand(message: string): JarvisCommand {
   const text = message.trim().slice(0, 2000);
-  const symbol = (text.match(/\b([A-Z0-9]{2,12}(?:USDT|USDC|USD|BTC|ETH))\b/i)?.[1] ?? "BTCUSDT").toUpperCase();
+  const symbolMatch = text.match(/\b([A-Z0-9]{2,12}(?:USDT|USDC|USD|BTC|ETH))\b/i);
+  const symbol = (symbolMatch?.[1] ?? "BTCUSDT").toUpperCase();
   const intervalMatch = text.match(/\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|12h|1d|1w)\b/i);
   const lower = text.toLowerCase();
   let intent: JarvisIntent = "help";
   if (/\b(deep review|llm review|second opinion|explain in depth)\b/.test(lower)) intent = "deep_review";
   else if (/\b(audit|performance|accuracy|historical decisions|trade history)\b/.test(lower)) intent = "audit";
   else if (/\b(status|health|system check|autopilot|agent status|how are you)\b/.test(lower)) intent = "status";
-  else if (/\b(analy[sz]e|analysis|market|chart|signal|trade setup|should i buy|should i sell|opportunity)\b/.test(lower)) intent = "analyze";
+  else if (symbolMatch || /\b(analy[sz]e|analysis|market|chart|signal|trade setup|should i buy|should i sell|opportunity)\b/.test(lower)) intent = "analyze";
   return { intent, symbol, interval: intervalMatch?.[1]?.toLowerCase() ?? "1h", message: text };
 }
 
