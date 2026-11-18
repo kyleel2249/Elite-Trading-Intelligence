@@ -100,6 +100,42 @@ jobs:
             npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file"
           fi
 
+      - name: Sync DataX Pages integration secret and redeploy production
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "${#DATAX_INTEGRATION_SECRET}" -ge 32
+          printf '%s' "$DATAX_INTEGRATION_SECRET" | npx --yes wrangler@4.148.0 pages secret put ETI_INTEGRATION_SECRET --project-name=datax
+          deployments="$(curl --silent --show-error --fail \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments?per_page=20")"
+          deployment_id="$(printf '%s' "$deployments" | node --input-type=module -e '
+            let input="";for await (const chunk of process.stdin) input+=chunk;
+            const body=JSON.parse(input);
+            if(body.success!==true||!Array.isArray(body.result))process.exit(2);
+            const latest=body.result.filter(x=>x.environment==="production"&&x.latest_stage?.status==="success")
+              .sort((a,b)=>Date.parse(b.created_on)-Date.parse(a.created_on))[0];
+            if(!latest?.id)process.exit(3);
+            process.stdout.write(latest.id);
+          ')"
+          test -n "$deployment_id"
+          retry="$(curl --silent --show-error --fail -X POST \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments/$deployment_id/retry")"
+          printf '%s' "$retry" | node --input-type=module -e '
+            let input="";for await (const chunk of process.stdin) input+=chunk;
+            const body=JSON.parse(input);
+            if(body.success!==true||!body.result?.id)process.exit(1);
+            console.log("DataX Pages production deployment retried after synchronizing the shared integration secret.");
+          '
+
       - name: Verify signed DataX production integration
         shell: bash
         env:
