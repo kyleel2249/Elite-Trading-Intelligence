@@ -188,7 +188,7 @@ function syncBitgetTransportControls(){
  env.querySelector('option[value="demo"]').disabled=account.value==="classic"||protocol.value==="sbe";
  account.querySelector('option[value="classic"]').disabled=env.value==="demo"||protocol.value==="sbe";
  protocol.querySelector('option[value="sbe"]').disabled=env.value==="demo"||account.value==="classic";
- env.disabled=!enabled;account.disabled=!enabled;protocol.disabled=!enabled;
+ env.disabled=!enabled;account.disabled=!enabled;protocol.disabled=!enabled;$("tt-private-connect").disabled=!enabled;
  S.bitgetEnvironment=env.value;S.bitgetAccount=account.value;S.bitgetProtocol=protocol.value;
 }
 function onBitgetTransportChanged(){
