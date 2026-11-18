@@ -24,7 +24,7 @@ async function request(pathV3,pathsV2){
    }catch(e){attempts.push(full+":"+(e&&e.name?e.name:"network_or_cors_error"))}
   }
  }
- throw new Error("Bitget browser connection failed (network, CORS or exchange restriction). "+attempts.join(" | "));
+ throw new Error("Bitget public REST failed after trying V3/V2 endpoints and both public hosts. Check browser network/CORS restrictions. "+attempts.join(" | "));
 }
 function parseCandles(data){
  return (Array.isArray(data)?data:[]).map(function(r){
@@ -36,7 +36,7 @@ function parseCandles(data){
 function candleRequest(symbol,interval,limit,market,category){
  var futures=market==="futures",cat=futures?category:"SPOT",gran=(futures?MIX_GRAN:SPOT_GRAN)[interval],v3iv=V3_INTERVAL[interval];
  if(!gran||!v3iv)throw new Error("Unsupported Bitget candle interval: "+interval);
- var v3="/api/v3/market/candles?"+q({category:cat,symbol:symbol,interval:v3iv,limit:limit});
+ var v3="/api/v3/market/candles?"+q({category:cat,symbol:symbol,granularity:v3iv,limit:limit});
  var v2limit=futures?Math.min(limit,200):Math.min(limit,1000);
  var v2q={symbol:symbol,granularity:gran,limit:v2limit};
  var v2=futures?"/api/v2/mix/market/"+(["1m","3m","5m"].indexOf(interval)>=0?"candles":"history-candles")+"?"+q(Object.assign({},v2q,{productType:cat})):"/api/v2/spot/market/candles?"+q(v2q);
@@ -137,7 +137,7 @@ async function loadSignalInputs(opts){
 
 var WS_URL="wss://ws.bitget.com/v2/ws/public";
 var WS_INTERVAL={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D"};
-function streamProduct(market,category){if(market!=="futures")return "spot";return String(category||"USDT-FUTURES").toLowerCase();}
+function streamProduct(market,category){if(market!=="futures")return "SPOT";var value=String(category||"USDT-FUTURES").toUpperCase();return PRODUCT_TYPES.indexOf(value)>=0?value:"USDT-FUTURES";}
 function streamTime(v){var n=num(v);return n===null?Date.now():millis(n)||Date.now();}
 function streamCandle(row){if(Array.isArray(row)){var a=[streamTime(row[0]),num(row[1]),num(row[2]),num(row[3]),num(row[4]),num(row[5])];return a.every(function(x){return x!==null})?a:null;}var x=row||{},a=[streamTime(x.start||x.ts||x.time),num(x.open),num(x.high),num(x.low),num(x.close),num(x.volume)];return a.every(function(v){return v!==null})?a:null;}
 function subscribe(opts,handlers){
