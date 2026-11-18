@@ -247,8 +247,8 @@ function mergeSbeDepth(book,d){
   book[key]=state;
  }else{
   if(!state){return {error:"sbe_snapshot_required",symbol:key,seq:d.seq,pseq:d.pseq};}
-  if(d.pseq!==undefined&&d.pseq!==state.seq){delete book[key];return {error:"sbe_sequence_gap",symbol:key,expectedPrevious:state.seq,receivedPrevious:d.pseq,seq:d.seq};}
   if(d.seq<=state.seq)return {ignored:true};
+  if(d.pseq!==undefined&&d.pseq!==state.seq){delete book[key];return {error:"sbe_sequence_gap",symbol:key,expectedPrevious:state.seq,receivedPrevious:d.pseq,seq:d.seq};}
   (d.bids||[]).forEach(function(x){var k=String(x[0]);if(x[1]<=0)delete state.bids[k];else state.bids[k]=x[1]});
   (d.asks||[]).forEach(function(x){var k=String(x[0]);if(x[1]<=0)delete state.asks[k];else state.asks[k]=x[1]});
   state.seq=d.seq;
