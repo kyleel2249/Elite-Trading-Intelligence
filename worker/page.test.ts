@@ -152,4 +152,8 @@ test("main dashboard Live Market Chart uses the Pro-style advanced chart and ret
   assert.match(html, /pfCandleIdx\(f\.at\)/, "portfolio fills retain their candle markers");
   assert.match(html, /POSITION SL/);
   assert.match(html, /addPortfolioLine\('OPEN /);
+  assert.match(html, /ETIAlgo V3 Alpha · Signal Intelligence/);
+  assert.match(html, /v3aStrategy/);
+  assert.match(html, /v3-alpha\/intelligence/);
+  assert.match(html, /v3-alpha\/signals/);
 });
