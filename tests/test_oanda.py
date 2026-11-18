@@ -9,6 +9,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
 import httpx
 import pytest
 
@@ -24,6 +28,16 @@ from app.trading.service import TradingService
 
 ACCT = "101-001-1234567-001"
 SETTINGS = Settings(oanda_api_token="tok-SECRET-123", oanda_account_id=ACCT)
+
+
+@pytest.fixture
+def isolated_oanda_db():
+    """Each protection test gets a clean account ledger and loss-streak state."""
+    test_engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=test_engine)
+    with Session(test_engine) as db:
+        yield db
+    test_engine.dispose()
 
 INSTRUMENTS = {"instruments": [
     {"name": "EUR_USD", "displayPrecision": 5, "tradeUnitsPrecision": 0, "minimumTradeSize": "1", "maximumOrderUnits": "100000000"},
@@ -322,13 +336,12 @@ def _adapter_path(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_trading_service_places_oanda_paper_orders(monkeypatch):
+async def test_trading_service_places_oanda_paper_orders(monkeypatch, isolated_oanda_db):
     _adapter_path(monkeypatch)
-    Base.metadata.create_all(bind=engine)
     import app.trading.service as ts
     fake = FakeOanda()
     monkeypatch.setattr(ts, "OandaClient", lambda settings, use_practice=True: OandaClient(settings, use_practice=use_practice, transport=fake.transport()))
-    db = SessionLocal()
+    db = isolated_oanda_db
     try:
         out = await TradingService(_risk_settings(), db=db).place_order(
             provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, equity=100000.0,
@@ -344,7 +357,7 @@ async def test_trading_service_places_oanda_paper_orders(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pending_oanda_limit_order_is_not_journaled_as_filled(monkeypatch):
+async def test_pending_oanda_limit_order_is_not_journaled_as_filled(monkeypatch, isolated_oanda_db):
     _adapter_path(monkeypatch)
     Base.metadata.create_all(bind=engine)
     import app.trading.service as ts
