@@ -75,3 +75,15 @@ test("/pro is served and everything else is delegated", async () => {
   assert.equal(await (await app.fetch(new Request("https://eti.test/command"), {} as any)).text(), "base:/command");
   assert.equal(await (await app.fetch(new Request("https://eti.test/pro", { method: "POST" }), {} as any)).text(), "base:/pro");
 });
+
+test("Pro chart renders full-precision price labels and full-width engine overlays for Gainz V2, Gainz V2 Alpha and ETIAlgo V3 Alpha", () => {
+  const html = proPage();
+  for (const token of ["priceFmt(v)", "maximumFractionDigits:12", "plotW", "axisW", "priceFmt(l[2])", "GainzAlgo V2", "GainzAlgo V2 Alpha", "ETIAlgo V3 Alpha", "/api/omnisignal", "/api/gainz/signals", "entryZone", "stop_loss", "tp1", "tp2", "tp3"]) assert.ok(html.includes(token), token);
+  assert.match(html, /id="gainzToken"/);
+  assert.match(html, /id="engineLevels"/);
+  assert.match(html, /id="refreshEngineLevels"/);
+  assert.match(html, /function rebuildLevels/);
+  assert.match(html, /function loadEngineLevels/);
+  assert.match(html, /ENGINE_LEVELS=\{\}/);
+  assert.match(html, /authorization:'Bearer '\+gainzToken/);
+});
