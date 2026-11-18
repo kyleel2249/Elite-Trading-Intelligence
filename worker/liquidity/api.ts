@@ -22,7 +22,7 @@ export async function handleLiquidity(request:Request):Promise<Response>{
   const liquidity=analyzeLiquidity({symbol:body.symbol,venue,market,category,depth,previousDepth,history,trades,candles:candles.slice(-100)} as LiquidityInput);
   const riskInput=body.risk&&typeof body.risk==="object"?body.risk:{};
   const risk:Partial<StrategyRiskConfig>={capital:Number(riskInput.capital??74),leverage:Number(riskInput.leverage??20),riskPercent:Number(riskInput.riskPercent??30),maxMarginPercent:Number(riskInput.maxMarginPercent??30),compoundProfits:riskInput.compoundProfits!==false,maxDailyLossPercent:Number(riskInput.maxDailyLossPercent??30)};
-  const strategy=analyzeTradingStrategy({symbol:body.symbol,venue,market,category,candles,candlesByTimeframe,depth,trades,risk});
+  const strategy=analyzeTradingStrategy({symbol:body.symbol,venue,market,category,candles,candlesByTimeframe,depth,trades,derivatives:body.derivatives&&typeof body.derivatives==="object"?body.derivatives:null,marketMetrics:body.marketMetrics&&typeof body.marketMetrics==="object"?body.marketMetrics:null,risk});
   return json({...liquidity,strategy});
  }catch(e){return json({error:"liquidity_analysis_failed",detail:e instanceof Error?e.message:"invalid_market_data"},422);}
 }
