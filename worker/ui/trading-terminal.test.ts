@@ -19,7 +19,7 @@ test("terminal keeps order placement inside the existing guarded execution flow"
 test("terminal exposes Bybit venue-specific market data requests", () => {
   assert.match(TRADING_TERMINAL_JS, /venue:"bybit"/);
   assert.match(TRADING_TERMINAL_JS, /\/api\/market\/klines/);
-  assert.match(TRADING_TERMINAL_JS, /\\/api\\/market\\/depth/);
+  assert.match(TRADING_TERMINAL_JS, /\/api\/market\/depth/);
 });
 
 test("Cloudflare Worker serves the terminal and its assets without a backend", async () => {
@@ -41,7 +41,7 @@ test("terminal exposes recent trades, chart presentation and manual level tools"
   assert.match(TRADING_TERMINAL_HTML, /tt-chart-style/);
   assert.match(TRADING_TERMINAL_HTML, /tt-draw-level/);
   assert.match(TRADING_TERMINAL_JS, /renderTrades/);
-  assert.match(TRADING_TERMINAL_JS, /api\/market\/depth/);
+  assert.match(TRADING_TERMINAL_JS, /\/api\/market\/depth/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /tt-heatmap/);
   assert.match(TRADING_TERMINAL_JS, /api\/market\/trades/);
   assert.match(TRADING_TERMINAL_JS, /createPriceLine/);
