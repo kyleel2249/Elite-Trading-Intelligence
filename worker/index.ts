@@ -310,6 +310,7 @@ function spread(labels,gap,lo,hi){labels.sort((a,b)=>a.y-b.y);for(let i=0;i<labe
 function updateOverlayNote(){const e=$('overlayNote');if(sigValid()&&provider&&sig.provider!==provider){e.style.display='inline-block';e.textContent='Overlays computed on '+sig.provider+' candles; chart candles from '+provider;}else e.style.display='none';}
 
 
+let etiLiquidityFvg=null,etiLiquidityFvgKey='',etiLiquidityFvgAt=0,etiLiquidityFvgSeq=0;
 let liveChart=null,liveCandle=null,liveVolume=null,liveEma20=null,liveEma50=null,liveEma200=null,liveBbUpper=null,liveBbLower=null,liveRibbon=null,liveLine=null,liveArea=null,livePriceLines=[],liveAdvancedKey='',liveSelectionKey='';
 function livePriceFormat(){return {type:'price',precision:pricePrecision,minMove:Math.pow(10,-pricePrecision)};}
 function liveEma(period){let prev=null,k=2/(period+1);return candles.map(v=>{const close=Number(v[4]);prev=prev===null?close:close*k+prev*(1-k);return {time:Math.floor(Number(v[0])/1000),value:prev};});}
@@ -340,7 +341,7 @@ function renderAdvancedLiveChart(){
  const selection=$('symbol').value+'|'+$('interval').value,tail=candles.length?candles[candles.length-1]:'',portfolio=layers.trades&&typeof pfChartData==='function'?pfChartData():null;
  if(portfolio){const prices=[];(portfolio.fills||[]).forEach(f=>prices.push(f.price));(portfolio.positions||[]).forEach(p=>prices.push(p.avgEntry,p.levels&&p.levels.stop,...(p.levels&&p.levels.tp||[])));(portfolio.open||[]).forEach(o=>prices.push(o.type==='stop'?o.stopPrice:o.limitPrice));capturePricePrecision(prices);}
  const portfolioKey=portfolio?JSON.stringify({fills:portfolio.fills,positions:portfolio.positions,open:portfolio.open}):'';
- const key=selection+'|'+pricePrecision+'|'+candles.length+'|'+(tail?tail.join('|'):'')+'|'+(sigSeq||0)+'|'+JSON.stringify(chartLines)+'|'+JSON.stringify(layers)+'|'+portfolioKey+'|'+$('chartStyle').value;
+ const key=selection+'|'+pricePrecision+'|'+candles.length+'|'+(tail?tail.join('|'):'')+'|'+(sigSeq||0)+'|'+JSON.stringify(chartLines)+'|'+JSON.stringify(layers)+'|'+portfolioKey+'|'+JSON.stringify(etiLiquidityFvg)+'|'+$('chartStyle').value;
  if(key===liveAdvancedKey)return;liveAdvancedKey=key;
  liveCandle.applyOptions({priceFormat:livePriceFormat()});[liveEma20,liveEma50,liveEma200,liveBbUpper,liveBbLower,liveLine,liveArea].forEach(x=>x.applyOptions({priceFormat:livePriceFormat()}));
  if(!candles.length){liveCandle.setData([]);liveVolume.setData([]);liveEma20.setData([]);liveEma50.setData([]);liveEma200.setData([]);liveBbUpper.setData([]);liveBbLower.setData([]);liveRibbon.setData([]);liveLine.setData([]);liveArea.setData([]);livePriceLines.forEach(p=>{try{liveCandle.removePriceLine(p);}catch(e){}});livePriceLines=[];return;}
@@ -362,14 +363,32 @@ function renderAdvancedLiveChart(){
  if(layers.markers&&ix&&sig.chart.markers)sig.chart.markers.forEach(m=>marks.push({time:Math.floor(Number(m.time)/1000),position:m.label==='BUY'?'belowBar':'aboveBar',color:m.label==='BUY'?'#21d69a':'#ff637d',shape:m.label==='BUY'?'arrowUp':'arrowDown',text:String(m.label||'SIGNAL')+' '+String(m.score==null?'':m.score)}));
  if(layers.replay&&ix&&sig.chart.replay)(sig.chart.replay||[]).forEach(t=>marks.push({time:Math.floor(Number(t.time)/1000),position:t.label==='BUY'?'belowBar':'aboveBar',color:t.outcome==='win'?'#21d69a':t.outcome==='loss'?'#ff637d':'#91a9c4',shape:'circle',text:'Replay '+(t.outcome||'open')}));
  if(portfolio){(portfolio.fills||[]).forEach(f=>{const i=typeof pfCandleIdx==='function'?pfCandleIdx(f.at):-1;if(i<0||i>=candles.length)return;const buy=f.side==='buy';marks.push({time:Math.floor(Number(candles[i][0])/1000),position:buy?'belowBar':'aboveBar',color:buy?'#21d69a':'#ff637d',shape:buy?'arrowUp':'arrowDown',text:(f.side||'FILL').toUpperCase()+' '+fp(f.price)});});(portfolio.positions||[]).forEach(p=>marks.push({time:Math.floor(Number(candles[candles.length-1][0])/1000),position:p.side==='short'?'aboveBar':'belowBar',color:p.side==='short'?'#ff637d':'#21d69a',shape:'square',text:'OPEN '+String(p.side||'POSITION').toUpperCase()}));}
+ if(etiLiquidityFvg&&etiLiquidityFvg.latestSweep){const sw=etiLiquidityFvg.latestSweep,ts=Math.floor(Number(sw.time)/1000);if(candles.some(v=>Math.floor(Number(v[0])/1000)===ts))marks.push({time:ts,position:sw.direction==='BUY'?'belowBar':'aboveBar',color:'#d5a8ff',shape:'circle',text:(sw.side==='buy_side'?'BSL':'SSL')+' SWEEP'});}
  marks.sort((a,b)=>a.time-b.time);liveCandle.setMarkers(marks.slice(-100));
  livePriceLines.forEach(p=>{try{liveCandle.removePriceLine(p);}catch(e){}});livePriceLines=[];
  if(sigValid()&&sig.chart&&layers.levels){const L=sig.chart.levels,levels=[['ENTRY',L.entry,C.entry],['STOP',L.stopLoss,C.down]].concat((L.targets||[]).map((p,i)=>['TP'+(i+1),p,C.up]));levels.forEach(v=>{if(Number.isFinite(Number(v[1]))&&Number(v[1])>0)livePriceLines.push(liveCandle.createPriceLine({price:Number(v[1]),color:v[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:v[0]}));});}
  chartLines.forEach(l=>{if(Number(l.price)>0)livePriceLines.push(liveCandle.createPriceLine({price:Number(l.price),color:l.color||'#f0c674',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:l.label||'ETI level'}));});
+ if(etiLiquidityFvg){const lf=etiLiquidityFvg,add=(label,price,color,style=2)=>{const n=Number(price);if(Number.isFinite(n)&&n>0)livePriceLines.push(liveCandle.createPriceLine({price:n,color,lineWidth:1,lineStyle:style,axisLabelVisible:true,title:label}));};
+ (lf.pools||[]).slice(0,8).forEach(p=>add((p.side==='buy_side'?'BSL':'SSL')+' · '+p.touches+' tests',p.price,p.side==='buy_side'?'#b58cff':'#56adff',2));
+ if(lf.latestSweep)add('SWEPT '+lf.latestSweep.side.toUpperCase(),lf.latestSweep.level,'#d5a8ff',0);
+ if(lf.manipulation&&lf.manipulation.estimatedReach){add('SWEEP REACH LOW',lf.manipulation.estimatedReach.low,'#d5a8ff',3);add('SWEEP REACH HIGH',lf.manipulation.estimatedReach.high,'#d5a8ff',3);}
+ const z=lf.precision&&lf.precision.best;if(z){const col=z.highlight==='green'?'#21d69a':z.highlight==='red'?'#ff637d':'#e6c36a';add('LIQ-FVG '+z.direction+' LOWER',z.zone.lower,col,2);add('LIQ-FVG '+z.direction+' UPPER',z.zone.upper,col,2);add('CE ENTRY '+fp(z.entry.price),z.entry.price,col,0);if(z.stopLoss)add('LIQ-FVG STOP',z.stopLoss,'#ff637d',2);(z.targets||[]).forEach((t,i)=>add('LIQ-FVG TP'+(i+1),t.price,'#21d69a',2));}}
  if(portfolio){const addPortfolioLine=(label,price,color)=>{const n=Number(price);if(Number.isFinite(n)&&n>0)livePriceLines.push(liveCandle.createPriceLine({price:n,color:color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:label}));};(portfolio.positions||[]).forEach(p=>{addPortfolioLine('POSITION '+fp(p.avgEntry),p.avgEntry,'#e6edf7');addPortfolioLine('POSITION SL',p.levels&&p.levels.stop,'#ff637d');(p.levels&&p.levels.tp||[]).forEach((v,i)=>addPortfolioLine('POSITION TP'+(i+1),v,'#21d69a'));});(portfolio.open||[]).forEach(o=>addPortfolioLine('OPEN '+String(o.side||'ORDER').toUpperCase(),o.type==='stop'?o.stopPrice:o.limitPrice,'#f0c674'));}
  if(selection!==liveSelectionKey){liveChart.timeScale().fitContent();liveSelectionKey=selection;}
 }
 
+async function refreshLiquidityFvg(force){
+ if(!candles.length)return;const sym=$('symbol').value,tf=$('interval').value,info=symInfo(),tail=candles.at(-1),key=[sym,tf,info.venue,info.market,tail&&tail[0]].join('|');
+ if(!force&&etiLiquidityFvgKey===key&&Date.now()-etiLiquidityFvgAt<30000)return;
+ if(etiLiquidityFvgKey===key&&Date.now()-etiLiquidityFvgAt<30000)return;
+ etiLiquidityFvgKey=key;const seq=++etiLiquidityFvgSeq;
+ try{let r;if(info.venue==='bitget'){r=await fetch('/api/analysis/liquidity-fvg?symbol='+encodeURIComponent(sym)+'&timeframe='+encodeURIComponent(tf),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candles:{[tf]:candles.map(v=>v.map(Number))}}),cache:'no-store'});}
+ else{const p=new URLSearchParams({symbol:sym,timeframe:tf,assetClass:'crypto',provider:'bybit',market:info.market});r=await fetch('/api/analysis/liquidity-fvg?'+p.toString(),{cache:'no-store'});}
+ const d=await r.json();if(seq!==etiLiquidityFvgSeq)return;if(!r.ok)throw Error(d.detail||d.error||'HTTP '+r.status);
+ if([$('symbol').value,$('interval').value,symVenueOf(),symMkt(),candles.at(-1)&&candles.at(-1)[0]].join('|')!==key)return;
+ etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();drawChart();
+ }catch(e){if(seq!==etiLiquidityFvgSeq)return;etiLiquidityFvg=null;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();}
+}
 function drawChart(){
  updateOverlayNote();
  const c=$('chart'),r=resize(c),x=r.x,w=r.w,h=r.h;x.clearRect(0,0,w,h);
@@ -464,7 +483,7 @@ function drawScorePane(){const r=paneCtx('paneScore');if(!r.ok)return;const x=r.
  paneTitle(r,'ETI engine score · bar opacity = conviction (low under 30, medium 30-54, high 55 and above = tradeable setup) · amber dot = lowered by method disagreement');
  const k=lastAligned(r);if(k>=0){const s=ch.score[r.J[k]];pill(x,r.g.plotW+4,py(s),sg(s),ch.direction[r.J[k]]===1?C.up:C.down);}
  paneCross(r);}
-function drawPanes(){drawRsi();drawMacd();drawAdx();drawScorePane();renderAdvancedLiveChart();}
+function drawPanes(){drawRsi();drawMacd();drawAdx();drawScorePane();renderAdvancedLiveChart();refreshLiquidityFvg(false);}
 
 function edgeTag(x,t,col,xx,yy,right){x.font=FONT;const tw=x.measureText(t).width+8,x0=right?xx-tw:xx;x.fillStyle='rgba(8,13,22,.85)';x.fillRect(x0,yy-10,tw,15);x.fillStyle=col;x.textAlign='left';x.fillText(t,x0+4,yy+1);}
 function drawDepth(){
@@ -1064,7 +1083,7 @@ $('symQuote').addEventListener('change',()=>{SYM.quote=$('symQuote').value;symRe
 $('symCat').addEventListener('change',()=>{SYM.cat=$('symCat').value;symRebuild();});
 initAdvancedLiveChart();$('chartStyle').addEventListener('change',()=>{liveAdvancedKey='';renderAdvancedLiveChart();});$('chartFit').addEventListener('click',()=>{if(liveChart)liveChart.timeScale().fitContent();});
 loadSymbols();setInterval(loadSymbols,60000);
-$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();etiMarketNote();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts();if(liveChart)liveChart.applyOptions({width:$('chartAdvanced').clientWidth,height:$('chartAdvanced').clientHeight});};wireChartInteractions();load();
+$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();etiMarketNote();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts();if(liveChart)liveChart.applyOptions({width:$('chartAdvanced').clientWidth,height:$('chartAdvanced').clientHeight});};wireChartInteractions();load();setInterval(()=>refreshLiquidityFvg(false),45000);
 </script></body></html>`;
 const page = withMotion(html);
 
