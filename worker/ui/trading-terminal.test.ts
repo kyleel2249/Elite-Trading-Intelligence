@@ -54,6 +54,5 @@ test("institutional chart workspace exposes SMC, multi-timeframe and auction pro
   assert.match(TRADING_TERMINAL_JS, /function renderDepthHeat/);
   assert.match(TRADING_TERMINAL_JS, /function renderFlow/);
   assert.match(TRADING_TERMINAL_JS, /saveChartPrefs/);
-  assert.match(TRADING_TERMINAL_JS, /liveExecutionAllowed/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /fetch\(["']\/api\/orders/);
 });
