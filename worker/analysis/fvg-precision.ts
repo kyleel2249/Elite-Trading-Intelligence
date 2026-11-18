@@ -93,7 +93,8 @@ export function analyzeFvgPrecision(
     else failed.push("A more favourably positioned fresh FVG exists");
 
     // A zone remains green only while fresh and all hard pre-entry filters pass.
-    const hardPass = fresh && !!bos && !!impulse && !!level && correctHalf && !htfOpposed && higherPriority;
+    const freshBeforeFirstRetest = fresh || (firstTouch >= 0 && z.touches === 1 && z.ageBars === currentIndex - confirmIndex);
+    const hardPass = freshBeforeFirstRetest && !!bos && !!impulse && !!level && correctHalf && !htfOpposed && higherPriority;
     let reaction = { confirmed: false, time: null as number | null, close: null as number | null, reason: "Awaiting first retest and a closed reaction candle" };
     let firstTouch = -1;
     for (let i = confirmIndex + 1; i <= currentIndex; i++) {
@@ -126,7 +127,7 @@ export function analyzeFvgPrecision(
     if (rr !== null) passed.push("At least one structural target meets minimum reward/risk");
     else failed.push("No verified liquidity/structure target meets minimum reward/risk");
     const score = clamp(Math.round((fresh?15:0)+(bos?15:0)+(impulse?10:0)+(level?10:0)+(correctHalf?10:0)+(sweep?10:0)+(htfAligned?10:0)+(reaction.confirmed?10:0)+(higherPriority?5:0)+(z.confluence.length?5:0)),0,100);
-    const tradableState = state === "confirmed" && targets.length > 0;
+    const tradableState = state === "confirmed" && hardPass && reaction.confirmed && targets.length > 0;
     const highlight: PrecisionCandidate["highlight"] = hardPass && fresh ? "green" : state === "rejected" ? "red" : "yellow";
     if (hardPass && fresh) explanation.push("Green: fresh, unmitigated FVG passed all pre-entry qualification filters.");
     if (firstTouch < 0 && hardPass) explanation.push("Entry remains pending; wait for the first retest and candle-close confirmation.");
