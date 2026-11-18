@@ -76,9 +76,9 @@ export function analyzeFvgPrecision(
     const fresh = z.status === "fresh" && z.mitigationPct === 0 && z.touches === 0;
     if (fresh) passed.push("Completely unmitigated FVG"); else failed.push("FVG has already been touched or mitigated");
     const zoneMid = (z.lower + z.upper) / 2;
-    const level = sr.filter(l => l.kind === (bullish ? "support" : "resistance") && intersects(l.low, l.high, z.lower - atr * FVG_PRECISION_RULES.srToleranceAtr, z.upper + atr * FVG_PRECISION_RULES.srToleranceAtr)).sort((a,b)=>Number(b.hasFVG)-Number(a.hasFVG)||b.index-a.index)[0] ?? null;
+    const level = sr.filter(l => l.kind === (bullish ? "support" : "resistance") && intersects(l.low, l.high, z.lower - atr * FVG_PRECISION_RULES.srToleranceAtr, z.upper + atr * FVG_PRECISION_RULES.srToleranceAtr)).sort((a,b)=>b.strength-a.strength||b.lastTouchIndex-a.lastTouchIndex)[0] ?? null;
     if (level) passed.push("Support/resistance overlaps the FVG"); else failed.push("No meaningful support/resistance overlap");
-    const orderBlock = orderBlocks.filter(o => o.kind === z.direction && !o.mitigated && !o.invalidated && intersects(o.low, o.high, z.lower, z.upper)).sort((a,b)=>Number(b.hasFVG)-Number(a.hasFVG))[0] ?? null;
+    const orderBlock = orderBlocks.filter(o => o.kind === z.direction && !o.mitigated && !o.invalidated && intersects(o.low, o.high, z.lower, z.upper)).sort((a,b)=>Number(b.hasFVG)-Number(a.hasFVG)||b.index-a.index)[0] ?? null;
     if (orderBlock) passed.push("Unmitigated same-direction order block overlaps the FVG");
     const correctHalf = !!pd && (bullish ? pd.zone === "discount" : pd.zone === "premium");
     if (correctHalf) passed.push(bullish ? "FVG is in discount" : "FVG is in premium"); else failed.push(bullish ? "FVG is not in discount" : "FVG is not in premium");
@@ -98,7 +98,7 @@ export function analyzeFvgPrecision(
 
     let firstTouch = -1;
     for (let i = confirmIndex + 1; i <= currentIndex; i++) {
-      const c = rows[i], touched = bullish ? c[3] <= z.upper : c[2] >= z.lower;
+      const c = rows[i], touched = c[3] <= z.upper && c[2] >= z.lower;
       if (touched) { firstTouch = i; break; }
     }
     // A first retest may still validate the original fresh setup, but it no longer receives the green unmitigated highlight.
