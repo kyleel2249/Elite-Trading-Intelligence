@@ -63,10 +63,10 @@ function validateBrowserMarketData(raw: any, strategy: Strategy, market: "spot" 
     const openInterest = raw.derivatives.openInterest == null ? null : Number(raw.derivatives.openInterest);
     const timestamp = Number(raw.derivatives.timestamp);
     if ((fundingRate === null || Number.isFinite(fundingRate)) && (openInterest === null || (Number.isFinite(openInterest) && openInterest >= 0)) &&
-        Number.isFinite(timestamp)) derivatives = { fundingRate, openInterest, timestamp, source: "bitget-browser" };
+        Number.isFinite(timestamp)) derivatives = { fundingRate, openInterest, timestamp, source: "bitget-browser-supplied" };
   }
   const failures = raw.failures && typeof raw.failures === "object" ? Object.fromEntries(Object.entries(raw.failures).map(([k, v]) => [k, String(v).slice(0, 200)])) : {};
-  return { candles, depth, derivatives, provider: "bitget-browser", market, category, failures };
+  return { candles, depth, derivatives, provider: "bitget-browser-supplied", market, category, failures };
 }
 
 export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Response> {
@@ -128,8 +128,9 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   let active; try { active = await activeOptions((env as any).ETI_EXECUTION_LOG); } catch { return reply({ error: "params_unavailable", submitsOrder: false }, 503); }
   const { version, name, ...opts } = active;
   let inputs: SignalInputs | { error: "market_data_unavailable"; executionTimeframe: Timeframe; failures: Record<string, string> };
-  if (venue === "bitget") {
-    if (req.method !== "POST" || !body.marketData) return reply({ error: "bitget_browser_market_data_required", message: "Bitget blocks ETI Cloudflare Worker egress. Load its public feed in the browser and POST the validated marketData snapshot; no API secret is exposed to the browser." }, 400);
+  if (venue === "bitget" && req.method === "POST" && body.marketData) {
+    // Explicitly supplied browser snapshots remain supported for environments where
+    // Worker egress is unavailable, but the default path now uses ETI's REST proxy.
     const supplied = validateBrowserMarketData(body.marketData, strategy, market as "spot" | "futures", category);
     if (!supplied) return reply({ error: "invalid_bitget_browser_market_data", message: "Required timeframes, candle ordering, order-book snapshot or derivatives context failed validation." }, 400);
     inputs = supplied;
