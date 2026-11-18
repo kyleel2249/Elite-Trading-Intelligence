@@ -37,6 +37,8 @@ test("the Pro page is wired to the existing exchange, SMC, agent and account ser
   assert.match(html, /WRONG VENUE/);
   // A missing Bitget ticker must not be shown as a 0% change.
   assert.match(html, /fails\.ticker/);
+  assert.ok(html.includes("async function pollMarket"));
+  assert.ok(html.includes("Full ETI Dashboard"));
 });
 
 test("the Pro page cannot place orders and never stores the execution token", () => {
