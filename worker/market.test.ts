@@ -216,3 +216,17 @@ test("Bitget category-scoped catalogue freshness is independent of failures in o
   assert.deepEqual(body.sources.futures.partial, []);
   assert.ok(body.symbols.some((r: any[]) => r[6] === "USDT-FUTURES"));
 });
+
+
+test("market diagnostics probe Bybit and Bitget spot and futures independently", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const host = new URL(String(input)).hostname;
+    return new Response(JSON.stringify(host.includes("bitget.com") ? bitgetKline : bybitKline));
+  }) as any;
+  const response = await handleMarket(req("/api/market/diag?symbol=BTCUSDT&interval=1m"), {});
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  const ids = body.providers.map((p: any) => p.provider);
+  assert.deepEqual(ids, ["bybit", "bitget", "bitget_mix"]);
+  assert.ok(body.providers.every((p: any) => p.connectionStatus === "connected"));
+});
