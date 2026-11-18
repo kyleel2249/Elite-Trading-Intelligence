@@ -151,9 +151,9 @@ test("Pro Terminal invalidates stale exchange loads and exposes time coordinates
 test("Pro Terminal starts Bitget streaming before REST and retains recent cached candles on temporary REST failure",()=>{
  const stream=TRADING_TERMINAL_JS.indexOf("ensureTerminalBitgetStream();const d=await window.ETIBitget.marketData");
  assert.ok(stream>=0);
- assert.ok(s.includes("function restoreMarketCache()"));
- assert.ok(s.includes("function saveMarketCache()"));
- assert.ok(s.includes("WebSocket live recovery"));
+ assert.ok(TRADING_TERMINAL_JS.includes("function restoreMarketCache()"));
+ assert.ok(TRADING_TERMINAL_JS.includes("function saveMarketCache()"));
+ assert.ok(TRADING_TERMINAL_JS.includes("WebSocket live recovery"));
 });
 
 
