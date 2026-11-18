@@ -5,7 +5,7 @@ import { DEFAULT_PAPER_CONFIG } from "./paper.ts";
 
 test("balanced paper policy uses bounded capital-protection defaults", () => {
   const config = paperConfigFrom({} as any);
-  assert.equal(config.riskFraction, 0.01);
+  assert.equal(config.riskFraction, DEFAULT_PAPER_CONFIG.riskFraction);
   assert.equal(config.maxNotionalFraction, 0.5);
   assert.equal(config.maxOpenPositions, 3);
   assert.equal(config.maxDailyLossPct, 2);
@@ -37,7 +37,7 @@ test("invalid or out-of-range paper risk overrides are constrained by safe hard 
     ETI_PAPER_MAX_DAILY_LOSS_PCT: "0",
     ETI_PAPER_MAX_CONSECUTIVE_LOSSES: "99",
   } as any);
-  assert.equal(config.riskFraction, DEFAULT_PAPER_CONFIG.riskFraction);
+  assert.equal(config.riskFraction, 0.01);
   assert.equal(config.maxNotionalFraction, 0.5);
   assert.equal(config.maxOpenPositions, 3);
   assert.equal(config.maxDailyLossPct, 2);
