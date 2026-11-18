@@ -136,7 +136,7 @@ export function analyzeFvgPrecision(
     if (!targets.length) explanation.push("No structural target satisfies the configured minimum reward/risk; no trade.");
     result.push({
       id:z.id,direction,timeframe,zone:{lower:z.lower,upper:z.upper,midpoint:roundPrice(zoneMid,precision)},
-      state:tradableState?"confirmed":state,highlight,
+      state:tradableState?"confirmed":(state==="confirmed"?"rejected":state),highlight,
       entry:{price:entryPrice,method:"consequent_encroachment_50",execution:reaction.confirmed?"limit_pending":"confirmation_required"},
       stopLoss,targets,riskReward:rr,score,scoreType:"evidence_quality_not_probability",passed,failed,bos:bos?{type:bos.type,time:bos.time,level:bos.level}:null,
       displacementAtr:round(displacementAtr,3),supportResistance:level?{kind:level.kind,price:level.price,strength:level.strength}:null,
