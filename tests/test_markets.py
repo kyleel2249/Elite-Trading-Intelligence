@@ -438,7 +438,8 @@ def test_pretrade_check_exposes_market_context_without_new_client_inputs(monkeyp
     result = asyncio.run(pretrade.pretrade_check(req, settings=Settings(paper_starting_equity=10000.0), db=None, _auth=None))
     assert result["market_context"]["asset_class"] == "crypto" and result["market_context"]["tier"] == "major"
     assert "warnings" in result and result["submits_order"] is False
-    assert set(pretrade.PretradeRequest.model_fields) == {"provider", "environment", "symbol", "side", "quantity", "order_type", "limit_price"}
+    assert {"provider", "environment", "symbol", "side", "quantity", "order_type", "limit_price"} <= set(pretrade.PretradeRequest.model_fields)
+    assert {"stop_loss", "take_profit", "strategy_id", "atr_pct"} <= set(pretrade.PretradeRequest.model_fields)
 
 
 # ------------------------------------------------------------------ holiday calendars (data/holidays.json)

@@ -331,7 +331,7 @@ async def test_trading_service_places_oanda_paper_orders(monkeypatch):
     try:
         out = await TradingService(_risk_settings(), db=db).place_order(
             provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, equity=100000.0,
-            data_age_seconds=5, data_status="fresh")
+            data_age_seconds=5, data_status="fresh", reference_price=1.08512, stop_loss=1.08)
         assert out["status"] == "submitted" and out["provider_response"]["fill_price"] == 1.08512
         row = db.query(OrderRecord).filter_by(client_order_id=out["client_order_id"]).one()
         assert row.status == "filled" and row.fill_price == 1.08512 and row.provider == "oanda"
@@ -352,7 +352,7 @@ async def test_pending_oanda_limit_order_is_not_journaled_as_filled(monkeypatch)
     try:
         out = await TradingService(_risk_settings(), db=db).place_order(
             provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, order_type="limit", limit_price=1.08,
-            equity=100000.0, data_age_seconds=5, data_status="fresh", fill_price_hint=1.0851)       # the hint must NOT become a fill
+            equity=100000.0, data_age_seconds=5, data_status="fresh", fill_price_hint=1.0851, stop_loss=1.075)       # the hint must NOT become a fill
         row = db.query(OrderRecord).filter_by(client_order_id=out["client_order_id"]).one()
         assert out["status"] == "submitted" and row.status == "submitted" and row.fill_price is None
     finally:

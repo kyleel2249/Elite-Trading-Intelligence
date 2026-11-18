@@ -380,6 +380,9 @@ class FakeExchange:
         return {"id": "ord-0000001", "status": "filled", "symbol": kw.get("symbol", "BTCUSDT"), "side": kw.get("side", "buy"),
                 "qty": kw.get("qty", 0.01), "filled_qty": kw.get("qty", 0.01)}
 
+    async def _snap(self, symbol):
+        return SimpleNamespace(mid=100.0)
+
     async def submit(self, **kw):
         self.calls.append(("submit", kw))
         return {"accepted": True, "duplicate": False, "reasons": [], "order": self._order(**kw), "fills": []}
@@ -404,10 +407,10 @@ class FakeExchange:
         return {"symbols": [], "fills": [], "unpriced": []}
 
     async def account(self, tick=True):
-        return {"positions": self.positions, "equity": 1.0}
+        return {"positions": self.positions, "equity": 10000.0, "starting_cash": 10000.0}
 
 
-ORDER = {"symbol": "BTCUSDT", "side": "buy", "qty": 0.01}
+ORDER = {"symbol": "BTCUSDT", "side": "buy", "qty": 0.01, "stop_loss": 95.0}
 OP_KEY = "operator-key-for-tests-123"
 
 

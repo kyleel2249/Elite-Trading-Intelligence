@@ -29,7 +29,7 @@ def settings(**kw):
 
 def proposal(**kw):
     args = dict(provider="binance", environment="paper", symbol="TEST", side="buy",
-                qty=1, equity=10000, reference_price=100)
+                qty=1, equity=10000, reference_price=100, stop_loss=95)
     args.update(kw)
     return OrderProposal(**args)
 
@@ -70,7 +70,7 @@ async def test_broker_new_order_not_filled_from_hint(db):
     svc._paper_resolution = lambda *a, **k: None   # exercise the exchange path, not the internal paper engine
     svc.alpaca.submit_order = AsyncMock(return_value={"id":"mock", "status":"new", "filled_qty":"0"})
     result = await svc.place_order(provider="alpaca", environment="paper", symbol="AAPL", side="buy",
-        qty=1, equity=10000, order_type="limit", limit_price=90, fill_price_hint=100)
+        qty=1, equity=10000, order_type="limit", limit_price=90, fill_price_hint=100, stop_loss=85)
     assert result["status"] == "submitted"
     assert db.query(Position).count() == 0
     assert db.query(OrderRecord).one().status == "submitted"
@@ -80,7 +80,7 @@ async def test_simulated_limit_requires_crossing(db):
     svc = TradingService(settings(), db)
     svc._paper_resolution = lambda *a, **k: None   # exercise the exchange path, not the internal paper engine
     result = await svc.place_order(provider="binance", environment="paper", symbol="TEST", side="buy",
-        qty=1, equity=10000, order_type="limit", limit_price=90, fill_price_hint=100)
+        qty=1, equity=10000, order_type="limit", limit_price=90, fill_price_hint=100, stop_loss=85)
     assert result["status"] == "submitted"
     assert db.query(Position).count() == 0
 
