@@ -11,6 +11,7 @@
  */
 import { withMotion } from "./ui/motion.ts";
 import { BITGET_CLIENT_JS } from "./ui/bitget-client.ts";
+import { COMMAND_CENTRE_HTML, COMMAND_CENTRE_JS } from "./ui/command-centre.ts";
 import { LIQUIDITY_CSS, LIQUIDITY_JS } from "./ui/liquidity-intelligence.ts";
 import { handleLiquidity } from "./liquidity/api.ts";
 import { TRADING_TERMINAL_CSS, TRADING_TERMINAL_HTML, TRADING_TERMINAL_JS } from "./ui/trading-terminal.ts";
@@ -152,7 +153,7 @@ ${PORTFOLIO_CSS}
 ${CALC_CSS}
 ${PERP_CSS}
 </style></head><body>
-<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><a href="/terminal" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">PRO TRADING TERMINAL →</a><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><a href="/agents" style="color:var(--blue)">AI Agents</a><div id="connection" class="status">Connecting…</div></div></header>
+<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><a href="/terminal" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">PRO TRADING TERMINAL →</a><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><a href="/jarvis" style="color:var(--cyan)">JARVIS Command Centre</a><a href="/agents" style="color:var(--blue)">AI Agents</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
 <div class="toolbar"><select id="symVenue" aria-label="Exchange" title="Choose Bybit or Bitget public spot, margin and futures market data. Live orders require the master ETI token and explicit confirmation."><option value="bybit" selected>Bybit (market data)</option><option value="bitget">Bitget (spot, margin &amp; futures)</option></select><select id="symMarket" aria-label="Market type" title="Spot pairs, USDT/USDC-margined perpetual futures, or Metals: gold, silver, platinum, palladium, copper and gold-backed tokens listed on Bybit"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option><option value="margin">Margin (cross / isolated)</option><option value="metals">Metals (gold, silver, copper)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search exchange pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symEti" class="muted" aria-live="polite" style="font-size:12px;display:none"></span><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
@@ -1133,6 +1134,8 @@ const page = withMotion(html);
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/jarvis") return new Response(COMMAND_CENTRE_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/jarvis.js") return new Response(COMMAND_CENTRE_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=60", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/terminal") return new Response(TRADING_TERMINAL_HTML.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/terminal.css") return new Response(TRADING_TERMINAL_CSS, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/liquidity.css") return new Response(LIQUIDITY_CSS, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
@@ -1187,7 +1190,7 @@ export default {
       return handleMarket(request, _env);
     }
     if (url.pathname === "/__eti/status" || url.pathname === "/api/system/health") {
-      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Bybit V5 Worker REST plus Bitget browser-direct public feed (Cloudflare Worker egress is blocked by Bitget)", market_data_transport: { bybit: "cloudflare-worker-rest", bitget: "browser-direct-rest", bitget_live_orders: "gated-until-private-egress-verified" }, time: new Date().toISOString() });
+      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Bybit and Bitget public REST via ETI Worker proxy with browser-native Bitget WebSocket streaming", market_data_transport: { bybit: "cloudflare-worker-rest", bitget: "same-origin-worker-proxy", bitget_live_orders: "gated-until-private-egress-verified" }, time: new Date().toISOString() });
     }
     if (url.pathname === "/") {
       return new Response(page.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
