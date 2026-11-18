@@ -3,7 +3,7 @@
 import type { Kline } from "../market.ts";
 import { atr14, lastAtr } from "./atr.ts";
 import { detectFvgZones, type FvgZone } from "./fvg.ts";
-import { detectDisplacement, detectLiquiditySweeps, findLiquidityPools } from "./smc.ts";
+import { detectDisplacement, detectLiquiditySweeps, detectOrderBlocks, findLiquidityPools } from "./smc.ts";
 import { analyzeStructure, findPivots, supportResistance } from "./structure.ts";
 import { premiumDiscount } from "./smc-intel.ts";
 import { clamp, round } from "./types.ts";
@@ -18,7 +18,7 @@ export interface PrecisionCandidate {
   stopLoss: number | null; targets: PrecisionTarget[]; riskReward: number | null;
   score: number; scoreType: "evidence_quality_not_probability"; passed: string[]; failed: string[];
   bos: { type: "BOS" | "CHoCH"; time: number; level: number } | null;
-  displacementAtr: number; supportResistance: { kind: "support" | "resistance"; price: number; strength: number } | null;
+  displacementAtr: number; supportResistance: { kind: "support" | "resistance"; price: number; strength: number } | null;\n  orderBlock: { lower: number; upper: number; strength: number } | null;
   dealingRange: { low: number; high: number; positionPct: number; zone: "discount" | "premium" | "equilibrium" } | null;
   liquiditySweep: { direction: "bullish" | "bearish"; time: number; level: number } | null;
   mitigationPct: number; freshnessBars: number; reaction: { confirmed: boolean; time: number | null; close: number | null; reason: string };
@@ -76,6 +76,8 @@ export function analyzeFvgPrecision(
     const zoneMid = (z.lower + z.upper) / 2;
     const level = sr.filter(l => l.kind === (bullish ? "support" : "resistance") && intersects(l.low, l.high, z.lower - atr * FVG_PRECISION_RULES.srToleranceAtr, z.upper + atr * FVG_PRECISION_RULES.srToleranceAtr)).sort((a,b)=>b.strength-a.strength)[0] ?? null;
     if (level) passed.push("Support/resistance overlaps the FVG"); else failed.push("No meaningful support/resistance overlap");
+    const orderBlock = detectOrderBlocks(rows, 120).filter(o => o.kind === z.direction && !o.mitigated && !o.invalidated && intersects(o.low, o.high, z.lower, z.upper)).sort((a,b)=>b.strength-a.strength)[0] ?? null;
+    if (orderBlock) passed.push("Unmitigated same-direction order block overlaps the FVG");
     const correctHalf = !!pd && (bullish ? pd.zone === "discount" : pd.zone === "premium");
     if (correctHalf) passed.push(bullish ? "FVG is in discount" : "FVG is in premium"); else failed.push(bullish ? "FVG is not in discount" : "FVG is not in premium");
     const sweep = sweeps.filter(s => s.direction === z.direction && s.index <= confirmIndex && confirmIndex - s.index <= 30).sort((a,b)=>b.index-a.index)[0] ?? null;
@@ -126,7 +128,7 @@ export function analyzeFvgPrecision(
     const rr = targets[0]?.rewardRisk ?? null;
     if (rr !== null) passed.push("At least one structural target meets minimum reward/risk");
     else failed.push("No verified liquidity/structure target meets minimum reward/risk");
-    const score = clamp(Math.round((fresh?15:0)+(bos?15:0)+(impulse?10:0)+(level?10:0)+(correctHalf?10:0)+(sweep?10:0)+(htfAligned?10:0)+(reaction.confirmed?10:0)+(higherPriority?5:0)+(z.confluence.length?5:0)),0,100);
+    const score = clamp(Math.round((fresh?15:0)+(bos?15:0)+(impulse?10:0)+(level?10:0)+(correctHalf?10:0)+(sweep?10:0)+(htfAligned?10:0)+(reaction.confirmed?10:0)+(higherPriority?5:0)+(orderBlock?5:0)),0,100);
     const tradableState = state === "confirmed" && hardPass && reaction.confirmed && targets.length > 0;
     const highlight: PrecisionCandidate["highlight"] = hardPass && fresh ? "green" : state === "rejected" ? "red" : "yellow";
     if (hardPass && fresh) explanation.push("Green: fresh, unmitigated FVG passed all pre-entry qualification filters.");
@@ -139,7 +141,7 @@ export function analyzeFvgPrecision(
       state:tradableState?"confirmed":(state==="confirmed"?"rejected":state),highlight,
       entry:{price:entryPrice,method:"consequent_encroachment_50",execution:reaction.confirmed?"limit_pending":"confirmation_required"},
       stopLoss,targets,riskReward:rr,score,scoreType:"evidence_quality_not_probability",passed,failed,bos:bos?{type:bos.type,time:bos.time,level:bos.level}:null,
-      displacementAtr:round(displacementAtr,3),supportResistance:level?{kind:level.kind,price:level.price,strength:level.strength}:null,
+      displacementAtr:round(displacementAtr,3),supportResistance:level?{kind:level.kind,price:level.price,strength:level.strength}:null,orderBlock:orderBlock?{lower:orderBlock.low,upper:orderBlock.high,strength:orderBlock.strength}:null,
       dealingRange:pd?{low:pd.rangeLow,high:pd.rangeHigh,positionPct:pd.positionPct,zone:pd.zone}:null,
       liquiditySweep:sweep?{direction:sweep.direction,time:sweep.time,level:sweep.level}:null,
       mitigationPct:z.mitigationPct,freshnessBars:z.ageBars,reaction,
