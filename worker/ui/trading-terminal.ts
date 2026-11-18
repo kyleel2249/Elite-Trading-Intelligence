@@ -146,7 +146,7 @@ function ensureTerminalBitgetStream(){
    else if(ev.type==="candle"){const x={time:Math.floor(Number(d[0])/1000),open:Number(d[1]),high:Number(d[2]),low:Number(d[3]),close:Number(d[4]),volume:Number(d[5])};if(!Number.isFinite(x.time)||!(x.close>0))return;const last=S.candles.at(-1);if(last&&last.time===x.time)S.candles[S.candles.length-1]=x;else S.candles.push(x);if(S.candles.length>500)S.candles=S.candles.slice(-500);if(S.candle)S.candle.update(x);if(S.line)S.line.update({time:x.time,value:x.close});if(S.area)S.area.update({time:x.time,value:x.close});}
    else if(ev.type==="depth"){S.depth=d;renderFlow();renderOrderFlow(S.depth,S.trades);}
    else if(ev.type==="trades"){const old=S.trades||[],all=(ev.data||[]).concat(old),seen={};S.trades=all.filter(t=>{const k=String(t.T||t.time)+"|"+String(t.p||t.price)+"|"+String(t.q||t.qty);if(seen[k])return false;seen[k]=1;return true;}).sort((a,b)=>Number(b.T||b.time)-Number(a.T||a.time)).slice(0,500);renderTrades(S.trades);renderFlow();renderOrderFlow(S.depth,S.trades);}
-   if(ev.type==="candle"){$("tt-price").textContent=px(d[4]);$("tt-pair").textContent=S.symbol;}
+   if(ev.type==="candle"){$("tt-price").textContent=px(d[4]);$("tt-pair").textContent=S.symbol;}status("BITGET · "+S.market+" · "+S.category+" · live WebSocket · "+new Date(ev.timestamp||Date.now()).toLocaleTimeString());
   }
  });
 }
