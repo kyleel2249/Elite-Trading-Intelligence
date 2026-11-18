@@ -181,17 +181,11 @@ function toggleTerminalBitgetPrivateStream(){
  });
 }
 function syncBitgetTransportControls(){
- const env=$("tt-bg-env"),account=$("tt-bg-account"),protocol=$("tt-bg-protocol"),enabled=$("tt-venue").value==="bitget";
- if(env.value==="demo"){account.value="uta";protocol.value="json";}
- if(account.value==="classic"){env.value="production";protocol.value="json";}
- if(protocol.value==="sbe"){env.value="production";account.value="uta";}
- env.querySelector('option[value="demo"]').disabled=account.value==="classic"||protocol.value==="sbe";
- account.querySelector('option[value="classic"]').disabled=env.value==="demo"||protocol.value==="sbe";
- protocol.querySelector('option[value="sbe"]').disabled=env.value==="demo"||account.value==="classic";
- env.disabled=!enabled;account.disabled=!enabled;protocol.disabled=!enabled;$("tt-private-connect").disabled=!enabled;
- S.bitgetEnvironment=env.value;S.bitgetAccount=account.value;S.bitgetProtocol=protocol.value;
-}
-function onBitgetTransportChanged(){
+  const protocol=$("tt-bg-protocol"),enabled=$("tt-venue").value==="bitget";
+  protocol.disabled=!enabled;$("tt-private-connect").disabled=!enabled;
+  S.bitgetProtocol=protocol.value;
+ }
+ function onBitgetTransportChanged(){
  syncBitgetTransportControls();closeTerminalBitgetStream();closeTerminalBitgetPrivateStream();
  if(S.venue==="bitget"){S.loadSeq++;S.busy=false;load();}
 }
