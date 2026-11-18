@@ -225,7 +225,7 @@ test("UTA private browser adapter authenticates through ETI proxy and normalizes
   sandbox.window.ETIBitget.subscribePrivate({}, {
     onMessage: (m: any) => messages.push(m), onStatus: (s: any) => states.push(s)
   });
-  assert.equal(sockets[0].url, "wss://eti.test/api/bitget/ws/private");
+  assert.equal(sockets[0].url, "wss://eti.test/api/bitget/ws/private?environment=production&account=uta");
   sockets[0].readyState = 1; sockets[0].onopen();
   assert.equal(sockets[0].sent.length, 0, "browser must not send a master token or Bitget API secret");
   sockets[0].onmessage({ data: JSON.stringify({ event: "status", state: "authenticated", topics: ["account","order","position","fill"] }) });
@@ -252,4 +252,31 @@ test("UTA public trades parser accepts compact p/v/S/T field names", () => {
   assert.equal(messages[0].data[0].p, "100");
   assert.equal(messages[0].data[0].q, "0.25");
   assert.equal(messages[0].data[0].m, true);
+});
+
+
+test("transport adapter selects production V3, demo V3, Classic V2 and SBE endpoints with correct subscriptions",()=>{
+ const sockets:any[]=[];
+ class FakeWebSocket{readyState=0;onopen:any;onmessage:any;onclose:any;onerror:any;sent:string[]=[];binaryType="";url:string;constructor(url:string){this.url=url;sockets.push(this)}send(v:string){this.sent.push(v)}close(){this.readyState=3;if(this.onclose)this.onclose({})}}
+ const sandbox:any={window:{},AbortSignal,Response,WebSocket:FakeWebSocket,Date,Math,JSON,Number,String,Array,Object,Promise,Map,TextDecoder,DataView,ArrayBuffer,Uint8Array,BigInt,setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,clearTimeout:()=>{},fetch:async()=>new Response("{}")};
+ vm.runInNewContext(BITGET_CLIENT_JS,sandbox);
+ const api=sandbox.window.ETIBitget;
+ api.subscribeTransport({symbol:"BTCUSDT",market:"futures",category:"USDT-FUTURES",environment:"production",account:"uta"});
+ api.subscribeTransport({symbol:"BTCUSDT",market:"spot",environment:"demo",account:"uta"});
+ api.subscribeTransport({symbol:"BTCUSDT",market:"futures",category:"USDT-FUTURES",environment:"production",account:"classic"});
+ api.subscribeTransport({symbol:"BTCUSDT",market:"futures",category:"USDT-FUTURES",environment:"production",account:"uta",protocol:"sbe"});
+ assert.equal(sockets[0].url,"wss://ws.bitget.com/v3/ws/public");
+ assert.equal(sockets[1].url,"wss://wspap.bitget.com/v3/ws/public");
+ assert.equal(sockets[2].url,"wss://ws.bitget.com/v2/ws/public");
+ assert.equal(sockets[3].url,"wss://ws.bitget.com/v3/ws/public/sbe");
+ sockets.forEach(s=>{s.readyState=1;s.onopen()});
+ const uta=JSON.parse(sockets[0].sent[0]);assert.ok(uta.args.some((x:any)=>x.topic==="publicTrade"&&x.instType==="usdt-futures"));
+ const classic=JSON.parse(sockets[2].sent[0]);assert.ok(classic.args.some((x:any)=>x.channel==="trade"&&x.instType==="USDT-FUTURES"));
+ const sbe=JSON.parse(sockets[3].sent[0]);assert.deepEqual(sbe.args.map((x:any)=>x.topic),["books50","books1","publicTrade"]);
+});
+
+test("transport adapter decodes SBE template 1002 and rejects invalid frames",()=>{
+ const sandbox:any={window:{},AbortSignal,Response,Date,Math,JSON,Number,String,Array,Object,Promise,Map,TextDecoder,DataView,ArrayBuffer,Uint8Array,BigInt,setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,clearTimeout:()=>{},fetch:async()=>new Response("{}")};
+ vm.runInNewContext(BITGET_CLIENT_JS,sandbox);
+ assert.throws(()=>sandbox.window.ETIBitget.decodeSbeFrame(new Uint8Array([1,2])),/too_short/);
 });
