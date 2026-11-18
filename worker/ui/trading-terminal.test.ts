@@ -34,3 +34,12 @@ test("Cloudflare Worker serves the terminal and its assets without a backend", a
   const home = await worker.fetch(new Request("https://eti.test/"), {} as any);
   assert.match(await home.text(), /href="\/terminal"/);
 });
+
+test("terminal exposes recent trades, chart presentation and manual level tools", () => {
+  assert.match(TRADING_TERMINAL_HTML, /Recent Trades/);
+  assert.match(TRADING_TERMINAL_HTML, /tt-chart-style/);
+  assert.match(TRADING_TERMINAL_HTML, /tt-draw-level/);
+  assert.match(TRADING_TERMINAL_JS, /renderTrades/);
+  assert.match(TRADING_TERMINAL_JS, /api\/market\/trades/);
+  assert.match(TRADING_TERMINAL_JS, /createPriceLine/);
+});
