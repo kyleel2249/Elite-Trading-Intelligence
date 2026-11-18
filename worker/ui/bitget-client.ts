@@ -6,7 +6,7 @@ var SPOT_GRAN={"1m":"1min","3m":"3min","5m":"5min","15m":"15min","30m":"30min","
 var MIX_GRAN={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1Dutc","1w":"1Wutc"};
 var PRODUCT_TYPES=["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"];
 function q(obj){var a=[];Object.keys(obj).forEach(function(k){if(obj[k]!==undefined&&obj[k]!==null&&obj[k]!=="")a.push(encodeURIComponent(k)+"="+encodeURIComponent(String(obj[k])))});return a.join("&")}
-function num(v){var n=Number(v);return Number.isFinite(n)?n:null}
+function num(v){if(v===undefined||v===null||v==="")return null;var n=Number(v);return Number.isFinite(n)?n:null}
 function millis(v){var n=num(v);return n===null?null:n<1e12?n*1000:n}
 function goodStatus(x){if(x===undefined||x===null||x==="")return true;return ["online","normal","trading","1"].indexOf(String(x).toLowerCase())>=0}
 function truth(v){return v===true||["true","yes","1"].indexOf(String(v==null?"":v).toLowerCase())>=0}
@@ -65,10 +65,11 @@ function parseTrades(data){
   return {T:millis(t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.side||"").toLowerCase()==="sell",p:String(t.price||t.fillPrice||""),q:String(t.size||t.baseVolume||t.qty||"")};
  }).filter(function(t){return t.T>0&&Number(t.p)>0&&Number(t.q)>0}).sort(function(a,b){return b.T-a.T}).slice(0,100);
 }
+function firstNumber(){for(var i=0;i<arguments.length;i++){var n=num(arguments[i]);if(n!==null)return n}return null}
 function parseTicker(data){
- var t=Array.isArray(data)?data[0]:(data||{}),last=num(t.lastPr||t.lastPrice),open=num(t.open||t.open24h||t.openPrice24h),pct=num(t.priceChangePercent||t.change24h);
+ var t=Array.isArray(data)?data[0]:(data||{}),last=firstNumber(t.lastPr,t.lastPrice),open=firstNumber(t.openPrice24h,t.open,t.open24h),pct=firstNumber(t.price24hPcnt,t.priceChangePercent,t.change24h);
  if(pct!==null)pct=pct*100;else pct=open&&last!==null?(last-open)/open*100:0;
- return {lastPrice:last,highPrice:num(t.highPrice24h||t.high24h),lowPrice:num(t.lowPrice24h||t.low24h),volume:num(t.baseVolume||t.volume24h||t.baseVol),quoteVolume:num(t.quoteVolume||t.turnover24h||t.usdtVolume),priceChangePercent:pct,fundingRate:num(t.fundingRate),openInterest:num(t.openInterest||t.holdingAmount),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
+ return {lastPrice:last,highPrice:firstNumber(t.highPrice24h,t.high24h),lowPrice:firstNumber(t.lowPrice24h,t.low24h),volume:firstNumber(t.baseVolume,t.volume24h,t.baseVol),quoteVolume:firstNumber(t.quoteVolume,t.turnover24h,t.usdtVolume),priceChangePercent:pct,fundingRate:firstNumber(t.fundingRate),openInterest:firstNumber(t.openInterest,t.holdingAmount),markPrice:firstNumber(t.markPrice),indexPrice:firstNumber(t.indexPrice),bidPrice:firstNumber(t.bid1Price,t.bidPr),askPrice:firstNumber(t.ask1Price,t.askPr),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
 }
 async function context(opts){
  var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=market==="futures"?(opts.category||"USDT-FUTURES"):"SPOT",futures=market==="futures",depthLimit=Math.max(5,Math.min(100,Number(opts.depthLimit)||20)),tradeLimit=Math.max(1,Math.min(100,Number(opts.tradeLimit)||50));
@@ -96,31 +97,36 @@ function instrumentRows(data,market,productType){
   return row;
  });
 }
-var LAST_GOOD={};
+var LAST_GOOD={},LAST_GOOD_AT={};
 async function symbols(kind){
  var jobs=[];
  if(kind==="all"||kind==="spot")jobs.push({market:"spot",category:"SPOT",v2:"/api/v2/spot/public/symbols"});
  if(kind==="all"||kind==="futures")PRODUCT_TYPES.forEach(function(pt){jobs.push({market:"futures",category:pt,v2:"/api/v2/mix/market/contracts?productType="+encodeURIComponent(pt),pt:pt})});
  if(kind==="margin")jobs.push({market:"margin",category:"MARGIN",v2:"/api/v2/margin/currencies"});
- var settled=await Promise.allSettled(jobs.map(function(j){return request("/api/v3/market/instruments?category="+encodeURIComponent(j.category),[j.v2]).then(function(r){return {job:j,data:r.data}})})),rows=[],warnings=[];
- settled.forEach(function(r,idx){var j=jobs[idx];
-  if(r.status!=="fulfilled"){var kept=LAST_GOOD[j.category];
-   if(kept){rows.push.apply(rows,kept);warnings.push(j.category+" refresh failed; showing the last known list")}
-   else warnings.push(r.reason&&r.reason.message||"catalogue unavailable");
-   return}
-  var data=Array.isArray(r.value.data)?r.value.data:[],jr=[];
+ var settled=await Promise.allSettled(jobs.map(function(j){return request("/api/v3/market/instruments?category="+encodeURIComponent(j.category),[j.v2]).then(function(r){return {job:j,data:r.data,host:r.host,version:r.version}})})),rows=[],warnings=[],sources={},now=Date.now();
+ settled.forEach(function(r,idx){var j=jobs[idx],jr=[];
+  if(r.status!=="fulfilled"){
+   var kept=LAST_GOOD[j.category]||[];
+   if(kept.length){rows.push.apply(rows,kept);warnings.push(j.category+" refresh failed; retained last successful catalogue");sources[j.category]={count:kept.length,fetchedAt:LAST_GOOD_AT[j.category]||null,stale:true,error:r.reason&&r.reason.message||"unavailable"};}
+   else{warnings.push(j.category+" catalogue unavailable: "+(r.reason&&r.reason.message||"upstream error"));sources[j.category]={count:0,fetchedAt:null,stale:true,error:r.reason&&r.reason.message||"unavailable"};}
+   return;
+  }
+  var data=Array.isArray(r.value.data)?r.value.data:[];
   if(j.market==="margin"){
    data.filter(function(x){return x&&goodStatus(x.status||"online")&&/^[A-Z0-9]{5,20}$/.test(String(x.symbol||""))}).forEach(function(x){
     var base=String(x.baseCoin||"").toUpperCase(),quote=String(x.quoteCoin||"").toUpperCase(),cross=x.isCrossBorrowable===undefined?Number(x.maxCrossedLeverage)>0:truth(x.isCrossBorrowable),iso=x.isIsolatedBaseBorrowable===undefined&&x.isIsolatedQuoteBorrowable===undefined?Number(x.maxIsolatedLeverage)>0:truth(x.isIsolatedBaseBorrowable)||truth(x.isIsolatedQuoteBorrowable);
+    if(!base||!quote)return;
     jr.push([String(x.symbol).toUpperCase(),base,quote,"margin",categoryOf(base,quote),"bitget",null,null,cross,iso,Number(x.maxCrossedLeverage)||0,Number(x.maxIsolatedLeverage)||0,truth(x.isIsolatedBaseBorrowable),truth(x.isIsolatedQuoteBorrowable),x.isCrossBorrowable===undefined?cross:truth(x.isCrossBorrowable)]);
    });
   }else jr=instrumentRows(data,j.market,j.pt);
-  LAST_GOOD[j.category]=jr;rows.push.apply(rows,jr);
+  if(!jr.length){var previous=LAST_GOOD[j.category]||[];if(previous.length){rows.push.apply(rows,previous);warnings.push(j.category+" returned an empty active catalogue; retained last successful catalogue");sources[j.category]={count:previous.length,fetchedAt:LAST_GOOD_AT[j.category]||null,stale:true,error:"empty_active_catalogue",host:r.value.host,apiVersion:r.value.version};return;}if(j.market!=="margin"){warnings.push(j.category+" returned no active contracts");sources[j.category]={count:0,fetchedAt:now,stale:true,error:"empty_active_catalogue",host:r.value.host,apiVersion:r.value.version};return;}}
+  LAST_GOOD[j.category]=jr;LAST_GOOD_AT[j.category]=now;rows.push.apply(rows,jr);
+  sources[j.category]={count:jr.length,fetchedAt:now,stale:false,host:r.value.host,apiVersion:r.value.version};
  });
- var seen={};rows=rows.filter(function(r){var key=r[0]+"|"+(r[6]||"")+"|"+r[3];if(seen[key])return false;seen[key]=1;return true}).sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0});
+ var seen={};rows=rows.filter(function(r){var key=r[0]+"|"+(r[6]||"")+"|"+r[3];if(seen[key])return false;seen[key]=1;return true}).sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:String(a[6]||"").localeCompare(String(b[6]||""));});
  if(kind==="margin"&&!rows.length)warnings.push("Bitget returned no margin-eligible pairs for the selected account/product region");
  if(!rows.length&&warnings.length)throw new Error("Bitget catalogue unavailable: "+warnings.join("; "));
- return {data:{symbols:rows,warnings:warnings},provider:"bitget-browser",failover:false};
+ return {data:{symbols:rows,warnings:warnings,sources:sources,generatedAt:now,stale:Object.keys(sources).some(function(k){return sources[k].stale}),count:rows.length},provider:"bitget-browser",failover:false};
 }
 async function loadSignalInputs(opts){
  var intervals=["1m","5m","15m","30m","1h","4h","1d","1w"],entries=await Promise.all(intervals.map(async function(iv){return [iv,await candles({symbol:opts.symbol,interval:iv,limit:300,market:opts.market,category:opts.category})]})),candleMap={};
@@ -128,5 +134,41 @@ async function loadSignalInputs(opts){
  var x=await context(opts);
  return {candles:candleMap,depth:x.depth,derivatives:x.derivatives,provider:"bitget-browser",market:opts.market,category:opts.category,failures:x.failures};
 }
-window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs};
+
+var WS_URL="wss://ws.bitget.com/v2/ws/public";
+var WS_INTERVAL={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D"};
+function streamProduct(market,category){if(market!=="futures")return "spot";return String(category||"USDT-FUTURES").toLowerCase();}
+function streamTime(v){var n=num(v);return n===null?Date.now():millis(n)||Date.now();}
+function streamCandle(row){if(Array.isArray(row)){var a=[streamTime(row[0]),num(row[1]),num(row[2]),num(row[3]),num(row[4]),num(row[5])];return a.every(function(x){return x!==null})?a:null;}var x=row||{},a=[streamTime(x.start||x.ts||x.time),num(x.open),num(x.high),num(x.low),num(x.close),num(x.volume)];return a.every(function(v){return v!==null})?a:null;}
+function subscribe(opts,handlers){
+ opts=opts||{};handlers=handlers||{};
+ var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=market==="futures"?(opts.category||"USDT-FUTURES"):"SPOT",interval=String(opts.interval||"1m"),product=streamProduct(market,category);
+ if(!/^[A-Z0-9]{5,20}$/.test(symbol))throw new Error("Invalid Bitget WebSocket symbol");
+ var args=[{instType:product,topic:"ticker",symbol:symbol},{instType:product,topic:"books5",symbol:symbol},{instType:product,topic:"publicTrade",symbol:symbol}];
+ if(WS_INTERVAL[interval])args.push({instType:product,topic:"kline",symbol:symbol,interval:WS_INTERVAL[interval]});
+ var ws=null,closed=false,retry=0,retryTimer=null,pingTimer=null,watchdog=null,lastMessageAt=0,connected=false;
+ function status(state,detail){if(typeof handlers.onStatus==="function")handlers.onStatus({state:state,detail:detail||"",connected:connected,lastMessageAt:lastMessageAt,retry:retry});}
+ function emit(type,data,raw){if(typeof handlers.onMessage==="function")handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null});}
+ function stopTimers(){if(pingTimer)clearInterval(pingTimer);if(watchdog)clearInterval(watchdog);pingTimer=null;watchdog=null;}
+ function scheduleReconnect(reason){if(closed)return;connected=false;stopTimers();status("reconnecting",reason);if(retryTimer)clearTimeout(retryTimer);var wait=Math.min(30000,1000*Math.pow(2,Math.min(retry,5)));retry++;retryTimer=setTimeout(connect,wait);}
+ function connect(){
+  if(closed)return;
+  status("connecting");
+  try{ws=new WebSocket(WS_URL);}catch(e){scheduleReconnect(e&&e.message||"websocket_unavailable");return;}
+  var current=ws;
+  current.onopen=function(){if(closed||ws!==current)return;connected=true;retry=0;lastMessageAt=Date.now();status("connected");current.send(JSON.stringify({op:"subscribe",args:args}));pingTimer=setInterval(function(){if(ws===current&&current.readyState===1)try{current.send("ping")}catch(e){}},25000);watchdog=setInterval(function(){if(ws===current&&connected&&Date.now()-lastMessageAt>60000){try{current.close()}catch(e){}}},10000);};
+  current.onmessage=function(event){if(ws!==current||closed)return;lastMessageAt=Date.now();var raw=event.data;if(raw==="pong"||raw==="ping")return;var msg;try{msg=typeof raw==="string"?JSON.parse(raw):raw}catch(e){return;}if(!msg||msg.event==="subscribe"||msg.event==="unsubscribe")return;if(msg.event==="error"){status("error",String(msg.msg||msg.code||"subscription_error"));return;}var arg=msg.arg||{},rows=Array.isArray(msg.data)?msg.data:[],topic=String(arg.topic||"");
+   if(topic==="ticker"&&rows.length){var ticker=parseTicker(rows[0]);ticker.timestamp=streamTime(msg.ts||rows[0].ts);emit("ticker",ticker,msg);}
+   else if(topic==="kline"&&rows.length){rows.forEach(function(row){var candle=streamCandle(row);if(candle)emit("candle",candle,msg);});}
+   else if(topic==="books5"&&rows.length){var d=rows[0]||{},depth=parseDepth(d);depth.timestamp=streamTime(msg.ts||d.ts);if(depth.bids.length&&depth.asks.length&&depth.bids[0][0]<depth.asks[0][0])emit("depth",depth,msg);}
+   else if(topic==="publicTrade"&&rows.length){var trades=parseTrades(rows);if(trades.length)emit("trades",trades,msg);}
+  };
+  current.onerror=function(){if(ws===current&&!closed)try{current.close()}catch(e){}};
+  current.onclose=function(){if(ws!==current||closed)return;connected=false;ws=null;scheduleReconnect("socket_closed");};
+ }
+ connect();
+ return {close:function(){closed=true;connected=false;if(retryTimer)clearTimeout(retryTimer);stopTimers();if(ws){var current=ws;ws=null;try{current.close()}catch(e){}}status("closed");},getState:function(){return {connected:connected,lastMessageAt:lastMessageAt,retry:retry,symbol:symbol,market:market,category:category,interval:interval,product:product};}};
+}
+
+window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs,subscribe:subscribe};
 })();`;
