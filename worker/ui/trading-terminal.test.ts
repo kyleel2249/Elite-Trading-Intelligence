@@ -55,7 +55,8 @@ test("institutional chart workspace exposes SMC, multi-timeframe and auction pro
   assert.match(TRADING_TERMINAL_JS, /function calcProfile/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /function renderDepthHeat|renderDepth\(/);
   assert.match(TRADING_TERMINAL_JS, /function renderFlow/);
-  assert.doesNotMatch(TRADING_TERMINAL_JS, /api\\/market\\/depth|renderDepth/);
+  assert.ok(!TRADING_TERMINAL_JS.includes("api/market/depth"));
+  assert.ok(!TRADING_TERMINAL_JS.includes("renderDepth"));
   assert.match(TRADING_TERMINAL_JS, /saveChartPrefs/);
   assert.match(TRADING_TERMINAL_JS, /drawFallbackChart/);
   assert.match(TRADING_TERMINAL_JS, /if\(S\.chart&&S\.candle\)/);
