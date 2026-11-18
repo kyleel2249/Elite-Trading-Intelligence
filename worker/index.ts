@@ -311,7 +311,7 @@ function renderAdvancedLiveChart(){
  const key=selection+'|'+pricePrecision+'|'+candles.length+'|'+(tail?tail.join('|'):'')+'|'+(sigSeq||0)+'|'+JSON.stringify(chartLines)+'|'+JSON.stringify(layers)+'|'+portfolioKey+'|'+$('chartStyle').value;
  if(key===liveAdvancedKey)return;liveAdvancedKey=key;
  liveCandle.applyOptions({priceFormat:livePriceFormat()});[liveEma20,liveEma50,liveEma200,liveBbUpper,liveBbLower,liveLine,liveArea].forEach(x=>x.applyOptions({priceFormat:livePriceFormat()}));
- if(!candles.length){liveCandle.setData([]);liveVolume.setData([]);return;}
+ if(!candles.length){liveCandle.setData([]);liveVolume.setData([]);liveEma20.setData([]);liveEma50.setData([]);liveEma200.setData([]);liveBbUpper.setData([]);liveBbLower.setData([]);liveRibbon.setData([]);liveLine.setData([]);liveArea.setData([]);livePriceLines.forEach(p=>{try{liveCandle.removePriceLine(p);}catch(e){}});livePriceLines=[];return;}
  const rows=candles.map(v=>({time:Math.floor(Number(v[0])/1000),open:Number(v[1]),high:Number(v[2]),low:Number(v[3]),close:Number(v[4])}));
  liveCandle.setData(rows);
  liveVolume.setData(candles.map(v=>({time:Math.floor(Number(v[0])/1000),value:Number(v[5])||0,color:Number(v[4])>=Number(v[1])?'rgba(33,214,154,.28)':'rgba(255,99,125,.28)'})));
