@@ -72,7 +72,7 @@ async function poll(force){
   const now=Date.now(),last=state.history[state.history.length-1];
   if(force||!last||now-last.t>900){state.history.push({t:now,mid:(book.bids[0][0]+book.asks[0][0])/2,bids:book.bids.slice(0,45),asks:book.asks.slice(0,45)});state.history=state.history.slice(-maxHistory);saveHistory();}
   await getCandles();
-  const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,trades:state.trades,candles:state.candles};
+  const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles};
   const response=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),cache:"no-store"});
   const analysis=await response.json().catch(()=>null);if(!response.ok)throw new Error(analysis?.detail||analysis?.error||"Liquidity analysis failed");
   state.analysis=analysis;setFeed(result.source+" · live snapshot",true);render();drawHeatmap();drawOverlay();
@@ -143,7 +143,7 @@ function startStream(){
 let analyzeAt=0;
 async function analyzeStreamDepth(){
  if(!state.depth||Date.now()-analyzeAt<900)return;analyzeAt=Date.now();
- try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,trades:state.trades,candles:state.candles})});const a=await r.json();if(r.ok){state.analysis=a;render();drawHeatmap();drawOverlay();}}catch(e){}
+ try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles})});const a=await r.json();if(r.ok){state.analysis=a;render();drawHeatmap();drawOverlay();}}catch(e){}
 }
 function restart(){
  readContext();stopStream();state.depth=null;state.previous=null;state.trades=[];state.candles=[];state.candleAt=0;state.analysis=null;state.history=[];restoreHistory();mount();createChartOverlay();poll(true);startStream();
