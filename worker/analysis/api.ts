@@ -252,6 +252,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         const sc = sanitizeCandles(body.candles);
         if (sc.error) return reply({ error: "invalid_candles", detail: sc.error }, 400);
         rows = sc.rows;
+        provider = String(body.provider ?? body.venue ?? "supplied").slice(0, 40);
       } else if (cls === "crypto") {
         const market = q("market") === "futures" ? "futures" : "spot";
         const inverse = market === "futures" && /USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol);
