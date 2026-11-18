@@ -499,10 +499,14 @@ let diagCache: { at: number; body: unknown } | null = null;
 
 async function runDiagnostics(env: MarketEnv, symbol: string, interval: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
   if (diagCache && Date.now() - diagCache.at < 10_000) return diagCache.body;
-  const params: Params = { symbol, interval, limit: 5, category: "spot" };
   const order: ProviderId[] = ["bybit"];
   const intervalSec = INTERVAL_SECONDS[interval] || 60;
-  const providers = await Promise.all((["bybit"] as ProviderId[]).map(async (id) => {
+  const providers = await Promise.all((["bybit", "bitget", "bitget_mix"] as ProviderId[]).map(async (id) => {
+    const params: Params = id === "bybit"
+      ? { symbol, interval, limit: 5, market: "spot", category: "spot" }
+      : id === "bitget_mix"
+        ? { symbol, interval, limit: 5, market: "futures", category: "USDT-FUTURES" }
+        : { symbol, interval, limit: 5, market: "spot", category: "SPOT" };
     const spec = PROVIDERS[id];
     let req: UpstreamRequest;
     try { req = spec.request("klines", params); } catch (e) {
@@ -546,6 +550,7 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string, 
       "lastSuccessAt is kept in Worker isolate memory and may reset when the isolate is recycled.",
       "Alpaca and Liquid are not used for market data: Alpaca crypto is USD-quoted (not USDT) and Liquid has no verified base URL.",
       "No credentials are sent or reported by this endpoint.",
+      "Bitget REST uses the same-origin Worker proxy with CAPI and documented V2 recovery; public WebSocket streams remain browser-native.",
     ],
   };
   diagCache = { at: Date.now(), body };
