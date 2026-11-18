@@ -131,7 +131,7 @@ jobs:
           const pathname = "/api/integrations/eti/summary";
           const timestamp = String(Math.floor(Date.now() / 1000));
           const nonce = randomBytes(24).toString("base64url");
-          const canonical = [timestamp, nonce, "GET", pathname].join("\\n");
+          const canonical = [timestamp, nonce, "GET", pathname].join("\n");
           const signature = createHmac("sha256", secret).update(canonical).digest("hex");
           const endpoint = new URL(pathname, origin);
 
