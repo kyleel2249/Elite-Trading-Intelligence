@@ -31,3 +31,11 @@ test("Bitget liquidity intelligence can recover from REST depth failure using it
  assert.ok(LIQUIDITY_JS.includes("waiting for WebSocket depth"));
  assert.ok(LIQUIDITY_JS.includes("state.sequence++;state.busy=false"));
 });
+
+
+test("Institutional Bitget recovery retains streamed candles and maps cached ticker metrics correctly",()=>{
+ assert.ok(LIQUIDITY_JS.includes('else if(m.type==="candle")'));
+ assert.ok(LIQUIDITY_JS.includes("state.structure=buildStructureMap(state.candles)"));
+ assert.ok(LIQUIDITY_JS.includes("quoteVolume:state.marketMetrics.turnover24h"));
+ assert.ok(LIQUIDITY_JS.includes("if(!state.candles.length)throw e;rows=state.candles"));
+});
