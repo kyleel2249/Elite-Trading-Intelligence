@@ -48,7 +48,7 @@ async function refresh(){
   get("/api/market/klines?venue=bybit&symbol=BTCUSDT&interval=1m&limit=180"),
   get("/api/market/diag?symbol=BTCUSDT&interval=1m"),
   get("/api/signals?symbol=BTCUSDT"),
-  get("/api/omnisignal/scan?symbols=BTCUSDT&strategy=intraday"),
+  get("/api/omnisignal?symbol=BTCUSDT&venue=bitget&market=spot&strategy=intraday&engines=swift,gainz"),
   get("/api/analysis/technical?symbol=BTCUSDT&assetClass=crypto&timeframe=1h"),
   get("/api/readiness?market=crypto&symbol=BTCUSDT&strategy=intraday"),
   get("/api/execution/status"),
