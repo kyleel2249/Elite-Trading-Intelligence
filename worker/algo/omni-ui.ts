@@ -126,6 +126,17 @@ function renderDecision(p){
  if(f.rejectedEngine)box.appendChild(note("Disagreement: "+f.rejectedEngine.engine+" was rejected. "+f.rejectedEngine.reason,"warn"));
  var dis=/SWIFT_.*_GAINZ_/.test(f.agreement||"");if(dis&&!f.rejectedEngine)box.appendChild(note("Engines disagree and independent evidence was not decisive, so ETI stands aside.","warn"));
  var det=el("details",null,el("summary",{text:"Why (decision trail)"}),list(p.reasons,"No reasons recorded"));box.appendChild(det);
+ if(p.fvg&&p.fvg.precision){
+  var fp=p.fvg.precision,fb=el("div"),best=fp.best;
+  fb.appendChild(el("div",{class:"muted small",text:"ETI INSTITUTIONAL FVG PRECISION · "+(fp.direction||"WAIT")+" · "+(fp.summary&&fp.summary.green||0)+" green qualified zone(s)"}));
+  if(best){
+   var zone=best.zone||{},targets=best.targets||[];
+   fb.appendChild(note((best.direction||"WAIT")+" · "+best.state+" · Entry "+fmt(best.entry&&best.entry.price)+" · FVG "+fmt(zone.lower)+"–"+fmt(zone.upper)+" · SL "+fmt(best.stopLoss)+" · TP1 "+fmt(targets[0]&&targets[0].price)+" · "+(best.riskReward===null?"RR unavailable":num(best.riskReward)+"R"),best.highlight==="green"?"ok":"warn"));
+   (best.explanation||[]).slice(0,4).forEach(function(v){fb.appendChild(el("div",{class:"muted small",text:"• "+v}));});
+  }else fb.appendChild(note("No fully qualified precision entry. Wait for a fresh green FVG and confirmed retest.","warn"));
+  fb.appendChild(el("div",{class:"muted small",text:"A green zone is a qualified, unmitigated setup; a confirmed signal is separate. Precision analysis is advisory and cannot place an order."}));
+  box.appendChild(fb);
+ }
  var dq=p.dataQuality||{};box.appendChild(el("div",{class:"muted small",text:"Provider: "+(dq.provider||"–")+" | market: "+(dq.venue||"–")+" "+(dq.category||"")+" | timeframes loaded: "+((dq.timeframesLoaded||[]).join(", ")||"–")+" | order book: "+(dq.orderBook||"–")+" | cross-provider check: "+(dq.providerCrossCheck||"–")}));
  put("decision-body",box)}
 
