@@ -1,7 +1,7 @@
 /**
  * ETI public market-data layer. Bybit REST runs from Cloudflare Workers; Bitget public REST
- * uses the browser-direct adapter because Bitget blocks Cloudflare Worker egress. No paid relay
- * or public-market API keys are required. Venue selection is explicit and never cross-substituted.
+ * uses a same-origin Worker proxy with CAPI/V2 recovery; live WebSocket streams remain browser-native.
+ * No paid relay or public-market API keys are required. Venue selection is explicit and never cross-substituted.
  */
 
 export interface MarketEnv { MARKET_PROVIDER_ORDER?: string; /** D1 binding; when present, the persisted Bitget catalogue is the labelled fallback if Bitget cannot be reached. */ ETI_PORTFOLIO_DB?: unknown }
