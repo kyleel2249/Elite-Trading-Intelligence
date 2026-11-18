@@ -52,7 +52,7 @@ async function getCandles(){
  if(state.venue==="bitget"){
   const market=state.market==="futures"?"futures":"spot";
   if(window.ETIBitget&&typeof window.ETIBitget.loadSignalInputs==="function"&&now-state.signalAt>=60000){const multi=await window.ETIBitget.loadSignalInputs({symbol:state.symbol,market,category:state.category});state.candlesByTimeframe=multi.candles||{};state.signalAt=now;}
-  rows=state.candlesByTimeframe[state.interval]?.length?state.candlesByTimeframe[state.interval]:await window.ETIBitget.candles({symbol:state.symbol,interval:state.interval,limit:300,market,category:state.category});
+  try{rows=state.candlesByTimeframe[state.interval]?.length?state.candlesByTimeframe[state.interval]:await window.ETIBitget.candles({symbol:state.symbol,interval:state.interval,limit:300,market,category:state.category});}catch(e){if(!state.candles.length)throw e;rows=state.candles;}
  }else rows=await query("/api/market/klines");
  state.candles=(rows||[]).map(r=>Array.isArray(r)?r:[r.time*1000,r.open,r.high,r.low,r.close,r.volume]).filter(r=>Array.isArray(r)&&r.length>=6).slice(-300);
  state.candleAt=now;
@@ -62,7 +62,7 @@ async function fetchBook(){
   if(!window.ETIBitget||typeof window.ETIBitget.context!=="function")throw new Error("Bitget browser adapter unavailable");
   const m=state.market==="futures"?"futures":"spot";
   const r=await window.ETIBitget.context({symbol:state.symbol,market:m,category:state.category,depthLimit:100,tradeLimit:100});
-  if(!r.depth){if(state.depth?.bids?.length&&state.depth?.asks?.length)return {depth:state.depth,trades:state.trades,ticker:state.marketMetrics,derivatives:state.derivatives,source:"Bitget WebSocket recovery"};throw new Error(r.failures?.depth||"Bitget order book unavailable; waiting for WebSocket depth");}
+  if(!r.depth){if(state.depth?.bids?.length&&state.depth?.asks?.length)return {depth:state.depth,trades:state.trades,ticker:state.marketMetrics?{quoteVolume:state.marketMetrics.turnover24h,volume:state.marketMetrics.volume24h,priceChangePercent:state.marketMetrics.priceChange24h,highPrice:state.marketMetrics.high24h,lowPrice:state.marketMetrics.low24h}:null,derivatives:state.derivatives,source:"Bitget WebSocket recovery"};throw new Error(r.failures?.depth||"Bitget order book unavailable; waiting for WebSocket depth");}
   return {depth:r.depth,trades:normalizeTrades(r.trades,"bitget"),ticker:r.ticker,derivatives:r.derivatives,source:"Bitget browser REST"};
  }
  const [depth,trades]=await Promise.all([query("/api/market/depth"),query("/api/market/trades")]);
@@ -203,7 +203,7 @@ function drawOverlay(){
 function stopStream(){if(state.ws){try{state.ws.close();}catch(e){}state.ws=null;}}
 function startStream(){
  stopStream();if(state.venue!=="bitget"||!window.ETIBitget?.subscribe)return;
- try{state.ws=window.ETIBitget.subscribe({symbol:state.symbol,market:state.market==="futures"?"futures":"spot",category:state.category,interval:state.interval},{onStatus:s=>{if(s.connected)setFeed("Bitget WebSocket connected · "+state.category,true);else if(s.state==="error"||s.state==="reconnecting")setFeed("Bitget stream "+s.state+" · "+(s.detail||"REST recovery active"),false);},onMessage:m=>{if(m.type==="depth"&&m.data?.bids?.length&&m.data?.asks?.length){state.previous=state.depth;state.depth={...m.data,timestamp:m.timestamp};state.trades=state.trades.slice(0,200);const snap={t:Date.now(),mid:(m.data.bids[0][0]+m.data.asks[0][0])/2,bids:m.data.bids.slice(0,45),asks:m.data.asks.slice(0,45)};state.history.push(snap);state.history=state.history.slice(-maxHistory);saveHistory();analyzeStreamDepth();}else if(m.type==="trades"){state.trades=normalizeTrades(m.data,"bitget").concat(state.trades).slice(0,300);}}});}catch(e){setFeed("Bitget WebSocket unavailable · REST fallback",false);}
+ try{state.ws=window.ETIBitget.subscribe({symbol:state.symbol,market:state.market==="futures"?"futures":"spot",category:state.category,interval:state.interval},{onStatus:s=>{if(s.connected)setFeed("Bitget WebSocket connected · "+state.category,true);else if(s.state==="error"||s.state==="reconnecting")setFeed("Bitget stream "+s.state+" · "+(s.detail||"REST recovery active"),false);},onMessage:m=>{if(m.type==="depth"&&m.data?.bids?.length&&m.data?.asks?.length){state.previous=state.depth;state.depth={...m.data,timestamp:m.timestamp};state.trades=state.trades.slice(0,200);const snap={t:Date.now(),mid:(m.data.bids[0][0]+m.data.asks[0][0])/2,bids:m.data.bids.slice(0,45),asks:m.data.asks.slice(0,45)};state.history.push(snap);state.history=state.history.slice(-maxHistory);saveHistory();analyzeStreamDepth();}else if(m.type==="trades"){state.trades=normalizeTrades(m.data,"bitget").concat(state.trades).slice(0,300);}else if(m.type==="candle"){const r=m.data;if(Array.isArray(r)&&r.length>=6){const row=r.map(Number);if(row.every(Number.isFinite)&&row[0]>0&&row[4]>0){const last=state.candles.at(-1);if(last&&Number(last[0])===row[0])state.candles[state.candles.length-1]=row;else state.candles.push(row);state.candles=state.candles.slice(-300);state.candleAt=Date.now();state.structure=buildStructureMap(state.candles);drawOverlay();}}}}});}catch(e){setFeed("Bitget WebSocket unavailable · REST fallback",false);}
 }
 let analyzeAt=0;
 async function analyzeStreamDepth(){
