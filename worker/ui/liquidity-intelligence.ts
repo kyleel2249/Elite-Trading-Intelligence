@@ -36,7 +36,7 @@ function query(path){const p=new URLSearchParams({venue:state.venue,market:state
 function normalizeTrades(rows,venue){
  return (rows||[]).map(t=>{
   if(Array.isArray(t))return {time:Number(t[0]),price:Number(t[1]),qty:Number(t[2]),side:String(t[3]||"").toLowerCase()};
-  if(venue==="bitget")return {time:Number(t.T||t.time||t.ts),price:Number(t.p||t.price),qty:Number(t.q||t.qty||t.size),side:t.m===true?"sell":String(t.side||"").toLowerCase()};
+  if(venue==="bitget")return {time:Number(t.T||t.time||t.ts),price:Number(t.p||t.price),qty:Number(t.q||t.qty||t.size),side:t.m===true?"sell":"buy"};
   return {time:Number(t.time||t.T||t.ts),price:Number(t.price||t.p),qty:Number(t.qty||t.size||t.q),side:t.isBuyerMaker===true?"sell":String(t.side||"").toLowerCase()};
  }).filter(t=>Number.isFinite(t.price)&&t.price>0&&Number.isFinite(t.qty)&&t.qty>0&&["buy","sell"].includes(t.side)).slice(0,300);
 }
