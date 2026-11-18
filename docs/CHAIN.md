@@ -41,3 +41,29 @@ UI: `/wallet`. API: `/api/chain/*` (every route needs `X-API-Key` when the serve
 - Public RPCs can rate-limit or censor; use a private endpoint for anything serious.
 - Mainnet use is the operator's decision and responsibility. Start on a testnet.
 
+
+## Connecting the Python backend (custodial wallet)
+
+The Worker serves the dashboard and reads native balances straight from the nodes. Creating the ETI wallet, tokens, the allowlist, transfer previews and the transaction list live in the Python backend (`/api/chain/*`).
+
+1. Deploy the backend: `fly launch --copy-config --no-deploy` then `fly secrets set DATABASE_URL=... ` and `fly deploy` (see `fly.toml`, health check `/api/system/health`). Any host that serves the Docker image over HTTPS works. Keep it outside US regions (Binance).
+2. Set the backend's chain options if needed: `CHAIN_ENABLED`, `CHAIN_RPC_<NETWORK>`, `CHAIN_REQUIRE_ALLOWLIST`, `CHAIN_MAINNET_SEND_ENABLED` (default false), `CHAIN_BROKER_ADDRESS`.
+3. Give the Worker the origin: add a GitHub repository variable (or secret) `BACKEND_URL=https://<your-backend-host>` and re-run the Deploy workflow, or run `npx wrangler secret put BACKEND_URL`. The value must be an origin only: no path, credentials, query or fragment.
+4. Verify: open `/api/chain-view/backend` (shows configured / connected / latency), then `/wallet/chain`.
+
+How the Worker connects (`worker/chain/backend.ts`): only `/api/chain/*` is forwarded; cookies are never sent; 10 s read / 20 s write timeout; a GET is retried once on a network error or 502/503/504; a POST (for example a send) is never retried; the network list is cached for 60 s per credential. Errors are explicit: `backend_not_configured` (503), `backend_invalid` (500), `backend_unreachable` (502), `backend_timeout` (504).
+
+## MetaMask (no backend needed)
+
+`/wallet/chain` has a MetaMask panel. It connects your own MetaMask in the browser (`eth_requestAccounts`), shows the account, the network and the native balance, can ask MetaMask to switch between the networks ETI tracks, and can cross-check the same address on the Worker's nodes. It is read-only: ETI never requests a signature, approval or transaction, never adds networks or tokens, and stores nothing. This works without `BACKEND_URL`; the ETI-managed custodial wallet above it still needs the backend.
+
+## Infura (API key and secret, no backend URL)
+
+Infura has no backend URL to configure: each network is `https://<network>.infura.io/v3/<API key>`. Provide the key as a secret and ETI builds the endpoints itself.
+
+- `INFURA_API_KEY` (secret): the 32-hex-character project key from the Infura dashboard.
+- `INFURA_API_SECRET` (secret, optional): needed only if the key has "Require API key secret for all requests" enabled; sent as HTTP Basic with an empty user name, and only to `*.infura.io`.
+- Worker: `npx wrangler secret put INFURA_API_KEY` (and `INFURA_API_SECRET`), or add them as GitHub Actions secrets: the Deploy workflow syncs them.
+- Backend: `fly secrets set INFURA_API_KEY=... INFURA_API_SECRET=...` (or the same variables on your host).
+- Precedence per network: explicit `CHAIN_RPC_<NETWORK>` > Infura > the built-in public Sepolia node. The wallet shows which one each network uses (Infura, custom RPC or public node); the key is never shown, logged or returned.
+- Enable the networks you need on the key in the Infura dashboard (Ethereum, Base, BNB Chain, Polygon). A network that is not enabled for the key shows the node's error on its tile.

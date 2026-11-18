@@ -53,7 +53,7 @@ class CredentialsBody(BaseModel):
 
 class AccountCreate(CredentialsBody):
     account_id: str = Field(..., pattern=ID)
-    provider: Literal["alpaca", "binance", "oanda"]
+    provider: Literal["alpaca", "binance", "bybit", "oanda"]
     environment: Literal["paper", "live"] = "paper"
     label: str = Field("", max_length=128)
 

@@ -2,13 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { executionBase, handleTestnetExecute, sizeFor } from "./algo/testnet-api.ts";
 import { series } from "./algo/fixtures.ts";
+import { bybitCompat } from "./test-support/bybit-compat.ts";
 
 const TOKEN = "t".repeat(40), NOW = Date.UTC(2026, 10, 9, 12, 0, 0);
 const MS: Record<string, number> = { "1m": 60000, "5m": 300000, "15m": 900000, "30m": 1800000, "1h": 3600000, "4h": 14400000, "1d": 86400000, "1w": 604800000 };
 const mk = (drift: number) => { const px = series(300, { drift, noise: 0.35, seed: 7, stepMs: 900000, end: 0 }).at(-1)![4]; return { drift, px }; };
 function world(drift = 0.25, acct: any = { environment: "paper", halted: false }, signal: { status: number; body: any } = { status: 200, body: { status: "filled", protective: [{}, {}, {}] } }, reach = true) {
   const { px } = mk(drift), calls: { url: string; init?: RequestInit }[] = [];
-  const fetchImpl = (async (input: any, init?: any) => {
+  const fetchImpl = bybitCompat((async (input: any, init?: any) => {
     const u = new URL(String(input)); calls.push({ url: String(input), init });
     if (u.host === "api.test") {
       if (!reach) throw new TypeError("refused");
@@ -18,7 +19,7 @@ function world(drift = 0.25, acct: any = { environment: "paper", halted: false }
     if (u.pathname.includes("klines")) { const st = MS[u.searchParams.get("interval") || "1h"]; return new Response(JSON.stringify(series(300, { drift, noise: 0.35, seed: 7, stepMs: st, end: NOW - st * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"]))); }
     if (u.pathname.includes("depth")) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(px - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(px + 0.01 + i * 0.01), "50"]) }));
     return new Response("x", { status: 500 });
-  }) as typeof fetch;
+  }) as typeof fetch);
   return { fetchImpl, calls };
 }
 const kv = () => { const m = new Map<string, string>(); return { get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => { m.set(k, v); }, list: async (o: { prefix: string }) => ({ keys: [...m.keys()].filter((k) => k.startsWith(o.prefix)).sort().map((name) => ({ name })), list_complete: true }) }; };

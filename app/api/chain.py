@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from app.chain.policy import fmt_units
 from app.chain.service import ChainError, ChainService
 from app.config import Settings, get_settings
 from app.database import get_db
+from app.governance import gate as gov_gate, rbac as gov_rbac
 from app.security.auth import require_api_key
 
 
@@ -74,6 +75,7 @@ class ApproveIn(BaseModel):
 class SendIn(BaseModel):
     quote_id: str = Field(..., max_length=4000)
     confirm: str = Field(..., max_length=8)
+    approval_id: Optional[int] = Field(None, ge=1, description="Approved multi-signature approval for this exact quote (required on mainnet when governance is enforced)")
 
 
 
@@ -156,8 +158,13 @@ async def approve_preview(body: ApproveIn, db: Session = Depends(get_db), settin
 
 @router.post("/send")
 @guarded
-async def send(body: SendIn, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    return {"transaction": await ChainService(db, settings).send(body.quote_id, body.confirm),
+async def send(body: SendIn, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings),
+               x_api_key: Optional[str] = Header(default=None), x_mfa_code: Optional[str] = Header(default=None)) -> dict[str, Any]:
+    actor, role = "api", "admin"
+    if gov_gate.enforced():       # RBAC + MFA step-up before the key is ever used; the gate itself runs inside ChainService.send
+        who = gov_rbac.authorize(db, "chain.send", x_api_key, x_mfa_code, request.client.host if request.client else "-")
+        actor, role = who.name, who.role
+    return {"transaction": await ChainService(db, settings).send(body.quote_id, body.confirm, approval_id=body.approval_id, actor=actor, role=role),
             "note": "Broadcast accepted by the node. It is not confirmed until a receipt says so (refresh the transaction)."}
 
 

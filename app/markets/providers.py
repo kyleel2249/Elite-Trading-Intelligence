@@ -45,6 +45,8 @@ class ProviderCapability:
 
 
 CAPABILITIES: dict[str, ProviderCapability] = {
+    "bybit": ProviderCapability("bybit", frozenset({AssetClass.CRYPTO}), False, True, True, ("paper", "live"),
+        "Bybit V5 Unified Trading Account: spot, spot margin, linear and inverse perpetuals. Testnet first; margin and derivatives require account-level eligibility."),
     "binance": ProviderCapability(
         "binance", frozenset({AssetClass.CRYPTO}), False, True, True, ("paper", "testnet", "live"),
         "Spot only (no margin, futures or options). The symbol must be listed on Binance spot."),
@@ -103,10 +105,13 @@ def setup_status(provider: str, settings: Any = None) -> dict:
     if p == "alpaca":
         missing = [n for n, v in (("ALPACA_API_KEY", settings.alpaca_api_key), ("ALPACA_SECRET_KEY", settings.alpaca_secret_key)) if not v]
         return {"configured": not missing, "missing": missing}
-    if p == "binance":     # public market data needs no keys; paper orders simulate without keys; real testnet/live orders need them
-        has = bool(settings.binance_api_key and settings.binance_secret_key)
+    if p == "bybit":
+        has = bool(settings.bybit_api_key and settings.bybit_api_secret)
         return {"configured": True, "missing": [], "note": None if has else
-                "public data and simulated paper fills work without keys; real testnet/live orders need BINANCE_API_KEY and BINANCE_SECRET_KEY"}
+                "public market data works without keys; private account access and testnet/live orders require BYBIT_API_KEY and BYBIT_API_SECRET"}
+    if p == "binance":     # retained for existing account records only
+        has = bool(settings.binance_api_key and settings.binance_secret_key)
+        return {"configured": True, "missing": [], "note": None if has else "legacy Binance credentials are not used for new ETI crypto routes"}
     return {"configured": False, "missing": []}
 
 
@@ -116,9 +121,9 @@ def routes_for(inst: Instrument, settings: Any = None) -> list[dict]:
     ac = inst.asset_class
 
     if ac == AssetClass.CRYPTO:
-        routes.append({"provider": "binance", "symbol": inst.symbol, "kind": "direct", "session_id": "crypto_24x7",
-                       "environments": list(CAPABILITIES["binance"].environments),
-                       "note": "Spot order via TradingService; the pair must exist on Binance spot."})
+        routes.append({"provider": "bybit", "symbol": inst.symbol, "kind": "direct", "session_id": "crypto_24x7",
+                       "environments": list(CAPABILITIES["bybit"].environments),
+                       "note": "Bybit V5 spot or derivative market data; execution uses the separately risk-gated Bybit execution account."})
 
     elif ac == AssetClass.STOCK and inst.region == "US":
         routes.append({"provider": "alpaca", "symbol": inst.symbol, "kind": "direct", "session_id": "us_equity",

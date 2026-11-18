@@ -19,13 +19,13 @@ button{background:#081d37;color:var(--txt);border:1px solid #102f50;border-radiu
 
 const BODY = `
 <main>
-<nav><a href="/">Dashboard</a><a href="/command">Command Centre</a><a href="/pro">ETI Pro</a><a href="/wallet"><b>Wallet</b></a></nav>
+<nav><a href="/">Dashboard</a><a href="/command">Command Centre</a><a href="/pro">ETI Pro</a><a href="/wallet"><b>Wallet</b></a><a href="/wallet/chain">On-chain wallet</a></nav>
 <h1>Wallet</h1>
 <div class="mut">Paper (simulated) wallet. No real funds are held or moved from this page.</div>
 <div id="status" class="note">Loading wallet...</div>
 <div class="grid" id="kpis"></div>
 <div class="card"><b>Open positions</b><div class="scroll"><table><thead><tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Unrealized</th></tr></thead><tbody id="pos"><tr><td colspan="5" class="mut">Loading...</td></tr></tbody></table></div></div>
-<div class="note" style="margin-top:14px">On-chain wallets and balances are provided by the ETI backend (/api/chain) and require CHAIN_ENABLED and a configured backend. They are not available in this view, and withdrawals are never enabled here.</div>
+<div class="note" style="margin-top:14px">The on-chain wallet, its native coin balances and live node status are on <a href="/wallet/chain">/wallet/chain</a>. Node data is read directly from the blockchain; the wallet itself lives in the ETI backend (/api/chain) and needs CHAIN_ENABLED and a configured backend. Withdrawals are never enabled here.</div>
 <p><button id="reload">Reload</button></p>
 </main>
 `;

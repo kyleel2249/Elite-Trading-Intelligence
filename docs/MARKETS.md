@@ -114,8 +114,7 @@ rerun the exporter after changing `app/markets`.
 Not on the Worker: `/snapshot`, `/calibrated-assess`, the `/markets` page, and any OANDA/Alpaca-market-data adapter. Its order
 path (Alpaca paper / Binance testnet / internal paper) now runs the market review before contacting a broker: a pairing the
 broker cannot trade (a London stock on Alpaca, a stock on Binance) is refused with `market_review_rejected`, and warnings
-(closed market, high-risk token) are stored on the audit record. Closed-market blocking applies only to live, which the Worker
-does not offer. Its `setup.configured` flags only say whether the matching secrets exist in the Worker environment.
+(closed market, high-risk token) are stored on the audit record. This Alpaca/Binance/internal order path is paper/testnet-only. Bitget live is a separate adapter with independent execution safeguards and remains fail-closed until private Worker egress is verified. Its `setup.configured` flags only say whether the matching secrets exist in the Worker environment.
 
 CME/ICE holiday calendars are not modelled: CME's published schedule is per product with early halts and its own page was not
 machine-readable or self-consistent enough to encode safely.
@@ -148,13 +147,8 @@ machine-readable or self-consistent enough to encode safely.
 | `GET /api/markets/calendars` | Holiday-calendar coverage and provenance, plus markets with none |
 | `GET /api/markets/snapshot?symbol=` | Live quote from the provider that can serve it (CFD/proxy labelled) |
 
-<<<<<<< HEAD
-Verdicts: `ready`, `caution`, `wait_for_session`, `analysis_only`, `blocked`. Nothing here submits an order.
-`POST /api/pretrade/check` (a dry run of the in-process risk engine) additionally returns `market_context` and `warnings`.
-=======
 Verdicts: `ready`, `caution`, `wait_for_session`, `needs_setup`, `analysis_only`, `blocked`. Nothing here submits an order.
-`POST /api/risk-gateway/preflight` additionally returns `market_context` and `warnings`.
->>>>>>> 053ecb9 (Add live calibration, Alpaca bars/options quote, and Cloudflare Worker market intelligence)
+`POST /api/pretrade/check` (a dry run of the in-process risk engine) additionally returns `market_context` and `warnings`.
 
 
 ## Metals on the live chart and in ETI

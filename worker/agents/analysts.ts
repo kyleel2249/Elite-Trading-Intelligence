@@ -3,6 +3,8 @@
  * They are not language models and they never fabricate inputs: missing data => insufficient_data.
  */
 import { INTERVAL_SECONDS } from "../market.ts";
+import { analyzeFvgPrecision } from "../analysis/fvg-precision.ts";
+import { analyzeLiquidityFvg } from "../analysis/liquidity-fvg.ts";
 import { makeReport, noData } from "./types.ts";
 import type { AgentReport, Ctx, Evidence, Kline, TradeProposal } from "./types.ts";
 import {
@@ -101,6 +103,17 @@ export function technicalAnalyst(ctx: Ctx): AgentReport {
   votes.push({ label: "market_structure", vote: structure, weight: 2, note: sNote });
   const prior = cs.slice(L - 20, L), hi20 = Math.max(...prior.map((k) => k[2])), lo20 = Math.min(...prior.map((k) => k[3]));
   votes.push({ label: "range_breakout_20", vote: close[L] > hi20 ? 1 : close[L] < lo20 ? -1 : 0, weight: 1 });
+  const closedForFvg = cs.filter(k => k[0] + (INTERVAL_SECONDS[ctx.market.interval] ?? 3600) * 1000 <= ctx.now);
+  let fvgPrecision: ReturnType<typeof analyzeFvgPrecision> | null = null;
+  let liquidityFvg: ReturnType<typeof analyzeLiquidityFvg> | null = null;
+  let fvgFailure: string | null = null;
+  try {
+    fvgPrecision = analyzeFvgPrecision(closedForFvg, ctx.market.interval, { symbol: ctx.market.symbol });
+    liquidityFvg = analyzeLiquidityFvg(closedForFvg, ctx.market.interval, { symbol: ctx.market.symbol });
+    const confirmed = fvgPrecision.best?.state === "confirmed" ? fvgPrecision.best : null;
+    if (confirmed) votes.push({ label: "fvg_precision_first_retest", vote: confirmed.direction === "BUY" ? 1 : -1, weight: 2, note: "Qualified FVG with a confirmed first-retest reaction; entry " + confirmed.entry.price });
+    if (liquidityFvg.autopilotEligible && liquidityFvg.setup) votes.push({ label: "liquidity_fvg_fusion", vote: liquidityFvg.direction === "BUY" ? 1 : -1, weight: 3, note: "Liquidity sweep + structure + FVG retest confirmed; entry " + liquidityFvg.setup.entry + "; manipulation risk " + liquidityFvg.manipulation.level });
+  } catch (e) { fvgFailure = e instanceof Error ? e.message : "Liquidity/FVG analysis failed"; }
   const sc = score(votes), stance = stanceOf(sc, 0.25);
   let conf = clamp(Math.abs(sc), 0, 0.9); if (!Number.isFinite(e200[L])) conf *= 0.85;
   const sup = lows.map((x) => x.p).filter((p) => p < close[L]), res = highs.map((x) => x.p).filter((p) => p > close[L]);
@@ -108,7 +121,19 @@ export function technicalAnalyst(ctx: Ctx): AgentReport {
   const evidence: Evidence[] = [...voteEvidence(votes),
     { label: "confluence_score", value: sc }, { label: "atr14", value: at[L] }, { label: "atr_pct", value: (at[L] / close[L]) * 100 },
     { label: "support", value: sup.length ? Math.max(...sup) : lo20 }, { label: "resistance", value: res.length ? Math.min(...res) : hi20 },
-    { label: "relative_volume_last_closed", value: relVol }];
+    { label: "relative_volume_last_closed", value: relVol },
+    { label: "fvg_precision_status", value: fvgPrecision?.best?.state ?? fvgPrecision?.status ?? "unavailable", note: fvgPrecision?.best?.explanation?.slice(0, 2).join("; ") ?? "No fully qualified FVG entry is active." },
+    { label: "fvg_precision_direction", value: fvgPrecision?.best?.direction ?? "WAIT" },
+    { label: "fvg_precision_entry", value: fvgPrecision?.best?.entry.price ?? null, note: "50% consequent encroachment reference; execution still requires the existing risk and order gates." },
+    { label: "fvg_precision_green_zones", value: fvgPrecision?.summary.green ?? 0 },
+    { label: "liquidity_fvg_autopilot_eligible", value: liquidityFvg?.autopilotEligible ?? false, note: liquidityFvg?.eligibilityReasons.join("; ") || liquidityFvg?.blocks.slice(0,3).join("; ") || "Fusion engine unavailable." },
+    { label: "liquidity_fvg_direction", value: liquidityFvg?.direction ?? "WAIT" },
+    { label: "liquidity_fvg_score", value: liquidityFvg?.score ?? 0 },
+    { label: "liquidity_manipulation_risk", value: liquidityFvg?.manipulation.level ?? "unavailable", note: liquidityFvg?.manipulation.evidence.slice(0,2).join("; ") ?? "No manipulation assessment." },
+    { label: "liquidity_nearest_sweep_price", value: liquidityFvg?.manipulation.likelySweepPrice ?? null }];
+  if (liquidityFvg?.blocks.length) warnings.push("Liquidity-FVG fusion: " + liquidityFvg.blocks.slice(0,3).join("; "));
+  if (fvgFailure) warnings.push("FVG precision sub-analysis unavailable: " + fvgFailure);
+  else if (fvgPrecision?.status === "insufficient_history") warnings.push("FVG precision needs at least 40 closed candles.");
   return makeReport("technical", { stance, confidence: conf, summary: `Technical ${stance} (confluence ${sc.toFixed(2)}): ${sNote}; RSI ${rv.toFixed(0)}.`, evidence, warnings }, ctx.now);
 }
 
@@ -166,11 +191,24 @@ export function macroIntelligence(ctx: Ctx): AgentReport {
 // ---------------------------------------------------------------- 6. CRYPTO
 export function cryptoIntelligence(ctx: Ctx): AgentReport {
   const book = ctx.market.depth ? bookStats(ctx.market.depth) : null, oc = obj(ctx.supplied.onchain);
-  if (!book && !oc) return noData("crypto", "No order book or on-chain data available.", ["order book", "onchain.exchangeNetflow7dPct, activeAddresses30dChangePct, stablecoinSupply30dChangePct, tvl30dChangePct, top10HolderPct, contractAudit, hasMintAuthority, liquidityLockedPct"], ctx.now);
+  const flow = obj(ctx.supplied.orderFlow) ?? (ctx.market.orderFlow as unknown as Record<string, unknown> | undefined) ?? null;
+  if (!book && !oc && !flow) return noData("crypto", "No order book, trade-flow or on-chain data available.", ["order book", "public trade tape", "onchain metrics"], ctx.now);
   const votes: Vote[] = [], evidence: Evidence[] = [], warnings: string[] = [];
   if (book) {
     evidence.push({ label: "spread_bps", value: book.spreadBps }, { label: "bid_depth_usd_1pct", value: book.bidUsd1pct }, { label: "ask_depth_usd_1pct", value: book.askUsd1pct }, { label: "book_imbalance", value: book.imbalance });
     votes.push({ label: "book_imbalance", vote: clamp(book.imbalance * 1.5, -1, 1), weight: 0.5, note: "Order books can be spoofed; low weight." });
+  }
+  if (flow) {
+    const tape = obj(flow.tape), quality = obj(flow.dataQuality);
+    const deltaPct = finite(tape.deltaPct), ageMs = finite(quality.tradeAgeMs), count = finite(tape.trades);
+    if (deltaPct !== undefined && ageMs !== undefined && ageMs >= 0 && ageMs <= 180_000 && count !== undefined && count >= 5) {
+      evidence.push({ label: "aggressor_delta_pct", value: deltaPct, note: "Observed public trade sample; not full-session CVD." },
+        { label: "aggressor_trade_count", value: count }, { label: "trade_tape_age_ms", value: ageMs });
+      votes.push({ label: "aggressor_delta", vote: clamp(deltaPct / 50, -1, 1), weight: 0.5, note: "Short public tape sample; low weight and freshness-gated." });
+    } else warnings.push("Order-flow trade tape is stale, too small or missing required fields; it was excluded from directional voting.");
+    const flowDepth = obj(flow.depth), spread = finite(flowDepth.spreadBps), imbalance = finite(flowDepth.imbalance);
+    if (spread !== undefined) evidence.push({ label: "flow_spread_bps", value: spread });
+    if (imbalance !== undefined) evidence.push({ label: "flow_depth_imbalance", value: imbalance });
   }
   const v = ctx.market.candles.map((k) => k[5]);
   if (v.length >= 41) evidence.push({ label: "volume_ratio_10_vs_prior_30", value: mean(v.slice(-11, -1)) / mean(v.slice(-41, -11)) });
@@ -187,7 +225,7 @@ export function cryptoIntelligence(ctx: Ctx): AgentReport {
   }
   const sc = score(votes), stance = votes.length ? stanceOf(sc, 0.2) : "neutral";
   let conf = clamp(Math.abs(sc) * 0.7, 0, 0.7); if (!oc) conf = Math.min(conf, 0.25);
-  return makeReport("crypto", { stance, confidence: conf, summary: `Crypto ${stance}: ${oc ? "on-chain + liquidity" : "order-book liquidity only (no on-chain data supplied)"}.`, evidence: [...evidence, ...voteEvidence(votes)], warnings, missingInputs: oc ? [] : ["onchain metrics"] }, ctx.now);
+  return makeReport("crypto", { stance, confidence: conf, summary: `Crypto ${stance}: ${oc ? "on-chain + liquidity" : flow ? "public trade flow + order-book liquidity" : "order-book liquidity only (no on-chain data supplied)"}.`, evidence: [...evidence, ...voteEvidence(votes)], warnings, missingInputs: oc ? [] : ["onchain metrics"] }, ctx.now);
 }
 
 // ----------------------------------------------------------------- 7. NEWS

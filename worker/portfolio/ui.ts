@@ -39,6 +39,14 @@ export const PORTFOLIO_HTML = `
 <div class="pfwrap"><div id="pfClosed"></div></div>
 <h3>Portfolio Performance</h3>
 <div class="pfperf"><div><canvas id="pfCurve" class="pfcurve" role="img" aria-label="Equity curve from actual fills"></canvas><div id="pfCurveNote" class="muted" style="font-size:11px;margin-top:4px"></div></div><div id="pfStats" class="pfstats"></div></div>
+<h3>AI Portfolio Manager <span class="muted">read-only allocation advisory</span></h3><div id="pfManager" class="pfwrap muted" aria-live="polite">Loading strategy allocation analysis…</div>
+<h3>Bybit &amp; Bitget Account Sync <button type="button" class="mini" id="pfExchangeRefresh">Refresh accounts</button></h3><div id="pfExchanges" class="pfwrap muted" aria-live="polite">Account snapshots require the ETI master execution token or administrator MFA.</div>
+<h3>Exchange Fill &amp; Open-Order Synchronization <button type="button" class="mini" id="pfActivitySync">Sync exchange activity</button><button type="button" class="mini" id="pfActivityRefresh">Refresh activity</button></h3>
+<div id="pfActivity" class="pfwrap muted" aria-live="polite">Exchange executions and open orders have not been synchronized.</div>
+<h3>Cross-Exchange Risk Reconciliation <button type="button" class="mini" id="pfCrossRefresh">Reconcile Bybit + Bitget</button></h3><div id="pfCrossRisk" class="pfwrap muted" aria-live="polite">No cross-exchange reconciliation has been run.</div>
+<h3>Autonomous Execution Authorization <span class="muted">separate permission · order dispatch locked</span></h3>
+<div class="pfinfo">Authorization records agent limits for 15 minutes. This does not activate live orders. Every future order must receive Risk Manager approval; its veto cannot be overridden.</div>
+<div class="pfbar"><label>Per-order cap USD <input id="pfAutoCap" type="number" min="1" max="1000" value="50" style="width:90px"></label><label>Max concurrent positions <input id="pfAutoPositions" type="number" min="1" max="5" value="2" style="width:65px"></label><input id="pfAutoConfirm" placeholder="Type AUTHORIZE ETI AUTONOMY" style="min-width:230px"><button id="pfAutoEnable" class="mini">Authorize agents (15 min)</button><button id="pfAutoDisable" class="mini danger">Revoke</button></div><div id="pfAutoStatus" class="pfwrap muted" aria-live="polite">Authorization status not loaded.</div>
 <details style="margin-top:12px"><summary class="muted">Ledger integrity (anomalies and reconciliation)</summary><div id="pfIntegrity" class="muted" style="font-size:12px;margin-top:6px"></div></details>
 </section>
 `;
@@ -49,7 +57,7 @@ export const PLAN_HTML = `
 
 export const PORTFOLIO_JS = `
 /* ===== live portfolio: ledger-backed panels + chart trade layer ===== */
-const pf={env:'internal_paper',state:null,timer:null,fails:0,okAt:0,busy:false,pollMs:15000,allOrders:false,closedRows:null,hits:[],pop:null,lastPx:null,levEdit:null};
+const pf={env:'internal_paper',state:null,manager:null,managerAt:0,exchanges:null,exchangesAt:0,timer:null,fails:0,okAt:0,busy:false,pollMs:15000,allOrders:false,closedRows:null,hits:[],pop:null,lastPx:null,levEdit:null};
 const pfEsc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pfNum=(v,d)=>{if(v==null||!isFinite(v))return '—';const dd=d==null?2:d,m=Math.abs(v)>=1||v===0?dd:Math.max(dd,6);return Number(v).toLocaleString(undefined,{minimumFractionDigits:Math.min(dd,m),maximumFractionDigits:m});};
 const pfQty=v=>v==null||!isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:8});
@@ -83,12 +91,50 @@ async function pfLoad(){
   if(r.status===403){pf.state=null;pfSetStatus('off','No '+pf.env.replace('_',' ')+' session');pfRender();pf.fails=0;pfSchedule(20000);return;}
   if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
   pf.state=d;pf.fails=0;pf.okAt=Date.now();pf.pollMs=pfNextDelay();
+  if(Date.now()-pf.managerAt>30000)pfLoadManager();
   pfSetStatus(document.hidden?'poll':'ok',d.disabled?'Disabled':'Synced · every '+Math.round(pf.pollMs/1000)+'s');
   pfRender();drawChart();pfSchedule(pf.pollMs);
  }catch(e){pf.fails++;const d=pfNextDelay();pfSetStatus('off','Offline · retrying in '+Math.round(d/1000)+'s'+(pf.state?' · showing last data':''));pfSchedule(d);}
  finally{pf.busy=false;if(pf.again){pf.again=false;setTimeout(pfLoad,50);}}
 }
 function pfKick(){clearTimeout(pf.timer);pfLoad();setTimeout(pfLoad,2500);}
+async function pfLoadManager(){
+ const target=$('pfManager');if(!target)return;
+ try{
+  const q='/api/portfolio/manager?environment='+encodeURIComponent(pf.env),{r,d}=await pfCall(q);
+  if(r.status===423){target.textContent='Live portfolio management is disabled. No live account or order state is inferred.';pf.managerAt=Date.now();return;}
+  if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
+  pf.manager=d;pf.managerAt=Date.now();pfRenderManager();
+  if(Date.now()-pf.exchangesAt>60000)pfLoadExchanges();
+ }catch(e){if(!pf.manager)target.textContent='Portfolio Manager unavailable: '+e.message;else target.textContent='Showing the last analysis. Refresh pending: '+e.message;}
+}
+function pfRenderManager(){
+ const root=$('pfManager'),m=pf.manager;if(!root||!m)return;
+ const a=m.account||{},c=m.controls||{};
+ const money=v=>v==null?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+ const pct=v=>v==null?'—':Number(v).toFixed(2)+'%';
+ const rows=(m.strategies||[]).map(s=>'<tr><td>'+pfEsc(s.strategy)+'</td><td>'+s.trades+'</td><td>'+pct(s.winRate==null?null:s.winRate*100)+'</td><td>'+money(s.expectancyUsd)+'</td><td>'+pct(s.targetWeightPct)+'</td><td>'+money(s.targetCapitalUsd)+'</td><td>'+pfEsc(s.eligible?'Eligible':'Building sample')+'</td></tr>').join('');
+ const warnings=(c.warnings||[]).map(w=>'<li>'+pfEsc(w.replace(/_/g,' '))+'</li>').join('');
+ const venues=(m.venues||[]).map(v=>'<span class="muted">'+pfEsc(v.venue)+': '+money(v.ledgerExposureUsd)+' USDT</span>').join(' · ');
+ root.className='pfwrap';root.innerHTML='<div class="pfkpis"><div><span>Equity</span><b>'+money(a.equityUsd)+'</b></div><div><span>Cash</span><b>'+money(a.cashUsd)+'</b></div><div><span>Open risk</span><b>'+pct(a.openRiskPct)+'</b></div><div><span>Allocated target</span><b>'+pct(a.allocatedPct)+'</b></div><div><span>Cash reserve target</span><b>'+pct(a.recommendedReservePct)+'</b></div><div><span>Portfolio exposure</span><b>'+pct(a.exposurePct)+'</b></div></div><div class="muted" style="font-size:11px;margin:8px 0">Advisory only · '+(c.executionReady?'risk data complete':'risk data incomplete / blocked')+' · no orders, leverage or automatic reallocations</div><div class="pfwrap"><table><thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Expectancy</th><th>Target</th><th>Capital</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="muted" style="font-size:11px;margin-top:8px">Recorded venue exposure: '+(venues||'No venue-tagged holdings in this ledger')+'</div>'+(warnings?'<ul class="muted" style="font-size:11px">'+warnings+'</ul>':'<div class="muted" style="font-size:11px;margin-top:6px">No portfolio-level warnings.</div>');
+}
+async function pfLoadExchanges(){
+ const root=$('pfExchanges');if(!root)return;
+ try{const {r,d}=await pfCall('/api/portfolio/exchanges');
+  if(r.status===403){root.textContent='Account snapshots require the ETI master execution token or an administrator session with MFA.';pf.exchangesAt=Date.now();return;}
+  if(!r.ok)throw Error(d.message||d.error||('HTTP '+r.status));
+  pf.exchanges=d;pf.exchangesAt=Date.now();pfRenderExchanges();
+ }catch(e){if(!pf.exchanges)root.textContent='Exchange account sync unavailable: '+e.message;}
+}
+function pfRenderExchanges(){
+ const root=$('pfExchanges'),x=pf.exchanges;if(!root||!x)return;
+ const money=v=>v==null?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+ const esc=pfEsc, by=(x.venues||[]).find(v=>v.venue==='bybit'),bg=(x.venues||[]).find(v=>v.venue==='bitget');
+ const byAssets=(by&&by.assets||[]).slice(0,20).map(a=>'<tr><td>'+esc(a.coin)+'</td><td>'+money(a.walletBalance)+'</td><td>'+money(a.availableToWithdraw)+'</td><td>'+money(a.usdValue)+'</td></tr>').join('');
+ const byPos=(by&&by.positions||[]).slice(0,20).map(p=>'<tr><td>'+esc(p.symbol)+'</td><td>'+esc(p.category+' '+p.side)+'</td><td>'+money(p.size)+'</td><td>'+money(p.positionValue)+'</td><td>'+money(p.unrealizedPnl)+'</td></tr>').join('');
+ const mk=(bg&&bg.markets||[]).map(m=>'<details><summary>'+esc(m.market)+' · '+esc(m.status)+' · '+(m.assets||[]).length+' assets · '+(m.positions||[]).length+' positions</summary><div class="pfwrap"><table><thead><tr><th>Coin</th><th>Balance</th><th>Available</th><th>Equity / USD value</th></tr></thead><tbody>'+((m.assets||[]).map(a=>'<tr><td>'+esc(a.coin)+'</td><td>'+money(a.total)+'</td><td>'+money(a.available)+'</td><td>'+money(a.equity??a.usdValue)+'</td></tr>').join('')||'<tr><td colspan="4">No reported assets or unavailable.</td></tr>')+'</tbody></table><table><thead><tr><th>Symbol</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Unrealized P&amp;L</th><th>Liquidation</th></tr></thead><tbody>'+((m.positions||[]).map(p=>'<tr><td>'+esc(p.symbol)+'</td><td>'+esc(p.side)+'</td><td>'+money(p.size)+'</td><td>'+money(p.entryPrice)+'</td><td>'+money(p.markPrice)+'</td><td>'+money(p.unrealizedPnl)+'</td><td>'+money(p.liquidationPrice)+'</td></tr>').join('')||'<tr><td colspan="7">No open positions reported.</td></tr>')+'</tbody></table></div>'+(m.error?'<div class="muted">'+esc(m.error)+'</div>':'')+'</details>').join('');
+ root.className='pfwrap';root.innerHTML='<div class="pfkpis"><div><span>Bybit status</span><b>'+esc(by&&by.status||'unknown')+'</b></div><div><span>Bybit equity</span><b>'+money(by&&by.equityUsd)+'</b></div><div><span>Bybit available</span><b>'+money(by&&by.availableUsd)+'</b></div><div><span>Bitget status</span><b>'+esc(bg&&bg.status||'unknown')+'</b></div><div><span>Last sync</span><b>'+new Date(x.generatedAt).toLocaleTimeString()+'</b></div></div><p class="muted" style="font-size:11px">Read-only. Bitget product balances remain separate to avoid double-counting shared collateral. Exchange-reported units are retained; combined equity is deliberately not calculated.</p><h4>Bybit assets</h4><div class="pfwrap"><table><thead><tr><th>Coin</th><th>Wallet</th><th>Available to withdraw</th><th>USD value</th></tr></thead><tbody>'+(byAssets||'<tr><td colspan="4">No assets reported or account unavailable.</td></tr>')+'</tbody></table></div><h4>Bybit positions</h4><div class="pfwrap"><table><thead><tr><th>Symbol</th><th>Market</th><th>Size</th><th>Position value</th><th>Unrealized P&amp;L</th></tr></thead><tbody>'+(byPos||'<tr><td colspan="5">No positions reported.</td></tr>')+'</tbody></table></div><h4>Bitget accounts by product</h4>'+mk+'<p class="muted" style="font-size:11px">No orders, leverage changes, transfers or withdrawals are performed by this panel.</p>';
+}
 function pfMark(p){const sym=$('symbol').value;if(p.symbol===sym&&candles.length){const px=candles[candles.length-1][4];if(px>0)return {px,src:'chart'};}return p.markPrice!=null?{px:p.markPrice,src:p.markStale?'stale':'server'}:{px:null,src:'none'};}
 function pfLive(){
  const s=pf.state;if(!s||!s.positions)return null;let unreal=0,value=0,ok=true;
@@ -298,9 +344,52 @@ function pfUseSignal(){
  $('planStop').value=L.stopLoss;$('planTp1').value=L.targets[0]!=null?L.targets[0]:'';$('planTp2').value=L.targets[1]!=null?L.targets[1]:'';$('planTp3').value=L.targets[2]!=null?L.targets[2]:'';
  n.textContent='Copied the ETI engine levels (entry '+fp(L.entry)+'). They apply to BUY orders only.';
 }
+async function pfLoadExchangeActivity(){
+ const root=$('pfActivity');if(!root)return;root.textContent='Loading persisted exchange activity…';
+ const {r,d}=await pfCall('/api/portfolio/exchange-activity?environment='+encodeURIComponent(pf.env));
+ if(!r.ok){root.textContent=d.message||d.error||'Exchange activity unavailable.';return;}
+ const fills=d.fills||[],orders=d.openOrders||[];
+ const recent=fills.slice(-30).reverse();
+ const fillRows=recent.map(f=>'<tr><td>'+pfEsc(f.venue)+'</td><td>'+pfEsc(f.market)+'</td><td>'+pfEsc(f.symbol)+'</td><td>'+pfEsc(f.side)+'</td><td class="num">'+pfQty(f.qty)+'</td><td class="num">'+pfNum(f.price,6)+'</td><td class="num">'+pfEsc(f.fee==null?'—':pfNum(f.fee,8)+' '+(f.feeCoin||''))+'</td><td>'+pfTime(f.at)+'</td></tr>').join('');
+ const orderRows=orders.slice(0,40).map(o=>'<tr><td>'+pfEsc(o.venue)+'</td><td>'+pfEsc(o.market)+'</td><td>'+pfEsc(o.symbol)+'</td><td>'+pfEsc(o.side)+'</td><td class="num">'+pfQty(o.leavesQty)+'</td><td>'+pfEsc(o.status)+'</td><td>'+pfEsc(o.orderId)+'</td></tr>').join('');
+ root.innerHTML='<div class="pfkpis"><div><span>Last sync</span><b>'+pfEsc(d.syncedAt?pfTime(d.syncedAt):'Never')+'</b></div><div><span>Stored executions</span><b>'+(d.totalFills??fills.length)+'</b></div><div><span>Current open orders</span><b>'+orders.length+'</b></div><div><span>Unmatched executions</span><b class="neg">'+(d.unmatchedFills||[]).length+'</b></div></div><p class="muted">Activity journal is separate from the position ledger. Futures hedge/reduce-only and margin fills are not force-converted into long-only spot positions.</p><b>Current open orders</b><div class="pfwrap"><table><thead><tr><th>Venue</th><th>Market</th><th>Symbol</th><th>Side</th><th class="num">Remaining</th><th>Status</th><th>Order ID</th></tr></thead><tbody>'+(orderRows||'<tr><td colspan="7">No open orders returned.</td></tr>')+'</tbody></table></div><b>Latest executions</b><div class="pfwrap"><table><thead><tr><th>Venue</th><th>Market</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fee</th><th>Time</th></tr></thead><tbody>'+(fillRows||'<tr><td colspan="8">No executions stored.</td></tr>')+'</tbody></table></div><div class="pfnote">'+(d.unmatchedFills||[]).slice(-10).map(f=>pfEsc(f.venue+' '+f.market+' '+f.symbol+' order '+f.orderId+' unmatched')).join('<br>')+'</div>';
+}
+async function pfSyncExchangeActivity(){
+ const b=$('pfActivitySync');b.disabled=true;b.textContent='Syncing…';
+ const {r,d}=await pfCall('/api/portfolio/exchange-activity',{environment:pf.env});
+ b.disabled=false;b.textContent='Sync exchange activity';
+ if(!r.ok){alert(d.message||d.error||'Exchange activity sync failed');return;}
+ await pfLoadExchangeActivity();
+ const s=d.summary||{};if(s.unmatchedExchangeFills)alert(s.unmatchedExchangeFills+' exchange fills could not be matched to ETI ledger orders. They remain in the separate activity journal.');
+}
+async function pfLoadCrossRisk(){
+ const root=$('pfCrossRisk');if(!root)return;root.textContent='Reconciling exchange positions with the ETI ledger…';
+ const {r,d}=await pfCall('/api/portfolio/reconciliation?environment='+encodeURIComponent(pf.env));
+ if(!r.ok){root.textContent=d.message||d.error||('Reconciliation failed: HTTP '+r.status);return;}
+ const rows=(d.comparisons||[]).map(x=>'<tr><td>'+pfEsc(x.venue)+'</td><td>'+pfEsc(x.symbol)+'</td><td>'+pfEsc(x.side)+'</td><td class="num">'+pfQty(x.exchangeQty)+'</td><td class="num">'+pfQty(x.ledgerQty)+'</td><td class="num">'+pfQty(x.delta)+'</td><td>'+pfEsc(x.status)+'</td></tr>').join('');
+ root.innerHTML='<div class="pfkpis"><div><span>Status</span><b class="'+(d.ok?'pos':'neg')+'">'+pfEsc(d.status)+'</b></div><div><span>Combined verified available USD</span><b>'+pfMoney(d.combinedVerifiedAvailableUsd)+'</b></div><div><span>Maximum deployable (50%)</span><b>'+pfMoney(d.capitalAllocation&&d.capitalAllocation.maxDeployableUsd)+'</b></div><div><span>Combined verified exposure USD</span><b>'+pfMoney(d.combinedVerifiedExposureUsd)+'</b></div><div><span>Snapshot age</span><b>'+pfEsc(d.fresh?'Fresh':'Stale / invalid')+'</b></div></div><p class="muted">Checked '+pfTime(d.checkedAt)+'. Exposure is withheld until exchange open orders and trusted USD notionals are available. Execution eligible: no.</p><div class="pfwrap"><table><thead><tr><th>Venue</th><th>Symbol</th><th>Side</th><th class="num">Exchange qty</th><th class="num">ETI ledger qty</th><th class="num">Difference</th><th>Status</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7">No comparable open positions.</td></tr>')+'</tbody></table></div><div class="pfnote">'+(d.problems||[]).map(pfEsc).join(' · ')+'</div><div class="pfinfo">'+(d.warnings||[]).map(pfEsc).join(' · ')+'</div>';
+}
+async function pfLoadAutonomy(){
+ const root=$('pfAutoStatus');if(!root)return;const {r,d}=await pfCall('/api/portfolio/autonomy');
+ if(!r.ok){root.textContent=d.message||d.error||'Authorization status unavailable.';return;}
+ root.textContent=(d.enabled?'AUTHORIZED until '+pfTime(d.expiresAt):'NOT AUTHORIZED')+' · '+(d.reason||'')+' · execution dispatch: '+(d.executionDispatchEnabled?'enabled':'LOCKED');
+}
+async function pfSetAutonomy(enabled){
+ const body=enabled?{enabled:true,confirmation:$('pfAutoConfirm').value,perOrderCapUsd:Number($('pfAutoCap').value),maxConcurrentPositions:Number($('pfAutoPositions').value)}:{enabled:false};
+ const {r,d}=await pfCall('/api/portfolio/autonomy',body);if(!r.ok){alert(d.message||d.error||'Autonomy control update failed');return;}
+ $('pfAutoStatus').textContent=(d.enabled?'AUTHORIZED until '+pfTime(d.expiresAt):'REVOKED')+' · execution dispatch: LOCKED';$('pfAutoConfirm').value='';
+}
 function pfInit(){
  pf.env=pfEnvOfBroker();$('pfEnv').value=pf.env;
- $('pfEnv').onchange=()=>{pf.env=$('pfEnv').value;pf.state=null;pf.closedRows=null;pfRender();pfLoad();};
+ $('pfExchangeRefresh').onclick=()=>{pf.exchangesAt=0;pfLoadExchanges();};
+ $('pfCrossRefresh').onclick=pfLoadCrossRisk;
+ $('pfActivitySync').onclick=pfSyncExchangeActivity;
+ $('pfActivityRefresh').onclick=pfLoadExchangeActivity;
+ pfLoadExchangeActivity();
+ $('pfAutoEnable').onclick=()=>pfSetAutonomy(true);
+ $('pfAutoDisable').onclick=()=>pfSetAutonomy(false);
+ pfLoadAutonomy();
+ $('pfEnv').onchange=()=>{pf.env=$('pfEnv').value;pf.state=null;pf.manager=null;pf.managerAt=0;pf.exchanges=null;pf.exchangesAt=0;pf.closedRows=null;pfRender();$('pfManager').textContent='Loading strategy allocation analysis…';$('pfExchanges').textContent='Refresh accounts to load exchange snapshots.';pfLoad();};
  $('orderBroker').addEventListener('change',()=>{const e=pfEnvOfBroker();if(e!==pf.env){pf.env=e;pf.state=null;pf.closedRows=null;pfRender();pfLoad();}});
  $('pfAllOrders').onchange=()=>{pf.allOrders=$('pfAllOrders').checked;pfRenderOrders();};
  $('pfSync').onclick=async()=>{$('pfSync').disabled=true;await pfCall('/api/portfolio/sync',{environment:pf.env});$('pfSync').disabled=false;pfKick();};

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { handlePaper, type PaperEnv } from "./algo/paper-api.ts";
 import worker from "./index.ts";
 import { series } from "./algo/fixtures.ts";
+import { bybitCompat } from "./test-support/bybit-compat.ts";
 
-const TOKEN = "t".repeat(40), NOW = Date.UTC(2026, 10, 9, 12, 0, 0), PX = series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: 900000, end: 0 }).at(-1)![4]; // every timeframe ends at this same price in the fixture
+const TOKEN = "t".repeat(40), NOW = Date.UTC(2026, 10, 9, 12, 0, 0), PX = series(300, { drift: 0.25, noise: 0.8, seed: 7, stepMs: 900000, end: 0 }).at(-1)![4]; // every timeframe ends at this same price in the fixture
 const MS: Record<string, number> = { "1m": 60000, "5m": 300000, "15m": 900000, "30m": 1800000, "1h": 3600000, "4h": 14400000, "1d": 86400000, "1w": 604800000 };
 function fakeKV() {
   const m = new Map<string, string>();
@@ -12,18 +13,18 @@ function fakeKV() {
 }
 interface World { clock: number; minuteOverride: ((interval: string) => unknown[][] | null) | null;externalCalls: string[]; depthOk: boolean }
 const world: World = { clock: NOW, minuteOverride: null, externalCalls: [], depthOk: true };
-const fetchImpl = (async (input: any, init?: any) => {
+const fetchImpl = bybitCompat((async (input: any, init?: any) => {
   const u = new URL(String(input));
   if (u.host !== "data-api.binance.vision") { world.externalCalls.push(u.host); return new Response("down", { status: 500 }); }
   if (u.pathname.includes("klines")) {
     const iv = u.searchParams.get("interval") || "1h", ov = world.minuteOverride?.(iv);
     if (ov) return new Response(JSON.stringify(ov), { status: 200 });
-    const step = MS[iv], rows = series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: step, end: world.clock - step * 0.5 });
+    const step = MS[iv], rows = series(300, { drift: 0.25, noise: 0.8, seed: 7, stepMs: step, end: world.clock - step * 0.5 });
     return new Response(JSON.stringify(rows.map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"])), { status: 200 });
   }
   if (u.pathname.includes("depth") && world.depthOk) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(PX - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(PX + 0.01 + i * 0.01), "50"]) }), { status: 200 });
   return new Response("down", { status: 500 });
-}) as typeof fetch;
+}) as typeof fetch);
 const realFetch = globalThis.fetch;
 test.beforeEach(() => { globalThis.fetch = fetchImpl; world.clock = NOW; world.minuteOverride = null; world.externalCalls = []; world.depthOk = true; });
 test.afterEach(() => { globalThis.fetch = realFetch; });

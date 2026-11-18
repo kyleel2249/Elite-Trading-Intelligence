@@ -24,13 +24,14 @@ from sqlalchemy.orm import Session
 from app.chain import policy as policy_mod
 from app.chain.crypto import address_from_private, generate_private_key, is_address, to_checksum
 from app.chain.models import ChainAllowlist, ChainEvent, ChainTransaction, ChainWallet
-from app.chain.networks import NETWORKS, Network, dex_config, load_limits, rpc_url
+from app.chain.networks import NETWORKS, Network, dex_config, load_limits, rpc_headers, rpc_url
 from app.chain.policy import fmt_units, to_units
 from app.chain.rpc import Rpc, RpcError
 from app.chain.txcodec import (decode_address, decode_string, decode_uint, decode_uint_array, enc_address, enc_uint, encode_call,
                                selector, sign_1559, sign_legacy)
 from app.config import get_settings
 from app.execution.vault import CredentialVault, VaultError
+from app.governance import gate as gov_gate
 
 logger = logging.getLogger("eti.chain")
 QUOTE_TTL_SECONDS = 120
@@ -48,8 +49,8 @@ class ChainError(Exception):
 def make_rpc(network_key: str) -> Rpc:
     url = rpc_url(network_key)
     if not url:
-        raise ChainError(f"No RPC endpoint configured for {network_key} (set CHAIN_RPC_{network_key.upper().replace('-', '_')})", 503)
-    return Rpc(url)
+        raise ChainError(f"No RPC endpoint configured for {network_key} (set INFURA_API_KEY or CHAIN_RPC_{network_key.upper().replace('-', '_')})", 503)
+    return Rpc(url, headers=rpc_headers(url))
 
 
 def _now() -> datetime:
@@ -355,7 +356,7 @@ class ChainService:
         return prep
 
     # ------------------------------------------------------------------ send
-    async def send(self, quote_id: str, confirm: str) -> dict[str, Any]:
+    async def send(self, quote_id: str, confirm: str, approval_id: Optional[int] = None, actor: str = "system", role: str = "admin") -> dict[str, Any]:
         if confirm != "SEND":
             raise ChainError('confirmation must be the exact word "SEND"', 400)
         q = self._unseal(quote_id)
@@ -367,6 +368,10 @@ class ChainService:
             v = self._violations(net, kind=q["kind"], notional=int(q["notional"]), to=q["to"], extra=q.get("extra") or {})
             if v:
                 raise ChainError("policy no longer allows this: " + "; ".join(v), 403)
+            try:      # security governance: fraud score, role limits, withdrawal allowlist, m-of-n approval bound to this quote
+                gov_gate.enforce_send(self.db, net=net, q=q, approval_id=approval_id, actor=actor, role=role)
+            except gov_gate.GateError as e:
+                raise ChainError(e.message, e.status)
             rpc = await self._checked_rpc(net)
             try:
                 nonce = await rpc.nonce(w.address)

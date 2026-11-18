@@ -5,7 +5,7 @@ export function journalPage(): string {
 <style>
 :root{color-scheme:dark light;--bg:#0b1118;--fg:#e8eef6;--mut:#8fa1b5;--card:#121b26;--line:#233245;--ok:#21d69a;--bad:#ff7b7b;--warn:#ffb08c;--acc:#5aa9ff}
 @media (prefers-color-scheme:light){:root{--bg:#f6f8fb;--fg:#0f1722;--mut:#50627a;--card:#fff;--line:#d5dde8;--ok:#0a8f66;--bad:#c0392b;--warn:#b4532a;--acc:#1f6fd1}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1100px;margin:0 auto;padding:14px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px}
 h1{font-size:1.4rem;margin:.2rem 0}h2{font-size:1.05rem;margin:0 0 8px}.mut{color:var(--mut)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.c{border:1px solid var(--line);border-radius:8px;padding:8px}.c b{display:block;font-size:1.15rem}
@@ -13,7 +13,7 @@ section{background:var(--card);border:1px solid var(--line);border-radius:10px;p
 input,select,button,textarea{font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:6px;padding:6px 8px;max-width:100%}button{cursor:pointer;background:var(--acc);color:#fff;border-color:var(--acc)}button.s{background:transparent;color:var(--fg);border-color:var(--line)}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin:6px 0}label{display:flex;flex-direction:column;font-size:.8rem;color:var(--mut);gap:2px}
-.tl{border-left:2px solid var(--line);margin:8px 0 0 6px;padding-left:12px}.tl div{margin:6px 0}a{color:var(--acc)}
+.tl{border-left:2px solid var(--line);margin:8px 0 0 6px;padding-left:12px}.tl div{margin:6px 0}a{color:var(--acc)}@media(max-width:700px){main{padding:12px 16px}}
 </style></head><body><main>
 <h1>ETI Autonomous Trade Journal</h1>
 <p class="mut">Permanent, append-only record of every analysis, order and trade ETI makes, including losses, cancellations, refusals and misses, plus trades you record yourself. Entries are hash-chained: nothing can be changed or removed without it showing. Paper and testnet only; no live orders. <a href="/">Dashboard</a></p>

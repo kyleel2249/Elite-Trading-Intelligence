@@ -1,0 +1,209 @@
+name: ETI Continuous Diagnostics & Recovery
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eti-continuous-diagnostics
+  cancel-in-progress: true
+
+jobs:
+  python-assessment:
+    name: Python backend assessment
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies with transient-failure recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if python -m pip install --upgrade pip && python -m pip install -r requirements.txt; then
+              exit 0
+            fi
+            echo "::warning::Python dependency installation attempt ${attempt} failed; retrying."
+            sleep $((attempt * 5))
+          done
+          echo "::error::Python dependencies could not be installed after three attempts."
+          exit 1
+      - name: Diagnose dependency integrity
+        run: python -m pip check
+      - name: Compile backend and tests
+        run: python -m compileall -q app tests
+      - name: Run backend tests with one transient retry
+        env:
+          PYTHONPATH: .
+          LIVE_TRADING_ENABLED: "false"
+          ALPACA_PAPER: "true"
+          LIVE_TRADING: "false"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            if python -m pytest -q --tb=short; then
+              exit 0
+            fi
+            echo "::warning::Backend test attempt ${attempt} failed; retrying once to rule out transient infrastructure."
+            sleep 8
+          done
+          echo "::error::Backend tests failed repeatedly. Review the first failing assertion and dependency diagnostics."
+          exit 1
+      - name: Verify application import
+        env:
+          PYTHONPATH: .
+        run: python -c "from app.main import app; print(app.title)"
+
+  worker-assessment:
+    name: Worker, exchange and security assessment
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies with transient-failure recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm ci --no-audit --no-fund; then
+              exit 0
+            fi
+            echo "::warning::npm ci attempt ${attempt} failed; retrying with the lockfile unchanged."
+            sleep $((attempt * 5))
+          done
+          echo "::error::Locked dependency installation failed after three attempts."
+          exit 1
+      - name: Run full ETI checks
+        run: npm run check
+
+  production-smoke:
+    name: Production connectivity and market-feed diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Retry public production probes and validate responses
+        shell: bash
+        env:
+          ETI_BASE_URL: https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          probe() {
+            local name="$1" url="$2" output="diagnostics/${1}.json"
+            for attempt in 1 2 3 4 5; do
+              code="$(curl --location --silent --show-error --connect-timeout 10 --max-time 25 -o "$output" -w '%{http_code}' "$url" || true)"
+              if [ "$code" = "200" ]; then
+                echo "PASS: ${name} (HTTP 200, attempt ${attempt})"
+                return 0
+              fi
+              echo "::warning::${name} returned HTTP ${code} on attempt ${attempt}."
+              sleep $((attempt * 3))
+            done
+            echo "::error::${name} remained unavailable after five attempts."
+            return 1
+          }
+          failed=0
+          probe region "$ETI_BASE_URL/api/market/region" || failed=1
+          probe bybit-symbols "$ETI_BASE_URL/api/market/symbols?market=all" || failed=1
+          probe bybit-spot-ticker "$ETI_BASE_URL/api/market/ticker?symbol=BTCUSDT" || failed=1
+          probe bybit-futures-ticker "$ETI_BASE_URL/api/market/ticker?symbol=BTCUSDT&market=futures" || failed=1
+          probe dashboard "$ETI_BASE_URL/" || failed=1
+          probe bitget-adapter "$ETI_BASE_URL/bitget-client.js" || failed=1
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const read = name => JSON.parse(fs.readFileSync(`diagnostics/${name}.json`, 'utf8'));
+          const errors = [];
+          try {
+            const region = read('region');
+            if (region.transport !== 'bybit-worker-rest+bitget-browser-direct') errors.push('Unexpected exchange transport configuration');
+          } catch (error) { errors.push(`Region response invalid: ${error.message}`); }
+          try {
+            const catalogue = read('bybit-symbols');
+            const categories = Array.isArray(catalogue.categories) ? catalogue.categories : [];
+            if (catalogue.provider !== 'bybit' || !Array.isArray(catalogue.symbols) || !catalogue.symbols.length ||
+                !['spot','linear','inverse'].every(value => categories.includes(value))) {
+              errors.push('Bybit symbol catalogue is empty, malformed, or missing a market category');
+            }
+          } catch (error) { errors.push(`Bybit catalogue invalid: ${error.message}`); }
+          for (const name of ['bybit-spot-ticker','bybit-futures-ticker']) {
+            try {
+              const ticker = read(name);
+              if (!(Number(ticker.lastPrice) > 0) || !(Number(ticker.highPrice) >= Number(ticker.lowPrice))) {
+                errors.push(`${name} contains invalid market values`);
+              }
+            } catch (error) { errors.push(`${name} invalid: ${error.message}`); }
+          }
+          if (errors.length) {
+            fs.writeFileSync('diagnostics/root-cause.txt', errors.join('\\n') + '\\n');
+            console.error(errors.join('\\n'));
+            process.exitCode = 1;
+          } else {
+            fs.writeFileSync('diagnostics/root-cause.txt', 'Production transport, Bybit catalogue, spot/futures tickers and dashboard probes passed.\\n');
+          }
+          NODE
+          exit "$failed"
+      - name: Publish diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eti-production-diagnostics
+          path: diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Failure classification and recovery guidance
+        if: failure()
+        run: |
+          {
+            echo "## ETI production diagnostic result"
+            echo "- Assessment: one or more production probes failed."
+            echo "- Recovery attempted: up to five bounded HTTP retries with increasing delays."
+            echo "- Root-cause evidence: inspect the eti-production-diagnostics artifact and the failing endpoint response."
+            echo "- Likely classes: transient network/egress reset, Worker availability, exchange upstream outage, invalid payload, or deployed configuration regression."
+            echo "- No trading orders, account settings, credentials, or user data were modified."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  diagnostic-summary:
+    name: Diagnostic summary
+    if: always()
+    needs: [python-assessment, worker-assessment, production-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report assessment and remediation outcome
+        env:
+          PYTHON_RESULT: ${{ needs.python-assessment.result }}
+          WORKER_RESULT: ${{ needs.worker-assessment.result }}
+          PRODUCTION_RESULT: ${{ needs.production-smoke.result }}
+        run: |
+          {
+            echo "## ETI diagnostic assessment"
+            echo "| Area | Result |"
+            echo "|---|---|"
+            echo "| Python backend | ${PYTHON_RESULT} |"
+            echo "| Worker, exchange and security | ${WORKER_RESULT} |"
+            echo "| Production smoke tests | ${PRODUCTION_RESULT} |"
+            echo
+            echo "Transient dependency/network failures receive bounded retries. Persistent failures retain their logs and diagnostic evidence for root-cause correction. No unsafe source rewrites, database resets, credential changes, or live trades are performed automatically."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PYTHON_RESULT" != "success" ] || [ "$WORKER_RESULT" != "success" ] || [ "$PRODUCTION_RESULT" != "success" ]; then
+            echo "::error::ETI diagnostics found unresolved failures."
+            exit 1
+          fi

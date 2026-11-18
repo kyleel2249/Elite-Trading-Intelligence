@@ -40,6 +40,37 @@ class Settings(BaseSettings):
     kelly_fraction: float = 0.25
     require_live_confirmation: bool = True
 
+    # --- ETI CAPITAL PROTECTION SYSTEM (independent of the LLM / signal engines) ---
+    # Conservative defaults. Every value is clamped to a hard ceiling in
+    # app/risk/protection_policy.py; there is no flag that disables the system.
+    cps_max_risk_per_trade_pct: float = 0.5
+    cps_max_daily_loss_pct: float = 2.0
+    cps_max_weekly_loss_pct: float = 5.0
+    cps_max_drawdown_pct: float = 10.0
+    cps_max_open_positions: int = 5
+    cps_max_correlated_exposure_pct: float = 20.0
+    cps_max_leverage: float = 1.0
+    cps_max_position_notional_pct: float = 6.0
+    cps_max_consecutive_losses: int = 3
+    cps_consecutive_loss_cooldown_minutes: int = 240
+    cps_emergency_drawdown_pct: float = 12.0
+    cps_emergency_daily_loss_pct: float = 4.0
+    cps_target_volatility_pct: float = 2.0
+    cps_extreme_volatility_pct: float = 12.0
+    cps_min_stop_distance_pct: float = 0.1
+    cps_max_stop_distance_pct: float = 10.0
+    cps_session_restrictions_enabled: bool = True
+    cps_equity_session_buffer_minutes: int = 15
+    cps_blocked_windows_utc: str = ""  # e.g. "23:55-00:05,21:55-22:05"
+    cps_news_blackout_before_minutes: int = 30
+    cps_news_blackout_after_minutes: int = 30
+    cps_news_calendar_required_for_live: bool = True
+    cps_require_strategy_attribution_live: bool = True
+    cps_auto_liquidate_on_stop_breach: bool = True
+    cps_auto_liquidate_on_emergency: bool = True
+    # Separate secret for releasing halts / quarantines. Never give it to an AI agent.
+    cps_admin_key: Optional[str] = None
+
     # Autonomous execution engine (docs/EXECUTION_ENGINE.md). Off by default.
     execution_enabled: bool = False
     # Fernet key that encrypts broker credentials at rest. Keep it separate from DATABASE_URL.
@@ -76,6 +107,11 @@ class Settings(BaseSettings):
     binance_testnet_enabled: bool = True
     binance_live_trading_enabled: bool = False
 
+    bybit_api_key: Optional[str] = None
+    bybit_api_secret: Optional[str] = None
+    bybit_testnet_enabled: bool = True
+    bybit_live_trading_enabled: bool = False
+
     # OANDA v20 (forex, spot metals, index/commodity CFDs). Paper = OANDA practice account.
     oanda_api_token: Optional[str] = None
     oanda_account_id: Optional[str] = None
@@ -98,6 +134,7 @@ class Settings(BaseSettings):
 
     # --- Global Alpha Intelligence ---
     alpha_research_enabled: bool = True
+    symbol_sync_enabled: bool = True   # one-minute refresh of Bybit / Bitget / Alpaca pair lists, started at boot (never in the test environment)
     alpha_research_interval_seconds: int = 3600
     alpha_crypto_scan_limit: int = 40
     alpha_equity_universe: str = ""  # comma separated tickers to always scan
@@ -169,6 +206,10 @@ class Settings(BaseSettings):
     @property
     def binance_configured(self) -> bool:
         return bool(self.binance_api_key and self.binance_secret_key)
+
+    @property
+    def bybit_configured(self) -> bool:
+        return bool(self.bybit_api_key and self.bybit_api_secret)
 
     @property
     def oanda_configured(self) -> bool:

@@ -11,7 +11,7 @@ Production-oriented multi-asset trading intelligence platform with a named elite
 git clone https://github.com/kyleel2249/Elite-Trading-Intelligence.git
 cd Elite-Trading-Intelligence
 cp .env.example .env
-# Optional: add Alpaca / Binance keys to .env
+# Optional: add Bybit testnet / Alpaca keys to .env
 docker compose up --build
 ```
 
@@ -19,10 +19,9 @@ Open http://localhost:8000  · API docs http://localhost:8000/docs
 
 Health: `curl -s localhost:8000/api/system/health | jq`
 
-## Cloudflare (edge proxy only)
+## Legacy Python/FastAPI deployment (optional)
 
-Cloudflare Workers **do not run** the Python app. Deploy FastAPI with Docker (above) or any host,
-then optionally deploy the Worker as a reverse proxy:
+The Docker/Python app is a separate legacy service. It is **not required** by the current Cloudflare-native ETI build documented below. Skip this section if you want Cloudflare-only hosting. If you still run the Python service, Cloudflare can optionally proxy to that origin:
 
 ```bash
 npm install
@@ -32,7 +31,7 @@ npx wrangler secret put BACKEND_URL   # https://your-origin.example.com
 
 Details and Workers Builds settings: [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md).
 
-## Local Python (no Docker)
+## Optional legacy Python/FastAPI local development
 
 ```bash
 python -m venv .venv
@@ -63,6 +62,10 @@ pytest -q
 
 Profiles & methods: `GET /api/intelligence/traders`
 
+## JARVIS agent intelligence layer
+
+JARVIS provides authenticated natural-language orchestration over the existing twelve-agent council, system/autopilot awareness, performance-audit retrieval, bounded operational memory and optional advisory deep review. It preserves the Commander and Risk Manager decision path and cannot execute live orders. See [docs/JARVIS.md](docs/JARVIS.md) for API usage, advanced capabilities and safety boundaries.
+
 ## Key APIs
 
 | Area | Endpoints |
@@ -79,9 +82,9 @@ Profiles & methods: `GET /api/intelligence/traders`
 | Reconcile | `POST /api/trading/reconcile` |
 | MTM job | `GET /api/system/mtm-status`, `POST /api/system/mtm-run` |
 
-## Authentication
+## Legacy Python/FastAPI authentication
 
-Mutating routes (orders, reconcile, MTM run, strategy execution, monitor control) require the
+The following `X-API-Key` instructions apply to the optional Python service, not the Cloudflare-native Worker. Mutating routes (orders, reconcile, MTM run, strategy execution, monitor control) require the
 `X-API-Key` header matching the `API_KEY` environment variable:
 
 ```bash
@@ -97,7 +100,11 @@ curl -X POST localhost:8000/api/trading/order \
   (see `docs/CLOUDFLARE.md`); it does not run the Python app or hold broker secrets.
 - **Live orders** are refused (HTTP 403) on any deployment without an `API_KEY`.
 
-## Safety
+## Bybit integration
+
+ETI uses Bybit V5 for crypto spot, opt-in spot margin, linear perpetuals and inverse perpetuals. Configure testnet credentials server-side and keep live trading disabled until testnet verification and reconciliation checks pass. Setup, API scopes, account categories and limitations are documented in [docs/BYBIT.md](docs/BYBIT.md).
+
+## Legacy Python/FastAPI safety
 
 - Live trading is **disabled by default** (`LIVE_TRADING_ENABLED=false`). When enabled, every order still passes **Helena Frost / RiskEngine** and requires an `API_KEY`
 - Risk inputs are **server-derived**: equity, open positions, daily PnL, drawdown and data freshness come from the database and a server-fetched quote. Values sent in the order request body are ignored (the fields remain accepted but deprecated). Responses include `risk_inputs` showing what the risk engine used
@@ -118,7 +125,7 @@ GitHub Actions runs compile + pytest on every push to `main`.
 
 Research and trading software. Use at your own risk. Live trading can result in loss of capital.
 
-## Security defaults and API compatibility
+## Legacy Python/FastAPI security defaults and API compatibility
 
 The application now defaults to `APP_ENV=production`. Configure `API_KEY` before using mutations or private portfolio, journal, and order-history reads. A missing configured key returns HTTP 503 on these routes; an incorrect or missing request header returns HTTP 401 when a key is configured. Only explicit `development`, `test`, or `local` mode permits a missing key. Unknown environment names and nonpositive job intervals are rejected.
 
@@ -137,6 +144,8 @@ ETI Cloudflare-native edge dashboard for live public market data.
 
 This deployment serves the ETI dashboard and health APIs directly from a Cloudflare Worker.
 It does not require a FastAPI origin, Fly.io, Docker hosting, a VPS, or `BACKEND_URL`.
+
+**Market-data routing:** Bybit V5 public REST is fetched from the Worker. Bitget public REST is fetched from the user's browser through `/bitget-client.js`, because Bitget blocks ETI's Cloudflare Worker egress with HTTP 403. The browser sends validated candles, order-book and derivatives snapshots to the Worker for Omnisignal analysis. Bitget live private orders remain fail-closed until Worker-to-Bitget private API connectivity is independently verified; API secrets never enter browser code.
 
 ### Cloudflare Workers Builds
 
@@ -193,10 +202,7 @@ The Worker serves:
 - Recent executed trades with timestamps and side.
 - Connection status and update timestamps.
 
-The current market-data adapter uses Binance's public REST API for initial snapshots and
-public WebSocket streams for live updates. It is read-only and does not require exchange
-credentials. Exchange connectivity, browser networking, public API limits and stream
-availability apply. The interface must not represent stale or disconnected data as live.
+The current crypto market-data adapter uses Bybit V5 REST for snapshots, history and instrument discovery, with public WebSocket ticker/trade streams for live updates. Spot, linear and inverse perpetual products are selectable; spot margin shares the spot feed. Public data does not require exchange credentials. Private Bybit execution is handled by the FastAPI execution engine and starts on testnet with ETI risk controls. See [docs/BYBIT.md](docs/BYBIT.md). Exchange connectivity, account eligibility, public API limits and stream availability apply; stale or disconnected data must never be presented as live.
 
 ## Trade / no-trade intelligence: ETI Market Readiness Engine
 
@@ -257,7 +263,7 @@ limits. Do not silently rely on paid Workers features, Containers, or an externa
 - Do not expose API keys, broker credentials, Quiver tokens or Liquid API tokens in frontend
   JavaScript or public environment variables.
 - Withdrawal permissions must never be requested, stored or enabled.
-- There is no live trading path: orders go only to Alpaca Paper and the Binance testnets.
+- Bitget has a separate live order route, but it is fail-closed by default until private API egress from Cloudflare Workers is verified; Alpaca Paper and Binance testnet remain separate environments.
 
 ## Multi-market intelligence
 
@@ -298,36 +304,24 @@ See [Cloudflare deployment guide](docs/CLOUDFLARE.md), [multi-market guide](docs
 and [Daily intelligence report](docs/DAILY_REPORT.md).
 
 
-## Broker execution — paper/testnet only
+## Broker execution — guarded paper/testnet and Bitget live
 
-The Worker includes a server-side execution handler for **Alpaca Paper** and the **Binance Spot Testnet**. Orders are validated by in-process safeguards (see "Paper / testnet execution and in-process safeguards" below); no separately deployed risk service is needed and there is no live route that submits orders. The Worker does not expose withdrawal, transfer, funding or wallet-management endpoints.
+The Worker provides ETI Internal Paper, Alpaca Paper, Binance Spot Testnet and a server-side Bitget live adapter. Bitget live execution is **fail-closed by default**: it requires the master execution token, audit KV, `ETI_BITGET_LIVE_ENABLED=true`, and `ETI_BITGET_EGRESS_VERIFIED=true`. The last flag must remain unset until private Bitget API connectivity from the Cloudflare Worker has been independently verified. Public Bitget market data uses the browser-direct adapter because Bitget currently blocks ETI's Cloudflare Worker egress with HTTP 403; that public-feed workaround does not prove private order connectivity.
 
-Configure these as **Cloudflare Worker secrets**, never frontend variables or GitHub source files:
+Configure all exchange credentials as **Cloudflare Worker secrets**, never frontend variables or GitHub source files:
 
 - `ETI_EXECUTION_TOKEN` — long random bearer token used by the trusted ETI client.
-- `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` — Alpaca paper-account key pair only.
-- `BINANCE_API_KEY` and `BINANCE_SECRET_KEY` — Binance Spot Testnet key pair only.
+- `BITGET_API_KEY`, `BITGET_API_SECRET`, `BITGET_API_PASSPHRASE` — Bitget key with only the permissions required for trading and account reads; disable withdrawals and transfers.
+- `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` — Alpaca paper-account key pair.
+- `BINANCE_API_KEY` and `BINANCE_SECRET_KEY` — Binance Spot Testnet key pair.
 
-Optional Worker variables: `ETI_MAX_ORDER_QUANTITY` (default 100), `ETI_DUPLICATE_WINDOW_SECONDS` (default 60, 0 disables) and `ETI_KILL_SWITCH` (set to `true` to reject orders). Each order requires a unique `clientOrderId`; requests without it are rejected. The handler uses a fixed Alpaca paper URL and fixed Binance Spot Testnet URL. It does not offer a live-mode switch, and never calls withdrawal, transfer, funding or wallet-management endpoints.
+Optional Worker variables include `ETI_BITGET_LIVE_ENABLED`, `ETI_BITGET_EGRESS_VERIFIED`, `ETI_BITGET_MAX_LEVERAGE`, `ETI_BITGET_MAX_NOTIONAL_USDT`, `ETI_MAX_ORDER_QUANTITY`, `ETI_DUPLICATE_WINDOW_SECONDS` and `ETI_KILL_SWITCH`. Leave `ETI_BITGET_EGRESS_VERIFIED` unset while private API reachability is unconfirmed. The dashboard reports the gate through `GET /api/execution/status`; it refuses Bitget live orders before confirmation and the server independently rejects them with `423 bitget_worker_egress_unverified`. Do not copy API secrets into browser code to bypass this restriction.
 
-Authenticated order request:
+Paper/testnet requests use `POST /api/orders`. Bitget live requests use `POST /api/orders/live` and require the master token, explicit user confirmation, a unique `clientOrderId`, a complete `executionSource`, quantity/notional/leverage limits, duplicate protection, the audit log and an inactive kill switch. The Bitget adapter retries the official legacy host only after an explicit Cloudflare block; it never retries an ambiguous network outcome, which could duplicate an order. No withdrawal, transfer, funding or wallet-management endpoints are exposed.
 
-```http
-POST /api/orders
-Authorization: Bearer <ETI_EXECUTION_TOKEN>
-Content-Type: application/json
+Check `GET /api/execution/status` for credential presence, safeguards, kill-switch state and `bitget_egress_verified`. Never paste secrets into chat, commit them, or place them in public dashboard JavaScript. The bearer token must remain in the trusted authenticated execution flow, not public page code.
 
-{"broker":"alpaca","symbol":"AAPL","side":"buy","type":"limit","quantity":1,"limitPrice":150,"clientOrderId":"eti-demo-000001","riskConfirmed":true}
-```
-
-For Binance use `"broker":"binance"` and a Binance Spot Testnet symbol such as `BTCUSDT`. Check `GET /api/execution/status` for configured adapters, the safeguards in force and kill-switch state. This endpoint intentionally reports paper/testnet-only mode.
-
-**Before enabling order submission:** create paper/testnet API keys with trading-only permissions, disable withdrawals/transfers, and set the three credentials as Worker secrets using Wrangler or the Cloudflare dashboard. Never paste secrets into chat, commit them, or place them in browser code. The bearer token must be held only by a trusted authenticated backend/client; do not embed it in public dashboard JavaScript.
-
-Live trading is not implemented or enabled in this build.
-
-
-## Paper execution, attribution and audit history
+## Execution, attribution and audit history
 
 Every submitted order must include an `executionSource` object so the execution receipt identifies who or what initiated it:
 
@@ -344,11 +338,11 @@ Every submitted order must include an `executionSource` object so the execution 
 }
 ```
 
-Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, paper/testnet mode, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
+Supported `actorType` values: `manual_user`, `strategy`, `system`, `automation`. Strategy/system orders should include a meaningful `actorId`, `sourceName`, and, where applicable, `strategyId` and `signalId`. ETI writes a 90-day execution record to the `ETI_EXECUTION_LOG` KV namespace binding. The record includes UTC execution time, broker, execution environment, symbol, side, order type, quantity, client and broker order IDs, and source attribution. Retrieve records from authenticated `GET /api/execution/history`; this endpoint is for a trusted backend, not public browser JavaScript. Configure a Cloudflare KV namespace and bind it to the Worker as `ETI_EXECUTION_LOG`. Order submission fails closed if this audit binding is absent.
 
-### Paper / testnet execution and in-process safeguards
+### Paper/testnet execution, guarded Bitget live path and in-process safeguards
 
-ETI executes **paper and testnet orders only**: Alpaca Paper (`paper-api.alpaca.markets`) and the Binance Spot Testnet (`testnet.binance.vision`). There is no live order path in this build: `POST /api/orders/live` exists only to answer `423 live_trading_disabled`, no live broker host or live credential is referenced, and `ETI_LIVE_TRADING_ENABLED=true` is ignored (the status endpoint reports `live_flag_ignored`). No separately deployed risk service is required: `ETI_RISK_GATE_URL` and `ETI_RISK_GATE_TOKEN` are no longer read.
+ETI paper/testnet execution uses ETI Internal Paper, Alpaca Paper (`paper-api.alpaca.markets`) and Binance Spot Testnet (`testnet.binance.vision`). A Bitget live route exists, but it refuses orders until `ETI_BITGET_LIVE_ENABLED=true` and `ETI_BITGET_EGRESS_VERIFIED=true` are both set alongside the required credentials, master token and audit binding. The egress flag is intentionally false by default because Bitget blocks the current Cloudflare Worker public REST path; browser-direct public market data does not establish that private order endpoints are reachable. `ETI_LIVE_TRADING_ENABLED=true` remains ignored (the status endpoint reports `live_flag_ignored`). No separately deployed risk service is required: `ETI_RISK_GATE_URL` and `ETI_RISK_GATE_TOKEN` are no longer read.
 
 Every order is checked inside the Worker, in this order, before a broker is contacted. A refusal at any step never reaches the broker and is written to the audit log with the reason.
 
@@ -364,6 +358,8 @@ Every order is checked inside the Worker, in this order, before a broker is cont
 Outcomes are explicit: `executed` (broker order ID and status returned), `rejected` (refused by ETI, `broker_contacted:false`), `broker_rejected` (the paper broker answered 4xx; the ID is freed for correction) and `unknown` (timeout/5xx; the ID stays reserved, check the broker before retrying). `GET /api/execution/status` (public, no secrets) reports the safeguards in force; `GET /api/execution/history` (bearer) lists executed and refused orders, newest first, and the dashboard renders both.
 
 The same checks cover every pathway: the dashboard Buy/Sell buttons, `POST /api/orders`, the Global Alpha executor and the agent execution route all call this one handler; futures testnet orders (`POST /api/futures/orders`) use the same kill switch, duplicate protection and refusal audit with their own hard limits. The simulated engine behind `/api/paper/*` applies its own in-process safeguards (kill switch, idempotency, position and loss limits, quantity cap, simulated free-cash check) and its scheduled cycle runs from the cron trigger (analyse-only unless `ETI_PAPER_AUTOEXECUTE=true`).
+
+**Multi-agent autopilot:** twelve specialist agents coordinate through Commander consensus and a binding Risk Manager veto. For each symbol, the autopilot also runs the existing Swift and GainzAlgo engines across scalp, intraday, swing and position strategies; at least three of four strategies must independently agree on a tradeable direction before execution. The five-minute scheduler checks agent confidence, strategy quorum and risk thresholds, then sends eligible orders to ETI INTERNAL PAPER only with attached stop/TP levels. It is enabled for BTCUSDT, ETHUSDT and SOLUSDT with a 15m analysis interval, 0.65 minimum confidence/agreement and a three-position cap. It never calls the Bitget live route. See [docs/AGENT_AUTOPILOT.md](docs/AGENT_AUTOPILOT.md), the [Agent Intelligence Center](/agents), and `GET /api/agents/autopilot` for current status. The twelve agents are structured rule/statistical modules; the optional LLM brief is advisory and cannot override the Risk Manager.
 
 **Omnisignal execute (`POST /api/omnisignal/execute`)** works with no extra service: a BUY plan becomes an ordinary limit order for the same in-Worker flow (ETI Internal Paper, or Binance testnet) and is subject to every safeguard above; the plan's stop and targets are returned but the Worker does not place resting stop/take-profit orders. Optionally set `ETI_EXECUTION_API_URL` + `ETI_EXECUTION_API_TOKEN` to route plans to the Python execution engine instead, which adds per-account limits and protective OCO orders. **Retired settings:** `ETI_RISK_GATE_URL` / `ETI_RISK_GATE_TOKEN` are never read; a deployment that still has them keeps working and `/api/execution/status` reports `legacy_gateway_config_ignored: true` so they can be deleted. A test (`worker/execution.test.ts`) fails the build if any Worker source or config file starts depending on a risk gateway or a live-trading switch again.
 
@@ -394,4 +390,8 @@ curl 'https://<worker>.<subdomain>.workers.dev/api/intelligence/traders?q=reflex
 
 ## Global Alpha Intelligence
 
-Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and paper/testnet execution through the in-process order safeguards. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Live execution is not available: Alpha orders go through the same paper/testnet handler as every other path, and no live route exists.
+Discovery, independent validation, strategy competition, investor-disclosure analysis, prediction accountability and paper/testnet execution through the in-process order safeguards. Dashboard at `/alpha`, API under `/api/alpha`. See [docs/GLOBAL_ALPHA.md](docs/GLOBAL_ALPHA.md). Alpha orders remain paper/testnet-only; they do not use the separate Bitget live route, which is fail-closed pending private egress verification.
+
+## Wallet and profit management
+- `/wallet/chain`: on-chain wallet dashboard with live native-coin balances, block height and gas read from the node over JSON-RPC (see `docs/CHAIN.md`). The custodial wallet itself needs the Python backend (`BACKEND_URL`).
+- `/profit`: automatic profit management (realized, confirmed, net-of-fees profit only; capital protection; allocation; expense forecast; reports). See `docs/PROFIT_MANAGEMENT.md`.

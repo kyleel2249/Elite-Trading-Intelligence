@@ -6,11 +6,13 @@ on:
     branches: [main]
     paths:
       - "worker/**"
+      - "app/**"
       - "wrangler.jsonc"
       - "migrations/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy.yml"
+      - ".github/workflows/eti-diagnostics.yml"
 
 concurrency:
   group: eti-cloudflare-deploy
@@ -29,8 +31,8 @@ jobs:
           cache: "npm"
       - name: Install dependencies
         run: npm ci
-      - name: Validate Worker bundle
-        run: npm run check:worker
+      - name: Run full Worker, security and type checks
+        run: npm run check
       - name: Apply pending D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -40,54 +42,398 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "::error::Set CLOUDFLARE_ACCOUNT_ID in GitHub Actions secrets"; exit 1)
           npx wrangler d1 migrations apply eti-portfolio-db --remote
 
-      - name: Sync optional sports Worker secrets from GitHub Actions
+      - name: Validate DataX integration configuration
+        env:
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+          DATAX_API_URL: ${{ vars.DATAX_API_URL }}
+        run: |
+          test -n "$DATAX_INTEGRATION_SECRET" || (echo "::error::Set DATAX_INTEGRATION_SECRET in GitHub Actions secrets"; exit 1)
+          test "${#DATAX_INTEGRATION_SECRET}" -ge 32 || (echo "::error::DATAX_INTEGRATION_SECRET must contain at least 32 characters"; exit 1)
+          test -n "$DATAX_API_URL" || (echo "::error::Set DATAX_API_URL in GitHub Actions variables"; exit 1)
+          node --input-type=module -e 'const u=new URL(process.env.DATAX_API_URL);if(u.protocol!=="https:"||u.username||u.password||u.pathname!=="/"||u.search||u.hash)process.exit(1);'
+
+      - name: Validate required GainzAlgo secrets
+        env:
+          ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
+        run: |
+          test -n "$ETI_GAINZ_WEBHOOK_SECRET" || (echo "::error::Set ETI_GAINZ_WEBHOOK_SECRET in GitHub Actions secrets"; exit 1)
+          test "${#ETI_GAINZ_WEBHOOK_SECRET}" -ge 32 || (echo "::error::ETI_GAINZ_WEBHOOK_SECRET must contain at least 32 characters"; exit 1)
+
+      - name: Deploy to Cloudflare Workers with versioned secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
           ETI_SPORTS_PAPER_TOKEN: ${{ secrets.ETI_SPORTS_PAPER_TOKEN }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          # Origin of the Python wallet backend (https://host, no path). Set as a repository variable or secret named BACKEND_URL.
+          BACKEND_URL: ${{ vars.BACKEND_URL || secrets.BACKEND_URL }}
+          INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
+          INFURA_API_SECRET: ${{ secrets.INFURA_API_SECRET }}
+          ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
+          ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}
+          BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}
+          BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
+          BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
+          BYBIT_API_KEY: ${{ secrets.BYBIT_API_KEY }}
+          BYBIT_API_SECRET: ${{ secrets.BYBIT_API_SECRET }}
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+          DATAX_API_URL: ${{ vars.DATAX_API_URL }}
         run: |
-          for name in ODDSPAPI_API_KEY ETI_SPORTS_PAPER_TOKEN ODDS_API_KEY; do
-            value="${!name}"
-            if [ -n "$value" ]; then
-              printf '%s' "$value" | npx wrangler secret put "$name"
-            fi
-          done
+          set -euo pipefail
+          secrets_file="/tmp/eti-worker-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          node <<'NODE'
+          const fs = require("node:fs");
+          const names = [
+            "ODDSPAPI_API_KEY", "ETI_SPORTS_PAPER_TOKEN", "ODDS_API_KEY", "BACKEND_URL",
+            "INFURA_API_KEY", "INFURA_API_SECRET", "ETI_GAINZ_WEBHOOK_SECRET", "ETI_GAINZ_ADMIN_TOKEN",
+            "BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_API_PASSPHRASE",
+          ];
+          const secrets = Object.fromEntries(names.filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
+          fs.writeFileSync("/tmp/eti-worker-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
+          NODE
+          # Deploy code and the full optional-secret set in one version. Secrets omitted here
+          # remain inherited from the previous deployed version.
+          if [ -n "${DATAX_API_URL:-}" ]; then
+            npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file" --var "DATAX_API_URL:${DATAX_API_URL}"
+          else
+            npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file"
+          fi
 
-      - name: Deploy to Cloudflare Workers
+      - name: Sync DataX Pages integration secret and redeploy production
+        shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "${#DATAX_INTEGRATION_SECRET}" -ge 32
+          printf '%s' "$DATAX_INTEGRATION_SECRET" | npx --yes wrangler@4.148.0 pages secret put ETI_INTEGRATION_SECRET --project-name=datax --env production
+          deployments="$(curl --silent --show-error --fail \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments?per_page=20")"
+          deployment_id="$(printf '%s' "$deployments" | node --input-type=module -e '
+            let input="";for await (const chunk of process.stdin) input+=chunk;
+            const body=JSON.parse(input);
+            if(body.success!==true||!Array.isArray(body.result))process.exit(2);
+            const latest=body.result.filter(x=>x.environment==="production"&&x.latest_stage?.status==="success")
+              .sort((a,b)=>Date.parse(b.created_on)-Date.parse(a.created_on))[0];
+            if(!latest?.id)process.exit(3);
+            process.stdout.write(latest.id);
+          ')"
+          test -n "$deployment_id"
+          retry="$(curl --silent --show-error --fail -X POST \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments/$deployment_id/retry")"
+          retry_id="$(printf '%s' "$retry" | node --input-type=module -e '
+            let input="";for await (const chunk of process.stdin) input+=chunk;
+            const body=JSON.parse(input);
+            if(body.success!==true||!body.result?.id)process.exit(1);
+            process.stdout.write(body.result.id);
+          ')"
+          ready=0
+          for attempt in $(seq 1 30); do
+            state="$(curl --silent --show-error --fail \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments/$retry_id" | node --input-type=module -e '
+                let input="";for await (const chunk of process.stdin) input+=chunk;
+                const body=JSON.parse(input);
+                if(body.success!==true)process.exit(2);
+                process.stdout.write(String(body.result?.latest_stage?.status||"unknown"));
+              ')"
+            if [ "$state" = "success" ]; then ready=1; break; fi
+            if [ "$state" = "failure" ] || [ "$state" = "canceled" ]; then
+              echo "::error::DataX Pages production deployment failed while applying the shared integration secret."
+              exit 1
+            fi
+            sleep 4
+          done
+          test "$ready" -eq 1 || { echo "::error::Timed out waiting for the DataX Pages production deployment to finish."; exit 1; }
+          echo "DataX Pages production deployment completed after synchronizing the shared integration secret."
 
-      - name: Verify live sports service and D1 readiness
+      - name: Verify signed DataX production integration
+        shell: bash
+        env:
+          DATAX_API_URL: ${{ vars.DATAX_API_URL }}
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHmac, randomBytes } from "node:crypto";
+
+          const configured = String(process.env.DATAX_API_URL || "");
+          const secret = String(process.env.DATAX_INTEGRATION_SECRET || "");
+          if (secret.length < 32) {
+            console.error("::error::DATAX_INTEGRATION_SECRET is missing or too short.");
+            process.exit(1);
+          }
+
+          let origin;
+          try {
+            origin = new URL(configured);
+            if (origin.protocol !== "https:" || origin.username || origin.password ||
+                origin.pathname !== "/" || origin.search || origin.hash) {
+              throw new Error("invalid_origin");
+            }
+          } catch {
+            console.error("::error::DATAX_API_URL must be a valid HTTPS origin without a path.");
+            process.exit(1);
+          }
+
+          const pathname = "/api/integrations/eti/summary";
+          const endpoint = new URL(pathname, origin);
+          const deadline = Date.now() + 120000;
+          let lastStatus = 0;
+          let lastError = "not_attempted";
+
+          while (Date.now() < deadline) {
+            const timestamp = String(Math.floor(Date.now() / 1000));
+            const nonce = randomBytes(24).toString("base64url");
+            const canonical = [timestamp, nonce, "GET", pathname].join("\n");
+            const signature = createHmac("sha256", secret).update(canonical).digest("hex");
+
+            let response;
+            try {
+              response = await fetch(endpoint, {
+                method: "GET",
+                headers: {
+                  accept: "application/json",
+                  "x-datax-timestamp": timestamp,
+                  "x-datax-nonce": nonce,
+                  "x-datax-signature": signature
+                },
+                redirect: "error",
+                signal: AbortSignal.timeout(10000)
+              });
+            } catch (error) {
+              lastError = error.name || "network_error";
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              continue;
+            }
+
+            let payload;
+            try { payload = await response.json(); }
+            catch {
+              lastStatus = response.status;
+              lastError = "invalid_json";
+              break;
+            }
+
+            if (response.ok && payload?.ok === true && payload?.source === "DataX" &&
+                payload?.integrationVersion === 1 && payload?.asOf &&
+                payload?.accounts && payload?.bandwidth && payload?.rewards &&
+                payload?.reserves && payload?.tradingCapitalEligible === false) {
+              console.log("Signed DataX production integration verified: HMAC authentication, nonce storage and aggregate snapshot succeeded. No member-level data or secret values were logged.");
+              process.exit(0);
+            }
+
+            lastStatus = response.status;
+            lastError = payload?.error || "unexpected_response";
+            if (![401, 409, 502, 503].includes(response.status)) break;
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+
+          console.error("::error::Signed DataX production verification failed after deployment propagation retries:", JSON.stringify({
+            status: lastStatus,
+            error: lastError
+          }));
+          process.exit(1);
+          NODE
+
+      - name: Verify Bybit routes, Bitget browser adapter and ETI safeguards
         shell: bash
         run: |
+          base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
+          failed=0
+          region_response="$(curl --silent --show-error --fail "$base/api/market/region")" || { echo "::error::Could not read the public market transport diagnostic"; exit 1; }
+          printf '%s' "$region_response" | node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s);
+              if(x.transport!=="bybit-worker-rest+bitget-browser-direct"||x.placementHint!=="cloudflare:global"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
+                console.error("Public market transport:",JSON.stringify(x));process.exit(1);
+              }
+              console.log("Bybit Worker REST and Bitget browser-direct public feed are configured; no paid relay or Fly.io is required.");
+            }catch(e){console.error("Invalid market transport response:",e.message);process.exit(1);}});' || exit 1
+          symbols_response="$(curl --silent --show-error --retry 4 --retry-all-errors --retry-delay 2 --max-time 20 -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
+          symbols_status="${symbols_response##*__HTTP_CODE__}"
+          symbols="${symbols_response%__HTTP_CODE__*}"
+          printf '%s' "$symbols" | HTTP_STATUS="$symbols_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s),cats=Array.isArray(x.categories)?x.categories:[],warnings=Array.isArray(x.warnings)?x.warnings:[];
+              const ok=process.env.HTTP_STATUS==="200"&&x.provider==="bybit"&&Array.isArray(x.symbols)&&x.symbols.length>0&&["spot","linear","inverse"].every(v=>cats.includes(v))&&Number(x.refreshEverySeconds)>0&&Number(x.refreshEverySeconds)<=60;
+              if(!ok){console.error("Bybit catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,provider:x.provider,categories:cats,count:x.count,refreshEverySeconds:x.refreshEverySeconds,warnings}));process.exit(1);}
+              console.log("Bybit spot, linear and inverse catalogues verified; spot market data also backs the margin-compatible feed.");
+            }catch(e){console.error("Invalid Bybit catalogue response:",e.message);process.exit(1);}});' || failed=1
+
+          for market in spot futures; do
+            suffix=""
+            [ "$market" = "futures" ] && suffix="&market=futures"
+            ticker_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/ticker?symbol=BTCUSDT$suffix")" || { echo "::error::Could not contact the Bybit $market ticker"; failed=1; ticker_response='{}__HTTP_CODE__000'; }
+            ticker_status="${ticker_response##*__HTTP_CODE__}"
+            ticker="${ticker_response%__HTTP_CODE__*}"
+            printf '%s' "$ticker" | HTTP_STATUS="$ticker_status" MARKET="$market" node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                const x=JSON.parse(s),attempts=Array.isArray(x.attempts)?x.attempts:[];
+                const ok=process.env.HTTP_STATUS==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0&&Number(x.highPrice)>=Number(x.lowPrice);
+                if(!ok){console.error("Bybit ticker:",JSON.stringify({market:process.env.MARKET,httpStatus:process.env.HTTP_STATUS,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice,error:x.error,attempts}));process.exit(1);}
+                console.log("Bybit "+process.env.MARKET+" ticker verified with valid live price and 24h high/low.");
+              }catch(e){console.error("Invalid Bybit ticker response:",e.message);process.exit(1);}});' || failed=1
+          done
+
+          # Bitget public REST is intentionally browser-direct: Bitget blocks Cloudflare Worker egress.
+          bitget_client="$(curl --silent --show-error --fail "$base/bitget-client.js")" || { echo "::error::Bitget browser adapter asset is unavailable"; failed=1; bitget_client=''; }
+          printf '%s' "$bitget_client" | grep -q 'window.ETIBitget' || { echo "::error::Bitget browser adapter export is missing"; failed=1; }
+          printf '%s' "$bitget_client" | grep -q 'https://api.bitget.com' || { echo "::error::Bitget official API host is missing from browser adapter"; failed=1; }
+          curl --silent --show-error --fail "$base/" -o /tmp/eti-home.html || { echo "::error::Dashboard HTML is unavailable"; failed=1; }
+          grep -q 'bitget-client.js' /tmp/eti-home.html || { echo "::error::Dashboard does not load the Bitget browser adapter"; failed=1; }
+          curl --silent --show-error --fail "$base/omnisignal" -o /tmp/eti-omnisignal.html || { echo "::error::Omnisignal HTML is unavailable"; failed=1; }
+          grep -q 'bitget-client.js' /tmp/eti-omnisignal.html || { echo "::error::Omnisignal does not load the Bitget browser adapter"; failed=1; }
+          bitget_probe_code="$(curl --silent --show-error -o /tmp/eti-bitget-probe.json -w '%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","engines":["swift","gainz"],"venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")"
+          [ "$bitget_probe_code" = "400" ] && grep -q 'bitget_browser_market_data_required' /tmp/eti-bitget-probe.json || { echo "::error::Omnisignal did not enforce the validated browser-feed boundary for Bitget"; failed=1; }
+          echo "Bitget browser-direct public market feed is wired into the dashboard and Omnisignal; Worker-side public egress is not assumed.";
+          
+          forecast_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }
+          forecast_status="${forecast_response##*__HTTP_CODE__}"
+          forecast="${forecast_response%__HTTP_CODE__*}"
+          printf '%s' "$forecast" | HTTP_STATUS="$forecast_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s),attempts=Array.isArray(x.attempts)?x.attempts:[];
+              const h=x.forecast?.high,l=x.forecast?.low,c=x.forecast?.confidence;
+              const validTime=v=>typeof v==="string"&&Number.isFinite(Date.parse(v));
+              const ok=process.env.HTTP_STATUS==="200"&&x.status==="ready"&&Number(h?.price)>0&&Number(l?.price)>0&&validTime(h?.time?.expectedAt)&&validTime(l?.time?.expectedAt)&&Number(x.history?.timeSampleDays)>=5&&Number(x.history?.priceSampleDays)>=5&&Number(c?.score)>=0&&Number(c?.score)<=100;
+              if(!ok){console.error("24-hour forecast readiness:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,status:x.status,reason:x.reason,history:x.history,forecast:x.forecast,attempts}));process.exit(1);}
+              console.log("24-hour Bybit high/low forecast API verified with price targets, UTC time windows and historical samples.");
+            }catch(e){console.error("Invalid 24-hour forecast response:",e.message);process.exit(1);}});' || failed=1
+
+          status="$(curl --silent --show-error --fail "$base/api/execution/status")" || { echo "::error::Could not read ETI execution safeguards"; failed=1; status='{}'; }
+          printf '%s' "$status" | node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s);
+              if(x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error("ETI execution safeguards:",JSON.stringify({masterToken:x.master_execution_token_configured,auditLog:x.audit_log_configured}));process.exit(1);}
+              console.log("ETI master execution authentication and audit storage verified; no live order was submitted.");
+            }catch(e){console.error("Invalid execution status response:",e.message);process.exit(1);}});' || failed=1
+          exit "$failed"
+
+      - name: Verify live GainzAlgo service, webhook and D1 readiness
+        shell: bash
+        env:
+          ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}
+        run: |
           for attempt in $(seq 1 10); do
-            response="$(curl --silent --show-error --fail https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/sports/health)" || { sleep 3; continue; }
+            response="$(curl --silent --show-error --fail https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/gainz/status)" || { sleep 3; continue; }
             if printf '%s' "$response" | node -e '
               let input = "";
               process.stdin.on("data", chunk => input += chunk);
               process.stdin.on("end", () => {
                 const h = JSON.parse(input);
-                const odd = h.providers?.oddspapi;
-                const ready = h.database?.ready
-                  && h.sports_paper_token_configured
-                  && odd?.reachable
-                  && Number(odd?.active_subscription_count) > 0
-                  && Number(odd?.bookmaker_count) > 0
-                  && Array.isArray(odd?.sports) && odd.sports.includes(10);
+                const engines = Array.isArray(h.engines) && h.engines.includes("gainz_v2") && h.engines.includes("gainz_v2_alpha");
+                const ready = h.databaseConfigured === true && h.databaseReady === true && h.webhookConfigured === true && engines && h.automaticOrderSubmission === false;
                 if (!ready) {
-                  console.error(JSON.stringify({database:h.database,provider:odd,paper_token_configured:h.sports_paper_token_configured}));
+                  console.error(JSON.stringify({databaseConfigured:h.databaseConfigured,databaseReady:h.databaseReady,webhookConfigured:h.webhookConfigured,engines:h.engines,automaticOrderSubmission:h.automaticOrderSubmission}));
                   process.exit(1);
                 }
-                console.log("Sports readiness verified: D1 migrations, paper token, OddsPapi football subscription and bookmakers are ready.");
+                console.log("GainzAlgo readiness verified: V2, V2 Alpha, webhook secret and D1 tables are ready; automatic execution remains disabled.");
               });
             '; then
+              if [ -n "$ETI_GAINZ_ADMIN_TOKEN" ]; then
+                private_response="$(curl --silent --show-error --fail -H "Authorization: Bearer $ETI_GAINZ_ADMIN_TOKEN" https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev/api/gainz/signals)" || { echo "::error::Gainz admin token was rejected by the live Worker"; exit 1; }
+                printf '%s' "$private_response" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s);if(!Array.isArray(x.signals)||typeof x.count!=="number")process.exit(1);console.log("Gainz authenticated signal-history API verified.");});'
+              fi
               exit 0
             fi
             sleep 3
           done
-          echo "::error::ETI Sports readiness check failed. Verify ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN, active football/bookmaker subscription, and D1 migrations."
+          echo "::error::GainzAlgo readiness failed. Verify ETI_GAINZ_WEBHOOK_SECRET, ETI_PORTFOLIO_DB binding and migration 0014."
           exit 1
+
+      - name: Verify live sports service and D1 readiness
+        shell: bash
+        run: |
+          base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
+          health_ok=0
+          for attempt in $(seq 1 10); do
+            response="$(curl --silent --show-error --fail "$base/api/sports/health")" || { sleep 3; continue; }
+            if printf '%s' "$response" | node -e '
+              let input = "";
+              process.stdin.on("data", chunk => input += chunk);
+              process.stdin.on("end", () => {
+                const h = JSON.parse(input), odd = h.providers?.oddspapi || h.provider;
+                const ready = h.database?.ready === true
+                  && h.sports_paper_token_configured === true
+                  && odd?.configured === true;
+                const subscriptionReady = odd?.reachable !== true
+                  || (Number(odd?.active_subscription_count) > 0 && Number(odd?.bookmaker_count) > 0);
+                if (!ready || !subscriptionReady) {
+                  console.error(JSON.stringify({database:h.database,provider:odd,paper_token_configured:h.sports_paper_token_configured}));
+                  process.exit(1);
+                }
+                if (odd.reachable !== true) {
+                  console.log("WARNING: Sports D1, paper token and OddsPapi configuration are ready, but the external provider is temporarily unreachable. Fixture checks will distinguish an upstream outage from a broken ETI route.");
+                } else {
+                  console.log("Sports D1, paper token, OddsPapi reachability and active bookmaker subscription verified.");
+                }
+              });
+            '; then health_ok=1; break; fi
+            sleep 3
+          done
+          test "$health_ok" -eq 1 || { echo "::error::ETI Sports health check failed. Verify ODDSPAPI_API_KEY, ETI_SPORTS_PAPER_TOKEN and D1 migrations."; exit 1; }
+
+          football_ok=0
+          provider_degraded=0
+          for attempt in $(seq 1 5); do
+            football_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/sports/football/next?limit=1" || true)"
+            football_status="${football_response##*__HTTP_CODE__}"
+            football="${football_response%__HTTP_CODE__*}"
+            if printf '%s' "$football" | HTTP_STATUS="$football_status" node -e '
+              let input = "";
+              process.stdin.on("data", chunk => input += chunk);
+              process.stdin.on("end", () => {
+                let x;
+                try { x = JSON.parse(input); } catch { console.error("Football route returned non-JSON output"); process.exit(1); }
+                const status = process.env.HTTP_STATUS;
+                if (status === "200") {
+                  const ready = x.provider === "OddsPapi" && x.sport === "football"
+                    && Array.isArray(x.events) && Number.isFinite(Number(x.fixture_candidates))
+                    && Number.isFinite(Number(x.fixture_count));
+                  if (!ready) { console.error(JSON.stringify({provider:x.provider,sport:x.sport,error:x.error})); process.exit(1); }
+                  console.log("Football fixture route verified; zero upcoming fixtures is accepted as a valid empty result.");
+                  return;
+                }
+                // A structured retryable upstream 429/5xx or provider rate-limit/network failure proves the route is deployed and handling the provider failure.
+                // It is degraded market data, not a reason to report a broken ETI deployment.
+                const providerStatus = Number(x.provider_status);
+                const providerKind = String(x.kind || "");
+                const knownProviderDegradation = providerKind === "rate_limit"
+                  || (x.retryable === true && (
+                    [408, 425, 429, 500, 502, 503, 504].includes(providerStatus)
+                    || ["network", "timeout"].includes(providerKind)
+                  ));
+                const upstreamFailure = status === "502" && x.error === "global_football_scan_failed"
+                  && knownProviderDegradation
+                  && typeof x.hint === "string" && x.hint.length > 0;
+                if (upstreamFailure) {
+                  console.log("WARNING: ETI football route is deployed and returns a structured OddsPapi upstream failure (HTTP " + x.provider_status + "). Deployment readiness passes; live fixture data remains degraded until the provider recovers.");
+                  process.exit(2);
+                }
+                console.error("Football route failure:", JSON.stringify({httpStatus:status,error:x.error,provider_status:x.provider_status,kind:x.kind}));
+                process.exit(1);
+              });
+            '; then
+              football_ok=1
+              break
+            else
+              code=$?
+              if [ "$code" -eq 2 ]; then provider_degraded=1; football_ok=1; break; fi
+            fi
+            sleep 3
+          done
+          test "$football_ok" -eq 1 || { echo "::error::ETI football route failed its application-level readiness check. Verify the route, active OddsPapi football subscription and provider response."; exit 1; }
+          if [ "$provider_degraded" -eq 1 ]; then
+            echo "::warning::ETI Sports is deployed, but OddsPapi currently has an upstream outage. Fixture scanning must be rechecked after provider recovery."
+          fi
+
+# Integration rollout: redeploy after configuring DATAX_API_URL and DATAX_INTEGRATION_SECRET.

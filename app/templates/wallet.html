@@ -1,8 +1,71 @@
 {% extends "eti_base.html" %}
 {% block title %}ETI Wallet{% endblock %}
+{% block head %}
+<style>
+  .cc { margin-top: 12px; }
+  .cc-h { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .cc-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 10px 0 14px; perspective: 900px; }
+  .cc-k { padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(128,128,128,.28);
+    background: linear-gradient(145deg, rgba(0,168,255,.14), rgba(128,128,128,.06) 60%);
+    box-shadow: 0 10px 24px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.12); transition: transform .25s ease, box-shadow .25s ease; }
+  .cc-k:hover { transform: translateY(-3px) rotateX(3deg); box-shadow: 0 16px 30px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.16); }
+  .cc-k .l { font-size: 12px; opacity: .75; text-transform: uppercase; letter-spacing: .04em; }
+  .cc-k .v { font-size: 22px; font-weight: 700; margin: 4px 0; overflow-wrap: anywhere; }
+  .cc-k .u { font-size: 11px; opacity: .65; line-height: 1.35; }
+  .cc-primary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .cc-primary .cc-card { flex-direction: column; text-align: center; justify-content: center; min-height: 104px; align-items: center; }
+  .cc-primary .cc-card .ic { width: 46px; height: 46px; font-size: 24px; }
+  .cc-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+  .cc-tools input[type=search] { flex: 1 1 240px; min-height: 40px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(128,128,128,.35); background: rgba(128,128,128,.08); color: inherit; }
+  .cc-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cc-chip { min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px solid rgba(128,128,128,.35); background: rgba(128,128,128,.08); color: inherit; cursor: pointer; font-size: 12px; }
+  .cc-chip[aria-pressed=true] { background: rgba(0,168,255,.25); border-color: #00a8ff; }
+  details.cc-g { margin: 12px 0; border: 1px solid rgba(128,128,128,.25); border-radius: 14px; padding: 4px 12px 12px; background: rgba(128,128,128,.04); }
+  details.cc-g > summary { cursor: pointer; font-weight: 700; padding: 10px 2px; min-height: 44px; display: flex; align-items: center; gap: 8px; list-style: none; }
+  details.cc-g > summary::-webkit-details-marker { display: none; }
+  details.cc-g > summary::after { content: "\25BE"; margin-left: auto; transition: transform .2s; }
+  details.cc-g:not([open]) > summary::after { transform: rotate(-90deg); }
+  .cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .cc-card { position: relative; display: flex; gap: 12px; align-items: center; text-align: left; min-height: 64px; padding: 12px 14px; border-radius: 14px; cursor: pointer; color: inherit; font: inherit;
+    border: 1px solid rgba(128,128,128,.3); background: linear-gradient(145deg, rgba(255,255,255,.07), rgba(128,128,128,.05));
+    box-shadow: 0 6px 14px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.1); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+  .cc-card:hover:not([aria-disabled=true]) { transform: translateY(-3px); border-color: #00a8ff; box-shadow: 0 12px 22px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.14); }
+  .cc-card:focus-visible { outline: 3px solid #00a8ff; outline-offset: 2px; }
+  .cc-card[aria-disabled=true] { opacity: .78; cursor: help; }
+  .cc-card.busy { opacity: .6; pointer-events: none; }
+  .cc-card .ic { flex: 0 0 38px; height: 38px; width: 38px; display: grid; place-items: center; border-radius: 12px; font-size: 19px; background: rgba(0,168,255,.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.2); }
+  .cc-card .tx { display: flex; flex-direction: column; min-width: 0; }
+  .cc-card .tx small { opacity: .7; font-size: 11.5px; line-height: 1.3; }
+  .cc-badge { position: absolute; top: 6px; right: 8px; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+  .b-op { color: #2ecc71; } .b-testnet { color: #f5a623; } .b-config { color: #e6b800; } .b-soon { color: #8a94a6; } .b-off { color: #ff5a5f; }
+  .cc-primary .cc-badge { position: static; margin-top: 4px; }
+  .cc-addr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; padding: 10px 12px; border-radius: 10px; background: rgba(128,128,128,.12); margin-bottom: 8px; }
+  #cc-work { margin-top: 14px; scroll-margin-top: 70px; }
+  .cc-warn { color: #e6b800; }
+  @media (max-width: 640px) { .cc-grid { grid-template-columns: 1fr; } .cc-k .v { font-size: 19px; } }
+  @media (prefers-reduced-motion: reduce) { .cc-k, .cc-card, details.cc-g > summary::after { transition: none; } .cc-k:hover, .cc-card:hover { transform: none; } }
+</style>
+{% endblock %}
 {% block content %}
 <h1>ETI wallet (on-chain)</h1>
 <div class="sub">ETI owns one EVM address. The private key is generated on the server, stored encrypted and never shown or exported. Testnets by default; every spend needs a previewed quote, passes the spending policy, and is confirmed by typing SEND.</div>
+
+<section class="cc" id="cc" aria-labelledby="h-cc">
+  <h2 id="h-cc" class="cc-h">Wallet control centre <span class="chip" id="cc-state">loading…</span></h2>
+  <div class="cc-kpis" id="cc-kpis" aria-live="polite"></div>
+  <div class="cc-primary" id="cc-primary" role="group" aria-label="Most used actions"></div>
+  <div class="cc-tools">
+    <input id="cc-q" type="search" placeholder="Search wallet functions…" autocomplete="off">
+    <div class="cc-chips" id="cc-chips" role="group" aria-label="Filter by status"></div>
+    <button class="btn sm" id="cc-exp" type="button">Collapse all</button>
+  </div>
+  <p class="sub" id="cc-legend"></p>
+  <div id="cc-groups"></div>
+  <section class="panel" id="cc-work" hidden aria-live="polite">
+    <h2><span id="cc-work-t"></span> <button class="btn sm" id="cc-work-x" type="button">Close</button></h2>
+    <div id="cc-work-b"></div>
+  </section>
+</section>
 
 <section class="panel" id="wdash" style="margin-top:12px" aria-labelledby="h-wd">
   <h2 id="h-wd">Wallet dashboard <span class="chip" id="wd-chip">loading…</span></h2>
@@ -150,7 +213,7 @@
       { k: (r) => r, label: '', fmt: (r) => (r.status === 'pending' ? el('button', { class: 'btn sm', type: 'button', onclick: (ev) => busy(ev.currentTarget, async () => { await api('/api/chain/txs/' + r.id + '/refresh', { method: 'POST' }); await loadTxs(); }) }, 'Check') : '') }], t.transactions, 'No transactions yet.'));
     $('#ev-body').replaceChildren(table([{ k: 'ts', label: 'Time', fmt: fmt.time }, { k: 'event', label: 'Event' }, { k: 'network', label: 'Network' }, { k: (r) => JSON.stringify(r.detail || {}), label: 'Detail', wrap: true }], e.events, 'No events yet.'));
   }
-  async function refreshAll() { await Promise.allSettled([loadWallet(), loadAllow(), loadTxs(), loadDash()]); loadStatus(); }
+  async function refreshAll() { await Promise.allSettled([loadWallet(), loadAllow(), loadTxs(), loadDash()]); loadStatus(); if (window.__ccReload) window.__ccReload(); }
 
   async function showPreview(p) {
     const rows = { Summary: p.summary, Network: p.label + (p.mainnet ? ' (MAINNET)' : ' (testnet)'), From: p.from, To: p.to, 'Value (wei)': p.value_wei, 'Gas limit': p.gas, 'Max fee cost': p.max_fee_cost + ' ' + p.native, 'Quote expires': p.expires_at ? fmt.time(p.expires_at) : '\u2014' };
@@ -182,7 +245,272 @@
   form('#f-scan', async (d) => { const r = await api('/api/chain/intel/blocks?network=' + ETI.enc(d.network) + '&count=' + Number(d.count) + '&threshold=' + ETI.enc(d.threshold.trim()), { timeout: 90000 }); $('#intel-out').replaceChildren(el('p', { class: 'sub', text: 'Scanned ' + r.blocks_scanned + ' block(s) up to ' + r.head + '. ' + r.note }), table([{ k: 'block', label: 'Block' }, { k: 'tags', label: 'Flag', fmt: (v) => v.join(', ') }, { k: (x) => x.value + ' ' + r.native, label: 'Value' }, { k: 'from', label: 'From', fmt: short }, { k: 'to', label: 'To', fmt: short }, { k: (x) => x, label: 'Tx', fmt: (x) => link(short(x.tx_hash), x.explorer_url) }], r.findings, 'No transfers at or above the threshold and none involving watch addresses.')); });
   $('#net-refresh').addEventListener('click', (e) => busy(e.currentTarget, loadStatus));
   $('#tx-refresh').addEventListener('click', (e) => busy(e.currentTarget, async () => { const r = await api('/api/chain/txs/refresh', { method: 'POST' }); toast('Checked ' + r.transactions.length + ' pending transaction(s)', 'good'); await loadTxs(); }));
-  document.addEventListener('DOMContentLoaded', async () => { loadDash(); await loadNets().catch((e) => toast(e.message, 'bad')); await refreshAll(); ETI.poll(() => loadTxs(), 30000); ETI.poll(() => loadDash(), 30000); });
+
+  // ================================================================ control centre (every function as a labelled button)
+  // Status meaning on this page: Operational = wired to a live endpoint on this server; Testnet = same, but only test networks can
+  // spend; Awaiting configuration = needs credentials/infrastructure; Coming soon = no backend exists yet; Disabled = withheld on purpose.
+  const S = { chain: { state: 'unknown', msg: '' }, wallet: null, nets: [], limits: {}, stat: null, paper: null, paperErr: '', txs: [] };
+  const STATUS = { op: 'Operational', testnet: 'Testnet', config: 'Awaiting configuration', soon: 'Coming soon', off: 'Disabled' };
+  const FILTER = { q: '', s: 'all' };
+  const classify = (e) => { const m = String((e && e.message) || e); return /disabled|503/i.test(m) ? { state: 'disabled', msg: m } : /401|403|api key|unauthor/i.test(m) ? { state: 'auth', msg: m } : { state: 'error', msg: m }; };
+  const aria = (node, name, val) => { node.setAttribute(name, val); return node; };
+  const lab = (t, input) => el('label', {}, t + ' ', input);
+  const prim = (v) => v === null || v === undefined ? '\u2014' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+  const flat = (o) => Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v === null || typeof v !== 'object').map(([k, v]) => [k, prim(v)]));
+  const csvCell = (v) => { let s = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
+  function download(name, rows, cols) {
+    const lines = [cols.map((c) => csvCell(c.label)).join(',')].concat(rows.map((r) => cols.map((c) => csvCell(typeof c.k === 'function' ? c.k(r) : r[c.k])).join(',')));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500); toast('Exported ' + rows.length + ' row(s)', 'good');
+  }
+  const work = (title, node) => { $('#cc-work-t').textContent = title; $('#cc-work-b').replaceChildren(node); const w = $('#cc-work'); w.hidden = false; w.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  const goto = (id) => { const t = document.getElementById(id); if (!t) return; t.scrollIntoView({ behavior: 'smooth', block: 'start' }); const f = t.querySelector('input,select,button'); if (f) f.focus({ preventScroll: true }); };
+  const copyBtn = (text, label) => el('button', { class: 'btn sm', type: 'button', onclick: () => navigator.clipboard.writeText(text).then(() => toast('Copied', 'good'), () => toast('Copy failed', 'bad')) }, label || 'Copy address');
+  const netSelect = () => el('select', {}, ...S.nets.map((n) => el('option', { value: n.key, text: n.label + (n.mainnet ? ' (MAINNET)' : ' (testnet)') })));
+  const generic = (rows) => { const keys = Object.keys(rows[0] || {}).slice(0, 8); return table(keys.map((k) => ({ k, label: k, fmt: prim })), rows, 'Nothing to show.'); };
+  const needWallet = () => { if (!S.wallet) throw new Error('Create the ETI wallet first.'); };
+
+  async function loadState() {
+    try { const d = await api('/api/chain/networks'); S.nets = d.networks || []; S.limits = d.limits || {}; S.chain = { state: 'ok', msg: '' }; }
+    catch (e) { S.chain = classify(e); S.nets = []; S.limits = {}; }
+    const jobs = [api('/api/command/performance?account_id=default&range=ALL').then((r) => { S.paper = r; S.paperErr = ''; }).catch((e) => { S.paper = null; S.paperErr = String((e && e.message) || e); })];
+    if (S.chain.state === 'ok') {
+      jobs.push(api('/api/chain/wallet').then((r) => { S.wallet = r.wallet; }).catch(() => {}));
+      jobs.push(api('/api/chain/status', { timeout: 90000 }).then((r) => { S.stat = r; }).catch(() => { S.stat = null; }));
+      jobs.push(api('/api/chain/txs?limit=200').then((r) => { S.txs = r.transactions || []; }).catch(() => {}));
+    }
+    await Promise.allSettled(jobs);
+    renderKpis(); renderAll();
+  }
+  window.__ccReload = () => { loadState(); };
+
+  function renderKpis() {
+    const s = S.paper && S.paper.summary, nets = (S.stat && S.stat.networks) || [], live = nets.filter((n) => n.connected).length;
+    const pend = S.txs.filter((t) => t.status === 'pending').length, sent = S.txs.filter((t) => t.status === 'confirmed').length, ok = S.chain.state === 'ok';
+    const k = (l, v, sub) => el('div', { class: 'cc-k' }, el('div', { class: 'l', text: l }), el('div', { class: 'v', text: String(v) }), el('div', { class: 'u', text: sub }));
+    $('#cc-kpis').replaceChildren(
+      k('Total wallet value', s ? fmt.usd(s.equity) : 'unavailable', 'Paper wallet (simulated). On-chain balances are not priced here.'),
+      k('Available balance', s ? fmt.usd(s.available_cash) : 'unavailable', 'Paper cash not reserved by open orders'),
+      k('Reserved balance', s ? fmt.usd(s.reserved_cash) : 'unavailable', 'Held by resting paper buy orders'),
+      k('Pending balance', ok ? pend + ' tx' : 'unavailable', 'On-chain transactions awaiting confirmation (amounts are not summed)'),
+      k('Total deposits', s ? fmt.usd(s.starting_cash) : 'unavailable', 'Paper funding only. On-chain deposits are not tracked (no incoming-transaction indexer).'),
+      k('Total withdrawals', ok ? sent + ' confirmed' : 'unavailable', 'Confirmed on-chain sends (a count; amounts are in the transaction table)'),
+      k('Total transaction fees', s ? fmt.usd(s.fees_paid) : 'unavailable', 'Paper trading fees. Network gas is shown under Gas and Network Fees.'),
+      k('Connected networks', ok ? live + ' / ' + S.nets.length : 'unavailable', 'Networks whose RPC answered just now'));
+    $('#cc-state').textContent = ok ? 'on-chain API connected' : S.chain.state === 'disabled' ? 'on-chain disabled' : S.chain.state === 'auth' ? 'API key needed' : 'on-chain unavailable';
+  }
+
+  // ---- views used by several buttons
+  function txView(title, pred, note) {
+    const all = S.txs.filter(pred || (() => true));
+    const q = el('input', { type: 'search', placeholder: 'Search hash, network, summary\u2026' }); aria(q, 'aria-label', 'Search transactions');
+    const sel = el('select', {}, ...['all', 'pending', 'confirmed', 'failed', 'broadcast_failed'].map((s) => el('option', { value: s, text: s }))); aria(sel, 'aria-label', 'Filter by status');
+    const out = el('div');
+    const csv = [{ k: 'created_at', label: 'time' }, { k: 'network', label: 'network' }, { k: 'kind', label: 'kind' }, { k: 'summary', label: 'summary' }, { k: 'status', label: 'status' }, { k: 'tx_hash', label: 'tx_hash' }, { k: 'error', label: 'error' }];
+    const cols = [{ k: 'created_at', label: 'Time', fmt: fmt.time }, { k: 'network', label: 'Network' }, { k: 'kind', label: 'Kind' }, { k: 'summary', label: 'Summary', wrap: true },
+      { k: 'status', label: 'Status', fmt: (v) => el('span', { class: 'badge ' + (v === 'confirmed' ? 'good' : v === 'failed' || v === 'broadcast_failed' ? 'bad' : 'warn'), text: v }) },
+      { k: (r) => r, label: 'Tx / explorer', fmt: (r) => link(short(r.tx_hash), r.explorer_url) },
+      { k: (r) => r, label: '', fmt: (r) => el('button', { class: 'btn sm', type: 'button', onclick: () => receipt(r) }, 'Receipt') }];
+    const draw = () => {
+      const t = q.value.trim().toLowerCase(), st = sel.value;
+      const rows = all.filter((r) => (st === 'all' || r.status === st) && (!t || [r.tx_hash, r.network, r.summary, r.kind, r.status].some((x) => String(x || '').toLowerCase().includes(t))));
+      out.replaceChildren(table(cols, rows, 'No matching transactions.'), el('p', { class: 'sub', text: rows.length + ' of ' + all.length + ' shown' })); return rows;
+    };
+    q.addEventListener('input', draw); sel.addEventListener('change', draw);
+    work(title, el('div', {}, note ? el('p', { class: 'sub', text: note }) : null, el('div', { class: 'cc-tools' }, q, sel,
+      el('button', { class: 'btn sm', type: 'button', onclick: () => download('eti-transactions.csv', draw(), csv) }, 'Export CSV'),
+      el('button', { class: 'btn sm', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { const r = await api('/api/chain/txs/refresh', { method: 'POST' }); toast('Checked ' + r.transactions.length + ' pending transaction(s)', 'good'); await loadState(); txView(title, pred, note); }) }, 'Check pending')), out));
+    draw();
+  }
+  async function receipt(r) {
+    await modal('Transaction receipt', el('div', {}, kv({ Status: r.status, Network: r.network, Kind: r.kind, Summary: r.summary, Hash: r.tx_hash || '\u2014', Created: r.created_at ? fmt.time(r.created_at) : '\u2014', Error: r.error || '\u2014' }),
+      r.explorer_url ? el('p', {}, link('Open in block explorer', r.explorer_url)) : el('p', { class: 'sub', text: 'No explorer link (not broadcast).' }), el('p', { class: 'sub', text: 'Only confirmed statuses prove an on-chain result.' })), [{ label: 'Close', value: 'x' }]);
+  }
+  async function netTable(kind) {
+    const s = await api('/api/chain/status', { timeout: 90000 }); S.stat = s;
+    const rpc = (r) => (r.connected ? 'connected' : r.configured ? 'unreachable' : 'no RPC');
+    const badge = (v) => el('span', { class: 'badge ' + (v === 'connected' ? 'good' : 'bad'), text: v });
+    const cols = { status: [{ k: 'label', label: 'Network' }, { k: 'mainnet', label: 'Type', fmt: (v) => (v ? 'MAINNET' : 'testnet') }, { k: rpc, label: 'RPC', fmt: badge }, { k: 'block', label: 'Block (synchronisation)' }, { k: (r) => r.error || r.note || '', label: 'Note', wrap: true }],
+      rpc: [{ k: 'label', label: 'Network' }, { k: rpc, label: 'Connectivity', fmt: badge }, { k: 'block', label: 'Latest block' }, { k: (r) => r.error || '', label: 'Error', wrap: true }],
+      gas: [{ k: 'label', label: 'Network' }, { k: 'gas_price_gwei', label: 'Gas price (gwei)', fmt: (v) => (v == null ? '\u2014' : v.toFixed(2)) }, { k: rpc, label: 'RPC', fmt: badge }],
+      native: [{ k: 'label', label: 'Network' }, { k: (r) => (r.balance != null ? r.balance + ' ' + r.native : '\u2014'), label: 'Native balance' }, { k: rpc, label: 'RPC', fmt: badge }] }[kind];
+    return table(cols, s.networks || [], 'No network has an RPC endpoint configured.');
+  }
+  async function paperSummary(title) {
+    const s = (S.paper && S.paper.summary) || null; if (!s) throw new Error('Paper account unavailable: ' + S.paperErr);
+    work(title, el('div', {}, kv({ 'Total value': fmt.usd(s.equity), Cash: fmt.usd(s.cash), Available: fmt.usd(s.available_cash), Reserved: fmt.usd(s.reserved_cash), 'Holdings value': fmt.usd(s.market_value), 'Realized P&L': fmt.signed(s.realized_pnl), 'Unrealized P&L': fmt.signed(s.unrealized_pnl), 'Fees paid': fmt.usd(s.fees_paid), 'Starting cash': fmt.usd(s.starting_cash) }),
+      el('p', { class: 'sub', text: 'Simulated paper wallet: no real money. Trade it from the Trading Command Centre.' })));
+  }
+  async function addressView(mode) {
+    needWallet(); const sel = netSelect(), out = el('div');
+    const draw = () => {
+      const n = S.nets.find((x) => x.key === sel.value) || S.nets[0]; if (!n) return;
+      out.replaceChildren(el('div', { class: 'cc-addr', text: S.wallet.address }), copyBtn(S.wallet.address),
+        kv({ Network: n.label, 'Chain ID': n.chain_id, Accepts: n.native + ' and tokens on the allowlist', Type: n.mainnet ? 'MAINNET (real funds)' : 'testnet (no real value)', RPC: n.configured ? 'configured' : 'not configured' }),
+        el('p', { class: 'cc-warn', text: 'Send only ' + n.native + ' (or allowlisted tokens) on ' + n.label + '. Funds sent on another network or as an unsupported token may be unrecoverable.' }),
+        el('p', { class: 'sub', text: mode === 'deposit' ? 'ETI does not detect incoming deposits automatically: after sending, check the balance under Network Status once the transaction confirms.' : 'No QR code is shown: ETI has no verified QR encoder and will not send your address to a third-party QR service. Copy the address instead.' }));
+    };
+    sel.addEventListener('change', draw); work(mode === 'deposit' ? 'Deposit' : 'Receive crypto', el('div', {}, lab('Network', sel), out)); draw();
+  }
+  async function reportView() {
+    const sel = el('select', {}, ...['daily', 'weekly', 'monthly'].map((k) => el('option', { value: k, text: k })));
+    const v = await modal('Wallet statement (paper account)', el('div', {}, lab('Period', sel), el('p', { class: 'sub', text: 'Built from stored paper fills. On-chain statements are the transaction history and CSV export.' })), [{ label: 'Cancel', value: 'no' }, { label: 'Generate', value: 'go', kind: 'primary' }]);
+    if (v !== 'go') return;
+    const r = await api('/api/command/report?kind=' + ETI.enc(sel.value) + '&format=json');
+    work('Statement: ' + sel.value, el('div', {}, kv(flat(r.summary)), el('h3', { class: 'sub', text: 'Performance' }), kv(flat(r.performance)), el('p', { class: 'sub', text: 'Generated ' + (r.generated_at ? fmt.time(r.generated_at) : '') })));
+  }
+  async function addTokenFlow() {
+    const net = netSelect(), addr = el('input', { placeholder: '0x\u2026 token contract', autocomplete: 'off' }), sym = el('input', { maxlength: 16, placeholder: 'e.g. USDC' }), dec = el('input', { type: 'number', min: 0, max: 36, value: 18 });
+    const v = await modal('Add custom token', el('div', { class: 'form' }, lab('Network', net), lab('Contract address', addr), lab('Symbol', sym), lab('Decimals', dec), el('p', { class: 'sub', text: 'Adds the token to the server allowlist so balances and DEX quotes can use it. Inspect unknown contracts first (Blockchain intelligence).' })), [{ label: 'Cancel', value: 'no' }, { label: 'Add to allowlist', value: 'go', kind: 'primary' }]);
+    if (v !== 'go') return;
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr.value.trim())) throw new Error('Enter a valid 0x\u2026 contract address (42 characters).');
+    const d = Number(dec.value); if (!Number.isInteger(d) || d < 0 || d > 36) throw new Error('Decimals must be a whole number from 0 to 36.');
+    if (!sym.value.trim()) throw new Error('Enter the token symbol.');
+    await api('/api/chain/allowlist', { method: 'POST', body: { network: net.value, kind: 'token', address: addr.value.trim(), label: null, symbol: sym.value.trim().slice(0, 16), decimals: d } });
+    toast('Token added to the allowlist', 'good'); await loadAllow();
+  }
+  async function tokenBalances() {
+    needWallet(); const ns = netSelect(), out = el('div');
+    const go = async () => { out.replaceChildren(el('div', { class: 'empty', text: 'Loading\u2026' })); try { const r = await api('/api/chain/tokens?network=' + ETI.enc(ns.value), { timeout: 60000 }); const rows = r.balances || []; out.replaceChildren(rows.length ? generic(rows) : unavailable('No allowlisted tokens on this network. Use Add Custom Token.', 'No tokens')); } catch (e) { out.replaceChildren(unavailable(e.message, 'Token balances')); } };
+    ns.addEventListener('change', go); work('Token balances', el('div', {}, lab('Network', ns), out)); await go();
+  }
+  const events = async () => {
+    const r = await api('/api/chain/events?limit=200'), rows = r.events || [];
+    work('Security audit logs', el('div', {}, el('button', { class: 'btn sm', type: 'button', onclick: () => download('eti-wallet-audit.csv', rows, [{ k: 'ts', label: 'time' }, { k: 'event', label: 'event' }, { k: 'network', label: 'network' }, { k: 'tx_hash', label: 'tx_hash' }, { k: (x) => JSON.stringify(x.detail || {}), label: 'detail' }]) }, 'Export CSV'),
+      table([{ k: 'ts', label: 'Time', fmt: fmt.time }, { k: 'event', label: 'Event' }, { k: 'network', label: 'Network' }, { k: (x) => JSON.stringify(x.detail || {}), label: 'Detail', wrap: true }], rows, 'No events yet.')));
+  };
+  const policyView = (title, extra) => work(title, el('div', {}, kv(flat(S.limits)), extra ? el('p', { class: 'sub', text: extra }) : null, el('p', { class: 'sub', text: 'These are operator-controlled server settings. This page can display them but cannot change them.' })));
+  const SOON_TREASURY = 'ETI has a single wallet and no company/treasury module in this backend. It needs multiple labelled wallets, ledger accounts and role-based approvals to be built first.';
+
+  // ---- registry: id, group, icon, label, description, kind, options
+  // kind: chain = needs the on-chain API; paper = needs the paper API; any = either; info = always available; soon / off = never wired
+  const F = [
+    ['create-wallet', 'A', '\u271A', 'Create Wallet', 'Generate the ETI wallet key on the server (encrypted, never shown)', 'chain', { run: async () => { if (S.wallet) { toast('The ETI wallet already exists: ' + short(S.wallet.address), 'warn'); return addressView('receive'); } await createWallet(); await loadState(); } }],
+    ['import-wallet', 'A', '\u21E9', 'Import Wallet', 'Bring in an existing key or seed phrase', 'off', { why: 'Disabled on purpose: pasting a private key or seed phrase into a web form would expose it to the browser, logs and extensions. An import would have to be a server-side operator procedure.' }],
+    ['view-addresses', 'A', '\u25A4', 'View Wallet Addresses', 'The ETI address and every network it works on', 'chain', { wallet: true, run: async () => { needWallet(); work('Wallet addresses', el('div', {}, el('div', { class: 'cc-addr', text: S.wallet.address }), copyBtn(S.wallet.address), el('p', { class: 'sub', text: 'One EVM address, valid on every network below.' }), table([{ k: 'label', label: 'Network' }, { k: 'chain_id', label: 'Chain ID' }, { k: 'native', label: 'Coin' }, { k: 'mainnet', label: 'Type', fmt: (v) => (v ? 'MAINNET' : 'testnet') }], S.nets, 'No networks.'))); } }],
+    ['manage-wallets', 'A', '\u2630', 'Manage Wallets', 'List, label and retire wallets', 'soon', { why: 'The backend supports exactly one ETI wallet. Multi-wallet management needs a wallet registry in the database and per-wallet policies.' }],
+    ['switch-wallet', 'A', '\u21C4', 'Switch Wallet', 'Choose which wallet is active', 'soon', { why: 'Needs more than one wallet (see Manage Wallets).' }],
+    ['connect-external', 'A', '\u29C9', 'Connect External Wallet', 'Link a browser or hardware wallet', 'soon', { why: 'Needs a WalletConnect or injected-provider integration with a signed proof of ownership. None exists yet.' }],
+    ['wallet-security', 'A', '\u26E8', 'Wallet Security', 'Kill switch, key storage and spending policy at a glance', 'chain', { run: async () => work('Wallet security', el('div', {}, kv({ 'Kill switch': S.stat ? (S.stat.kill_switch ? 'ACTIVE: on-chain sends are blocked' : 'off') : 'unknown (status unavailable)', 'Key storage': 'Encrypted on the server; never returned by any endpoint; cannot be exported', 'Sends require': 'Previewed quote + spending policy + typed SEND confirmation', 'API access': 'ETI API key (shared). Per-user roles, MFA and multi-signature are not implemented.', ...flat(S.limits) })))) }],
+    ['backup', 'A', '\u29C9', 'Backup and Recovery', 'Export or restore the wallet key', 'off', { why: 'Key export is disabled by design. Recovery is an operator procedure: restore the database backup together with EXECUTION_VAULT_KEY. Losing either loses the wallet.' }],
+
+    ['deposit', 'B', '\u2913', 'Deposit', 'Deposit address and instructions for a network', 'chain', { wallet: true, run: () => addressView('deposit') }],
+    ['receive', 'B', '\u25CE', 'Receive Crypto', 'The address to receive native coin and allowlisted tokens', 'chain', { wallet: true, run: () => addressView('receive') }],
+    ['qr', 'B', '\u25A6', 'Show QR Code', 'Display the receive address as a QR code', 'soon', { why: 'No verified QR encoder is bundled, and ETI will not send your address to a third-party QR service. A shown QR that fails to scan could misdirect funds.' }],
+    ['copy-address', 'B', '\u2398', 'Copy Wallet Address', 'Copy the ETI address to the clipboard', 'chain', { wallet: true, run: async () => { needWallet(); await navigator.clipboard.writeText(S.wallet.address); toast('Address copied: ' + short(S.wallet.address), 'good'); } }],
+    ['deposit-history', 'B', '\u29D6', 'Deposit History', 'Incoming transfers to the wallet', 'soon', { why: 'The backend records only transactions ETI sends. Incoming history needs a block/indexer service. (Blockchain intelligence can scan recent blocks for watch addresses manually.)' }],
+    ['monitor-incoming', 'B', '\u25C9', 'Monitor Incoming Transactions', 'Alert when funds arrive', 'soon', { why: 'Needs a background scanner for incoming transfers plus alert routing; neither exists yet.' }],
+
+    ['withdraw', 'C', '\u2912', 'Withdraw', 'Request a withdrawal for approval', 'soon', { why: 'The request-and-approval workflow (human or multi-signature approval, MFA) is not built. Use Send Crypto, which enforces the allowlist, limits and a typed confirmation.' }],
+    ['send', 'C', '\u27A4', 'Send Crypto', 'Preview, then send native coin to an allowlisted address', 'chain', { wallet: true, rpc: true, sends: true, run: async () => { goto('send'); toast('Choose network, allowlisted destination and amount, then Preview.', 'good'); } }],
+    ['internal-transfer', 'C', '\u21C6', 'Internal Wallet Transfer', 'Move funds between company wallets', 'soon', { why: 'Needs more than one wallet and a ledger between them (see Manage Wallets).' }],
+    ['external-transfer', 'C', '\u2197', 'External Wallet Transfer', 'Send to an outside address on the allowlist', 'chain', { wallet: true, rpc: true, sends: true, run: async () => { goto('send'); toast('External transfers go to allowlisted destinations only. Add one under Manage Withdrawal Addresses.', 'good'); } }],
+    ['wd-requests', 'C', '\u2630', 'Withdrawal Requests', 'Queue of requested withdrawals', 'soon', { why: 'No request queue exists; sends are previewed and confirmed immediately.' }],
+    ['wd-pending', 'C', '\u23F3', 'Pending Withdrawals', 'Sends broadcast but not yet confirmed', 'chain', { run: async () => txView('Pending withdrawals', (r) => r.status === 'pending' && !/swap|approv/i.test(r.kind || ''), 'Broadcast transactions that have no confirmation yet.') }],
+    ['wd-approval', 'C', '\u2714', 'Withdrawal Approval', 'Second-person or multi-signature approval', 'soon', { why: 'No approver roles or multi-signature wallet are implemented; today the only gate is the previewed quote plus typed SEND confirmation.' }],
+    ['wd-history', 'C', '\u29D7', 'Withdrawal History', 'Completed and failed on-chain sends', 'chain', { run: async () => txView('Withdrawal history', (r) => !/swap|approv/i.test(r.kind || '')) }],
+
+    ['all-assets', 'D', '\u25C8', 'View All Assets', 'Native coins plus paper holdings', 'any', { run: async () => { const t = S.chain.state === 'ok' ? await netTable('native') : unavailable('On-chain API unavailable: ' + (S.chain.msg || ''), 'On-chain assets'); const p = (S.paper && S.paper.summary) ? table([{ k: 'symbol', label: 'Paper asset' }, { k: 'qty', label: 'Qty' }, { k: 'market_value', label: 'Value', fmt: (v) => fmt.usd(v) }], (S.paper.summary.positions || []).filter((x) => x.open !== false), 'No paper holdings.') : unavailable(S.paperErr, 'Paper holdings'); work('All assets', el('div', {}, el('h3', { class: 'sub', text: 'On-chain native balances (token balances: use Token Balances)' }), t, el('h3', { class: 'sub', text: 'Paper holdings (simulated)' }), p)); } }],
+    ['token-balances', 'D', '\u25CD', 'Token Balances', 'Allowlisted token balances per network', 'chain', { wallet: true, rpc: true, run: tokenBalances }],
+    ['native-balances', 'D', '\u25CB', 'Native Coin Balances', 'ETH/BNB/etc. balance on each network', 'chain', { wallet: true, rpc: true, run: async () => work('Native coin balances', await netTable('native')) }],
+    ['add-token', 'D', '\u271A', 'Add Custom Token', 'Allowlist a token contract', 'chain', { run: addTokenFlow }],
+    ['networks', 'D', '\u2301', 'Supported Networks', 'Networks, chain IDs and whether an RPC is configured', 'chain', { run: async () => work('Supported networks', table([{ k: 'label', label: 'Network' }, { k: 'chain_id', label: 'Chain ID' }, { k: 'native', label: 'Coin' }, { k: 'mainnet', label: 'Type', fmt: (v) => (v ? 'MAINNET' : 'testnet') }, { k: 'configured', label: 'RPC', fmt: (v) => (v ? 'configured' : 'not configured') }], S.nets, 'No networks.')) }],
+    ['token-txs', 'D', '\u21C5', 'Token Transactions', 'Swaps and token approvals', 'chain', { run: async () => txView('Token transactions', (r) => /swap|approv|token/i.test(r.kind || ''), 'Swap and approval transactions.') }],
+
+    ['explorer', 'E', '\u2B21', 'Blockchain Explorer', 'Open any ETI transaction in the network explorer', 'chain', { run: async () => txView('Blockchain explorer', null, 'Each hash links to the network\u2019s public block explorer (opens in a new tab).') }],
+    ['net-status', 'E', '\u2630', 'Network Status', 'Live RPC state and block height per network', 'chain', { rpc: true, run: async () => work('Network status', await netTable('status')) }],
+    ['rpc', 'E', '\u21C5', 'RPC Connectivity', 'Is each configured RPC answering?', 'chain', { rpc: true, run: async () => work('RPC connectivity', await netTable('rpc')) }],
+    ['tx-history', 'E', '\u29D7', 'Transaction History', 'Searchable history of every on-chain transaction', 'chain', { run: async () => txView('Transaction history') }],
+    ['tx-tracking', 'E', '\u25CE', 'Transaction Tracking', 'Pending transactions and receipt checks', 'chain', { run: async () => txView('Transaction tracking', (r) => r.status === 'pending', 'Use Check pending to ask the node for receipts.') }],
+    ['gas', 'E', '\u26FD', 'Gas and Network Fees', 'Current gas price per network', 'chain', { rpc: true, run: async () => work('Gas and network fees', await netTable('gas')) }],
+    ['reconcile-tx', 'E', '\u21BB', 'Transaction Reconciliation', 'Re-check pending transactions against on-chain receipts', 'chain', { run: async () => { const r = await api('/api/chain/txs/refresh', { method: 'POST' }); await loadState(); const rows = r.transactions || []; work('Transaction reconciliation', el('div', {}, el('p', { class: 'sub', text: 'Asked the nodes about ' + rows.length + ' pending transaction(s).' }), rows.length ? generic(rows) : el('p', { text: 'Nothing was pending.' }))); } }],
+
+    ['f-trading', 'F', '\u25A3', 'Trading Wallet', 'The simulated paper wallet used for trading', 'paper', { run: () => paperSummary('Trading wallet (simulated paper)') }],
+    ['f-treasury', 'F', '\u25A3', 'Treasury Wallet', 'Company treasury account', 'soon', { why: SOON_TREASURY }],
+    ['f-opex', 'F', '\u25A3', 'Operating Expenses Wallet', 'Day-to-day operating funds', 'soon', { why: SOON_TREASURY }],
+    ['f-reserve', 'F', '\u25A3', 'Emergency Reserve Wallet', 'Locked contingency funds', 'soon', { why: SOON_TREASURY }],
+    ['f-invest', 'F', '\u25A3', 'Investment Wallet', 'Long-term investment funds', 'soon', { why: SOON_TREASURY }],
+    ['f-budgets', 'F', '\u25A5', 'Departmental Budgets', 'Budgets per department', 'soon', { why: 'No budget or department model exists in the backend.' }],
+    ['f-transfer', 'F', '\u21C6', 'Transfer Between Company Wallets', 'Move funds between treasury wallets', 'soon', { why: SOON_TREASURY }],
+    ['f-profit', 'F', '\u25D0', 'Profit Allocation', 'Split profits across wallets by rule', 'soon', { why: 'Needs treasury wallets and an allocation-rule engine with approvals.' }],
+    ['f-reports', 'F', '\u2263', 'Treasury Reports', 'Reports across treasury wallets', 'soon', { why: 'Needs treasury wallets first. Paper-account statements are available under Wallet Statements.' }],
+
+    ['g-statements', 'G', '\u2263', 'Wallet Statements', 'Daily, weekly or monthly statement (paper account)', 'paper', { run: reportView }],
+    ['g-receipts', 'G', '\u29C9', 'Transaction Receipts', 'Receipt for any on-chain transaction', 'chain', { run: async () => txView('Transaction receipts', null, 'Use the Receipt button on a row.') }],
+    ['g-balances', 'G', '\u25C8', 'Account Balances', 'Paper cash and holdings plus on-chain native balances', 'any', { run: async () => { const s = S.paper && S.paper.summary; work('Account balances', el('div', {}, s ? kv({ 'Paper total value': fmt.usd(s.equity), 'Paper cash': fmt.usd(s.cash), 'Paper holdings value': fmt.usd(s.market_value) }) : unavailable(S.paperErr, 'Paper wallet'), S.chain.state === 'ok' ? await netTable('native') : unavailable(S.chain.msg || 'On-chain API unavailable', 'On-chain wallet'))); } }],
+    ['g-available', 'G', '\u2713', 'Available Funds', 'Cash that can be used right now (paper)', 'paper', { run: async () => { const s = S.paper && S.paper.summary; if (!s) throw new Error(S.paperErr); work('Available funds', kv({ 'Available cash': fmt.usd(s.available_cash), 'Total cash': fmt.usd(s.cash) })); } }],
+    ['g-reserved', 'G', '\u2692', 'Reserved Funds', 'Cash held back by open paper orders', 'paper', { run: async () => { const s = S.paper && S.paper.summary; if (!s) throw new Error(S.paperErr); work('Reserved funds', kv({ 'Reserved cash': fmt.usd(s.reserved_cash), 'Open orders': s.open_orders == null ? '\u2014' : s.open_orders })); } }],
+    ['g-pending', 'G', '\u23F3', 'Pending Funds', 'On-chain transactions not yet confirmed', 'chain', { run: async () => txView('Pending funds', (r) => r.status === 'pending', 'Amounts settle only when the transaction confirms.') }],
+    ['g-fees', 'G', '\u00A2', 'Transaction Fees', 'Paper trading fees and current network gas', 'any', { run: async () => { const s = S.paper && S.paper.summary; work('Transaction fees', el('div', {}, s ? kv({ 'Paper fees paid': fmt.usd(s.fees_paid) }) : unavailable(S.paperErr, 'Paper fees'), S.chain.state === 'ok' ? await netTable('gas') : unavailable(S.chain.msg || 'On-chain API unavailable', 'Gas'))); } }],
+    ['g-reconcile', 'G', '\u21BB', 'Financial Reconciliation', 'Internal ledger versus external balances', 'soon', { why: 'ETI keeps no internal ledger of on-chain balances to compare with the RPC, and no exchange-account balances are connected. Transaction Reconciliation (receipts) is available under Blockchain operations.' }],
+    ['g-export', 'G', '\u2913', 'Export Transactions', 'Download CSV (on-chain or paper fills)', 'any', { run: async () => work('Export transactions', el('div', {}, el('div', { class: 'cc-tools' },
+      S.chain.state === 'ok' ? el('button', { class: 'btn', type: 'button', onclick: () => download('eti-onchain-transactions.csv', S.txs, [{ k: 'created_at', label: 'time' }, { k: 'network', label: 'network' }, { k: 'kind', label: 'kind' }, { k: 'summary', label: 'summary' }, { k: 'status', label: 'status' }, { k: 'tx_hash', label: 'tx_hash' }]) }, 'Export on-chain transactions (CSV)') : null,
+      el('button', { class: 'btn', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { const r = await api('/api/paper/fills?limit=1000'); const rows = r.fills || r; download('eti-paper-fills.csv', rows, [{ k: 'ts', label: 'time' }, { k: 'symbol', label: 'symbol' }, { k: 'side', label: 'side' }, { k: 'qty', label: 'qty' }, { k: 'price', label: 'price' }, { k: 'fee', label: 'fee' }, { k: 'realized_pnl', label: 'realized_pnl' }, { k: 'order_id', label: 'order_id' }]); }) }, 'Export paper fills (CSV)')),
+      el('p', { class: 'sub', text: 'Files are built in your browser from server data; nothing is uploaded.' }))) }],
+
+    ['h-settings', 'H', '\u2699', 'Change Wallet Security Settings', 'Edit limits, allowlist requirement, mainnet switch', 'off', { why: 'Disabled on purpose: these are operator-controlled server environment settings so that a compromised browser session cannot loosen them. View them under Withdrawal Limits.' }],
+    ['h-users', 'H', '\u263A', 'Manage Authorized Users', 'Per-user wallet roles', 'soon', { why: 'Wallet access is gated by the shared ETI API key only. Per-user accounts and roles for the wallet are not implemented.' }],
+    ['h-mfa', 'H', '\u2699', 'Multi-Factor Authentication', 'Second factor for sends', 'soon', { why: 'MFA is not enforced on wallet actions. Today a send needs a previewed quote and a typed SEND confirmation.' }],
+    ['h-multisig', 'H', '\u2714', 'Multi-Signature Approvals', 'Require several approvers', 'soon', { why: 'Needs a multi-signature wallet contract or an approval workflow; neither exists.' }],
+    ['h-addresses', 'H', '\u2316', 'Manage Withdrawal Addresses', 'Allowlist destinations that sends may use', 'chain', { run: async () => { goto('allow'); toast('Add or remove destinations in the Allowlist panel.', 'good'); } }],
+    ['h-limits', 'H', '\u2264', 'Withdrawal Limits', 'Per-transaction and daily limits in force', 'chain', { run: async () => policyView('Withdrawal limits') }],
+    ['h-policies', 'H', '\u2696', 'Transaction Approval Policies', 'Rules every send must pass', 'chain', { run: async () => policyView('Transaction approval policies', 'Every send: previewed quote, spending policy (limits and allowlist), typed SEND confirmation, kill-switch check. No second approver or MFA yet.') }],
+    ['h-freeze', 'H', '\u2744', 'Emergency Wallet Freeze', 'Trigger the global emergency stop (kill switch)', 'info', { run: async () => { const b = document.getElementById('btn-emergency'); if (b) b.click(); else toast('The EMERGENCY STOP control is not available on this page.', 'bad'); } }],
+    ['h-audit', 'H', '\u2263', 'Security Audit Logs', 'Every wallet event the server recorded', 'chain', { run: events }],
+  ].map(([id, g, i, t, d, k, o]) => ({ id, g, i, t, d, k, ...o }));
+  const BYID = Object.fromEntries(F.map((f) => [f.id, f]));
+  const GROUPS = { A: 'Wallet management', B: 'Deposits and receiving', C: 'Withdrawals and sending', D: 'Digital assets', E: 'Blockchain operations', F: 'Corporate treasury', G: 'Financial management', H: 'Security and permissions' };
+
+  function st(f) {
+    if (f.k === 'soon') return { s: 'soon', n: f.why };
+    if (f.k === 'off') return { s: 'off', n: f.why };
+    if (f.k === 'info') return { s: 'op', n: f.d };
+    const chainOk = S.chain.state === 'ok', paperOk = !!S.paper;
+    if (f.k === 'paper') return paperOk ? { s: 'op', n: 'Simulated paper account (no real money).' } : { s: 'config', n: 'The paper account API is unavailable: ' + (S.paperErr || 'checking') };
+    if (f.k === 'any' && !chainOk && !paperOk) return { s: 'config', n: 'Neither the paper account nor the on-chain API is reachable.' };
+    if (f.k === 'chain' || f.k === 'any') {
+      if (f.k === 'chain' && S.chain.state === 'disabled') return { s: 'config', n: 'The on-chain wallet is disabled on this server (set CHAIN_ENABLED=true and configure RPC URLs).' };
+      if (f.k === 'chain' && S.chain.state === 'auth') return { s: 'config', n: 'The server requires the ETI API key for wallet endpoints (use the API key button in the header).' };
+      if (f.k === 'chain' && S.chain.state !== 'ok') return { s: 'config', n: S.chain.msg || 'Checking the on-chain API\u2026' };
+      if (chainOk && f.wallet && !S.wallet) return { s: 'config', n: 'Create the ETI wallet first (Create Wallet).' };
+      if (chainOk && f.rpc && !S.nets.some((n) => n.configured)) return { s: 'config', n: 'No network has an RPC endpoint configured on this server.' };
+      if (chainOk && f.sends) return S.limits && S.limits.mainnet_send_enabled ? { s: 'op', n: 'Mainnet sending is enabled by the operator; spending limits apply.' } : { s: 'testnet', n: 'Mainnet sending is OFF: only testnet transactions can be sent.' };
+    }
+    return { s: 'op', n: f.d };
+  }
+  const info = (f, x) => modal(f.t, el('div', {}, el('p', {}, el('span', { class: 'cc-badge b-' + x.s, style: 'position:static', text: STATUS[x.s] })), el('p', { text: f.d }), el('p', { class: 'cc-warn', text: x.n || '' }), el('p', { class: 'sub', text: 'This button does not perform an action: the status above explains what is required.' })), [{ label: 'Close', value: 'x' }]);
+
+  function card(f, big) {
+    const x = st(f), live = x.s === 'op' || x.s === 'testnet';
+    const b = el('button', { class: 'cc-card s-' + x.s, type: 'button', onclick: (e) => { if (!live) return info(f, x); return busy(e.currentTarget, () => f.run()); } },
+      el('span', { class: 'ic', text: f.i }), el('span', { class: 'tx' }, el('b', { text: big || f.t }), big ? null : el('small', { text: f.d })), el('span', { class: 'cc-badge b-' + x.s, text: STATUS[x.s] }));
+    b.setAttribute('aria-disabled', live ? 'false' : 'true'); b.title = x.n || f.d; b.dataset.id = f.id; b.dataset.status = x.s;
+    return b;
+  }
+  const match = (f) => { const x = st(f); return (FILTER.s === 'all' || x.s === FILTER.s) && (!FILTER.q || (f.t + ' ' + f.d + ' ' + STATUS[x.s] + ' ' + GROUPS[f.g]).toLowerCase().includes(FILTER.q)); };
+  function renderAll() {
+    const open = new Set($$('#cc-groups details[open]').map ? $$('#cc-groups details[open]').map((d) => d.dataset.g) : Array.from($$('#cc-groups details[open]')).map((d) => d.dataset.g));
+    const first = !$('#cc-groups').children.length;
+    $('#cc-primary').replaceChildren(...[['deposit', 'Deposit'], ['receive', 'Receive'], ['send', 'Send'], ['withdraw', 'Withdraw'], ['external-transfer', 'Transfer'], ['tx-history', 'Transactions']].map(([id, l]) => card(BYID[id], l)));
+    const counts = { all: F.length }; F.forEach((f) => { const s = st(f).s; counts[s] = (counts[s] || 0) + 1; });
+    $('#cc-chips').replaceChildren(...['all', 'op', 'testnet', 'config', 'soon', 'off'].filter((s) => s === 'all' || counts[s]).map((s) => {
+      const c = el('button', { class: 'cc-chip', type: 'button', onclick: () => { FILTER.s = s; renderAll(); } }, (s === 'all' ? 'All' : STATUS[s]) + ' (' + (counts[s] || 0) + ')'); c.setAttribute('aria-pressed', String(FILTER.s === s)); return c; }));
+    $('#cc-groups').replaceChildren(...Object.keys(GROUPS).map((g) => {
+      const fs = F.filter((f) => f.g === g && match(f)); if (!fs.length) return null;
+      const d = el('details', { class: 'cc-g' }, el('summary', { text: GROUPS[g] + ' (' + fs.length + ')' }), el('div', { class: 'cc-grid' }, ...fs.map((f) => card(f))));
+      d.dataset.g = g; if (first || open.has(g) || FILTER.q || FILTER.s !== 'all') d.open = true; return d;
+    }).filter(Boolean));
+    if (!$('#cc-groups').children.length) $('#cc-groups').replaceChildren(el('p', { class: 'sub', text: 'No function matches the current search or filter.' }));
+  }
+  function ccInit() {
+    $('#cc-legend').textContent = 'Status legend: Operational = connected to a live endpoint on this server \u00B7 Testnet = works, but only test networks can spend \u00B7 Awaiting configuration = needs credentials or infrastructure \u00B7 Coming soon = no backend exists yet \u00B7 Disabled = withheld on purpose. A visible button is not proof that its feature is operational: read the badge.';
+    $('#cc-q').addEventListener('input', (e) => { FILTER.q = e.target.value.trim().toLowerCase(); renderAll(); });
+    $('#cc-exp').addEventListener('click', (e) => { const ds = Array.from(document.querySelectorAll('#cc-groups details')); const anyOpen = ds.some((d) => d.open); ds.forEach((d) => { d.open = !anyOpen; }); e.currentTarget.textContent = anyOpen ? 'Expand all' : 'Collapse all'; });
+    $('#cc-work-x').addEventListener('click', () => { $('#cc-work').hidden = true; });
+    renderKpis(); renderAll(); loadState(); ETI.poll(loadState, 60000);
+  }
+
+  document.addEventListener('DOMContentLoaded', async () => { ccInit(); loadDash(); await loadNets().catch((e) => toast(e.message, 'bad')); await refreshAll(); ETI.poll(() => loadTxs(), 30000); ETI.poll(() => loadDash(), 30000); });
 })();
 </script>
 {% endblock %}

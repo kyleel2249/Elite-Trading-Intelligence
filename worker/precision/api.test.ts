@@ -5,6 +5,7 @@ import { handlePrecision } from "./api.ts";
 import { withPrecision } from "./route.ts";
 import type { KvLike, PrecisionEnv } from "./stores.ts";
 import { depthAround, informativeSamples } from "./testkit.ts";
+import { bybitCompat } from "../test-support/bybit-compat.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
@@ -19,7 +20,7 @@ const TOKEN = "a-sufficiently-long-admin-token-123";
 function mockExchange(opts: { klines?: boolean; depth?: boolean; drift?: number; start?: number } = {}) {
   const { drift = 1, start = 100 } = opts;
   const px = series(260, { drift, noise: 2, seed: 1, start, end: Date.now() }).at(-1)![4];
-  globalThis.fetch = (async (input: any) => {
+  globalThis.fetch = bybitCompat((async (input: any) => {
     const u = new URL(String(input));
     if (u.pathname.includes("depth")) {
       if (opts.depth === false) return new Response("{}", { status: 500 });
@@ -30,7 +31,7 @@ function mockExchange(opts: { klines?: boolean; depth?: boolean; drift?: number;
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000;
     const rows = series(260, { drift, noise: 2, seed: 1, start, stepMs: step, end: Date.now() }).map(r => [r[0], String(r[1]), String(r[2]), String(r[3]), String(r[4]), String(r[5])]);
     return new Response(JSON.stringify(rows), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 
 function memoryKv(): KvLike & { data: Map<string, string> } {

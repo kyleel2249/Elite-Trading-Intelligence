@@ -2,23 +2,29 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleAlgoSignal } from "./api.ts";
 import { handleOmnisignal } from "./omni-api.ts";
+import { bybitCompat } from "../test-support/bybit-compat.ts";
 
 const realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
 const STEP: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
 
 function mockExchange(opts: { depth?: boolean } = {}) {
-  globalThis.fetch = (async (input: any) => {
+  globalThis.fetch = bybitCompat((async (input: any) => {
     const u = new URL(String(input));
     if (u.pathname.includes("depth")) {
       if (opts.depth === false) return new Response("{}", { status: 500 });
       const bids = Array.from({ length: 20 }, (_, i) => [String(100 - 0.01 - i * 0.05), "20"]), asks = Array.from({ length: 20 }, (_, i) => [String(100 + 0.01 + i * 0.05), "10"]);
       return new Response(JSON.stringify({ lastUpdateId: 1, bids, asks }), { status: 200 });
     }
+    if (u.pathname.includes("ticker/24hr")) return new Response(JSON.stringify({
+      symbol: "BTCUSDT", lastPrice: "100", priceChangePercent: "2", highPrice: "105", lowPrice: "95",
+      volume: "1000", quoteVolume: "100000", markPrice: "100", indexPrice: "100", fundingRate: "0.0007",
+      openInterest: "12500", bidPrice: "99.99", askPrice: "100.01", closeTime: Date.now()
+    }), { status: 200 });
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000, now = Date.now();
     const rows = Array.from({ length: 300 }, (_, i) => { const c = 50 + i * 0.3; const o = c - 0.1; return [now - (299 - i) * step, String(o), String(c + 0.2), String(o - 0.2), String(c), String(100 + (i % 5) * 10)]; });
     return new Response(JSON.stringify(rows), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 
 test("algo endpoint validates input and only accepts GET", async () => {
@@ -59,6 +65,69 @@ test("single signal path: /api/algo/signal and /api/omnisignal return the same d
     assert.equal(a.decision, b.decision, q); assert.deepEqual(a.stopLoss, b.stopLoss, q); assert.deepEqual(a.takeProfits, b.takeProfits, q); assert.equal(a.fusion.direction, b.fusion.direction, q);
     assert.equal(a.action, a.decision === "BUY" || a.decision === "SELL" ? a.decision : "HOLD");
   }
+});
+
+test("Omnisignal POST loads futures derivatives and builds a read-only position plan", async () => {
+  mockExchange();
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", strategy: "intraday", engines: ["swift", "gainz"], venue: "bybit", market: "futures", category: "linear", equity: 10000, riskFraction: 0.01, leverage: 2, feeBps: 5, slippageBps: 3 })
+  }), {});
+  assert.equal(res.status, 200);
+  const s = await res.json() as any;
+  assert.equal(s.dataQuality.market, "futures");
+  assert.equal(s.dataQuality.category, "linear");
+  assert.equal(s.derivatives?.fundingRate, 0.0007);
+  assert.equal(s.derivatives?.openInterest, 12500);
+  assert.equal(s.submitsOrder, false);
+  assert.equal(s.liveExecutionAllowed, false);
+  if (s.tradePlan) assert.equal(s.tradePlan.canSubmitOrder, false);
+});
+
+test("Omnisignal accepts validated Bitget browser snapshots without Worker-to-Bitget requests", async () => {
+  const now = Date.now();
+  const intervals: Record<string, number> = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "1w": 604_800_000 };
+  const candles: Record<string, number[][]> = {};
+  for (const [tf, step] of Object.entries(intervals)) candles[tf] = Array.from({ length: 260 }, (_, i) => {
+    const close = 100 + i * 0.02, open = close - 0.01;
+    return [now - (259 - i) * step, open, close + 0.2, open - 0.2, close, 100 + i % 7];
+  });
+  const marketData = {
+    provider: "bitget-browser", candles,
+    depth: { bids: [[99.99, 10], [99.98, 12]], asks: [[100.01, 9], [100.02, 11]], timestamp: now },
+    derivatives: { fundingRate: 0.0008, openInterest: 12500, timestamp: now, source: "bitget-browser" },
+    failures: {}
+  };
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", strategy: "intraday", engines: ["swift", "gainz"], venue: "bitget", market: "futures", category: "USDT-FUTURES", marketData })
+  }), {});
+  assert.equal(res.status, 200);
+  const s = await res.json() as any;
+  assert.equal(s.dataQuality.provider, "bitget-browser");
+  assert.equal(s.dataQuality.market, "futures");
+  assert.equal(s.dataQuality.derivatives, "ticker_snapshot");
+  assert.equal(s.derivatives.fundingRate, 0.0008);
+  assert.equal(s.derivatives.openInterest, 12500);
+  assert.equal(s.submitsOrder, false);
+  assert.equal(s.liveExecutionAllowed, false);
+});
+
+test("Omnisignal requires browser-supplied data for Bitget rather than retrying blocked Worker egress", async () => {
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", strategy: "intraday", venue: "bitget", market: "futures", category: "USDT-FUTURES" })
+  }), {});
+  assert.equal(res.status, 400);
+  assert.equal((await res.json() as any).error, "bitget_browser_market_data_required");
+});
+
+test("Omnisignal POST rejects unsafe or incomplete sizing inputs", async () => {
+  const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", equity: 10000 })
+  }), {});
+  assert.equal(res.status, 400);
 });
 
 test("engines parameter is honoured and validated", async () => {

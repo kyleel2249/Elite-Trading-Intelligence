@@ -13,12 +13,24 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ALPHA_EQUITY_WATCHLIST` | config | Comma-separated equity symbols for Global Alpha. |
 | `ALPHA_SUBREQUEST_BUDGET` | config | Cap on outbound sub-requests per Global Alpha run. |
 | `ANTHROPIC_API_KEY` | secret | Enables the optional LLM brief. Absent = feature off. |
-| `BACKEND_URL` | config | Optional. HTTP(S) origin (no path, credentials, query or fragment) that receives any route the Worker does not handle itself. Unset = unknown routes return a JSON 404. |
+| `BACKEND_URL` | config | Origin of the Python backend (`https://host`, no path, credentials, query or fragment). Required for the custodial wallet at /wallet/chain (the Worker forwards /api/chain/* to it with a timeout, a GET retry and a header allowlist) and used as the generic fallback for routes the Worker does not implement. Check it at GET /api/chain-view/backend. The deploy workflow syncs it from a GitHub variable or secret named `BACKEND_URL`. |
 | `BINANCE_API_KEY` | secret | Binance spot **testnet** key (trade-only). |
 | `BINANCE_FUTURES_API_KEY` | secret | Binance futures **testnet** key. |
 | `BINANCE_FUTURES_SECRET_KEY` | secret | Binance futures testnet secret. |
+| `ETI_WALLET_EXECUTION` | var | `enabled` allows external wallet withdrawals to be executed (default off; needs D1). |
+| `ETI_WALLET_RP_ID` | var | WebAuthn relying-party id for signer approvals (defaults to the request host). |
+| `ETI_WALLET_ORIGINS` | var | Comma-separated origins allowed for signer approvals (defaults to the request origin). |
+| `ETI_WALLET_ALLOW_SYNCED_PASSKEYS` | var | `true` allows synced passkeys as signer keys (default: device-bound keys only). |
+| `ETI_WALLET_AAGUIDS` | var | Comma-separated AAGUID allow-list of approved hardware-key models. |
+| `ETI_WALLET_GOV_TIMELOCK_SEC` | var | Timelock for governance actions (default 86400). |
+| `ETI_SIGNER_URL` | secret | HTTPS URL of the signing gateway (HSM / MPC / KMS) that holds the keys. |
+| `ETI_SIGNER_SECRET` | secret | HMAC secret shared with the signing gateway. |
+| `BINANCE_WITHDRAW_API_KEY` | secret | Binance withdrawal-only API key (IP-restricted) for Binance-custody wallets. |
+| `BINANCE_WITHDRAW_SECRET_KEY` | secret | Secret for the Binance withdrawal key. |
 | `BINANCE_SECRET_KEY` | secret | Binance spot testnet secret. |
 | `COINGECKO_API_KEY` | secret | Optional CoinGecko key for fundamentals. |
+| `DATAX_API_URL` | config | HTTPS origin of the independent DataX Pages application. ETI appends the signed read-only summary route; origin only, no path or credentials. |
+| `DATAX_INTEGRATION_SECRET` | secret | HMAC-SHA256 shared secret for server-to-server DataX summary requests. Configure the matching `ETI_INTEGRATION_SECRET` in DataX; never expose it to browser code. |
 | `CRYPTO_PROFILES_JSON` | secret | Operator-curated crypto facts no free API provides (team identity, regulatory status, verified audits, unlocks), keyed by symbol. Only whitelisted, type-checked fields are read; they are labelled as operator assertions. |
 | `ETHERSCAN_API_KEY` | secret | Optional Etherscan key for on-chain data and provider probes. |
 | `ETI_ALERTS_DISABLED` | config | `true` turns alert delivery off. |
@@ -26,6 +38,17 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_ALERT_EMAIL` | config | Alert recipient address. |
 | `ETI_ALERT_FROM` | config | Alert sender address (must be allowed by the mail provider). |
 | `ETI_ALERT_MAX_PER_HOUR` | config | Alert rate cap per hour. |
+| `ETI_AGENT_AUTOPILOT_ENABLED` | config | Enables the scheduled multi-agent autopilot. It is restricted to ETI INTERNAL PAPER and never submits live orders. |
+| `ETI_AGENT_AUTOPILOT_CONFIG` | config | Consolidated JSON configuration for symbols, interval, strategy quorum, confidence thresholds, cycle budget and position cap. Used to keep the Worker within the Cloudflare Free 64-variable limit. |
+| `ETI_AGENT_AUTOPILOT_SYMBOLS` | config | Comma-separated symbols evaluated by the agent autopilot. Default: BTCUSDT,ETHUSDT,SOLUSDT. |
+| `ETI_AGENT_AUTOPILOT_INTERVAL` | config | Market timeframe used by the autopilot (default 15m). |
+| `ETI_AGENT_AUTOPILOT_MAX_PER_CYCLE` | config | Maximum symbols evaluated per five-minute cycle (default 2). |
+| `ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE` | config | Minimum Commander confidence required before an internal-paper order (default 0.65; heuristic, not a win probability). |
+| `ETI_AGENT_AUTOPILOT_MIN_AGREEMENT` | config | Minimum directional consensus agreement required before an internal-paper order (default 0.65). |
+| `ETI_AGENT_AUTOPILOT_MAX_POSITIONS` | config | Maximum open internal-paper positions managed by this autopilot (default 3). |
+| `ETI_AGENT_AUTOPILOT_STRATEGIES` | config | Comma-separated Omnisignal strategies evaluated by the autopilot (default scalp,intraday,swing,position). |
+| `ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT` | config | Minimum number of configured strategies that must produce an aligned tradeable decision (default 3). |
+| `ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE` | config | Minimum Omnisignal confidence score on its 0–100 heuristic scale (default 60; not a win probability). |
 | `ETI_ALPHA_KV` | binding | KV namespace for Global Alpha (falls back to ETI_EXECUTION_LOG). |
 | `ETI_ALPHA_TOKEN` | secret | Token for Global Alpha write routes (falls back to ETI_EXECUTION_TOKEN). |
 | `ETI_ANALYSIS_ALLOW_FULL` | config | `true` lets a Free-plan deployment serve `detail=full` analysis (only if you raised your own CPU limit). Default off. |
@@ -41,6 +64,19 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_DUPLICATE_WINDOW_SECONDS` | config | Window in which an identical order is refused as a duplicate. |
 | `ETI_EDGE` | config | Adaptive-edge feature switch for the dashboard. |
 | `ETI_EVENTS_JSON` | config | Inline JSON of scheduled market events for the readiness engine. |
+| `BYBIT_API_KEY` | secret | Bybit V5 account-snapshot API key. Read-only wallet/position snapshot access is sufficient; never grant withdrawals. |
+| `BYBIT_API_SECRET` | secret | Secret paired with BYBIT_API_KEY; used only to sign Bybit V5 read-only account requests. |
+| `BYBIT_ACCOUNT_ENV` | config | `mainnet` (default) or `testnet` host selection for the read-only Bybit account snapshot. |
+| `BITGET_API_KEY` | secret | Bitget API key. Read permission is sufficient for account snapshots; the separate live-order route requires trade permission. Keep withdrawal permission disabled. Also accepted: `BITGET_KEY` and `BITGET_ACCESS_KEY`. |
+| `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY` and `BITGET_SECRET`. |
+| `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
+| `ETI_BITGET_CATALOGUE_SYNC` | config | Every-minute Bitget pair catalogue sync (spot, USDT/USDC/coin-margined futures, margin) into D1. On by default; set `false` to disable. See docs/BITGET.md. |
+| `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
+| `ETI_BITGET_LIVE_ENABLED` | config | `true` enables the separately authenticated Bitget live-order adapter. The master ETI execution token, Bitget trade-enabled credentials, explicit order confirmation, kill-switch check, idempotency and notional/leverage limits remain required. |
+| `ETI_BITGET_EGRESS_VERIFIED` | config | Must be `true` before Bitget live orders are available. Keep unset until private Bitget API connectivity from the Cloudflare Worker is independently verified; public browser-direct market data does not satisfy this gate. |
+| `ETI_BITGET_MAX_LEVERAGE` | config | Maximum allowed Bitget futures leverage (default 150x; capped by ETI at 150x and the exchange's own contract limit). |
+| `ETI_BITGET_MAX_NOTIONAL_USDT` | config | Maximum estimated notional per Bitget live order (default 1,000 quote units; checked against the submitted reference price or market-buy quote amount). |
+| `ETI_BITGET_MARGIN_SYMBOLS` | config | Comma-separated margin pairs whose fills are synced (Bitget margin fills require a symbol), e.g. `BTCUSDT,ETHUSDT`. |
 | `ETI_EVENT_FEED_TOKEN` | secret | Bearer token for ETI_EVENT_FEED_URL. |
 | `ETI_EVENT_FEED_URL` | config | HTTPS JSON event feed for the readiness engine. |
 | `ETI_EXECUTION_API_TOKEN` | secret | Token for the optional Python execution engine. |
@@ -85,15 +121,28 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_PRECISION_STRATEGIES` | config | Strategies the ledger records (default `intraday`). |
 | `ETI_PRECISION_BATCH` | config | Pairs evaluated per cron tick, 1 to 4 (default 1). |
 | `ETI_READINESS_GATE` | config | `enforce`/`off`: whether a failing readiness check blocks orders. |
+| `ETI_RISK` | prefix | Common prefix of the autonomous risk-policy variables below (`worker/risk/policy.ts`). Each can only tighten the policy; values looser than the built-in hard ceilings are clamped back to them. Invalid values fall back to the default. |
+| `ETI_RISK_PER_TRADE` | config | Fraction of equity risked per trade (default 0.005 = 0.5%, ceiling 0.01). |
+| `ETI_RISK_MAX_NOTIONAL` | config | Maximum single-position notional as a fraction of equity (default and ceiling 0.5). |
+| `ETI_RISK_MAX_POSITIONS` | config | Maximum concurrent positions, integer (default and ceiling 3). |
+| `ETI_RISK_MAX_DAILY_LOSS` | config | Daily realized + unrealized loss, as a fraction of the day's equity baseline, that stops new entries (default and ceiling 0.02). |
+| `ETI_RISK_MAX_CONSECUTIVE_LOSSES` | config | Consecutive losing trades that stop new entries, integer (default and ceiling 3). |
+| `ETI_RISK_MIN_REWARD_RISK` | config | Minimum net reward-to-risk ratio after costs (default and floor 1.5). |
+| `ETI_RISK_MAX_LEVERAGE` | config | Maximum leverage (default and ceiling 1). |
+| `ETI_RISK_MIN_CASH_RESERVE` | config | Cash kept uncommitted as a fraction of equity (default and floor 0.5). |
+| `ETI_RISK_MAX_DRAWDOWN` | config | Drawdown from peak equity that stops new entries (default and ceiling 0.1). |
 | `ETI_RISK_GATE_TOKEN` | legacy | Removed. Ignored; reported as unused legacy config. |
 | `ETI_RISK_GATE_URL` | legacy | Removed. Ignored; if present the dashboard reports it as unused legacy config. |
 | `ETI_ROUND_TRIP_COST_BPS` | config | Assumed round-trip trading cost (bps) in signal maths. |
+| `ETI_FVG_CONFLUENCE` | config | Set to `off` to stop Fair Value Gap confluence from adjusting Omnisignal confidence (default: on; advisory, bounded to +/-8, never creates or flips a trade). |
 | `ETI_SPORTS_AUTO_SCAN_LIMIT` | config | Upcoming football fixtures retrieved per scheduled scan (default 12, max 12). |
 | `ETI_SPORTS_HISTORY_BATCH_SIZE` | config | Unseen finished football fixtures imported per scheduled history sync (5 default, max 30). |
 | `ETI_SPORTS_HISTORY_SYNC_MINUTES` | config | Minimum minutes between scheduled football history syncs (1440 default, min 360). |
 | `ETI_SPORTS_PAPER_BANKROLL_CENTS` | config | Starting balance, in cents, of a **new** sports paper ledger (default 100000 = USD 1,000.00; range 100 to 1,000,000,000). An existing ledger is never changed automatically. |
 | `ETI_SPORTS_PAPER_TOKEN` | secret | Protects the isolated sports paper bankroll, bet ledger and manual history sync. |
 | `ETI_SPORTS_SCAN_INTERVAL_MINUTES` | config | Minimum minutes between scheduled global football odds scans (360 default, min 60). |
+| `ETI_GAINZ_WEBHOOK_SECRET` | secret | HMAC-SHA256 secret for signed TradingView GainzAlgo V2 / V2 Alpha webhook requests. |
+| `ETI_GAINZ_ADMIN_TOKEN` | secret | Optional dedicated bearer token for the GainzAlgo Intelligence Centre; falls back to `ETI_EXECUTION_TOKEN` when absent. |
 | `ETI_SESSION_SECRET` | secret | Signs ETI session tokens. |
 | `ETI_SESSION_SECRET_PREVIOUS` | secret | Previous signing secret, accepted during rotation. |
 | `ETI_UNIVERSE_BATCH` | config | Symbols scanned per scheduled universe run. |
@@ -121,6 +170,22 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `SENTIMENT_AI_MODEL` | config | Workers AI model id for the sentiment second opinion (default `@cf/meta/llama-3.1-8b-instruct`). |
 | `TOKENOMIST_API_KEY` | secret | Optional Tokenomist Pro key for token unlock schedules (native port of the Python client). Licence: data is not redistributed; only derived metrics are returned. |
 | `TOKENOMIST_CREDIT_RESERVE` | config | Share (0-1, default 0.1) of the monthly Tokenomist credit allowance that is never spent. |
+| `INFURA_API_KEY` | secret | Infura project API key (32 hex characters). When set, every tracked network without an explicit `CHAIN_RPC_*` URL is read through `https://<network>.infura.io/v3/<key>` (Ethereum, Base, BNB Chain, Polygon and their testnets). Set it as a Worker secret (`wrangler secret put INFURA_API_KEY`) and as a backend secret (`fly secrets set`). Never put it in a URL variable you commit. |
+| `INFURA_API_SECRET` | secret | Optional Infura API key secret, for keys with "Require API key secret" enabled. Sent as HTTP Basic (empty user name) only to `*.infura.io`. |
+| `CHAIN_RPC_SEPOLIA` | config | Optional (defaults to the public Sepolia node) JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
+| `ETI_PROFIT_CONFIRM_MINUTES` | config | Profit management (/profit). Default `60`. Minutes a trade must have been closed before its result counts as confirmed profit (0 to 10080). |
+| `ETI_PROFIT_DRAWDOWN_WINDOW_DAYS` | config | Profit management (/profit). Default `30`. Look-back window for the realized-drawdown capital-protection check (1 to 365). |
+| `ETI_PROFIT_MAX_DRAWDOWN_BPS` | config | Profit management (/profit). Default `1000`. Realized drawdown, in basis points of trading capital, above which distributions are held and profit stays in trading capital. |
+| `ETI_PROFIT_AUTO_ALLOCATE` | config | Profit management (/profit). Default `true`. Set to `false` to stop the engine allocating simulated profit automatically (it still recognises it). Real-funds books are never allocated automatically. |
+| `ETI_PROFIT_MIN_ALLOCATION_CENTS` | config | Profit management (/profit). Default `100`. Smallest pool, in cents, that triggers an automatic simulated allocation. |
+| `ETI_PROFIT_SIM_CAPITAL_CENTS` | config | Profit management (/profit). Default `0`. Optional one-time simulated trading capital, in cents, posted to the simulated books so simulated losses have capital to be charged against. Not real money. |
+| `CHAIN_RPC_BASE_SEPOLIA` | config | Optional JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
+| `CHAIN_RPC_BSC_TESTNET` | config | Optional JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
+| `CHAIN_RPC_POLYGON_AMOY` | config | Optional JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
+| `CHAIN_RPC_ETHEREUM` | config | Optional JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
+| `CHAIN_RPC_BASE` | config | Optional JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
+| `CHAIN_RPC_BSC` | config | Optional JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
+| `CHAIN_RPC_POLYGON` | config | Optional JSON-RPC URL (https, no embedded credentials) the Worker uses for the read-only on-chain dashboard at /wallet/chain. The node's chain id must match the network or the data is refused. May contain a provider key in the path: treat as sensitive. |
 
 Kinds: **secret** = private, never exposed to the browser or logs; **config** = non-sensitive setting; **binding** = Cloudflare KV/D1 resource; **legacy** = removed, ignored.
 

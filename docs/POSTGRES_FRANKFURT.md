@@ -1,6 +1,6 @@
-# Moving ETI to Frankfurt (fra) on PostgreSQL
+# ETI FastAPI origin in Frankfurt (fra) on PostgreSQL
 
-Why: Binance refuses US IP addresses on every official host, and the old config ran in `iad` (Virginia). `fra` is outside the US. ETI also moves from a region-bound SQLite volume to PostgreSQL.
+The FastAPI origin remains in `fra`, outside Bybit's documented US and mainland-China IP blocks. The Cloudflare Worker forwards public Bybit REST requests to this Frankfurt origin, so public market calls never depend on the GitHub Actions runner or the user's nearest Cloudflare edge for Bybit egress. The PostgreSQL origin remains near Frankfurt to avoid adding cross-region database latency.
 
 What the repo now does:
 
@@ -15,7 +15,7 @@ What the repo now does:
 2. `fly secrets set DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/DBNAME' -a eti-trading-intelligence`
    Also re-check the other secrets you rely on (`API_KEY`, `EXECUTION_VAULT_KEY`, exchange keys): secrets stay with the app, not the region.
 3. Remove the old US machine and its volume only after you have decided you do not need the SQLite data (`fly machines list`, `fly machine destroy <id>`, `fly volumes list`, `fly volumes destroy <id>`).
-4. `fly deploy` (the machine is created in `fra`). Check `curl https://<app>.fly.dev/api/system/health` and `/api/market/binance-hosts`.
+4. `fly deploy` (the machine is created in `fra`). Check `curl https://<app>.fly.dev/api/system/health` and `/api/market/symbols?provider=bybit` plus `/api/providers/status`.
 
 ## Data in the old SQLite file
 
@@ -24,3 +24,10 @@ The new database starts empty. Nothing copies the old file automatically. If you
 ## Not changed
 
 The Cloudflare Worker (D1) is separate and is not affected. Trading stays paper/testnet unless every live gate is opened.
+
+
+## Automated deployment
+
+The ETI Cloudflare Worker deployment workflow no longer deploys FastAPI to Fly.io and no longer requires `FLY_API_TOKEN`. Bybit and Bitget public market data run directly from the Cloudflare Worker on the free Worker plan, using each exchange's global public REST API.
+
+The PostgreSQL/FastAPI backend described in this document is a separate legacy service for backend-dependent features. It is not a dependency for Bybit or Bitget public market feeds. Do not provision a paid Fly.io service for those feeds. If other ETI features still require the Python backend or PostgreSQL, they need a separately chosen hosting/database plan; this market-data change does not migrate or delete that data.

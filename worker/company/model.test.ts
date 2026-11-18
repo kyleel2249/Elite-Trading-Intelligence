@@ -28,7 +28,7 @@ test("expense approval follows role, limit, own-request and MFA rules", () => {
   assert.equal(M.canDecideExpense(exec, { ...e, amountCents: 900_000_000 }), true);
   assert.equal(M.expenseDecisionBlock(exec, { ...e, requestedBy: "ex" }), "cannot_decide_own_request");
   assert.equal(M.expenseDecisionBlock({ ...exec, mfa: false }, e), "mfa_required");
-  assert.equal(M.expenseDecisionBlock(mem, e), "no_approval_authority");
+  assert.equal(M.expenseDecisionBlock(mem, { ...e, requestedBy: "other" }), "no_approval_authority"); // a member with no authority (not their own request)
   assert.equal(M.expenseDecisionBlock(aud, e), "no_approval_authority");
   assert.equal(M.canDecideExpense(actor("master", [], { operator: true, mfa: false }), e), false);
 });

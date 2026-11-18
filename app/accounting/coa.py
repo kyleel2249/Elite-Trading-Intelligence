@@ -6,6 +6,7 @@ from app.accounting.domain import Account
 # Well-known accounts referenced by events.py
 CASH_BANK = "1010"
 CASH_EXCHANGE = "1020"
+RESERVE = "1030"
 AR = "1100"
 CRYPTO_WALLET = "1210"
 PREPAID = "1400"
@@ -34,6 +35,7 @@ DEFAULT_ACCOUNTS = [
     Account("1000", "Assets", "asset", postable=False, group="Assets"),
     Account("1010", "Operating Bank Account", "asset", "1000", cash=True, group="Cash"),
     Account("1020", "Exchange Cash (trading)", "asset", "1000", cash=True, group="Cash"),
+    Account("1030", "Emergency Reserve Fund", "asset", "1000", cash=True, group="Cash"),
     Account("1100", "Accounts Receivable", "asset", "1000", group="Receivables"),
     Account("1210", "Treasury Wallet (crypto)", "asset", "1000", cashflow="investing", group="Digital assets"),
     Account("1300", "Open Trading Positions (at cost)", "asset", "1000", cashflow="investing", group="Trading"),

@@ -416,26 +416,57 @@ export function signalFromCandles(rows: Kline[], symbol: string, provider: strin
   return { signal, trades };
 }
 
+function validateClientCandles(value: unknown): Kline[] | null {
+  if (!Array.isArray(value) || value.length < MIN_CANDLES || value.length > 1000) return null;
+  const rows: Kline[] = [];
+  let previousTime = 0;
+  for (const item of value) {
+    if (!Array.isArray(item) || item.length < 6) return null;
+    const row = item.slice(0, 6).map(Number) as Kline;
+    const [time, open, high, low, close, volume] = row;
+    if (![time, open, high, low, close, volume].every(Number.isFinite) || time <= previousTime || time <= 0 ||
+        open <= 0 || high <= 0 || low <= 0 || close <= 0 || volume < 0 ||
+        high < Math.max(open, close) || low > Math.min(open, close) || high < low) return null;
+    rows.push(row);
+    previousTime = time;
+  }
+  return rows;
+}
+
 export async function handleSignals(req: Request, env: SignalEnv): Promise<Response> {
   const url = new URL(req.url);
-  if (url.pathname !== "/api/signals" || req.method !== "GET") return jsonError({ error: "not_found" }, 404);
-  const symbol = (url.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
-  const interval = url.searchParams.get("interval") || "1h";
-  const requestedProvider = url.searchParams.get("provider");
-  const market = url.searchParams.get("market") === "futures" ? "futures" : "spot";
+  if (url.pathname !== "/api/signals" || (req.method !== "GET" && req.method !== "POST")) return jsonError({ error: "method_not_allowed" }, 405);
+  let body: any = {};
+  if (req.method === "POST") {
+    try { body = await req.json(); } catch { return jsonError({ error: "invalid_json_body" }, 400); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return jsonError({ error: "invalid_json_body" }, 400);
+  }
+  const symbol = String(body.symbol ?? url.searchParams.get("symbol") ?? "BTCUSDT").toUpperCase();
+  const interval = String(body.interval ?? url.searchParams.get("interval") ?? "1h");
+  const requestedProvider = String(body.provider ?? url.searchParams.get("provider") ?? "");
+  const market = (body.market ?? url.searchParams.get("market")) === "futures" ? "futures" : "spot";
   if (!/^[A-Z0-9]{5,20}$/.test(symbol) || !INTERVALS.includes(interval)) return jsonError({ error: "invalid_symbol_or_interval" }, 400);
-  const windowRaw = url.searchParams.get("window");
+  const windowRaw = body.window ?? url.searchParams.get("window");
   let windowSize = DEFAULT_WINDOW;
-  if (windowRaw !== null) {
-    if (!/^\d+$/.test(windowRaw) || Number(windowRaw) < MIN_WINDOW || Number(windowRaw) > MAX_WINDOW) return jsonError({ error: "invalid_window", min: MIN_WINDOW, max: MAX_WINDOW }, 400);
+  if (windowRaw !== null && windowRaw !== undefined) {
+    if (!/^\d+$/.test(String(windowRaw)) || Number(windowRaw) < MIN_WINDOW || Number(windowRaw) > MAX_WINDOW) return jsonError({ error: "invalid_window", min: MIN_WINDOW, max: MAX_WINDOW }, 400);
     windowSize = Number(windowRaw);
   }
   try {
-    const result = await getMarketData("klines", { symbol, interval, limit: 1000, market }, providerOrder(env, requestedProvider));
-    const rows = result.data as Kline[];
+    let rows: Kline[], source: string;
+    if (req.method === "POST") {
+      const supplied = validateClientCandles(body.candles);
+      if (!supplied) return jsonError({ error: "invalid_client_candles", requiredCandles: MIN_CANDLES, maxCandles: 1000 }, 400);
+      rows = supplied;
+      source = requestedProvider || "client-market-data";
+    } else {
+      const result = await getMarketData("klines", { symbol, interval, limit: 1000, market }, providerOrder(env, requestedProvider));
+      rows = result.data as Kline[];
+      source = result.provider;
+    }
     const latestAge = (Date.now() - rows.at(-1)![0]) / 1000;
     if (latestAge < -60 || latestAge > (INTERVAL_SECONDS[interval] || 60) * 3) return jsonError({ error: "stale_market_data", ageSeconds: Math.round(latestAge), maxAgeSeconds: (INTERVAL_SECONDS[interval] || 60) * 3 }, 503);
-    const built = signalFromCandles(rows, symbol, result.provider, interval);
+    const built = signalFromCandles(rows, symbol, source, interval);
     if (!built) return jsonError({ error: "insufficient_history", requiredCandles: MIN_CANDLES, received: rows.length }, 422);
     const { signal, trades } = built;
     const chart = buildChart(rows, windowSize, trades);

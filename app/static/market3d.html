@@ -36,8 +36,7 @@
       <div class="row" style="margin:0">
         <label class="sub" for="prov">Market</label>
         <select id="prov">
-          <option value="binance" selected>Binance (crypto)</option>
-          <option value="bitget">Bitget (crypto)</option>
+          <option value="bybit" selected>Bybit (crypto spot, margin & derivatives)</option>
           <option value="alpaca">US stocks (Alpaca)</option>
           <option value="oanda">Forex &amp; CFDs (OANDA)</option>
           <option value="twelvedata">Non-US stocks &amp; forex (Twelve Data)</option>
@@ -45,6 +44,8 @@
         <label class="sub" for="sym">Symbol</label>
         <input id="sym" list="symlist" value="BTCUSDT" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" size="14" aria-describedby="symhint">
         <datalist id="symlist"></datalist>
+        <label class="sub" for="category">Product</label>
+        <select id="category"><option value="spot" selected>Spot / Margin</option><option value="linear">USDT / USDC Perpetual</option><option value="inverse">Inverse Perpetual</option></select>
         <label class="sub" for="int">Interval</label>
         <select id="int">
           <option>1m</option><option>5m</option><option>15m</option>

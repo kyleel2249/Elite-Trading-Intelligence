@@ -64,7 +64,7 @@ test("OpenFIGI resolution: batches of 10 (100 with a key), prefers common stock,
 });
 // A real SQLite database (D1 is SQLite) built from the actual migration file, loaded with the pipeline's generated SQL.
 async function loadedDb() {
-  const db = new DatabaseSync(":memory:"); db.exec(readFileSync("migrations/0002_institutional_holdings.sql", "utf8"));
+  const db = new DatabaseSync(":memory:"); db.exec(readFileSync("migrations/0012_institutional_holdings.sql", "utf8"));
   const cur = await aggregateQuarter(sourceOf(Q3()), "2026-09-30"), prev = await aggregateQuarter(sourceOf(Q2()), "2026-06-30");
   const names = new Map(cur.filings.map(f => [f.accession, { cik: f.cik, name: f.name }]));
   const { sql, stats } = buildSql({ current: cur, previous: prev, tickers: { "000AAA001": "ACME", "000BBB002": "BETA", "000OOO003": null }, filerNames: names, source: "test", loadedAt: "2026-11-12T00:00:00Z" });

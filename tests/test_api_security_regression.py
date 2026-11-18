@@ -62,7 +62,7 @@ def test_score_auth_and_positive_price(api, monkeypatch):
         with pytest.raises(ValidationError):
             main.ForecastScoreRequest(realized_price=price)
     assert api.post("/api/intelligence/forecast/score", json={"realized_price": 100}, headers=HEADERS).status_code == 200
-    score.score_pending.assert_called_once_with("BTCUSDT", 100.0, provider="binance")
+    score.score_pending.assert_called_once_with("BTCUSDT", 100.0, provider="bybit")
 
 
 @pytest.mark.parametrize("price", [0, -1, float("inf"), float("nan"), "invalid"])

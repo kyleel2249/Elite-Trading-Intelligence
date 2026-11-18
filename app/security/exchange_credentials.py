@@ -1,9 +1,9 @@
 """Exchange-testnet credentials: loaded server-side from environment secrets, verified, never exposed.
 
 Sources (first match wins)
-  1. BINANCE_TESTNET_API_KEY + BINANCE_TESTNET_SECRET_KEY   (preferred, testnet-only)
-  2. BINANCE_API_KEY + BINANCE_SECRET_KEY, only while BINANCE_TESTNET_ENABLED=true AND
-     BINANCE_LIVE_TRADING_ENABLED=false (so a live key is never reinterpreted as a testnet key)
+  1. BYBIT_TESTNET_API_KEY + BYBIT_TESTNET_API_SECRET   (preferred, testnet-only)
+  2. BYBIT_API_KEY + BYBIT_API_SECRET, only while BYBIT_TESTNET_ENABLED=true AND
+     BYBIT_LIVE_TRADING_ENABLED=false (so a live key is never reinterpreted as a testnet key)
 
 In production these variables are populated from your secret store (Cloudflare / Render secrets). ETI
 never generates, derives or substitutes exchange credentials. Verification reuses the execution
@@ -22,7 +22,7 @@ from app.config import Settings, get_settings
 
 logger = logging.getLogger("eti.credentials")
 
-TESTNET_ACCOUNT_ID = "env-binance-testnet"
+TESTNET_ACCOUNT_ID = "env-bybit-testnet"
 VALID_TTL = 300.0
 INVALID_TTL = 60.0
 
@@ -42,12 +42,12 @@ class CredentialState:
 
 def load_testnet_credentials(settings: Optional[Settings] = None) -> Optional[tuple[dict[str, str], str]]:
     s = settings or get_settings()
-    k = (os.environ.get("BINANCE_TESTNET_API_KEY") or "").strip()
-    sec = (os.environ.get("BINANCE_TESTNET_SECRET_KEY") or "").strip()
+    k = (os.environ.get("BYBIT_TESTNET_API_KEY") or "").strip()
+    sec = (os.environ.get("BYBIT_TESTNET_API_SECRET") or "").strip()
     if k and sec:
-        return {"api_key": k, "secret_key": sec}, "env:BINANCE_TESTNET_*"
-    if s.binance_api_key and s.binance_secret_key and s.binance_testnet_enabled and not s.binance_live_trading_enabled:
-        return {"api_key": s.binance_api_key.strip(), "secret_key": s.binance_secret_key.strip()}, "env:BINANCE_*"
+        return {"api_key": k, "api_secret": sec}, "env:BYBIT_TESTNET_*"
+    if getattr(s, "bybit_api_key", None) and getattr(s, "bybit_api_secret", None) and getattr(s, "bybit_testnet_enabled", True) and not getattr(s, "bybit_live_trading_enabled", False):
+        return {"api_key": s.bybit_api_key.strip(), "api_secret": s.bybit_api_secret.strip()}, "env:BYBIT_*"
     return None
 
 
@@ -62,12 +62,12 @@ async def validate_credentials(creds: dict[str, str], *, adapter_factory: Option
         if adapter_factory is None:
             from app.execution.adapters.registry import build_adapter
 
-            adapter = build_adapter("binance", creds, "paper")
+            adapter = build_adapter("bybit", creds, "paper")
         else:
             adapter = adapter_factory(creds)
         await asyncio.wait_for(adapter.verify_permissions(), timeout)
         await asyncio.wait_for(adapter.get_equity(), timeout)
-        return "valid", "Authenticated against the exchange sandbox."
+        return "valid", "Authenticated against the Bybit testnet sandbox."
     except PermissionPolicyError:
         return "unsafe_permissions", "Key carries permissions ETI refuses to use (e.g. withdrawals)."
     except PermanentProviderError:
@@ -102,7 +102,7 @@ async def get_credential_state(settings: Optional[Settings] = None, *, force: bo
     s = settings or get_settings()
     loaded = load_testnet_credentials(s)
     if loaded is None:
-        _cache = CredentialState("missing", None, time.time(), "No exchange testnet credentials are configured.")
+        _cache = CredentialState("missing", None, time.time(), "No Bybit testnet credentials are configured.")
         return _cache
     creds, source = loaded
     now = time.time()
@@ -140,7 +140,7 @@ def ensure_env_testnet_account(settings: Optional[Settings] = None) -> dict[str,
         sealed = get_vault().seal(creds)
     except VaultError:
         return {"registered": False, "reason": "EXECUTION_VAULT_KEY is not configured"}
-    rec = AccountRecord(TESTNET_ACCOUNT_ID, "binance", "paper", "Binance testnet (from environment secrets)",
+    rec = AccountRecord(TESTNET_ACCOUNT_ID, "bybit", "paper", "Bybit testnet (from environment secrets)",
                         AccountPolicy(), credentials_ciphertext=sealed)
     store.save_account(rec)
     # Audit record names the fields only - no key material, masked or otherwise.

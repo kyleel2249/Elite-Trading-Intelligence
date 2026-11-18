@@ -7,6 +7,7 @@ import { withAlgo } from "./route.ts";
 import { MemoryKV } from "./kv.ts";
 import { entryFromResult, recordEntry } from "./journal.ts";
 import type { ClosedTrade } from "./performance.ts";
+import { bybitCompat } from "../test-support/bybit-compat.ts";
 
 const TOKEN = "test-token-1234567890", DAY = 86_400_000, M = 60_000, realFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = realFetch; });
@@ -81,11 +82,11 @@ test("resolve: pending entries are evaluated against real closed bars, updated o
     validation: { classification: "CONFIRMED", score: 70, hardFailures: [] }, reasons: [], timeframes: {}, fusion: { agreement: "BOTH_BULLISH", swift: { status: "SIGNAL" }, gainz: { status: "SIGNAL" } } };
   const e = entryFromResult(res as any, "intraday", ts); await recordEntry(kv, e);
   const script: Record<number, number[]> = { 1: [100, 101.3, 99.5, 101], 2: [101, 102.3, 100.5, 102], 3: [102, 103.6, 101.5, 103.5] };
-  let seen = ""; globalThis.fetch = (async (input: any) => {
+  let seen = ""; globalThis.fetch = bybitCompat((async (input: any) => {
     const u = new URL(String(input)); seen = u.searchParams.get("interval") || "";
     const rows = Array.from({ length: 40 }, (_, i) => { const b = script[i] ?? [100.6, 100.8, 100.4, 100.6]; return [ts + i * M, String(b[0]), String(b[1]), String(b[2]), String(b[3]), "1", ts + i * M + 59_999, "1", 1, "0", "0", "0"]; });
     return new Response(JSON.stringify(rows), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
   const r = await (await call(env, "/api/algo/journal/resolve", { method: "POST", body: {} }, NOW)).json() as any;
   assert.equal(r.processed, 1); assert.equal(r.results[0].outcome, "win"); assert.equal(r.results[0].updated, true); assert.ok(Math.abs(r.results[0].r - 2.19) < 1e-3); assert.equal(seen, "1m");
   const after = await (await call(env, `/api/algo/journal/entry?id=${encodeURIComponent(e.id)}`)).json() as any; assert.equal(after.resolution.status, "win"); assert.equal(after.resolution.granularity, "1m bars");
@@ -98,13 +99,13 @@ test("resolve: pending entries are evaluated against real closed bars, updated o
 // ---- integration: the stored evidence changes what the live routes tell the validator ----
 const STEP: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
 function market() {
-  globalThis.fetch = (async (input: any) => {
+  globalThis.fetch = bybitCompat((async (input: any) => {
     const u = new URL(String(input)), last = 50 + 299 * 0.3 + 0.1;
     if (u.pathname.includes("depth")) { const bids = Array.from({ length: 20 }, (_, i) => [String(last - 0.01 - i * 0.05), "20"]), asks = Array.from({ length: 20 }, (_, i) => [String(last + 0.01 + i * 0.05), "10"]); return new Response(JSON.stringify({ lastUpdateId: 1, bids, asks }), { status: 200 }); }
     const step = (STEP[u.searchParams.get("interval") || "1h"] || 3600) * 1000, now = Date.now();
     const rows = Array.from({ length: 300 }, (_, i) => { const c = 50 + i * 0.3 + 0.1, o = c - 0.1; return [now - (299 - i) * step, String(o), String(c + 1.5), String(o - 1.5), String(c), String(100 + (i % 5) * 10)]; });   // wide wicks: stops large enough to clear the cost gate
     return new Response(JSON.stringify(rows), { status: 200 });
-  }) as typeof fetch;
+  }) as typeof fetch);
 }
 const sig = (env: any, q = "strategy=intraday") => handleAlgoSignal(new Request(`https://eti.test/api/algo/signal?symbol=BTCUSDT&${q}`), env).then(r => r.json()) as Promise<any>;
 

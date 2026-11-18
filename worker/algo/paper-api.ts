@@ -10,6 +10,7 @@
 //   GET  /api/paper/performance
 //   GET  /api/paper/audit?limit=100
 import type { ExecutionEnv } from "../execution.ts";
+import { parsePolicy } from "../risk/policy.ts";
 import { authenticate, can } from "../auth/session.ts";
 import type { MarketEnv } from "../market.ts";
 import type { Strategy } from "./timeframes.ts";
@@ -24,6 +25,7 @@ import { ParamRegistry, KVParamStore, degradationStep } from "./optimizer.ts";
 import { fitCalibration, loadCalibration, outcomesFrom, saveCalibration } from "./calibration.ts";
 import { DEFAULT_PAPER_CONFIG, KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
+import { loadUniverse } from "./universe.ts";
 
 export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string; ETI_ROUND_TRIP_COST_BPS?: string; ETI_PAPER_RISK_FRACTION?: string; ETI_PAPER_MAX_NOTIONAL_FRACTION?: string; ETI_PAPER_MAX_OPEN_POSITIONS?: string; ETI_PAPER_MAX_DAILY_LOSS_PCT?: string; ETI_PAPER_MAX_CONSECUTIVE_LOSSES?: string }
 export interface PaperDeps { now?: () => number; fetchImpl?: typeof fetch }
@@ -32,25 +34,17 @@ interface KVWithList extends KVLike { list(o: { prefix: string; limit?: number }
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (k, v) => (v === Infinity ? "Infinity" : v)), { status, headers: HEADERS });
 
-/**
- * Balanced internal-paper policy. Values are bounded here as well as documented in wrangler.jsonc so a bad
- * deployment variable cannot silently disable the risk limits. This config affects only the legacy simulated
- * PaperEngine; it does not enable broker/testnet orders or live trading.
- */
-function boundedSetting(raw: string | undefined, fallback: number, min: number, max: number, integer = false): number {
-  if (raw === undefined || raw.trim() === "") return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) return fallback;
-  return value;
-}
-export function paperConfigFrom(env: PaperEnv): Partial<PaperConfig> {
+/** Apply the shared, hard-ceiling risk policy to every paper entry path (scheduled and authenticated API). */
+export function paperConfigFrom(env: ExecutionEnv): Partial<PaperConfig> {
   const cap = Number(env.ETI_MAX_ORDER_QUANTITY);
+  const policy = parsePolicy(env as unknown as Record<string, unknown>);
   return {
-    riskFraction: boundedSetting(env.ETI_PAPER_RISK_FRACTION, DEFAULT_PAPER_CONFIG.riskFraction, 0.001, 0.02),
-    maxNotionalFraction: boundedSetting(env.ETI_PAPER_MAX_NOTIONAL_FRACTION, 0.5, 0.05, 1),
-    maxOpenPositions: boundedSetting(env.ETI_PAPER_MAX_OPEN_POSITIONS, 3, 1, 5, true),
-    maxDailyLossPct: boundedSetting(env.ETI_PAPER_MAX_DAILY_LOSS_PCT, 2, 0.25, 5),
-    maxConsecutiveLosses: boundedSetting(env.ETI_PAPER_MAX_CONSECUTIVE_LOSSES, 3, 2, 8, true),
+    riskFraction: policy.riskPerTrade,
+    maxNotionalFraction: policy.maxPositionNotional,
+    maxOpenPositions: policy.maxConcurrentPositions,
+    maxDailyLossPct: policy.maxDailyLoss * 100,
+    maxConsecutiveLosses: policy.maxConsecutiveLosses,
+    policy,
     ...(Number.isFinite(cap) && cap > 0 ? { maxOrderQuantity: cap } : {}),
   };
 }
@@ -74,7 +68,7 @@ export async function handlePaper(req: Request, env: PaperEnv, deps: PaperDeps =
     const s = engine.state;
     return reply({ mode: "paper", simulated: true, equity: s.equity, startingEquity: engine.cfg.startingEquity, openPositions: s.positions, closedTrades: s.closed.length, killSwitch: s.killSwitch || envKill, envKillSwitch: envKill,
       safeguards: { engine: "in_process", externalRiskGateway: false }, config: engine.cfg, withdrawalPermissions: false, liveTradingAvailable: false, stateVersion: s.version,
-      scheduler: { ...(({ symbols, strategy, autoExecute, ignored }) => ({ symbols, strategy, autoExecute, ignoredSymbols: ignored }))(cycleConfig(env)), maxSymbolsPerRun: MAX_CYCLE_SYMBOLS, lastRun: await readLastRun(env) },
+      scheduler: { ...(({ symbols, strategy, autoExecute, ignored, allPairs }) => ({ symbols, strategy, autoExecute, ignoredSymbols: ignored, ...(allPairs ? { allPairs: true } : {}) }))(cycleConfig(env)), maxSymbolsPerRun: cycleLimit(env), lastRun: await readLastRun(env) },
       note: "Simulated fills against live public prices; no broker is contacted. State is stored in KV without transactions, so issue paper requests one at a time." });
   }
   if (path === "/api/paper/performance") {
@@ -144,40 +138,75 @@ export async function evaluateSymbol(engine: PaperEngine, env: PaperEnv, symbol:
 // ---------- scheduled cycle ----------
 /** Free-plan Workers allow ~50 subrequests per invocation and one symbol costs ~10, so a run is capped. */
 export const MAX_CYCLE_SYMBOLS = 3;
-export interface CycleConfig { symbols: string[]; strategy: Strategy; autoExecute: boolean; ignored: string[] }
+/** Paid-plan Workers allow far more subrequests per invocation, so a paid deployment (ETI_ANALYSIS_PLAN=paid) evaluates more symbols per run. */
+export const PAID_CYCLE_SYMBOLS = 20;
+export const cycleLimit = (env: PaperEnv): number => ((env as any).ETI_ANALYSIS_PLAN === "paid" ? PAID_CYCLE_SYMBOLS : MAX_CYCLE_SYMBOLS);
+/** ETI_PAPER_SYMBOLS may contain ALL (or *): every pair in the scanned market universe is evaluated, a few per run in rotation. */
+const WILDCARDS = new Set(["ALL", "*"]);
+export interface CycleConfig { symbols: string[]; strategy: Strategy; autoExecute: boolean; ignored: string[]; allPairs?: boolean }
 export function cycleConfig(env: PaperEnv): CycleConfig {
-  const raw = (env.ETI_PAPER_SYMBOLS || "").split(",").map(x => x.trim().toUpperCase()).filter(Boolean), good = [...new Set(raw.filter(x => /^[A-Z0-9]{5,20}$/.test(x)))];
+  const tokens = (env.ETI_PAPER_SYMBOLS || "").split(",").map(x => x.trim().toUpperCase()).filter(Boolean);
+  const allPairs = tokens.some(t => WILDCARDS.has(t)), raw = tokens.filter(t => !WILDCARDS.has(t)), limit = cycleLimit(env);
+  const good = [...new Set(raw.filter(x => /^[A-Z0-9]{5,20}$/.test(x)))];
   const strategy = STRATEGIES.includes(env.ETI_PAPER_STRATEGY as Strategy) ? (env.ETI_PAPER_STRATEGY as Strategy) : "intraday";
-  return { symbols: good.slice(0, MAX_CYCLE_SYMBOLS), strategy, autoExecute: env.ETI_PAPER_AUTOEXECUTE === "true", ignored: [...raw.filter(x => !good.includes(x)), ...good.slice(MAX_CYCLE_SYMBOLS)] };
+  return { symbols: good.slice(0, limit), strategy, autoExecute: env.ETI_PAPER_AUTOEXECUTE === "true", ignored: [...raw.filter(x => !good.includes(x)), ...good.slice(limit)], ...(allPairs ? { allPairs: true } : {}) };
+}
+/** Pure: the next symbols to evaluate in an all-pairs rotation. Never-evaluated first, then the least recently evaluated; ties go to the more liquid pair. */
+export function pickRotation(universe: { symbol: string; quoteVolume: number }[], lastEvaluated: Record<string, number>, exclude: Set<string>, slots: number): string[] {
+  if (slots <= 0) return [];
+  return universe.filter(u => !exclude.has(u.symbol)).sort((a, b) => (lastEvaluated[a.symbol] ?? 0) - (lastEvaluated[b.symbol] ?? 0) || b.quoteVolume - a.quoteVolume || a.symbol.localeCompare(b.symbol)).slice(0, slots).map(u => u.symbol);
 }
 export interface CycleItem { symbol: string; action: "tick" | "evaluate"; decision?: string; event?: string; reasons?: string[]; events?: string[]; error?: string }
-export interface CycleSummary { ran: boolean; reason?: string; at: string; autoExecute?: boolean; strategy?: Strategy; items: CycleItem[]; ignoredSymbols?: string[]; killSwitch?: boolean; equity?: number; openPositions?: number }
+export interface CycleSummary { ran: boolean; reason?: string; at: string; autoExecute?: boolean; strategy?: Strategy; items: CycleItem[]; ignoredSymbols?: string[]; killSwitch?: boolean; equity?: number; openPositions?: number; universe?: { size: number; rotatedIn: number } }
 const LASTRUN_KEY = "eti:paper:lastrun";
+const ROTATION_KEY = "eti:paper:rotation";
 
 /** One scheduled pass: manage every open position, then evaluate configured symbols. Disabled unless ETI_PAPER_SYMBOLS is set.
- *  Opening new positions additionally requires ETI_PAPER_AUTOEXECUTE=true and no kill switch; managing open positions never stops. */
+ *  Opening new positions additionally requires ETI_PAPER_AUTOEXECUTE=true and no kill switch; managing open positions never stops.
+ *  With ETI_PAPER_SYMBOLS=ALL the symbols come from the scanned market universe, a few per run in rotation, so every pair is covered over time. */
 export async function runPaperCycle(env: PaperEnv, deps: PaperDeps = {}): Promise<CycleSummary> {
-  const now = (deps.now ?? Date.now)(), at = new Date(now).toISOString(), cfg = cycleConfig(env);
+  const now = (deps.now ?? Date.now)(), at = new Date(now).toISOString(), cfg = cycleConfig(env), limit = cycleLimit(env);
   if (!env.ETI_EXECUTION_LOG) return { ran: false, reason: "ETI_EXECUTION_LOG KV binding is not configured", at, items: [] };
   const kv = env.ETI_EXECUTION_LOG as unknown as KVWithList, engine = await PaperEngine.create(new KVPaperStore(kv), paperConfigFrom(env), now);
   const open = engine.state.positions.map(p => p.symbol);
-  if (!cfg.symbols.length && !open.length) return { ran: false, reason: "ETI_PAPER_SYMBOLS is not set and there are no open positions", at, items: [] };
+  let rotating: string[] = [], universeSize = 0, rotation: Record<string, number> = {}, universeSymbols: string[] = [];
+  if (cfg.allPairs) {
+    try {
+      const u = await loadUniverse(kv as any);
+      if (u) {
+        universeSize = u.symbols.length; universeSymbols = u.symbols.map(s => s.symbol);
+        try { rotation = JSON.parse((await kv.get(ROTATION_KEY)) || "{}") || {}; } catch { rotation = {}; }
+        const exclude = new Set([...open, ...cfg.symbols]);
+        rotating = pickRotation(u.symbols, rotation, exclude, limit - exclude.size);
+      }
+    } catch { /* an unreadable universe only means no rotation this run */ }
+  }
+  const evalSymbols = [...cfg.symbols, ...rotating];
+  if (!evalSymbols.length && !open.length) return { ran: false, reason: cfg.allPairs ? "ETI_PAPER_SYMBOLS=ALL but the market universe has not been built yet (the scheduled universe scan builds it; ETI_UNIVERSE_ENABLED must be true)" : "ETI_PAPER_SYMBOLS is not set and there are no open positions", at, items: [] };
   const envKill = env.ETI_KILL_SWITCH === "true", killed = envKill || engine.state.killSwitch, items: CycleItem[] = [];
-  const targets = [...new Set([...open, ...cfg.symbols])].slice(0, Math.max(MAX_CYCLE_SYMBOLS, open.length)); // open positions always get managed
+  const targets = [...new Set([...open, ...evalSymbols])].slice(0, Math.max(limit, open.length)); // open positions always get managed
   for (const symbol of targets) {
     const holds = engine.state.positions.some(p => p.symbol === symbol);
     try {
       if (holds) {
         const r = await tickSymbol(engine, env, symbol, now), b = r.body as any;
         items.push(r.status === 200 ? { symbol, action: "tick", events: (b.events ?? []).map((e: any) => e.type) } : { symbol, action: "tick", error: String(b.error ?? `HTTP ${r.status}`) });
-      } else if (cfg.symbols.includes(symbol)) {
+      } else if (evalSymbols.includes(symbol)) {
         const execute = cfg.autoExecute && !killed, r = await evaluateSymbol(engine, env, symbol, cfg.strategy, execute, now, envKill), b = r.body as any;
         const skipped = cfg.autoExecute && killed && r.status === 200; // evaluated but deliberately not executed: say why
         items.push(r.status === 200 || r.status === 423 ? { symbol, action: "evaluate", decision: b.plan?.decision, event: skipped ? "SKIPPED" : b.event?.type, reasons: skipped ? ["Kill switch active: new entries are disabled"] : b.event?.reasons } : { symbol, action: "evaluate", decision: b.decision, error: String(b.error ?? `HTTP ${r.status}`) });
       }
     } catch (e) { items.push({ symbol, action: holds ? "tick" : "evaluate", error: e instanceof Error ? e.message : "unknown" }); } // one symbol failing never stops the rest
   }
-  const summary: CycleSummary = { ran: true, at, autoExecute: cfg.autoExecute, strategy: cfg.strategy, items, ignoredSymbols: cfg.ignored, killSwitch: killed, equity: engine.state.equity, openPositions: engine.state.positions.length };
+  const summary: CycleSummary = { ran: true, at, autoExecute: cfg.autoExecute, strategy: cfg.strategy, items, ignoredSymbols: cfg.ignored, killSwitch: killed, equity: engine.state.equity, openPositions: engine.state.positions.length, ...(cfg.allPairs ? { universe: { size: universeSize, rotatedIn: rotating.length } } : {}) };
+  if (cfg.allPairs && universeSymbols.length) { // remember when each pair was last looked at (including failures, so one bad pair cannot block the rotation); keep only pairs still in the universe
+    try {
+      for (const it of items) if (it.action === "evaluate") rotation[it.symbol] = now;
+      const keep = new Set(universeSymbols), pruned: Record<string, number> = {};
+      for (const [k, v] of Object.entries(rotation)) if (keep.has(k)) pruned[k] = v;
+      await kv.put(ROTATION_KEY, JSON.stringify(pruned));
+    } catch { /* rotation memory is best effort */ }
+  }
   try {
     const alerts = paperCycleAlerts(summary);
     try { // Phase 11: restore the last approved configuration when recent results breach the degradation thresholds (ETI_AUTO_ROLLBACK=false makes it advisory)

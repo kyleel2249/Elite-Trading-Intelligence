@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { handleOmnisignal } from "./algo/omni-api.ts";
 import { parseSymbols, rankRows, opportunityScore, MAX_SCAN_SYMBOLS, type ScanRow } from "./algo/scan.ts";
 import { series } from "./algo/fixtures.ts";
+import { bybitCompat } from "./test-support/bybit-compat.ts";
 
 const row = (o: Partial<ScanRow>): ScanRow => ({ rank: null, symbol: "AAAAA", decision: "HOLD", direction: null, opportunityScore: null, validationScore: null, confidence: 0, riskRewardToTP3: null, agreement: null, liquidity: null, entryZone: null, stopLoss: null, reason: "", ...o });
 
@@ -28,13 +29,13 @@ test("opportunity score is null without validation and caps reward/risk", () => 
 const MS: Record<string, number> = { "1m": 6e4, "5m": 3e5, "15m": 9e5, "30m": 18e5, "1h": 36e5, "4h": 144e5, "1d": 864e5, "1w": 6048e5 };
 const PX = series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: 900000, end: 0 }).at(-1)![4];
 const realFetch = globalThis.fetch;
-test.beforeEach(() => { globalThis.fetch = (async (input: any) => {
+test.beforeEach(() => { globalThis.fetch = bybitCompat((async (input: any) => {
   const u = new URL(String(input)), sym = u.searchParams.get("symbol");
   if (sym === "DOWNUSDT") return new Response("down", { status: 500 });
   if (u.pathname.includes("klines")) { const st = MS[u.searchParams.get("interval") || "1h"]; return new Response(JSON.stringify(series(300, { drift: 0.25, noise: 0.35, seed: 7, stepMs: st, end: Date.now() - st * 0.5 }).map(k => [k[0], String(k[1]), String(k[2]), String(k[3]), String(k[4]), String(k[5]), 0, "0", 1, "0", "0", "0"]))); }
   if (u.pathname.includes("depth")) return new Response(JSON.stringify({ lastUpdateId: 1, bids: Array.from({ length: 50 }, (_, i) => [String(PX - 0.01 - i * 0.01), "50"]), asks: Array.from({ length: 50 }, (_, i) => [String(PX + 0.01 + i * 0.01), "50"]) }));
   return new Response("x", { status: 500 });
-}) as typeof fetch; });
+}) as typeof fetch); });
 test.afterEach(() => { globalThis.fetch = realFetch; });
 
 const get = (q: string, m = "GET") => handleOmnisignal(new Request("https://x.test/api/omnisignal/scan" + q, { method: m }), {} as any);
