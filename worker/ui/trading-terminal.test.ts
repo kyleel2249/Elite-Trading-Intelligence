@@ -155,3 +155,8 @@ test("Pro Terminal starts Bitget streaming before REST and retains recent cached
  assert.ok(s.includes("function saveMarketCache()"));
  assert.ok(s.includes("WebSocket live recovery"));
 });
+
+
+test("Pro Terminal preserves USDT, USDC and Coin-M Bitget futures selections",()=>{
+ assert.match(TRADING_TERMINAL_JS,/\["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"\]\.includes\(category\)/);
+});
