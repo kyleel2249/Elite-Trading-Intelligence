@@ -45,6 +45,10 @@ Twelve specialised agents exchange schema-validated JSON (`eti.agent.report/1`, 
 
 1% equity risk per trade, 20% max position, -3% daily loss stop, 10% drawdown stop, 6% open-risk budget, 25 bps max spread, 10% max book participation, stop 0.75–4× ATR, ATR ≤ 8% of price, final-target R:R ≥ 2, stale-data and high-impact-event vetoes, kill switch, security severity ≥ high.
 
+## Scheduled integration
+
+The Cloudflare Worker runs the multi-agent autopilot every five minutes (`*/5 * * * *`). Each scheduled symbol is assessed by all twelve agents first; the authenticated analysis request sets `record:true`, so actionable and `NO_TRADE` council snapshots are archived before Omnisignal strategy gates run. Swift + GainzAlgo strategy agreement, Commander confidence, security checks, the Risk Manager veto, position limits, the execution token, KV idempotency and the existing order gateway remain independent requirements. Automatic submission is restricted to ETI INTERNAL PAPER; the controller never submits live Bybit or Bitget orders. `GET /api/agents/autopilot` reports scheduler cadence, readiness blockers, storage availability and the latest cycle. The Agent Intelligence Center refreshes this status every 30 seconds.
+
 ## Durable agent audit
 
 Migration `0017_agent_decision_audit.sql` creates an append-only `eti_agent_decisions` table and indexes. The existing `ETI_PORTFOLIO_DB` D1 binding is reused; no new database or external API key is required. Snapshots use `INSERT OR IGNORE` keyed by decision ID, making retries idempotent. Database triggers reject updates and deletes. The existing KV compact decision log remains for compatibility. Audit writes are opt-in for analysis: POST requests require the existing bearer token and `record:true`, preventing unauthenticated callers from filling the D1 archive. The response distinguishes `d1`, `kv_fallback`, `none`, and `not_requested`; it never claims a failed write succeeded.
