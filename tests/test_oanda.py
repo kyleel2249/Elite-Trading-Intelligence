@@ -366,7 +366,7 @@ async def test_oanda_failure_is_reported_as_error_not_success(monkeypatch):
     fake = FakeOanda(order_status=201, order_response={"orderCancelTransaction": {"reason": "INSUFFICIENT_LIQUIDITY"}})
     monkeypatch.setattr(ts, "OandaClient", lambda settings, use_practice=True: OandaClient(settings, use_practice=use_practice, transport=fake.transport()))
     out = await TradingService(_risk_settings(), db=None).place_order(
-        provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, equity=100000.0, data_age_seconds=5, data_status="fresh")
+        provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, equity=100000.0, data_age_seconds=5, data_status="fresh", reference_price=1.08512, stop_loss=1.08)
     assert out["status"] == "error" and "INSUFFICIENT_LIQUIDITY" in out["error"]
 
 
