@@ -47,7 +47,7 @@ const BODY = `
 <nav class="side" aria-label="Primary">
  <div class="brand"><b>ETI</b><div><small>ELITE TRADING</small><small>INTELLIGENCE</small></div></div>
  <a class="on" href="/pro">Dashboard</a><a href="#p-signal">Trading Signal</a><a href="#p-struct">Structure &amp; FVG</a><a href="#p-agents">AI Agents</a><a href="#p-ready">Market Readiness</a><a href="#p-daily">Daily Report</a><a href="#p-sys">System &amp; Execution</a><a href="#p-acct">Exchange Accounts</a>
- <h4>Other ETI pages</h4><a href="/terminal">Trading Terminal</a><a href="/command">Command Centre</a><a href="/daily">Daily Report (full)</a><a href="/alpha">Global Alpha</a><a href="/agents">AI Agents (full)</a>
+ <h4>Other ETI pages</h4><a href="/">Full ETI Dashboard</a><a href="/terminal">Trading Terminal</a><a href="/command">Command Centre</a><a href="/daily">Daily Report (full)</a><a href="/alpha">Global Alpha</a><a href="/agents">AI Agents (full)</a>
 </nav>
 <main>
  <div class="grid">
@@ -135,6 +135,7 @@ async function loadMarket(){
  $('fm').textContent='Updated '+utc()+' · '+ms+' ms'+(stale?' · Do not trade on stale data.':'')+(mism?' · Served by '+prov+', not Bybit: do not trade on this feed.':'')+(fk.length?' · partial: '+fk.join(', ')+' unavailable':'');
  if(S.venue==='bybit'){try{var t=await api('/api/market/ticker?'+mq(120));if(my!==SEQ)return false;tick=t.data;}catch(e){tickErr=e.message;}}
  else if(fails&&fails.ticker){tick=null;tickErr=fails.ticker;}
+ if(my!==SEQ)return false;
  var chg=tick?Number(tick.priceChangePercent):NaN;
  if(isFinite(chg)){$('k2').textContent=(chg>=0?'+':'')+chg.toFixed(2)+'%';$('k2').className=chg>=0?'up':'dn';$('k2s').textContent='24h, from the '+S.venue+' ticker';}else{$('k2').textContent='--';$('k2').className='';$('k2s').textContent=tickErr?'Ticker unavailable: '+tickErr:'Ticker did not report a 24h change';}
  return true;
@@ -163,12 +164,13 @@ async function loadSignal(){
  recon();
 }
 async function loadReady(){
- try{var r=await api('/api/readiness?market=crypto&symbol='+encodeURIComponent(S.symbol)+'&strategy=intraday&scope=now');var o=r.data.overall||{};
+ var my=SEQ;
+ try{var r=await api('/api/readiness?market=crypto&symbol='+encodeURIComponent(S.symbol)+'&strategy=intraday&scope=now');if(my!==SEQ)return;var o=r.data.overall||{};
   $('k4').textContent=o.statusLabel||'--';$('k4s').textContent=(o.evaluated!=null?o.evaluated+' of 12 factors evaluated':'');
   var h='<div class="decision">'+esc(o.statusLabel||'unknown')+'</div><div class="mut" style="margin:6px 0">'+esc(o.recommendation||'')+'</div><ul>'+(o.reasons||[]).slice(0,6).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>';
   if(o.notEvaluated&&o.notEvaluated.length)h+='<div class="foot">Not evaluated: '+esc(o.notEvaluated.join('; '))+'</div>';
   $('br').className='';$('br').innerHTML=h;$('fr').textContent='Updated '+utc()+' · '+r.ms+' ms · a favourable rating is never an entry signal';}
- catch(e){$('k4').textContent='--';$('k4s').textContent='Readiness unavailable';fail('br',e.message);}
+ catch(e){if(my!==SEQ)return;$('k4').textContent='--';$('k4s').textContent='Readiness unavailable';fail('br',e.message);}
 }
 async function loadStruct(){
  var my=SEQ,tfl=['15m','1h','4h','1d'],prov=S.venue==='bitget'?'bitget':'bybit';
@@ -208,14 +210,14 @@ async function loadAgents(){
 }
 function acctHtml(d){
  if(d.configured===false)return '<div class="err">Bybit credentials are not configured on the Worker ('+esc(d.error||'credentials_missing')+'). Nothing is shown.</div>';
- var cls=d.status==='connected'?'up':d.status==='partial'?'warn':'dn',pos=d.positions||[],h='';
+ var cls=d.status==='connected'?'up':d.status==='partial'?'warn':'dn',pos=Array.isArray(d.positions)?d.positions:[],h='';
  h+='<div class="seg"><span class="badge '+cls+'">'+esc(d.status)+'</span><span class="badge">'+esc(d.environment)+'</span><span class="badge">read-only snapshot</span></div>';
  h+='<div class="grid" style="margin-bottom:8px"><div class="kpi c4"><small>Equity (USD)</small><b>'+nv(d.equityUsd,2)+'</b></div><div class="kpi c4"><small>Available (USD)</small><b>'+nv(d.availableUsd,2)+'</b></div><div class="kpi c4"><small>Open positions</small><b>'+pos.length+'</b></div></div>';
  h+=pos.length?'<div class="scroll"><table><tr><th>Symbol</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Unrealised P/L</th><th>Leverage</th><th>Liquidation</th><th>Margin</th></tr>'+pos.map(function(p){var c=Number(p.unrealizedPnl)>=0?'up':'dn';return '<tr><td>'+(p.symbol===S.symbol?'<b>'+esc(p.symbol)+'</b>':esc(p.symbol))+' <span class="mut">'+esc(p.category)+'</span></td><td>'+esc(p.side)+'</td><td>'+nv(p.size)+'</td><td>'+nv(p.avgPrice)+'</td><td>'+nv(p.markPrice)+'</td><td class="'+c+'">'+nv(p.unrealizedPnl,2)+'</td><td>'+nv(p.leverage)+'x</td><td>'+nv(p.liquidationPrice)+'</td><td>'+esc(p.marginMode)+'</td></tr>';}).join('')+'</table></div>':'<div class="mut">No open derivatives positions reported.</div>';
  var as=(d.assets||[]).slice().sort(function(a,b){return (Number(b.usdValue)||0)-(Number(a.usdValue)||0);}).slice(0,8);
  if(as.length)h+='<div class="scroll"><table><tr><th>Asset</th><th>Wallet balance</th><th>Locked</th><th>USD value</th></tr>'+as.map(function(a){return '<tr><td>'+esc(a.coin)+'</td><td>'+nv(a.walletBalance,6)+'</td><td>'+nv(a.locked,6)+'</td><td>'+nv(a.usdValue,2)+'</td></tr>';}).join('')+'</table></div>';
  if((d.warnings||[]).length)h+='<ul class="warn">'+d.warnings.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>';
- h+='<div class="foot">Snapshot '+esc(new Date(d.checkedAt).toISOString().slice(0,19).replace('T',' '))+' UTC · orders, transfers and withdrawals are not available from this route</div>';
+ var checked=Date.parse(d.checkedAt);h+='<div class="foot">Snapshot '+(Number.isFinite(checked)?esc(new Date(checked).toISOString().slice(0,19).replace('T',' '))+' UTC':'timestamp unavailable')+' · orders, transfers and withdrawals are not available from this route</div>';
  return h;
 }
 async function loadAccount(){
@@ -226,7 +228,7 @@ async function loadAccount(){
  catch(e){$('tok').value='';fail('bacct',e.message);}
 }
 async function loadDaily(){
- try{var r=await api('/api/daily-report');var d=r.data;
+ try{var r=await api('/api/daily-report');var d=r.data;if(!d||!d.finalVerdict||!Array.isArray(d.opportunities)||!d.dataQuality||!Array.isArray(d.dataQuality.assets))throw new Error('Daily report returned an incomplete data contract');
   var h='<div class="decision">'+esc(d.finalVerdict.label)+'</div><div class="mut" style="margin:6px 0">'+esc(d.finalVerdict.summary)+'</div><div class="scroll"><table><tr><th>Asset</th><th>Direction</th><th>Setup</th><th>ETI verdict</th></tr>'+d.opportunities.map(function(o){var c=o.direction==='BUY'?'up':o.direction==='SELL'?'dn':'mut';return '<tr><td>'+esc(o.asset)+'</td><td class="'+c+'"><b>'+esc(o.direction)+'</b></td><td>'+esc(o.setup)+'</td><td>'+esc(o.verdict)+'</td></tr>';}).join('')+'</table></div>';
   $('bd').className='';$('bd').innerHTML=h;$('fd').textContent=d.dateTimeUtc+(d.cache?(d.cache.hit?' · cached '+d.cache.ageSeconds+' s':' · freshly generated'):'')+' · '+d.dataQuality.assets.filter(function(a){return a.status==='evaluated';}).length+' of '+d.dataQuality.assets.length+' assets fully evaluated';}
  catch(e){fail('bd',e.message);}
@@ -256,6 +258,7 @@ async function refreshAll(){
  await loadMarket();
  loadSignal();loadReady();loadStruct();loadAgents();
 }
+async function pollMarket(){SEQ++;var ok=await loadMarket();if(ok)loadSignal();}
 function tfs(){$('tfs').innerHTML=TFS.map(function(t){return '<button data-tf="'+t+'" class="'+(t===S.interval?'on':'')+'">'+t+'</button>';}).join('');$('tfs').querySelectorAll('button').forEach(function(b){b.onclick=function(){S.interval=b.getAttribute('data-tf');tfs();refreshAll();};});}
 $('ven').onchange=function(){S.venue=$('ven').value;paint();refreshAll();};
 $('mkt').onchange=function(){S.market=$('mkt').value;paint();refreshAll();};
@@ -264,7 +267,7 @@ $('btnacct').onclick=loadAccount;
 $('tok').addEventListener('keydown',function(e){if(e.key==='Enter')loadAccount();});
 window.addEventListener('resize',function(){if(CANDLES)drawChart(CANDLES);});
 setInterval(function(){$('clock').textContent=utc();},1000);$('clock').textContent=utc();
-setInterval(function(){if(document.visibilityState==='visible')loadMarket().then(function(ok){if(ok)loadSignal();});},30000);
+setInterval(function(){if(document.visibilityState==='visible')pollMarket();},30000);
 setInterval(function(){if(document.visibilityState==='visible')loadSys();},60000);
 tfs();paint();refreshAll();loadDaily();loadSys();
 `;
