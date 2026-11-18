@@ -1,5 +1,5 @@
 // Shared market-data loading for analytical and paper endpoints (read-only public data).
-import { getMarketData, providerOrder, type Depth, type Kline, type MarketEnv, type Ticker, type ProviderId } from "../market.ts";
+import { getMarketData, providerOrder, bitgetProductFor, type Depth, type Kline, type MarketEnv, type Ticker, type ProviderId } from "../market.ts";
 import type { DerivativesSnapshot } from "./derivatives.ts";
 import { DEFAULT_WEIGHTS, EXECUTION_TF, TIMEFRAMES, TF_SECONDS, type Strategy, type Timeframe } from "./timeframes.ts";
 
@@ -70,7 +70,9 @@ export async function loadSignalInputs(
 }
 /** Closed 1-minute bars (used for position management) and the latest fresh 1m close as a live reference price. */
 export async function loadMinuteBars(env: MarketEnv, symbol: string, providerParam: string | null, now: number, market: "spot" | "futures" = "spot"): Promise<{ bars: Kline[]; price: number | null; provider: string }> {
-  const r = await getMarketData("klines", { symbol, interval: "1m", limit: 300, market }, providerOrder(env, providerParam)), rows = r.data as Kline[], ms = TF_SECONDS["1m"] * 1000;
+  const selected = providerParam === "bitget" && market === "futures" ? "bitget_mix" : providerParam;
+  const category = selected === "bitget_mix" ? bitgetProductFor(symbol) : undefined;
+  const r = await getMarketData("klines", { symbol, interval: "1m", limit: 300, market, category }, providerOrder(env, selected)), rows = r.data as Kline[], ms = TF_SECONDS["1m"] * 1000;
   const closed = rows.filter(k => k[0] + ms <= now), last = rows.at(-1);
   const fresh = last && now - last[0] <= 3 * ms && now - last[0] >= -60_000;
   return { bars: closed, price: fresh && last![4] > 0 ? last![4] : null, provider: r.provider };
