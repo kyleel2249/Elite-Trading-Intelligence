@@ -18,9 +18,12 @@ function fakeDb() {
           async all() {
             const limit = Number(values[values.length - 1]);
             let data = [...rows.values()];
+            if (sql.includes("(created_at < ? OR (created_at = ? AND id < ?))")) {
+              const before = Number(values[0]), beforeId = String(values[2]);
+              data = data.filter(x => Number(x.created_at) < before || (Number(x.created_at) === before && String(x.id) < beforeId));
+            } else if (sql.includes("created_at < ?")) data = data.filter(x => Number(x.created_at) < Number(values[0]));
             if (sql.includes("symbol = ?")) data = data.filter(x => x.symbol === values[values.length - 2]);
-            if (sql.includes("created_at < ?")) data = data.filter(x => Number(x.created_at) < Number(values[0]));
-            data.sort((a,b) => Number(b.created_at)-Number(a.created_at));
+            data.sort((a,b) => Number(b.created_at)-Number(a.created_at) || String(b.id).localeCompare(String(a.id)));
             return { results: data.slice(0, limit) };
           },
         };
@@ -53,4 +56,19 @@ test("agent audit snapshots validate identity and bound page size", async () => 
   const page = await listAgentDecisions(db, { limit: 2 });
   assert.equal(page.records.length, 2);
   assert.notEqual(page.nextBefore, null);
+  assert.notEqual(page.nextBeforeId, null);
+});
+
+test("agent audit pagination uses a stable id tie-break when timestamps match", async () => {
+  const db = fakeDb();
+  const at = "2026-11-18T10:00:00.000Z";
+  for (const id of ["same-0", "same-1", "same-2", "same-3"]) await persistAgentDecision(db, snapshot(id, at));
+  const first = await listAgentDecisions(db, { limit: 2 });
+  assert.deepEqual(first.records.map((x) => x.id), ["same-3", "same-2"]);
+  assert.equal(first.nextBefore, Date.parse(at));
+  assert.equal(first.nextBeforeId, "same-2");
+  const second = await listAgentDecisions(db, { limit: 2, before: first.nextBefore!, beforeId: first.nextBeforeId! });
+  assert.deepEqual(second.records.map((x) => x.id), ["same-1", "same-0"]);
+  assert.equal(second.nextBefore, null);
+  assert.equal(second.nextBeforeId, null);
 });
