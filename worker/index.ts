@@ -1097,7 +1097,7 @@ async function loadSymbols(){
   ]);
   const prevAll=SYM.all||[];SYM.all=[];
   const warnings=[];
-  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0||i===3?'Bybit': 'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)warnings.push(k+' symbol list is stale');});}else{const venue=(i===0||i===3?'bybit':'bitget'),isMargin=(i===2||i===3),kept=prevAll.filter(x=>symV(x)===venue&&(x[3]==='margin')===isMargin);SYM.all.push(...kept);warnings.push((venue==='bybit'?'Bybit':'Bitget')+(kept.length?' refresh failed; keeping the last known list':' catalogue unavailable'));}});
+  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0||i===3?'Bybit':'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{const src=j.sources[k]||{};if(src.stale){const age=src.fetchedAt?Math.max(0,Math.round((Date.now()-Number(src.fetchedAt))/1000)):null;warnings.push('Bitget '+k+' catalogue is stale'+(age!==null?' · last success '+age+'s ago':' · no successful refresh recorded'));}});}else{const venue=(i===0||i===3?'bybit':'bitget'),isMargin=(i===2||i===3),kept=prevAll.filter(x=>symV(x)===venue&&(x[3]==='margin')===isMargin);SYM.all.push(...kept);warnings.push((venue==='bybit'?'Bybit':'Bitget')+(kept.length?' refresh failed; keeping the last known list':' catalogue unavailable'));}});
   SYM.at=Date.now();
   SYM.warn=warnings.join('; ');
   if(!SYM.all.some(r=>symV(r)==='bybit'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bybit pairs unavailable.';
