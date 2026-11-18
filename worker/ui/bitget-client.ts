@@ -38,7 +38,7 @@ async function request(pathV3,pathsV2){
   var rows=(body&&body.symbols||[]).map(function(r){return {symbol:r[0],baseCoin:r[1],quoteCoin:r[2],status:"online",type:r[7]||"perpetual",maxCrossedLeverage:r[8],maxIsolatedLeverage:r[9],isIsolatedBaseBorrowable:r[10],isIsolatedQuoteBorrowable:r[11],isCrossBorrowable:r[12]};});
   return {data:rows,host:"eti-worker",version:"proxy",meta:body};
  }
- if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){return {T:t.time,p:String(t.price),q:String(t.qty),m:!!t.isBuyerMaker};});
+ if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){return {T:t.time,p:String(t.price),q:String(t.qty),side:t.isBuyerMaker?"sell":"buy"};});
  return {data:body,host:"eti-worker",version:"proxy"};
 }
 function parseCandles(data){
