@@ -281,3 +281,5 @@ jobs:
           if [ "$provider_degraded" -eq 1 ]; then
             echo "::warning::ETI Sports is deployed, but OddsPapi currently has an upstream outage. Fixture scanning must be rechecked after provider recovery."
           fi
+
+# Integration rollout: redeploy after configuring DATAX_API_URL and DATAX_INTEGRATION_SECRET.
