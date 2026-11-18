@@ -49,7 +49,7 @@ test("private login isolates demo UTA and production Classic credentials", async
  const demo=await bitgetPrivateLogin(env,"demo","uta",()=>1_700_000_000_999);
  assert.equal(demo.args[0].apiKey,"demo");
  assert.equal(demo.args[0].sign,await bitgetSign("demo-secret","1700000000","GET","/user/verify",""));
- const classic=await bitgetUtaPrivateLogin(env,"production","classic",()=>1_700_000_000_999);
+ const classic=await bitgetPrivateLogin(env,"production","classic",()=>1_700_000_000_999);
  assert.equal(classic.args[0].apiKey,"classic");
  assert.equal(classic.args[0].sign,await bitgetSign("classic-secret","1700000000","GET","/user/verify",""));
 });
