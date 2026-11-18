@@ -205,6 +205,7 @@ ${PERP_ORDER_HTML}
   <div class="im-subpanel"><h3>Structure &amp; trend</h3><div id="imStructure" class="execution-note">Waiting for confirmed swing analysis…</div></div>
   <div class="im-subpanel"><h3>Volume profile · 70% value area</h3><div id="imProfile" class="execution-note">Waiting for profile calculation…</div></div>
   <div class="im-subpanel"><h3>Liquidity pools &amp; sweeps</h3><div id="imLiquidity" class="execution-note">Waiting for liquidity analysis…</div></div>
+  <div class="im-subpanel"><h3>Liquidity + FVG manipulation monitor</h3><div id="imLiquidityFvg" class="execution-note">Waiting for combined sweep, reach and FVG qualification…</div></div>
   <div class="im-subpanel"><h3>Recent BOS / CHoCH events</h3><div id="imEvents" class="execution-note">Waiting for confirmed events…</div></div>
   <div class="im-subpanel"><h3>Order blocks &amp; mitigation</h3><div id="imOrderBlocks" class="execution-note">Waiting for validated order blocks…</div></div>
   <div class="im-subpanel"><h3>Displacement &amp; participation</h3><div id="imDisplacement" class="execution-note">Waiting for displacement analysis…</div></div>
@@ -385,7 +386,7 @@ async function refreshLiquidityFvg(force){
  try{const r=await fetch('/api/analysis/liquidity-fvg?symbol='+encodeURIComponent(sym)+'&timeframe='+encodeURIComponent(tf)+'&assetClass=crypto',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candles:{[tf]:candles.map(v=>v.map(Number))}}),cache:'no-store'});
  const d=await r.json();if(seq!==etiLiquidityFvgSeq)return;if(!r.ok)throw Error(d.detail||d.error||'HTTP '+r.status);
  if([$('symbol').value,$('interval').value,symVenueOf(),symMkt(),candles.at(-1)&&candles.at(-1)[0]].join('|')!==key)return;
- etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();drawChart();
+ etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();const lf=$('imLiquidityFvg');if(lf){const z=d.precision&&d.precision.best,band=d.manipulation&&d.manipulation.estimatedReach;lf.textContent='Combined '+(d.autopilotEligible?d.direction:'WAIT')+' · evidence '+d.score+'/100 · manipulation '+(d.manipulation&&d.manipulation.level||'unknown')+' ('+(d.manipulation&&d.manipulation.score||0)+'/100) · likely '+String(d.manipulation&&d.manipulation.likelySide||'none').replace(/_/g,' ')+' liquidity '+(d.manipulation&&d.manipulation.likelySweepPrice?fp(d.manipulation.likelySweepPrice):'—')+(band?' · estimated reach '+fp(band.low)+'–'+fp(band.high):'')+(z?' · '+z.direction+' FVG '+fp(z.zone.lower)+'–'+fp(z.zone.upper)+' · CE '+fp(z.entry.price):' · no qualified FVG')+' · '+(d.blocks||[]).slice(0,2).join('; ');}renderAdvancedLiveChart();drawChart();
  }catch(e){if(seq!==etiLiquidityFvgSeq)return;etiLiquidityFvg=null;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();}
 }
 function drawChart(){
