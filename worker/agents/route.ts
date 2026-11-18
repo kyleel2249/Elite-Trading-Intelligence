@@ -6,7 +6,7 @@
  *   GET|POST /api/agents/analyze      read-only analysis (providers auto-fetched unless providers=0 / providers:false)
  *   POST /api/agents/execute          bearer-authenticated; reaches /api/orders only if Commander AND Risk Manager approve and exchange filters pass
  *   GET  /api/agents/audit            bearer-authenticated; Performance Auditor over recorded decisions
- *   POST /api/agents/brief            bearer-authenticated; advisory LLM review of an analysis (see llm-route.ts)
+ *   POST /api/agents/brief            bearer-authenticated; advisory LLM review of an analysis (see llm-route.ts)\n *   GET|POST /api/agents/jarvis        bearer-authenticated JARVIS command/orchestration layer\n *   GET /api/agents/jarvis/memory     bounded operational memory (bearer-authenticated)
  */
 import { AllProvidersFailed, INTERVALS, getMarketData, providerOrder } from "../market.ts";
 import { buildOrderFlow, normalizeDepth, normalizeTrades } from "../analysis/orderflow.ts";
