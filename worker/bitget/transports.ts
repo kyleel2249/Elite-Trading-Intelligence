@@ -73,13 +73,13 @@ export function decodeBitgetSbe(input: ArrayBuffer | Uint8Array) {
   const result: any = { header };
   if (header.templateId === 1002) {
     if (header.blockLength < 56 || bytes.length < 8 + header.blockLength + 1) throw new Error("sbe_bbo_truncated");
-    const o = 8, pe = i8(o + 32), se = i8(o + 33);
+    const o = 8, pe = i8(o + 40), se = i8(o + 41);
     result.type = "books1"; result.ts = u64(o); result.bids = [[scale(i64(o + 8), pe), scale(i64(o + 16), se)]];
-    result.asks = [[scale(i64(o + 24), pe), scale(i64(o + 32 - 8), se)]];
+    result.asks = [[scale(i64(o + 24), pe), scale(i64(o + 32), se)]];
     // Canonical offsets from the 56-byte BBO root: ts, bid px/size, ask px/size, exponents, seq, sts, category, padding.
     result.bids = [[scale(i64(o + 8), pe), scale(i64(o + 16), se)]];
     result.asks = [[scale(i64(o + 24), pe), scale(i64(o + 32), se)]];
-    result.priceExponent = pe; result.sizeExponent = se; result.seq = u64(o + 34); result.sts = header.blockLength >= 50 ? u64(o + 42) : null;
+    result.priceExponent = pe; result.sizeExponent = se; result.seq = u64(o + 42); result.sts = null;
     result.symbol = str(8 + header.blockLength);
     return result;
   }
