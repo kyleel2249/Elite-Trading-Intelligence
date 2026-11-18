@@ -39,6 +39,9 @@ test("dashboard uses a static, edge-to-edge layout with no 3D animation", async 
   assert.match(html, /\.chart-workspace\{width:100vw;max-width:none;margin-left:calc\(50% - 50vw\)/, "chart spans the full viewport width without a max-width constraint");
   assert.match(html, /\.chart-workspace \.chart\.big\{width:100%;height:100svh;min-height:560px;max-height:none/, "chart receives full viewport height without a desktop height cap");
   assert.match(html, /\.chart-workspace:fullscreen/, "chart workspace supports native fullscreen mode");
+  assert.match(html, /@media\\(min-width:1440px\\) and \\(min-height:800px\\)/, "dashboard includes desktop sizing rules for the 1920x1080 target");
+  assert.match(html, /\.chart-workspace \.chart\.big\\{height:min\\(72vh,780px\\);min-height:620px\\}/, "desktop chart height is fitted to the viewport instead of overflowing the screen");
+  assert.match(html, /\.chart-workspace \.paneBox\\{height:64px\\}/, "indicator panes use compact desktop sizing");
   assert.match(html, /id="chartAdvanced"/);
   assert.match(html, /id="paneRsi"/);
   assert.match(html, /id="paneMacd"/);
