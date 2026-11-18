@@ -50,7 +50,7 @@ from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
-from app.security.auth import require_api_key, require_persistence_auth
+from app.security.auth import PROTECTED_ENVS, require_api_key, require_persistence_auth
 from app.api.pretrade import router as pretrade_router
 from app.api.execution import router as execution_router
 from app.api.paper import router as paper_router
@@ -60,7 +60,6 @@ from app.api.strategies import router as strategies_router
 from app.prediction_ledger.api import router as predictions_router
 from app.prediction_ledger.job import prediction_resolver_job
 from app.prediction_ledger.service import record_from_forecast
-from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
 
