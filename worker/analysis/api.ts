@@ -3,6 +3,7 @@ import { getMarketData, providerOrder, type Kline, type MarketEnv } from "../mar
 import { runOmnisignal } from "../algo/omnisignal.ts";
 import { analyzeFvgMtf, FVG_RULES } from "./fvg.ts";
 import { analyzeFvgPrecision } from "./fvg-precision.ts";
+import { analyzeLiquidityFvg } from "./liquidity-fvg.ts";
 import { detectDisplacement, detectLiquiditySweeps, detectOrderBlocks, findLiquidityPools } from "./smc.ts";
 import { analyzeStructure, findPivots } from "./structure.ts";
 import { volumeProfile } from "./volume-profile.ts";
@@ -329,6 +330,32 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       const result = confluence({ symbol, frames: smc, orderFlow, entryTimeframe, now });
       const detections = q("include")?.includes("detections") ? Object.fromEntries(Object.entries(smc).map(([tf, a]) => [tf, a!.detections.slice(0, 40)])) : undefined;
       return reply({ ...result, detections, dataQuality: { providers, failures, notes, orderFlow: orderFlowNote, timeframesRequested: frames }, generatedAt: new Date(now).toISOString() });
+    }
+    if (path === "/api/analysis/liquidity-fvg") {
+      // Combined liquidity sweep, manipulation-risk and institutional FVG intelligence. Read-only.
+      const FVG_TFS: MtfTimeframe[] = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"];
+      const tf = (q("timeframe") ?? q("interval") ?? "15m") as MtfTimeframe;
+      if (!FVG_TFS.includes(tf)) return reply({ error: "invalid_timeframe", timeframes: FVG_TFS }, 400);
+      const tfs = FVG_TFS.slice(FVG_TFS.indexOf(tf), FVG_TFS.indexOf(tf) + 3);
+      let by: Partial<Record<MtfTimeframe, Kline[]>> = {}, failures: Record<string, string> = {}, provider = "supplied", notes: string[] = [];
+      if (post && body.candles) {
+        if (typeof body.candles !== "object" || Array.isArray(body.candles)) return reply({ error: "candles_must_be_an_object_keyed_by_timeframe" }, 400);
+        for (const [t, v] of Object.entries(body.candles)) {
+          if (!tfs.includes(t as MtfTimeframe)) return reply({ error: "invalid_timeframe", timeframe: t, timeframes: tfs }, 400);
+          const sc = sanitizeCandles(v); if (sc.error) return reply({ error: "invalid_candles", timeframe: t, detail: sc.error }, 400);
+          by[t as MtfTimeframe] = sc.rows;
+        }
+      } else if (cls === "crypto") {
+        const l = await loadCandles(symbol, tfs, env, q("provider")); by = l.candles; failures = l.failures; provider = l.providers.join("+") || "none";
+      } else if (cls === "stock" || cls === "fx") {
+        const y = await loadYahooCandles(symbol, cls, tfs, fetchFn); by = y.candles as typeof by; failures = y.failures; notes = y.notes; provider = "yahoo-finance";
+      } else return reply({ error: "market_data_unavailable", detail: `Unknown asset class for ${symbol}: pass ?assetClass= or POST candles` }, 424);
+      const chartRows = by[tf] ? closedCandles(tf, by[tf]!, now) : [];
+      if (chartRows.length < 40) return reply({ error: "insufficient_history", detail: failures[tf] ?? `Need 40 closed ${tf} candles; received ${chartRows.length}`, failures, notes }, 422);
+      const higherTimeframes: Partial<Record<string, Kline[]>> = {};
+      for (const h of tfs.slice(1)) if (by[h]?.length) higherTimeframes[h] = closedCandles(h, by[h]!, now);
+      const analysis = analyzeLiquidityFvg(chartRows, tf, { symbol, higherTimeframes, minScore: Math.max(60, Math.min(95, Number(q("minScore")) || 75)) });
+      return reply({ ...analysis, higherTimeframesLoaded: Object.keys(higherTimeframes), dataQuality: { provider, timeframe: tf, closedCandles: chartRows.length, lastClosedCandleAt: new Date(chartRows.at(-1)![0]).toISOString(), failures, notes }, submitsOrder: false, liveExecutionAllowed: false });
     }
     if (path === "/api/analysis/fvg-precision") {
       // Institutional FVG qualification and precision-entry analysis. Read-only; no trade can be submitted here.
