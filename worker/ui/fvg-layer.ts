@@ -184,7 +184,7 @@ function loadPrecision(tf){
   if(precisionState.key!==key)return;
   var ids=Object.create(null);(data.candidates||[]).forEach(function(c){if(c.highlight==='green'&&c.state==='qualified_fresh')ids[c.id]=c;});
   precisionState.ids=ids;precisionState.error='';try{drawChart();}catch(_){}
- }).catch(function(e){if(precisionState.key===key)precisionState.error=(e&&e.message)||'precision analysis unavailable';}).then(function(){precisionState.busy=false;});
+ }).catch(function(e){if(precisionState.key===key)precisionState.error=(e&&e.message)||'precision analysis unavailable';}).then(function(){precisionState.busy=false;if(precisionState.key!==marketKey()+'|'+curTf())loadPrecision(curTf());});
 }
 
 function slotOf(t){var lo=0,hi=candles.length;while(lo<hi){var m=(lo+hi)>>1;if(candles[m][0]<t)lo=m+1;else hi=m;}return lo;}
