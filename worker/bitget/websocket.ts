@@ -46,6 +46,7 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   server.accept();
   let upstream: WebSocket | null = null, loggedIn = false, closed = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let lastUpstreamMessageAt = Date.now();
 
   const sendClient = (value: unknown) => {
     if (!closed && server.readyState === 1) try { server.send(typeof value === "string" ? value : JSON.stringify(value)); } catch { /* closing */ }
@@ -70,6 +71,9 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
     upstream.addEventListener("message", (event: MessageEvent) => {
       if (closed) return;
       const raw = typeof event.data === "string" ? event.data : "";
+      lastUpstreamMessageAt = Date.now();
+      if (raw === "pong") { sendClient("pong"); return; }
+      if (raw === "ping") { try { upstream?.send("pong"); } catch { close(1011, "upstream ping response failed"); } return; }
       let message: any;
       try { message = JSON.parse(raw); } catch { sendClient(raw); return; }
       if (message?.event === "login") {
@@ -98,7 +102,10 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   server.addEventListener("close", () => close());
   server.addEventListener("error", () => close(1011, "client socket error"));
   heartbeat = setInterval(() => {
-    if (!closed && loggedIn && upstream?.readyState === 1) try { upstream.send("ping"); } catch { close(1011, "heartbeat failed"); }
+    if (!closed && loggedIn && upstream?.readyState === 1) {
+      if (Date.now() - lastUpstreamMessageAt > 65000) { close(1011, "upstream heartbeat timeout"); return; }
+      try { upstream.send("ping"); } catch { close(1011, "heartbeat failed"); }
+    }
   }, 30000);
   return new Response(null, { status: 101, webSocket: client } as any);
 }
