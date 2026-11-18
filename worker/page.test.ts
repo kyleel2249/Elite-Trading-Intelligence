@@ -59,8 +59,8 @@ test("dashboard uses a static, contained 1920x1080 chart layout with no 3D anima
   assert.match(html, /refreshInstitutionalIntel/);
   assert.match(html, /\/api\/analysis\/smc/);
   assert.match(html, /volumeProfile/);
-  assert.match(html, /<script[^>]+src="\\/bitget-client\\.js"/i);
-  assert.match(html, /lightweight-charts@4\\.1\\.3/);
+  assert.match(html, /<script[^>]+src="\/bitget-client\.js"/i);
+  assert.match(html, /lightweight-charts@4\.1\.3/);
 });
 
 test("/elite is served, loads no external script, and carries none of the reference image's sample figures", async () => {
