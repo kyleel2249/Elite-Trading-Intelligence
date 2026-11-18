@@ -33,7 +33,7 @@ Implemented in this checkpoint:
 - Bybit server-side GET support.
 - Explicit data-quality notes and no order-submission capability.
 
-## Planned phases
+## Phase 2 — Signal quality and lifecycle\n\nImplemented in this checkpoint:\n- Closed-candle, confirmed-pivot regular and hidden bullish/bearish price-RSI divergence.\n- Divergence evidence contributes to ETIAlgo V3 Alpha scoring and warns when it opposes the candidate direction.\n- Persistent signal lifecycle states: confirmed, entry reached, TP1/TP2/TP3 reached, invalidated and expired.\n- Conservative stop-first handling when one candle touches both a stop and target.\n- Existing TP1-based historical outcome accounting remains comparable.\n\n## Planned phases
 
 1. Visual Market Intelligence: integrate footprint, CVD and historical liquidity into the chart and Pro Terminal; complete MTF confluence presentation.
 2. ETIAlgo intelligence: regime-aware adaptive scoring, divergence and lifecycle persistence.

@@ -26,16 +26,30 @@ export async function recordV3AlphaSignal(db:DB|undefined, symbol:string, strate
  return true;
 }
 
-function outcomeFor(row:any, candles:Kline[]):{outcome:"win"|"loss"|"expired"|null; r:number|null; at:number|null; bars:number}{
- let seen=0;
- for(const c of candles){if(c[0]<=Number(row.signal_time))continue;seen++;const stop=Number(row.stop_loss),tp=Number(row.tp1),dir=Number(row.direction);
- const stopHit=dir>0?c[3]<=stop:c[2]>=stop, targetHit=dir>0?c[2]>=tp:c[3]<=tp;
- // If both levels are touched in one OHLC candle, assume the protective stop was hit first.
- if(stopHit)return{outcome:"loss",r:-1,at:c[0],bars:seen};
- if(targetHit)return{outcome:"win",r:1.5,at:c[0],bars:seen};
- if(seen>=100)return{outcome:"expired",r:null,at:c[0],bars:seen};
+export type SignalLifecycleStatus = "confirmed" | "entry_reached" | "tp1_reached" | "tp2_reached" | "tp3_reached" | "invalidated" | "expired";
+export interface SignalLifecycleAdvance {
+ status:SignalLifecycleStatus;outcome:"win"|"loss"|"expired"|null;r:number|null;at:number|null;bars:number;note:string;
+}
+/** Advance one immutable signal through closed-candle lifecycle states. A same-candle stop/target collision resolves conservatively as a stop. */
+export function advanceSignalLifecycle(row:any,candles:Kline[]):SignalLifecycleAdvance{
+ let status=(["confirmed","entry_reached","tp1_reached","tp2_reached","tp3_reached","invalidated","expired"].includes(String(row.lifecycle_status))?String(row.lifecycle_status):"confirmed") as SignalLifecycleStatus;
+ let bars=0;const signalTime=Number(row.signal_time),direction=Number(row.direction),entryLow=Number(row.entry_low),entryHigh=Number(row.entry_high),stop=Number(row.stop_loss);
+ const lo=Math.min(entryLow,entryHigh),hi=Math.max(entryLow,entryHigh);
+ for(const c of candles){
+  if(c[0]<=signalTime)continue;
+  bars++;
+  const stopHit=direction>0?c[3]<=stop:c[2]>=stop;
+  const entryHit=c[2]>=lo&&c[3]<=hi;
+  const tp1=Number(row.tp1),tp2=Number(row.tp2),tp3=Number(row.tp3);
+  const hit=(target:number)=>direction>0?c[2]>=target:c[3]<=target;
+  if(stopHit)return{status:"invalidated",outcome:"loss",r:-1,at:c[0],bars,note:status==="confirmed"?"Protective stop reached before a confirmed entry.":"Protective stop reached after entry."};
+  if(status==="confirmed"&&entryHit)status="entry_reached";
+  if(hit(tp3))return{status:"tp3_reached",outcome:"win",r:1.5,at:c[0],bars,note:"TP3 reached; historical outcome remains TP1-based for compatibility."};
+  if(hit(tp2))return{status:"tp2_reached",outcome:"win",r:1.5,at:c[0],bars,note:"TP2 reached; historical outcome remains TP1-based for compatibility."};
+  if(hit(tp1))return{status:"tp1_reached",outcome:"win",r:1.5,at:c[0],bars,note:"TP1 reached."};
+  if(bars>=100)return{status:"expired",outcome:"expired",r:null,at:c[0],bars,note:"Signal expired after 100 observed candles without a terminal target or stop event."};
  }
- return{outcome:null,r:null,at:null,bars:seen};
+ return{status,outcome:null,r:null,at:null,bars,note:status==="entry_reached"?"Entry zone reached; targets and stop remain active.":"Awaiting entry-zone interaction."};
 }
 
 async function trackOpen(db:DB,env:MarketEnv,now:number){
@@ -47,7 +61,13 @@ async function trackOpen(db:DB,env:MarketEnv,now:number){
   const [symbol,interval]=key.split("|");
   let candles:Kline[];
   try{candles=(await getMarketData("klines",{symbol,interval,limit:1000},providerOrder(env))).data as Kline[];}catch{continue}
-  for(const r of items){const o=outcomeFor(r,candles);if(!o.outcome)continue;await db.prepare("UPDATE eti_v3_alpha_signals SET outcome=?,outcome_r=?,resolved_at=?,last_checked_at=?,bars_observed=? WHERE id=? AND outcome IS NULL").bind(o.outcome,o.r,o.at,now,o.bars,r.id).run();updates.push({id:r.id,outcome:o.outcome,outcomeR:o.r,barsObserved:o.bars});}
+  for(const r of items){
+   const o=advanceSignalLifecycle(r,candles),previous=String(r.lifecycle_status??"confirmed");
+   if(o.status===previous&&!o.outcome)continue;
+   await db.prepare("UPDATE eti_v3_alpha_signals SET lifecycle_status=?,lifecycle_updated_at=?,lifecycle_note=?,outcome=COALESCE(outcome,?),outcome_r=COALESCE(outcome_r,?),resolved_at=COALESCE(resolved_at,?),last_checked_at=?,bars_observed=? WHERE id=? AND outcome IS NULL")
+    .bind(o.status,now,o.note,o.outcome,o.r,o.at,now,o.bars,r.id).run();
+   updates.push({id:r.id,lifecycleStatus:o.status,outcome:o.outcome,outcomeR:o.r,barsObserved:o.bars,note:o.note});
+  }
  }
  return{checked:rows.length,resolved:updates.length,updates};
 }
@@ -62,7 +82,7 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
   if(!db)return reply({error:"storage_not_configured",message:"Signal history requires the ETI_PORTFOLIO_DB D1 binding."},503);
   const symbol=(url.searchParams.get("symbol")??"").toUpperCase(),limit=Math.max(1,Math.min(100,Number(url.searchParams.get("limit")??50)||50));
   if(symbol&&!validSymbol(symbol))return reply({error:"invalid_symbol"},400);
-  const q=await db.prepare("SELECT id,symbol,strategy,venue,market,category,timeframe,direction,signal_time,received_at,entry,stop_loss,tp1,tp2,tp3,score,threshold,regime,outcome,outcome_r,resolved_at,bars_observed FROM eti_v3_alpha_signals "+(symbol?"WHERE symbol=? ":"")+"ORDER BY signal_time DESC LIMIT ?").bind(...(symbol?[symbol,limit]:[limit])).all();
+  const q=await db.prepare("SELECT id,symbol,strategy,venue,market,category,timeframe,direction,signal_time,received_at,entry,stop_loss,tp1,tp2,tp3,score,threshold,regime,outcome,outcome_r,resolved_at,bars_observed,lifecycle_status,lifecycle_updated_at,lifecycle_note FROM eti_v3_alpha_signals "+(symbol?"WHERE symbol=? ":"")+"ORDER BY signal_time DESC LIMIT ?").bind(...(symbol?[symbol,limit]:[limit])).all();
   return reply({signals:q.results??[],submitsOrder:false});
  }
  if(path==="/api/algo/v3-alpha/performance"&&req.method==="GET"){
