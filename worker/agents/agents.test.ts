@@ -197,6 +197,8 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
     assert.equal(await (await app.fetch(new Request("https://e.test/other"), env)).text(), "base"); assert.equal(baseCalls, 1);
     const page = await app.fetch(new Request("https://e.test/agents"), env); assert.equal(page.status, 200); assert.match(await page.text(), /ETI Agent Intelligence Center/);
     const roster: any = await (await app.fetch(new Request("https://e.test/api/agents"), env)).json(); assert.equal(roster.agents.length, 12); assert.equal(roster.liveExecutionAllowed, false);
+    assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions"), env)).status, 401);
+    assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions", { headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN } }), env)).status, 503);
     const a: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&interval=1h"), env)).json();
     assert.equal(a.reports.length, 12); assert.deepEqual(a.providers, status); assert.equal(a.reports.find((x: any) => x.agent === "news").status, "ok");
     const off: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&providers=0"), env)).json();

@@ -25,6 +25,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px
 <label>Benchmark (optional)<input id='bench' placeholder='ETHUSDT' size='10'></label>
 <label>Equity USD (optional)<input id='equity' type='number' min='0' placeholder='10000' size='10'></label>
 <label>Auto-refresh<select id='every'><option value='30'>30 s</option><option value='60' selected>60 s</option><option value='120'>120 s</option></select></label>
+<label>Audit token (optional)<input id='auditToken' type='password' autocomplete='off' placeholder='Bearer token' size='16'></label>
 <button id='run'>Run analysis</button><button id='start'>Start auto</button><button id='pause'>Pause</button><button id='resume'>Resume</button><button id='stop'>Stop</button>
 <span>State: <b id='state'>idle</b> &middot; <span id='last' class='mut'>not run yet</span></span></div>
 <div id='err' class='card' style='display:none;border-color:var(--bad)'></div>
@@ -69,11 +70,11 @@ function renderMsgs(res){var n=$('msgs');clear(n);n.className='card wrap';n.appe
 function showErr(t){var e=$('err');e.style.display='block';e.textContent=t}
 function loadAutopilot(){api('/api/agents/autopilot').then(function(r){var n=$('autopilot');clear(n);n.className='card wrap';var mode=r.mode||'unknown';n.appendChild(el('div','big',r.enabled?'ENABLED':'DISABLED'));n.appendChild(el('div','mut','Mode: '+mode+' | Live orders: '+(r.liveOrdersAllowed?'available':'disabled')+' | Kill switch: '+(r.killSwitch?'ACTIVE':'inactive')));n.appendChild(el('div','mut','Symbols: '+(r.symbols||[]).join(', ')+' | Interval: '+r.interval+' | Minimum confidence: '+fmt(r.minConfidence)+' | Minimum agreement: '+fmt(r.minAgreement)+' | Max positions: '+r.maxPositions+' | Strategies: '+(r.strategies||[]).join(', ')+' ('+r.minStrategyAgreement+' aligned; score '+r.minOmniConfidence+'+)));if(!r.executionTokenConfigured||!r.auditLogConfigured)n.appendChild(el('div','error','Execution token or audit log is not configured; automatic orders cannot run.'));var x=r.latest;if(x){n.appendChild(el('div',null,'Last cycle: '+x.at+' | Evaluated: '+x.evaluated+' | Paper orders submitted: '+x.submitted));n.appendChild(table(['Symbol','Status','Reason / action'],(x.outcomes||[]).map(function(o){return [o.symbol,o.status,o.reason||o.action||o.error||'']})))}else n.appendChild(el('div','mut','No scheduled cycle has been recorded yet.'))}).catch(function(e){$('autopilot').textContent='Autopilot status unavailable: '+e})}
 function run(){if(busy)return;busy=true;setState('running');$('err').style.display='none';
-var body={symbol:$('symbol').value.trim().toUpperCase(),interval:$('interval').value},b=$('bench').value.trim(),eq=parseFloat($('equity').value);
-if(b)body.benchmark=b.toUpperCase();if(isFinite(eq)&&eq>0)body.account={equityUsd:eq};
-return api('/api/agents/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(res){
+var body={symbol:$('symbol').value.trim().toUpperCase(),interval:$('interval').value},b=$('bench').value.trim(),eq=parseFloat($('equity').value),token=$('auditToken').value.trim(),headers={'content-type':'application/json'};
+if(b)body.benchmark=b.toUpperCase();if(isFinite(eq)&&eq>0)body.account={equityUsd:eq};if(token){body.record=true;headers.authorization='Bearer '+token;}
+return api('/api/agents/analyze',{method:'POST',headers:headers,body:JSON.stringify(body)}).then(function(res){
 if(res.error){showErr('Backend error: '+res.error+(res.detail?' ('+JSON.stringify(res.detail)+')':''));return}
-renderAgents(res.reports);renderDecision(res);renderRisk(res);renderProviders(res);renderMsgs(res);$('last').textContent='last run '+res.generatedAt+' | audit: '+(res.auditPersistence||'unavailable')}).catch(function(e){showErr('Request failed: '+e)}).then(function(){busy=false;setState(timer?'auto-refresh':paused?'paused':'idle')})}
+renderAgents(res.reports);renderDecision(res);renderRisk(res);renderProviders(res);renderMsgs(res);$('last').textContent='last run '+res.generatedAt+' | audit: '+(res.auditPersistence||'not_requested')}).catch(function(e){showErr('Request failed: '+e)}).then(function(){busy=false;setState(timer?'auto-refresh':paused?'paused':'idle')})}
 function stopTimer(){if(timer){clearInterval(timer);timer=null}}
 function startTimer(){stopTimer();timer=setInterval(run,parseInt($('every').value,10)*1000);paused=false;run()}
 $('run').onclick=run;$('start').onclick=startTimer;

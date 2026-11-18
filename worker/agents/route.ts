@@ -111,22 +111,21 @@ async function readBody(req: Request): Promise<Record<string, unknown> | null> {
   return j && typeof j === "object" && !Array.isArray(j) ? j : null;
 }
 
-async function record(env: AgentsEnv, r: AnalysisResult, executed: boolean) {
-  let saved = false;
+async function record(env: AgentsEnv, r: AnalysisResult, executed: boolean): Promise<"d1" | "kv_fallback" | "none"> {
   if (env.ETI_PORTFOLIO_DB) {
     try {
       await persistAgentDecision(env.ETI_PORTFOLIO_DB, r as unknown as AgentDecisionSnapshot, executed);
-      saved = true;
-    } catch { /* A failed durable write is surfaced as not recorded; never claim success. */ }
+      return "d1";
+    } catch { /* Fall through to the existing compact KV audit sink. */ }
   }
   if (env.ETI_EXECUTION_LOG) {
     try {
       const rec = toDecisionRecord(r, executed), inv = String(9_999_999_999_999 - Date.parse(rec.at)).padStart(13, "0");
       await env.ETI_EXECUTION_LOG.put(`agentrun:${inv}:${rec.id}`, JSON.stringify(rec), { expirationTtl: TTL });
-      saved = true;
-    } catch { /* Keep analysis available if the optional KV audit sink is degraded. */ }
+      return "kv_fallback";
+    } catch { /* Report persistence unavailable; never claim a failed write succeeded. */ }
   }
-  return saved;
+  return "none";
 }
 
 function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
@@ -253,15 +252,16 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
       const result = analyze({ market, supplied: mergeSupplied(pSup, supplied(body)), account, integrity, audit, execution: isExec ? exReq : undefined, maxOrderQuantity: Number.isFinite(maxQty) && maxQty > 0 ? maxQty : undefined, now: clock() });
 
       if (!isExec) {
-        // Every completed analysis receives an immutable audit snapshot. Storage failure is explicit.
-        const recorded = await record(env, result, false).catch(() => false);
-        return reply({ ...result, providers: pStatus, recorded, auditPersistence: recorded ? "stored" : "unavailable" });
+        // D1 writes are opt-in and bearer-authenticated to prevent public analysis requests from exhausting storage.
+        const requested = request.method === "POST" && authed && body.record === true;
+        const persistence = requested ? await record(env, result, false).catch(() => "none" as const) : "none";
+        return reply({ ...result, providers: pStatus, recorded: persistence !== "none", auditPersistence: requested ? persistence : "not_requested" });
       }
 
       // Execution path: the Risk Manager's veto is structural: no ticket exists unless risk.approved.
       const block = async (reasons: string[]) => {
-        await record(env, result, false).catch(() => false);
-        return reply({ error: "blocked_by_agents", vetoedBy: result.decision.vetoedBy, action: result.decision.action, reasons, accountNote, decision: result.decision, execution: result.execution, risk: result.risk }, 409);
+        const auditPersistence = await record(env, result, false).catch(() => "none" as const);
+        return reply({ error: "blocked_by_agents", auditPersistence, vetoedBy: result.decision.vetoedBy, action: result.decision.action, reasons, accountNote, decision: result.decision, execution: result.execution, risk: result.risk }, 409);
       };
       if (!result.decision.executionEligible || !result.execution.eligible || !result.execution.ticket)
         return block(result.decision.vetoedBy ? result.risk?.vetoes ?? [] : result.execution.blockers.length ? result.execution.blockers : result.decision.rationale);
@@ -277,8 +277,8 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
       const order = new Request(new URL("/api/orders", request.url).toString(), { method: "POST", headers: { "content-type": "application/json", authorization: request.headers.get("authorization") ?? "" }, body: JSON.stringify(ticket) });
       const res = await handleExecution(order, env);
       const brokerBody = await res.json().catch(() => ({}));
-      await record(env, result, res.status === 201).catch(() => false);
-      return reply({ ok: res.status === 201, status: res.status, broker: brokerBody, decision: result.decision, risk: result.risk, ticket, adjustments, accountNote }, res.status);
+      const auditPersistence = await record(env, result, res.status === 201).catch(() => "none" as const);
+      return reply({ ok: res.status === 201, auditPersistence, status: res.status, broker: brokerBody, decision: result.decision, risk: result.risk, ticket, adjustments, accountNote }, res.status);
     },
   };
 }
