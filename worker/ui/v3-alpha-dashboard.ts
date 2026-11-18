@@ -1,5 +1,5 @@
 /** ETIAlgo V3 Alpha dashboard workspace. Read-only signal intelligence; never submits orders. */
-export const V3_ALPHA_DASHBOARD_CSS = \`<style id="eti-v3-alpha-css">
+export const V3_ALPHA_DASHBOARD_CSS = `<style id="eti-v3-alpha-css">
 .eti-v3a{margin-top:14px;border:1px solid #2a4260;border-radius:14px;padding:16px;background:linear-gradient(145deg,#101d30,#0a1422);color:#eaf2ff;min-width:0}
 .eti-v3a-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.eti-v3a-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.eti-v3a-title h2{margin:0;font-size:16px}.eti-v3a-sub{font-size:11px;color:#91a7c1;margin-top:5px}
 .eti-v3a-controls{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.eti-v3a-controls select,.eti-v3a-controls button{padding:7px 9px;font-size:11px}
@@ -12,8 +12,8 @@ export const V3_ALPHA_DASHBOARD_CSS = \`<style id="eti-v3-alpha-css">
 .eti-v3a-note{font-size:10px;line-height:1.5;color:#91a7c1;margin-top:10px}.eti-v3a-warn{color:#f5bd62}.eti-v3a-history{width:100%;border-collapse:collapse;font-size:10px}.eti-v3a-history th,.eti-v3a-history td{text-align:left;padding:6px;border-bottom:1px solid #253852;white-space:nowrap}.eti-v3a-history th{color:#91a7c1;font-weight:600}.eti-v3a-empty{font-size:10px;color:#91a7c1;line-height:1.5}
 @media(max-width:900px){.eti-v3a-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.eti-v3a-columns{grid-template-columns:1fr 1fr}.eti-v3a-columns .eti-v3a-box:first-child{grid-column:1/-1}}
 @media(max-width:600px){.eti-v3a{padding:12px}.eti-v3a-grid{gap:6px}.eti-v3a-card{padding:8px}.eti-v3a-card strong{font-size:15px}.eti-v3a-columns{grid-template-columns:1fr}.eti-v3a-columns .eti-v3a-box:first-child{grid-column:auto}.eti-v3a-bar{grid-template-columns:minmax(72px,1fr) 1.2fr 32px}.eti-v3a-history th,.eti-v3a-history td{padding:5px}}
-</style>\`;
-export const V3_ALPHA_DASHBOARD_JS = String.raw\`<script id="eti-v3-alpha-js">
+</style>`;
+export const V3_ALPHA_DASHBOARD_JS = String.raw`<script id="eti-v3-alpha-js">
 (function(){
 "use strict";
 try{
@@ -51,7 +51,7 @@ refresh(true);setInterval(function(){refresh(false);},90000);
 if(typeof window!=="undefined")window.etiV3AlphaDashboard={refresh:function(){lastKey="";return refresh(true);},state:function(){return current&&current.snapshot?{symbol:current.symbol,strategy:current.strategy,signal:current.snapshot.signal,status:current.snapshot.signal.status}:null;}};
 }catch(e){if(window.console)console.warn("ETIAlgo V3 Alpha dashboard unavailable",e&&e.message);}
 })();
-</script>\`;
+</script>`;
 export function withV3AlphaDashboard(page:string):string{
  if(!page.includes('id="institutionalPanel"')||!page.includes('id="chartAdvanced"'))return page;
  return page.replace("</head>",V3_ALPHA_DASHBOARD_CSS+"</head>").replace("</body>",V3_ALPHA_DASHBOARD_JS+"</body>");
