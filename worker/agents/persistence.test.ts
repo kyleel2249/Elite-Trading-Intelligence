@@ -57,6 +57,7 @@ test("agent audit snapshots validate identity and bound page size", async () => 
   assert.equal(page.records.length, 2);
   assert.notEqual(page.nextBefore, null);
   assert.notEqual(page.nextBeforeId, null);
+  await assert.rejects(() => listAgentDecisions(db, { beforeId: "id-without-time" }));
 });
 
 test("agent audit pagination uses a stable id tie-break when timestamps match", async () => {
