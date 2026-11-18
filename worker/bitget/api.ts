@@ -119,6 +119,25 @@ export async function getPositions(env: Record<string, any>, market: BitgetMarke
   return bitgetGetSigned(env, "/api/v2/mix/position/all-position", { productType: productTypeParam(market), marginCoin }, deps);
 }
 /** Read-only currently pending orders. Futures are account-wide per product type; margin APIs are symbol-scoped. */
+/** Read-only production connectivity check for both requested Bitget account products.
+ * Returns only connectivity/error metadata; balances and positions are never included in diagnostics.
+ */
+export async function verifyBitgetConnectivity(env: Record<string, any>, deps: Deps = {}) {
+  const checks = await Promise.all([
+    ["spot_account", () => getAssets(env, "spot", deps)] as const,
+    ["usdt_futures_account", () => getAssets(env, "usdt-futures", deps)] as const,
+    ["usdt_futures_positions", () => getPositions(env, "usdt-futures", deps)] as const,
+  ].map(async ([name, run]) => {
+    try { await run(); return { name, ok: true, error: null }; }
+    catch (e) {
+      const err = e instanceof BitgetError ? e : null;
+      return { name, ok: false, error: err?.code ?? "request_failed", upstreamStatus: err?.status ?? null };
+    }
+  }));
+  return { venue: "bitget", checkedAt: (deps.now ?? Date.now)(), ok: checks.every(x => x.ok), checks,
+    note: "Read-only signed REST checks only. This does not enable live orders or verify private WebSocket streaming." };
+}
+
 export async function getOpenOrders(env:Record<string,any>,market:BitgetMarket,symbols:string[]=[],deps:Deps={}):Promise<any[]> {
  const path=market==="spot"?"/api/v2/spot/trade/unfilled-orders":market.endsWith("futures")?"/api/v2/mix/order/orders-pending":`/api/v2/margin/${marginKind(market)}/open-orders`;
  const base:Record<string,string|number|undefined>=market==="spot"?{limit:100}:market.endsWith("futures")?{productType:productTypeParam(market),limit:100}:{limit:100,startTime:(deps.now??Date.now)()-7*86400_000};
@@ -252,6 +271,11 @@ export async function handleBitget(req: Request, env: Record<string, any>, deps:
     return reply({ venue: "bitget", credentials: { complete: c.complete, found: c.found, missing: c.missing }, markets: BITGET_MARKETS, storage: !!env.ETI_EXECUTION_LOG,
       readOnly: false, liveTradingEnabled: env.ETI_BITGET_LIVE_ENABLED === "true", note: "Account and history reads use allowlisted GET endpoints. Live orders are accepted only through the master-authenticated /api/orders/live route; transfers and withdrawals are not exposed.",
       marginSymbolDiscovery: "automatic_all_eligible_pairs", marginSymbols: null });
+  }
+  if (sub === "/verify" && req.method === "GET") {
+    if (!c.complete) return reply({ error: "credentials_missing", missing: c.missing, hint: "Set these Worker secrets; names only are reported." }, 503);
+    const result = await verifyBitgetConnectivity(env, deps);
+    return reply(result, result.ok ? 200 : 502);
   }
   if (!c.complete) return reply({ error: "credentials_missing", missing: c.missing, hint: "Set these Worker secrets; names only are reported." }, 503);
   const market = mkt(url.searchParams.get("market") ?? "spot");

@@ -146,3 +146,24 @@ test("futures open-order snapshots paginate beyond the first 100 orders",async()
  const orders=await getOpenOrders(ENV,"usdt-futures",[],{fetchImpl});
  assert.equal(orders.length,101);assert.deepEqual(cursors,["","page-2"]);assert.equal((orders as any).truncated,false);
 });
+
+
+test("production connectivity verification checks spot and USDT futures using signed REST without exposing account data", async () => {
+  const calls: string[] = [];
+  const { verifyBitgetConnectivity } = await import("./api.ts");
+  const result = await verifyBitgetConnectivity(ENV, { now: () => 1700000000000, fetchImpl: (async (url: string) => {
+    calls.push(new URL(url).pathname);
+    return ok([]);
+  }) as any });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.checks.map(x => x.name), ["spot_account", "usdt_futures_account", "usdt_futures_positions"]);
+  assert.equal(calls.length, 3);
+  assert.equal("assets" in (result as any), false);
+});
+
+test("connectivity verification reports upstream failure without exposing response payloads", async () => {
+  const { verifyBitgetConnectivity } = await import("./api.ts");
+  const result = await verifyBitgetConnectivity(ENV, { fetchImpl: (async () => new Response(JSON.stringify({ code: "40019", msg: "IP not whitelisted" }), { status: 400 })) as any });
+  assert.equal(result.ok, false);
+  assert.equal(result.checks.every(x => x.error === "bitget_40019"), true);
+});

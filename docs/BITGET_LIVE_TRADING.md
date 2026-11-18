@@ -1,37 +1,53 @@
 # Bitget live trading
 
-ETI now supports explicitly confirmed Bitget live orders through the master-authenticated `POST /api/orders/live` endpoint. This is separate from the existing ETI Internal Paper, Alpaca Paper and Binance Spot/Futures Testnet paths.
+ETI supports explicitly confirmed Bitget live orders through the master-authenticated `POST /api/orders/live` endpoint. This is separate from ETI Internal Paper, Alpaca Paper and Binance Testnet.
 
-## Supported Bitget account API mode
+## Supported account API mode
 
-The order adapter uses Bitget's Classic V2 spot, margin and contract endpoints, matching the existing ETI Bitget account/history connector. If the Bitget account has been upgraded to Unified Trading Account (UTA) and requires V3 order endpoints, do not enable live orders with this Classic V2 adapter; the UTA V3 order and account-mode adapter must be implemented and tested first.
+The private account and order adapters use Bitget Classic V2 endpoints. If the account is Unified Trading Account (UTA) and requires V3 private account/order endpoints, do not enable live orders with this adapter until UTA support has been implemented and verified.
 
-## Required Worker secrets and optional GitHub Actions sync
+## Credentials and permissions
 
-- `BITGET_API_KEY` — Bitget API key with trade permission enabled.
-- `BITGET_API_SECRET` — matching API secret.
-- `BITGET_API_PASSPHRASE` — matching API passphrase.
-- `ETI_EXECUTION_TOKEN` — master ETI token required for live order submission.
+Configure these as Cloudflare Worker secrets (or GitHub Actions secrets used by the deploy workflow):
 
-Create a Bitget API key with **trade permission only**. Keep withdrawal and transfer permissions disabled. Never place API credentials in `wrangler.jsonc`, the browser, or source control. If the matching GitHub Actions secrets are present, the deploy workflow syncs them into Worker secrets. Otherwise, existing Cloudflare Worker secrets are retained; post-deploy readiness verifies that all three are present.
+- `BITGET_API_KEY`
+- `BITGET_API_SECRET`
+- `BITGET_API_PASSPHRASE`
+- `ETI_EXECUTION_TOKEN`
 
-## Markets and order sizing
+Use a dedicated API key with only required read/trade permissions. Disable withdrawals and transfers. Never put credentials in `wrangler.jsonc`, browser code, chat, or source control.
 
-The Bitget order adapter supports spot, cross margin, isolated margin, USDT-margined futures, USDC-margined futures and coin-margined futures. Spot and margin market buys use quote-currency `quoteAmount`; spot/margin sells and limit orders use base-coin quantity. Futures use contract quantity and the selected product type, margin mode and leverage. The futures adapter sets margin mode and leverage before placing the order. The exchange can still reject a symbol, leverage, size, or margin configuration that its current contract rules do not permit.
+## Account and connectivity routes
 
-ETI requires a valid reference price for notional validation except quote-sized market buys. Defaults are a 10,000 quote-unit maximum notional and a 150x maximum futures leverage; both are configurable with `ETI_BITGET_MAX_NOTIONAL_USDT` and `ETI_BITGET_MAX_LEVERAGE`. The exchange's own lower contract limits always take precedence.
+All private routes require `Authorization: Bearer <ETI_EXECUTION_TOKEN>`. The public margin catalogue is the exception.
 
-## Safeguards and outcomes
+| Route | Purpose |
+|---|---|
+| `GET /api/bitget/status` | Secret-free credential presence, market list and KV readiness |
+| `GET /api/bitget/verify` | Three signed, read-only deployed-Worker checks: Spot account, USDT-M Futures account, and USDT-M Futures positions |
+| `GET /api/bitget/account?market=spot` | Spot, margin or futures account assets |
+| `GET /api/bitget/positions?market=usdt-futures` | Futures positions |
+| `GET /api/bitget/orders?market=spot` | Order history |
+| `GET /api/bitget/fills?market=spot` | Normalized fill history |
+| `POST /api/bitget/sync` | Idempotent fill-history sync to KV |
+| `GET /api/portfolio/exchanges` | Read-only account snapshot |
+| `GET /api/portfolio/exchange-activity?environment=exchange_testnet` | Stored exchange fill/open-order activity |
+| `POST /api/portfolio/exchange-activity?environment=exchange_testnet` | Refresh Bitget and Bybit fill/open-order activity |
 
-- `ETI_BITGET_LIVE_ENABLED=true` is the explicit live adapter switch.
-- Only the master ETI execution token can authorise Bitget live orders; automatic paper/testnet sessions cannot.
-- `ETI_KILL_SWITCH=true` blocks every new order.
-- `riskConfirmed: true`, a valid execution source and a unique ETI client order ID are required.
-- Each client order ID is reserved in `ETI_EXECUTION_LOG` before contacting Bitget. An ambiguous network result stays reserved; check Bitget order history before retrying.
-- Bitget acknowledgements mean accepted, not necessarily filled. Confirm final status and fills in Bitget order history.
-- No withdrawal, transfer, or funding endpoints are exposed by this adapter.
+The verification route returns only pass/fail metadata and safe error codes; it does not include balances, positions, or credentials. It does not enable trading and does not verify private WebSocket streaming.
 
-## Market data refresh
+The scheduled portfolio monitor polls exchange activity approximately every five minutes. The activity journal is kept separate from ETI's long-only paper/testnet position ledger so hedge-mode futures and reduce-only fills are not incorrectly folded into spot positions. The journal retains the latest 12,000 unique fills and seven days are queried per sync.
 
-The Bitget spot and all three perpetual-futures symbol catalogues refresh at a maximum 60-second cache interval. The dashboard reloads pair lists every 60 seconds. Cross/isolated margin pairs are added from Bitget's public margin-pair catalogue and chart against Bitget spot candles. The scheduled Bitget account/fill-history sync runs on ETI's one-minute monitor cron when credentials and KV storage are configured.
+## Order execution and safeguards
 
+Bitget live orders use `POST /api/orders/live` and require the master ETI execution token, `ETI_BITGET_LIVE_ENABLED=true`, `ETI_BITGET_EGRESS_VERIFIED=true`, an audit KV binding, explicit `riskConfirmed: true`, a unique ETI client order ID, valid execution source, quantity/notional caps and a disabled kill switch. Futures additionally require explicit leverage and margin mode. Acknowledgement means accepted, not necessarily filled.
+
+Live execution stays disabled by default. Never set `ETI_BITGET_EGRESS_VERIFIED=true` until the deployed `/api/bitget/verify` route succeeds from the Cloudflare Worker and the API key's account mode and permissions have been confirmed. An ambiguous order response remains reserved; check Bitget order history before retrying. No withdrawal, transfer or funding route is exposed.
+
+## WebSocket status
+
+Public market-data WebSockets are separate from private account activity. The authenticated account sync currently uses signed REST polling. Private WebSocket account/order streaming, automatic position-ledger folding, and automatic agent-council live dispatch are not enabled by this change.
+
+## Verification limits
+
+Automated tests use mocked exchange responses and verify signing, route mounting, error handling and fail-closed behavior. They do not prove real credentials, Cloudflare egress, account eligibility, fills, or production order execution. Those require the deployed read-only verification route and then a separately approved testnet/live rollout.

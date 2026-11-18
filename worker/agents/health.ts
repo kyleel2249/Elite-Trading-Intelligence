@@ -22,7 +22,7 @@ type RuntimeEnv = {
 
 export function agentRuntimeStatus(env: RuntimeEnv) {
   const killSwitch = env.ETI_KILL_SWITCH === "true";
-  const bitgetCredentialsConfigured = !!(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE);
+  const bitgetCredentialsConfigured = !!((env.BITGET_API_KEY || (env as any).BITGET_KEY || (env as any).BITGET_ACCESS_KEY) && (env.BITGET_API_SECRET || (env as any).BITGET_SECRET_KEY || (env as any).BITGET_SECRET) && (env.BITGET_API_PASSPHRASE || (env as any).BITGET_PASSPHRASE));
   const bitgetGatewayConfigured = env.ETI_BITGET_LIVE_ENABLED === "true"
     && env.ETI_BITGET_EGRESS_VERIFIED === "true"
     && bitgetCredentialsConfigured
