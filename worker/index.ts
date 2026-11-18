@@ -11,6 +11,8 @@
  */
 import { withMotion } from "./ui/motion.ts";
 import { BITGET_CLIENT_JS } from "./ui/bitget-client.ts";
+import { LIQUIDITY_CSS, LIQUIDITY_JS } from "./ui/liquidity-intelligence.ts";
+import { handleLiquidity } from "./liquidity/api.ts";
 import { TRADING_TERMINAL_CSS, TRADING_TERMINAL_HTML, TRADING_TERMINAL_JS } from "./ui/trading-terminal.ts";
 import { PWA_ICON, PWA_MANIFEST, PWA_SERVICE_WORKER } from "./ui/pwa.ts";
 import { handleExecution } from "./execution.ts";
@@ -1130,8 +1132,10 @@ const page = withMotion(html);
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/terminal") return new Response(TRADING_TERMINAL_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/terminal") return new Response(TRADING_TERMINAL_HTML.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/terminal.css") return new Response(TRADING_TERMINAL_CSS, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/liquidity.css") return new Response(LIQUIDITY_CSS, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/liquidity.js") return new Response(LIQUIDITY_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=60", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/terminal.js") return new Response(TRADING_TERMINAL_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=60", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/bitget-client.js") return new Response(BITGET_CLIENT_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/manifest.webmanifest") return new Response(PWA_MANIFEST, { headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
@@ -1177,6 +1181,7 @@ export default {
     if (url.pathname === "/api/omnisignal" || url.pathname === "/api/omnisignal/scan" || url.pathname === "/api/omnisignal/universe" || url.pathname === "/api/omnisignal/universe/refresh") {
       return handleOmnisignal(request, _env);
     }
+    if (url.pathname === "/api/liquidity/analyze") return handleLiquidity(request);
     if (url.pathname.startsWith("/api/market/")) {
       return handleMarket(request, _env);
     }
@@ -1184,7 +1189,7 @@ export default {
       return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Bybit V5 Worker REST plus Bitget browser-direct public feed (Cloudflare Worker egress is blocked by Bitget)", market_data_transport: { bybit: "cloudflare-worker-rest", bitget: "browser-direct-rest", bitget_live_orders: "gated-until-private-egress-verified" }, time: new Date().toISOString() });
     }
     if (url.pathname === "/") {
-      return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+      return new Response(page.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     // Optional: forward everything else to a configured origin (BACKEND_URL). Unset by default.
     if (typeof _env.BACKEND_URL === "string" && _env.BACKEND_URL.trim()) return proxyToBackend(request, _env.BACKEND_URL.trim());

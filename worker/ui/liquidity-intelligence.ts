@@ -1,0 +1,170 @@
+export const LIQUIDITY_CSS = String.raw`.eti-liq{margin:12px 0;padding:14px;background:linear-gradient(145deg,#0e2036,#091729);border:1px solid #29445f;border-radius:13px;color:#eaf2ff;font:12px Inter,system-ui,sans-serif;min-width:0}.eti-liq *{box-sizing:border-box}.eti-liq-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.eti-liq h2{font-size:15px;margin:0}.eti-liq-sub{color:#8ea6c2;font-size:10px;margin-top:4px}.eti-liq-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.eti-liq button,.eti-liq select{background:#071526;color:#eaf2ff;border:1px solid #29435f;border-radius:7px;padding:7px 9px;font:inherit;cursor:pointer}.eti-liq button.on{border-color:#56adff;color:#cce7ff;background:#102c48}.eti-liq-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:12px 0}.eti-liq-stat{background:#08182a;border:1px solid #1e3650;border-radius:8px;padding:9px;min-width:0}.eti-liq-stat small{display:block;color:#8ea6c2;font-size:9px;letter-spacing:.5px}.eti-liq-stat strong{display:block;font-size:15px;margin:5px 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.eti-liq-stat span{color:#8ea6c2;font-size:9px}.eti-liq-main{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(240px,1fr);gap:10px}.eti-liq-canvas-wrap{position:relative;min-width:0;background:#061321;border:1px solid #203b59;border-radius:9px;overflow:hidden}.eti-liq-canvas{display:block;width:100%;height:340px}.eti-liq-side{display:grid;gap:8px;align-content:start;min-width:0}.eti-liq-box{background:#08182a;border:1px solid #1e3650;border-radius:8px;padding:10px;min-width:0}.eti-liq-box h3{font-size:11px;margin:0 0 8px}.eti-liq-row{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #1d2e43;font-size:10px}.eti-liq-row:last-child{border-bottom:0}.eti-liq-row b{font-variant-numeric:tabular-nums;text-align:right}.eti-liq-muted{color:#8ea6c2}.eti-liq-bid{color:#61d9c2}.eti-liq-ask{color:#ff899d}.eti-liq-warn{color:#ffc77d}.eti-liq-signal{font-size:12px;font-weight:800;letter-spacing:.3px}.eti-liq-foot{font-size:9px;color:#8ea6c2;line-height:1.55;margin-top:10px}.eti-liq-pill{display:inline-flex;align-items:center;border:1px solid #29435f;border-radius:99px;padding:3px 7px;font-size:9px;color:#a9bfd6}.eti-liq-pill.good{border-color:#1c8d6c;color:#72e6bf}.eti-liq-pill.bad{border-color:#a63e58;color:#ff9aaa}.eti-liq-overlay{position:absolute;inset:0;width:100%;height:100%;z-index:9;pointer-events:none}.eti-liq-hidden{display:none!important}@media(max-width:900px){.eti-liq-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.eti-liq-main{grid-template-columns:1fr}.eti-liq-canvas{height:300px}}@media(max-width:560px){.eti-liq{padding:10px}.eti-liq-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.eti-liq-head{align-items:flex-start}.eti-liq-canvas{height:260px}.eti-liq-actions button{padding:6px 7px;font-size:10px}}
+`;
+export const LIQUIDITY_JS = String.raw`(function(){
+"use strict";
+if(window.__ETI_LIQUIDITY_BOOTED)return;window.__ETI_LIQUIDITY_BOOTED=true;
+const $=id=>document.getElementById(id),fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
+const state={venue:"bybit",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",depth:null,previous:null,trades:[],candles:[],analysis:null,orderFlow:null,history:[],ws:null,timer:null,candleAt:0,lastOrderFlowAt:0,busy:false,overlay:true,scenarios:true,root:false,lastError:"",sequence:0};
+const maxHistory=90;
+function isRoot(){return !!$("symVenue")&&!$("tt-venue");}
+function readContext(){
+ state.root=isRoot();
+ state.venue=$(state.root?"symVenue":"tt-venue")?.value||"bybit";
+ state.market=$(state.root?"symMarket":"tt-market")?.value||"futures";
+ state.symbol=($(state.root?"symbol":"tt-symbol")?.value||"BTCUSDT").trim().toUpperCase();
+ state.interval=$(state.root?"interval":"tt-interval")?.value||"1h";
+ const cat=$(state.root?"symCat":"tt-category")?.value||"";
+ state.category=state.venue==="bitget"?(cat||"USDT-FUTURES"):(state.market==="futures"?(cat==="inverse"?"inverse":"linear"):"spot");
+ if(state.venue==="bitget"&&state.market!=="futures")state.category="SPOT";
+}
+function historyKey(){return "eti-liquidity-depth-v1:"+[state.venue,state.market,state.category,state.symbol].join(":");}
+function restoreHistory(){try{const a=JSON.parse(localStorage.getItem(historyKey())||"[]");state.history=Array.isArray(a)?a.slice(-maxHistory):[];}catch(e){state.history=[];}}
+function saveHistory(){try{localStorage.setItem(historyKey(),JSON.stringify(state.history.slice(-maxHistory)));}catch(e){}}
+function mount(){
+ const anchor=state.root?document.querySelector(".chart-workspace"):(document.querySelector("#tt-chart")?.closest(".tt-card")||document.querySelector("#tt-chart")?.parentElement);
+ if(!anchor||$("eti-liquidity-panel"))return;
+ const el=document.createElement("section");el.id="eti-liquidity-panel";el.className="eti-liq";
+ el.innerHTML='<div class="eti-liq-head"><div><h2>Institutional Liquidity Intelligence</h2><div class="eti-liq-sub">Live order-book depth · liquidity persistence · absorption · sweep confluence</div></div><div class="eti-liq-actions"><span id="eti-liq-feed" class="eti-liq-pill">Connecting</span><button id="eti-liq-overlay" class="on" type="button">Chart overlay: ON</button><button id="eti-liq-scenarios" class="on" type="button">Liquidation scenarios: ON</button><button id="eti-liq-refresh" type="button">Refresh</button></div></div><div class="eti-liq-grid"><div class="eti-liq-stat"><small>REFERENCE MID</small><strong id="eti-liq-mid">—</strong><span id="eti-liq-spread">Spread unavailable</span></div><div class="eti-liq-stat"><small>BOOK IMBALANCE</small><strong id="eti-liq-imbalance">—</strong><span>Top 20 levels · not direction alone</span></div><div class="eti-liq-stat"><small>TRADE DELTA</small><strong id="eti-liq-delta">—</strong><span id="eti-liq-delta-sub">Recent executed trades</span></div><div class="eti-liq-stat"><small>LIQUIDITY CONFLUENCE</small><strong id="eti-liq-score">—</strong><span id="eti-liq-signal">Waiting for evidence</span></div><div class="eti-liq-stat"><small>BOOK BEHAVIOUR</small><strong id="eti-liq-behaviour">—</strong><span id="eti-liq-behaviour-sub">Persistence / pulled / absorbed</span></div><div class="eti-liq-stat"><small>DATA FRESHNESS</small><strong id="eti-liq-age">—</strong><span id="eti-liq-source">Exchange feed</span></div></div><div class="eti-liq-main"><div class="eti-liq-canvas-wrap"><canvas id="eti-liq-canvas" class="eti-liq-canvas" role="img" aria-label="Order-book liquidity heatmap showing bid and ask liquidity through time"></canvas></div><div class="eti-liq-side"><div class="eti-liq-box"><h3>Largest displayed liquidity</h3><div id="eti-liq-walls" class="eti-liq-muted">Waiting for order-book depth…</div></div><div class="eti-liq-box"><h3>Liquidity behaviour</h3><div id="eti-liq-events" class="eti-liq-muted">Waiting for successive snapshots…</div></div><div class="eti-liq-box"><h3>Estimated liquidation scenarios</h3><div id="eti-liq-liquidations" class="eti-liq-muted">Scenario model pending mark/last price.</div><div class="eti-liq-sub">Illustrative isolated-margin price bands at assumed leverage; not exchange liquidation data.</div></div><div class="eti-liq-box"><h3>Strategy confluence</h3><div id="eti-liq-confluence" class="eti-liq-muted">Waiting for market structure and trade flow…</div></div></div></div><div class="eti-liq-foot">Order-book heatmap uses observed resting depth from the selected venue. Historical bands are stored in this browser (up to 90 snapshots per symbol). Displayed orders can be cancelled or moved. Liquidation bands are mathematical scenarios using assumed leverage and a generic maintenance-margin approximation; they are not actual trader positions or verified liquidation clusters. This module is analytical only and does not submit orders.</div>';
+ anchor.insertAdjacentElement("afterend",el);
+ $("eti-liq-overlay").onclick=()=>{state.overlay=!state.overlay;$("eti-liq-overlay").textContent="Chart overlay: "+(state.overlay?"ON":"OFF");$("eti-liq-overlay").classList.toggle("on",state.overlay);drawOverlay();};
+ $("eti-liq-scenarios").onclick=()=>{state.scenarios=!state.scenarios;$("eti-liq-scenarios").textContent="Liquidation scenarios: "+(state.scenarios?"ON":"OFF");$("eti-liq-scenarios").classList.toggle("on",state.scenarios);renderScenarios();drawHeatmap();};
+ $("eti-liq-refresh").onclick=()=>poll(true);
+ createChartOverlay();
+}
+function setFeed(text,good){const el=$("eti-liq-feed");if(!el)return;el.textContent=text;el.className="eti-liq-pill"+(good===true?" good":good===false?" bad":"");}
+function query(path){const p=new URLSearchParams({venue:state.venue,market:state.market==="futures"?"futures":"spot",symbol:state.symbol,limit:"100"});if(path.indexOf("klines")>=0)p.set("interval",state.interval);if(state.venue==="bybit")p.set("category",state.category);return fetch(path+"?"+p,{cache:"no-store"}).then(async r=>{const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(j?.detail||j?.error||"HTTP "+r.status);return j;});}
+function normalizeTrades(rows,venue){
+ return (rows||[]).map(t=>{
+  if(Array.isArray(t))return {time:Number(t[0]),price:Number(t[1]),qty:Number(t[2]),side:String(t[3]||"").toLowerCase()};
+  if(venue==="bitget")return {time:Number(t.T||t.time||t.ts),price:Number(t.p||t.price),qty:Number(t.q||t.qty||t.size),side:t.m===true?"sell":"buy"};
+  return {time:Number(t.time||t.T||t.ts),price:Number(t.price||t.p),qty:Number(t.qty||t.size||t.q),side:t.isBuyerMaker===true?"sell":String(t.side||"").toLowerCase()};
+ }).filter(t=>Number.isFinite(t.price)&&t.price>0&&Number.isFinite(t.qty)&&t.qty>0&&["buy","sell"].includes(t.side)).slice(0,300);
+}
+async function getCandles(){
+ const now=Date.now();if(state.candles.length&&now-state.candleAt<12000)return;
+ let rows;
+ if(state.venue==="bitget"){
+  const market=state.market==="futures"?"futures":"spot";
+  rows=await window.ETIBitget.candles({symbol:state.symbol,interval:state.interval,limit:100,market,category:state.category});
+ }else rows=await query("/api/market/klines");
+ state.candles=(rows||[]).map(r=>Array.isArray(r)?r:[r.time*1000,r.open,r.high,r.low,r.close,r.volume]).filter(r=>Array.isArray(r)&&r.length>=6).slice(-100);
+ state.candleAt=now;
+}
+async function fetchBook(){
+ if(state.venue==="bitget"){
+  if(!window.ETIBitget||typeof window.ETIBitget.context!=="function")throw new Error("Bitget browser adapter unavailable");
+  const m=state.market==="futures"?"futures":"spot";
+  const r=await window.ETIBitget.context({symbol:state.symbol,market:m,category:state.category,depthLimit:100,tradeLimit:100});
+  if(!r.depth)throw new Error(r.failures?.depth||"Bitget order book unavailable");
+  return {depth:r.depth,trades:normalizeTrades(r.trades,"bitget"),ticker:r.ticker,source:"Bitget browser REST"};
+ }
+ const [depth,trades]=await Promise.all([query("/api/market/depth"),query("/api/market/trades")]);
+ return {depth,trades:normalizeTrades(trades,"bybit"),source:"Bybit REST"};
+}
+async function poll(force){
+ if(state.busy)return;readContext();if(!state.symbol||!/^[A-Z0-9]{3,24}$/.test(state.symbol)){setFeed("Invalid symbol",false);return;}
+ state.busy=true;const seq=++state.sequence;
+ try{
+  const result=await fetchBook();if(seq!==state.sequence)return;
+  const book={bids:result.depth.bids,asks:result.depth.asks,timestamp:Number(result.depth.timestamp)||Date.now()};
+  if(!book.bids.length||!book.asks.length)throw new Error("Exchange returned empty order-book sides");
+  const prev=state.depth;state.previous=prev;state.depth=book;state.trades=result.trades||[];
+  const now=Date.now(),last=state.history[state.history.length-1];
+  if(force||!last||now-last.t>900){state.history.push({t:now,mid:(book.bids[0][0]+book.asks[0][0])/2,bids:book.bids.slice(0,45),asks:book.asks.slice(0,45)});state.history=state.history.slice(-maxHistory);saveHistory();}
+  await getCandles();
+  await loadOrderFlow();
+  const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles};
+  const response=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),cache:"no-store"});
+  const analysis=await response.json().catch(()=>null);if(!response.ok)throw new Error(analysis?.detail||analysis?.error||"Liquidity analysis failed");
+  state.analysis=analysis;setFeed(result.source+" · live snapshot",true);render();drawHeatmap();drawOverlay();
+ }catch(e){state.lastError=e?.message||"feed unavailable";setFeed("Feed unavailable · "+state.lastError,false);const note=$("eti-liq-source");if(note)note.textContent="Last successful snapshot retained; "+state.lastError;}
+ finally{state.busy=false;}
+}
+async function loadOrderFlow(){
+ if(!state.depth||!state.trades.length||Date.now()-state.lastOrderFlowAt<5000)return;
+ state.lastOrderFlowAt=Date.now();
+ const q=new URLSearchParams({symbol:state.symbol,venue:state.venue,market:state.market==="futures"?"futures":"spot",category:state.category});
+ const trades=state.trades.map(t=>({time:t.time,price:t.price,qty:t.qty,isBuyerMaker:t.side==="sell"}));
+ try{
+  const r=await fetch("/api/analysis/orderflow?"+q,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({provider:state.venue,depth:state.depth,trades,candles:state.candles}),cache:"no-store"});
+  const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(j?.detail||j?.error||"Order-flow history unavailable");state.orderFlow=j;
+ }catch(e){state.orderFlow={dataQuality:{notes:[e?.message||"Order-flow history unavailable"]},liquidityHistory:{status:"unavailable",persistentLevels:[]}};}
+}
+function render(){
+ const a=state.analysis;if(!a)return;
+ $("eti-liq-mid").textContent=fmt(a.mid,Math.min(8,Math.max(2,state.pricePrecision||2)));
+ $("eti-liq-spread").textContent=fmt(a.spreadBps,2)+" bps spread";
+ $("eti-liq-imbalance").textContent=(a.depth.imbalance*100).toFixed(1)+"%";
+ $("eti-liq-delta").textContent=(a.orderFlow.delta>=0?"+":"")+fmt(a.orderFlow.delta,0);
+ $("eti-liq-delta-sub").textContent=fmt(a.orderFlow.deltaPct,1)+"% of recent traded notional";
+ $("eti-liq-score").textContent=a.confluence.score+"/100";
+ $("eti-liq-signal").textContent=a.confluence.direction==="WAIT"?"NO CONFIRMED SETUP":a.confluence.direction+" WATCH";
+ $("eti-liq-behaviour").textContent=a.behaviour.persistent+" / "+a.behaviour.pulled+" / "+a.behaviour.absorbed;
+ $("eti-liq-behaviour-sub").textContent="Persistent / pulled / absorbed · replenished "+a.behaviour.replenished;
+ const age=a.dataQuality.freshnessMs===null?"timestamp unavailable":fmt(a.dataQuality.freshnessMs/1000,1)+"s old";
+ $("eti-liq-age").textContent=age;$("eti-liq-source").textContent=a.dataQuality.warnings.length?a.dataQuality.warnings[0]:"Validated exchange snapshot";
+ const wallHtml=(side,rows)=>rows.length?rows.slice(0,5).map(x=>'<div class="eti-liq-row"><span class="'+(side==="bid"?"eti-liq-bid":"eti-liq-ask")+'">'+side.toUpperCase()+' · '+fmt(x.price,6)+'</span><b>'+fmt(x.notional,0)+'</b></div>').join(""):'<div class="eti-liq-row"><span>No large walls detected</span></div>';
+ $("eti-liq-walls").innerHTML=wallHtml("bid",a.walls.bids)+wallHtml("ask",a.walls.asks);
+ $("eti-liq-events").innerHTML='<div class="eti-liq-row"><span>Persistent levels</span><b>'+a.behaviour.persistent+'</b></div><div class="eti-liq-row"><span>Pulled levels</span><b class="eti-liq-warn">'+a.behaviour.pulled+'</b></div><div class="eti-liq-row"><span>Absorbed levels</span><b>'+a.behaviour.absorbed+'</b></div><div class="eti-liq-row"><span>Replenished levels</span><b>'+a.behaviour.replenished+'</b></div>';
+ const persisted=state.orderFlow?.liquidityHistory?.persistentLevels||[];const of=state.orderFlow?.tape||{};if(Number.isFinite(Number(of.deltaPct)))$("eti-liq-delta-sub").textContent=fmt(of.deltaPct,1)+"% tape delta · CVD "+fmt(of.cumulativeDelta,2);if(persisted.length)$("eti-liq-behaviour-sub").textContent="D1/KV persistent bands "+persisted.length+" · local replenishment "+a.behaviour.replenished;const p=a.priceAction||{};let conf='<div class="eti-liq-row"><span>Liquidity sweep</span><b>'+(p.sweep?p.sweep.direction.toUpperCase()+' · '+fmt(p.sweep.level,6):'None confirmed')+'</b></div><div class="eti-liq-row"><span>Fair value gap</span><b>'+(p.fvg?p.fvg.direction.toUpperCase()+' · '+fmt(p.fvg.low,6)+'–'+fmt(p.fvg.high,6):'None detected')+'</b></div><div class="eti-liq-row"><span>Order-flow alignment</span><b>'+(a.confluence.buyAligned?'Bullish':a.confluence.bearAligned?'Bearish':'Mixed / weak')+'</b></div><div class="eti-liq-row"><span>Market structure</span><b>'+String(p.structure||'unavailable').toUpperCase()+'</b></div>';
+ $("eti-liq-confluence").innerHTML=conf;
+ renderScenarios();
+}
+function renderScenarios(){
+ const el=$("eti-liq-liquidations");if(!el)return;
+ if(!state.scenarios){el.textContent="Scenario display disabled.";return;}
+ const mid=state.analysis?.mid;if(!Number.isFinite(mid)){el.textContent="Waiting for a valid reference price.";return;}
+ const mmr=.005,levs=[5,10,20,50];
+ el.innerHTML=levs.map(L=>{const long=mid*(1-1/L+mmr),short=mid*(1+1/L-mmr);return '<div class="eti-liq-row"><span>'+L+'× assumed leverage</span><b><span class="eti-liq-bid">L '+fmt(long,6)+'</span> / <span class="eti-liq-ask">S '+fmt(short,6)+'</span></b></div>';}).join("");
+}
+function drawHeatmap(){
+ const c=$("eti-liq-canvas");if(!c)return;const rect=c.getBoundingClientRect(),dpr=Math.min(2,window.devicePixelRatio||1),w=Math.max(320,rect.width),h=Math.max(220,rect.height);
+ c.width=Math.round(w*dpr);c.height=Math.round(h*dpr);const x=c.getContext("2d");x.scale(dpr,dpr);x.fillStyle="#061321";x.fillRect(0,0,w,h);
+ const samples=state.history;if(!samples.length){x.fillStyle="#8ea6c2";x.fillText("Waiting for historical depth snapshots…",16,28);return;}
+ const all=[];samples.forEach(s=>{(s.bids||[]).forEach(v=>all.push(v[0]));(s.asks||[]).forEach(v=>all.push(v[0]));});
+ let lo=Math.min(...all),hi=Math.max(...all);if(!(hi>lo)){lo*=.999;hi*=1.001;}const pad=(hi-lo)*.06;lo-=pad;hi+=pad;
+ const left=58,right=12,top=14,bottom=28,plotW=w-left-right,plotH=h-top-bottom,cellW=plotW/samples.length;
+ const maxN=Math.max(1,...samples.flatMap(s=>[...(s.bids||[]),...(s.asks||[])].map(v=>v[0]*v[1])));
+ const y=p=>top+(hi-p)/(hi-lo)*plotH;
+ samples.forEach((s,i)=>{const xx=left+i*cellW;(s.bids||[]).forEach(v=>{const yy=y(v[0]),int=Math.sqrt(v[0]*v[1]/maxN);x.fillStyle="rgba(42,190,170,"+(0.08+int*.78)+")";x.fillRect(xx,yy-2,Math.max(1,cellW+.5),4);});(s.asks||[]).forEach(v=>{const yy=y(v[0]),int=Math.sqrt(v[0]*v[1]/maxN);x.fillStyle="rgba(239,91,119,"+(0.08+int*.78)+")";x.fillRect(xx,yy-2,Math.max(1,cellW+.5),4);});});
+ x.strokeStyle="#29435f";x.lineWidth=1;x.setLineDash([3,4]);for(let i=0;i<5;i++){const yy=top+i*plotH/4;x.beginPath();x.moveTo(left,yy);x.lineTo(w-right,yy);x.stroke();x.fillStyle="#8ea6c2";x.fillText(fmt(hi-i*(hi-lo)/4,6),5,yy+3);}x.setLineDash([]);
+ if(state.analysis){const yy=y(state.analysis.mid);x.strokeStyle="#f3d27b";x.lineWidth=1.3;x.beginPath();x.moveTo(left,yy);x.lineTo(w-right,yy);x.stroke();x.fillStyle="#f3d27b";x.fillText("MID",left+4,Math.max(10,yy-5));}
+ x.fillStyle="#8ea6c2";x.fillText("OLDER",left,h-8);x.textAlign="right";x.fillText("LIVE",w-right,h-8);x.textAlign="left";
+ if(state.scenarios&&state.analysis){const mid=state.analysis.mid;[5,10,20,50].forEach(L=>{const p1=mid*(1-1/L+.005),p2=mid*(1+1/L-.005);x.fillStyle="rgba(42,190,170,.10)";x.fillRect(left,y(p1)-3,plotW,6);x.fillStyle="rgba(239,91,119,.10)";x.fillRect(left,y(p2)-3,plotW,6);});}
+}
+function createChartOverlay(){
+ const host=document.querySelector("#tt-chart")||document.querySelector("#liveChartFrame");if(!host||host.querySelector(".eti-liq-overlay"))return;
+ if(getComputedStyle(host).position==="static")host.style.position="relative";
+ const c=document.createElement("canvas");c.className="eti-liq-overlay";c.setAttribute("aria-hidden","true");host.appendChild(c);state.overlayCanvas=c;
+}
+function drawOverlay(){
+ const c=state.overlayCanvas;if(!c)return;c.classList.toggle("eti-liq-hidden",!state.overlay||!state.depth);
+ const host=c.parentElement;if(!host)return;const w=host.clientWidth,h=host.clientHeight,dpr=Math.min(2,window.devicePixelRatio||1);c.width=Math.max(1,Math.round(w*dpr));c.height=Math.max(1,Math.round(h*dpr));const x=c.getContext("2d");x.scale(dpr,dpr);
+ const candles=state.candles||[];const prices=candles.flatMap(r=>[Number(r[2]),Number(r[3])]).filter(v=>Number.isFinite(v)&&v>0);
+ if(prices.length<2)return;let lo=Math.min(...prices),hi=Math.max(...prices);const pad=(hi-lo)*.08||hi*.001;lo-=pad;hi+=pad;
+ const y=p=>(hi-p)/(hi-lo)*h;
+ const walls=state.analysis?.walls||{bids:[],asks:[]};
+ [...walls.bids.slice(0,4),...walls.asks.slice(0,4)].forEach(v=>{const yy=y(v.price);if(yy<0||yy>h)return;const bid=v.side==="bid";x.fillStyle=bid?"rgba(37,213,160,.10)":"rgba(243,106,128,.10)";x.fillRect(0,yy-3,w,6);x.strokeStyle=bid?"rgba(37,213,160,.45)":"rgba(243,106,128,.45)";x.setLineDash([4,5]);x.beginPath();x.moveTo(0,yy);x.lineTo(w,yy);x.stroke();x.setLineDash([]);});
+}
+function stopStream(){if(state.ws){try{state.ws.close();}catch(e){}state.ws=null;}}
+function startStream(){
+ stopStream();if(state.venue!=="bitget"||!window.ETIBitget?.subscribe)return;
+ try{state.ws=window.ETIBitget.subscribe({symbol:state.symbol,market:state.market==="futures"?"futures":"spot",category:state.category,interval:state.interval},{onStatus:s=>{if(s.connected)setFeed("Bitget WebSocket connected",true);},onMessage:m=>{if(m.type==="depth"&&m.data?.bids?.length&&m.data?.asks?.length){state.previous=state.depth;state.depth={...m.data,timestamp:m.timestamp};state.trades=state.trades.slice(0,200);const snap={t:Date.now(),mid:(m.data.bids[0][0]+m.data.asks[0][0])/2,bids:m.data.bids.slice(0,45),asks:m.data.asks.slice(0,45)};state.history.push(snap);state.history=state.history.slice(-maxHistory);saveHistory();analyzeStreamDepth();}else if(m.type==="trades"){state.trades=normalizeTrades(m.data,"bitget").concat(state.trades).slice(0,300);}}});}catch(e){setFeed("Bitget WebSocket unavailable · REST fallback",false);}
+}
+let analyzeAt=0;
+async function analyzeStreamDepth(){
+ if(!state.depth||Date.now()-analyzeAt<900)return;analyzeAt=Date.now();
+ try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles})});const a=await r.json();if(r.ok){state.analysis=a;await loadOrderFlow();render();drawHeatmap();drawOverlay();}}catch(e){}
+}
+function restart(){
+ readContext();stopStream();state.depth=null;state.previous=null;state.trades=[];state.candles=[];state.candleAt=0;state.analysis=null;state.history=[];restoreHistory();mount();createChartOverlay();poll(true);startStream();
+}
+function watchControls(){
+ const ids=isRoot()?["symVenue","symMarket","symCat","symbol","interval"]:["tt-venue","tt-market","tt-category","tt-symbol","tt-interval"];
+ ids.forEach(id=>{const el=$(id);if(el){el.addEventListener("change",restart);if(id==="symbol"||id==="tt-symbol")el.addEventListener("keydown",e=>{if(e.key==="Enter")setTimeout(restart,100);});}});
+ window.addEventListener("resize",()=>{drawHeatmap();drawOverlay();});
+}
+readContext();restoreHistory();mount();createChartOverlay();watchControls();poll(true);startStream();
+state.timer=setInterval(()=>poll(false),state.venue==="bitget"?5000:3000);
+window.ETILiquidity={refresh:()=>poll(true),getState:()=>({symbol:state.symbol,venue:state.venue,market:state.market,history:state.history.length,analysis:state.analysis,feedError:state.lastError})};
+})();`;
