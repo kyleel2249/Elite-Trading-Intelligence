@@ -50,3 +50,9 @@ test("Institutional Liquidity reads the selected Bitget contract category instea
  assert.ok(LIQUIDITY_JS.includes('$(state.root?"orderBitgetMarket":"tt-category")'));
  assert.ok(LIQUIDITY_JS.includes('["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"].includes(normalizedCategory)'));
 });
+
+
+test("Institutional category routing keeps Bybit inverse/linear mapping separate from Bitget product types",()=>{
+ assert.ok(LIQUIDITY_JS.includes('state.root&&state.venue==="bitget"?$("orderBitgetMarket")'));
+ assert.ok(LIQUIDITY_JS.includes('cat==="inverse"?"inverse":"linear"'));
+});
