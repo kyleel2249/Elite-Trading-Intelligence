@@ -82,8 +82,8 @@ function parseTrades(data){
 }
 function firstNumber(){for(var i=0;i<arguments.length;i++){var n=num(arguments[i]);if(n!==null)return n}return null}
 function parseTicker(data){
- var t=Array.isArray(data)?data[0]:(data||{}),last=firstNumber(t.lastPr,t.lastPrice),open=firstNumber(t.openPrice24h,t.open,t.open24h),pct=firstNumber(t.price24hPcnt,t.priceChangePercent,t.change24h);
- if(pct!==null)pct=pct*100;else pct=open&&last!==null?(last-open)/open*100:0;
+ var t=Array.isArray(data)?data[0]:(data||{}),last=firstNumber(t.lastPr,t.lastPrice),open=firstNumber(t.openPrice24h,t.open,t.open24h),ratio=firstNumber(t.price24hPcnt,t.change24h),pct=ratio!==null?ratio*100:firstNumber(t.priceChangePercent);
+ if(pct===null)pct=open&&last!==null?(last-open)/open*100:0;
  return {lastPrice:last,highPrice:firstNumber(t.highPrice24h,t.high24h,t.highPrice),lowPrice:firstNumber(t.lowPrice24h,t.low24h,t.lowPrice),volume:firstNumber(t.baseVolume,t.volume24h,t.baseVol,t.volume),quoteVolume:firstNumber(t.quoteVolume,t.turnover24h,t.usdtVolume),priceChangePercent:pct,fundingRate:firstNumber(t.fundingRate),openInterest:firstNumber(t.openInterest,t.holdingAmount),markPrice:firstNumber(t.markPrice),indexPrice:firstNumber(t.indexPrice),bidPrice:firstNumber(t.bid1Price,t.bidPr),askPrice:firstNumber(t.ask1Price,t.askPr),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
 }
 async function context(opts){
@@ -118,7 +118,7 @@ async function symbols(kind){
  if(kind==="all"||kind==="spot")jobs.push({market:"spot",category:"SPOT",v2:"/api/v2/spot/public/symbols"});
  if(kind==="all"||kind==="futures")PRODUCT_TYPES.forEach(function(pt){jobs.push({market:"futures",category:pt,v2:"/api/v2/mix/market/contracts?productType="+encodeURIComponent(pt),pt:pt})});
  if(kind==="margin")jobs.push({market:"margin",category:"MARGIN",v2:"/api/v2/margin/currencies"});
- var settled=await Promise.allSettled(jobs.map(function(j){return request("/api/v3/market/instruments?category="+encodeURIComponent(j.category),[j.v2]).then(function(r){return {job:j,data:r.data,host:r.host,version:r.version}})})),rows=[],warnings=[],sources={},now=Date.now();
+ var settled=await Promise.allSettled(jobs.map(function(j){return request("/api/v3/market/instruments?category="+encodeURIComponent(j.category),[j.v2]).then(function(r){return {job:j,data:r.data,host:r.host,version:r.version,meta:r.meta||null}})})),rows=[],warnings=[],sources={},now=Date.now();
  settled.forEach(function(r,idx){var j=jobs[idx],jr=[];
   if(r.status!=="fulfilled"){
    var kept=LAST_GOOD[j.category]||[];
@@ -136,7 +136,9 @@ async function symbols(kind){
   }else jr=instrumentRows(data,j.market,j.pt);
   if(!jr.length){var previous=LAST_GOOD[j.category]||[];if(previous.length){rows.push.apply(rows,previous);warnings.push(j.category+" returned an empty active catalogue; retained last successful catalogue");sources[j.category]={count:previous.length,fetchedAt:LAST_GOOD_AT[j.category]||null,stale:true,error:"empty_active_catalogue",host:r.value.host,apiVersion:r.value.version};return;}if(j.market!=="margin"){warnings.push(j.category+" returned no active contracts");sources[j.category]={count:0,fetchedAt:now,stale:true,error:"empty_active_catalogue",host:r.value.host,apiVersion:r.value.version};return;}}
   LAST_GOOD[j.category]=jr;LAST_GOOD_AT[j.category]=now;rows.push.apply(rows,jr);
-  sources[j.category]={count:jr.length,fetchedAt:now,stale:false,host:r.value.host,apiVersion:r.value.version};
+  var meta=r.value.meta||{},sourceMeta=(meta.sources||{})[j.market]||(meta.sources||{})[j.category]||(meta.sources||{}).MARGIN;
+  sources[j.category]=Object.assign({count:jr.length,fetchedAt:now,stale:false,host:r.value.host,apiVersion:r.value.version},sourceMeta||{});
+  if(Array.isArray(meta.warnings))meta.warnings.forEach(function(w){warnings.push(typeof w==="string"?w:(w.market||w.venue||"Bitget")+" "+(w.error||"catalogue warning"));});
  });
  var seen={};rows=rows.filter(function(r){var key=r[0]+"|"+(r[6]||"")+"|"+r[3];if(seen[key])return false;seen[key]=1;return true}).sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:String(a[6]||"").localeCompare(String(b[6]||""));});
  if(kind==="margin"&&!rows.length)warnings.push("Bitget returned no margin-eligible pairs for the selected account/product region");
