@@ -1,5 +1,6 @@
 // Assembles one live Precision signal: fetch candles and order book, load stored context, run the pure engine.
 // Shared by the HTTP route and the scheduled outcome cycle so both produce identical signals.
+import type { RiskContext } from "../algo/validation.ts";
 import { getMarketData, providerOrder, type Depth, type Kline } from "../market.ts";
 import { DEFAULT_WEIGHTS, EXECUTION_TF, TIMEFRAMES, type Strategy, type Timeframe } from "../algo/timeframes.ts";
 import { resolveConfig } from "./config.ts";
@@ -14,7 +15,7 @@ export const isStrategy = (s: string | null): s is Strategy => !!s && (STRATEGIE
 export interface BuiltSignal { status: number; body: unknown; signal: PrecisionSignal | null }
 
 /** `symbol` must already be validated and supported by the caller (parseInstrument non-null). */
-export async function buildSignal(env: PrecisionEnv, symbol: string, strategy: Strategy, preferredProvider: string | null): Promise<BuiltSignal> {
+export async function buildSignal(env: PrecisionEnv, symbol: string, strategy: Strategy, preferredProvider: string | null, risk?: RiskContext): Promise<BuiltSignal> {
   const resolved = resolveConfig(env.ETI_PRECISION_CONFIG);
   const cfg = resolved.config;
   const inst = parseInstrument(symbol);
@@ -25,7 +26,7 @@ export async function buildSignal(env: PrecisionEnv, symbol: string, strategy: S
   const failures: Record<string, string> = {};
   let provider = "unknown";
   const fetchedAt = Date.now();
-  const ctxPromise = loadContext(env, inst.base, strategy, fetchedAt, cfg.context.expectancyMaxAgeDays);
+  const ctxPromise = loadContext(env, inst.base, strategy, fetchedAt, cfg.context.expectancyMaxAgeDays, symbol);
   await Promise.all(need.map(async tf => {
     try { const r = await getMarketData("klines", { symbol, interval: tf, limit: 300 }, order); candles[tf] = r.data as Kline[]; if (tf === EXECUTION_TF[strategy]) provider = r.provider; }
     catch (e) { failures[tf] = e instanceof Error ? e.message : "unknown"; }
@@ -39,7 +40,7 @@ export async function buildSignal(env: PrecisionEnv, symbol: string, strategy: S
   const now = Date.now();
   const signal = runPrecisionEngine({
     symbol, strategy, candles, depth, now, fetchedAt, provider, config: cfg, configStatus: resolved.status,
-    fundamentals: ctx.fundamentals, news: mergeNews(ctx.news, ctx.marketNews), expectancy: ctx.expectancy, calibration: ctx.calibration,
+    fundamentals: ctx.fundamentals, news: mergeNews(ctx.news, ctx.marketNews), expectancy: ctx.expectancy, calibration: ctx.calibration, risk,
   });
   const notes = [...(ctx.expectancyNote ? [ctx.expectancyNote] : []), ...(resolved.status === "override_rejected" ? [`ETI_PRECISION_CONFIG was rejected and defaults are in use: ${resolved.errors.join("; ")}`] : []),
     ...(!ctx.storeConfigured ? ["No context store (ETI_PRECISION_DATA or ETI_EXECUTION_LOG) is bound: fundamentals, news, expectancy and calibration are unavailable, so the score is capped and confidence is qualitative."] : [])];

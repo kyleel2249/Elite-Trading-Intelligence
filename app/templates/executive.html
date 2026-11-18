@@ -1,0 +1,321 @@
+{% extends "eti_base.html" %}
+{% block title %}Executive Command Centre{% endblock %}
+{% block head %}
+<style>
+  .ex-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:0 0 12px}
+  .ex-tabs,.ex-ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .ex-tab[aria-selected=true]{background:#00e67622;border-color:#00e676;color:#f4f8ff}
+  .ex-ctl select,.ex-ctl input{background:#0b1629;color:#f4f8ff;border:1px solid rgba(156,178,204,.3);border-radius:6px;padding:5px 7px;max-width:110px}
+  .ex-meta{color:#9cb2cc;font-size:12px;margin:0 0 10px}
+  .ex-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-bottom:14px}
+  .ex-kpi{background:#0b1629;border:1px solid rgba(156,178,204,.22);border-radius:10px;padding:11px 13px;min-width:0}
+  .ex-kpi.neg{border-color:#ff5252aa}.ex-kpi.warn{border-color:#ffb300aa}.ex-kpi.pos .ex-kv{color:#00e676}.ex-kpi.neg .ex-kv{color:#ff5252}
+  .ex-kl{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#9cb2cc}
+  .ex-kv{font-size:22px;font-weight:700;margin:3px 0;overflow-wrap:anywhere}
+  .ex-ks,.ex-kn{font-size:11px;color:#9cb2cc}.ex-kn{margin-top:3px;font-style:italic}
+  .ex-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:12px;align-items:start}
+  .ex-p{background:#0b1629;border:1px solid rgba(156,178,204,.22);border-radius:10px;padding:12px 14px;min-width:0}
+  .ex-p.wide{grid-column:1/-1}
+  .ex-p h2{font-size:14px;margin:0 0 8px;display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+  .ex-row{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid rgba(156,178,204,.12);font-size:13px}
+  .ex-row span:last-child{font-variant-numeric:tabular-nums;text-align:right}
+  .ex-bar{height:8px;background:rgba(156,178,204,.18);border-radius:4px;overflow:hidden;min-width:60px}
+  .ex-bar>i{display:block;height:100%;background:#00e676}.ex-bar.warn>i{background:#ffb300}.ex-bar.bad>i{background:#ff5252}
+  .ex-b{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid rgba(156,178,204,.4)}
+  .ex-b.good,.ex-b.pass,.ex-b.ok,.ex-b.funded,.ex-b.paid,.ex-b.approved{color:#00e676;border-color:#00e676}
+  .ex-b.bad,.ex-b.fail,.ex-b.critical,.ex-b.over,.ex-b.high,.ex-b.rejected{color:#ff5252;border-color:#ff5252}
+  .ex-b.warn,.ex-b.watch,.ex-b.underfunded,.ex-b.unbudgeted,.ex-b.pending{color:#ffb300;border-color:#ffb300}
+  .ex-al{display:flex;gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px solid rgba(156,178,204,.12);font-size:13px}
+  .ex-form{display:grid;gap:8px}.ex-form label{display:grid;gap:3px;font-size:12px;color:#9cb2cc}
+  .ex-form input,.ex-form select{background:#020817;color:#f4f8ff;border:1px solid rgba(156,178,204,.3);border-radius:6px;padding:6px}
+  .ex-act{display:flex;gap:4px;flex-wrap:wrap}.ex-note{font-size:11px;color:#9cb2cc;margin:6px 0 0}
+  @media (max-width:640px){.ex-kv{font-size:19px}.ex-kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="ex-head">
+  <div><h1 style="margin:0">Executive Command Centre</h1><div class="ex-meta" id="ex-meta">Loading…</div></div>
+  <div class="ex-ctl">
+    <label>Scope <select id="ex-scope" aria-label="Scope"><option value="real">Real</option><option value="simulated">Simulated</option><option value="all">Real + simulated</option></select></label>
+    <label>Range <select id="ex-range" aria-label="Range"><option value="mtd">MTD</option><option value="qtd">QTD</option><option value="ytd" selected>YTD</option><option value="12m">12 months</option><option value="all">All time</option></select></label>
+    <label>Currency <input id="ex-cur" value="USD" maxlength="10" aria-label="Currency"></label>
+    <label>Actor <input id="ex-actor" placeholder="your name" maxlength="64" aria-label="Actor label for the audit trail"></label>
+    <button class="btn sm" id="ex-refresh" type="button">Refresh</button>
+    <button class="btn sm" id="ex-csv" type="button">Export KPIs</button>
+  </div>
+</div>
+<div class="ex-tabs" id="ex-tabs" role="tablist" aria-label="Views" style="margin-bottom:12px"></div>
+<div id="ex-root" aria-live="polite"></div>
+<p class="ex-note">This centre records requests, approvals and payments and reads balances. It never executes a withdrawal or transfer; payments are made in the bank, exchange or wallet and then recorded here. The actor label is self-declared unless per-role keys are configured.</p>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  'use strict';
+  const { $, el, svg, fmt, table, toast, busy, modal, prompt, unavailable, download, apiKey } = ETI;
+  const ROLES = ['executive', 'finance', 'trading', 'operations', 'auditor'];
+  const LABEL = { executive: 'Executive management', finance: 'Finance', trading: 'Trading', operations: 'Operations', auditor: 'Auditors' };
+  const KINDS = ['vendor_payment', 'payroll', 'tax', 'expense', 'withdrawal', 'other'];
+  const TITLES = { alerts: 'Alerts', position: 'Company position', liquidity: 'Liquidity and funds', trading_capital: 'Trading capital', trading: 'Trading results', unrealized: 'Unrealized P&L (simulated)', expenditure: 'Expenditure', budgets: 'Departmental budgets', obligations: 'Outstanding obligations', payments: 'Payments and withdrawals', forecast: 'Cash-flow forecast (13 weeks)', reserve: 'Emergency reserve', system: 'System and safety', controls: 'Audit controls', reconciliation: 'Reconciliation and periods', audit_log: 'Executive audit trail' };
+  const st = { role: ROLES.includes(localStorage.getItem('eti_exec_role')) ? localStorage.getItem('eti_exec_role') : 'executive', me: null, view: null, retried: false };
+  let PERM = {};
+  const root = $('#ex-root');
+  const num = (s) => (s == null || s === '' ? null : Number(s));
+  const usd = (s) => fmt.usd(num(s));
+  const badge = (t, cls) => el('span', { class: 'ex-b ' + (cls || t), text: String(t) });
+  const can = (p) => (PERM[p] || []).includes(st.role);
+  const ctl = () => ({ scope: $('#ex-scope').value, range: $('#ex-range').value, currency: ($('#ex-cur').value || 'USD').trim().toUpperCase() });
+
+  async function x(path, opts = {}) {
+    const h = { 'X-Executive-Role': st.role };
+    if (opts.body !== undefined) h['Content-Type'] = 'application/json';
+    if (apiKey.get()) h['X-API-Key'] = apiKey.get();
+    const actor = ($('#ex-actor').value || '').trim();
+    if (actor) h['X-Actor'] = actor;
+    const r = await fetch(path, { method: opts.method || 'GET', headers: h, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined });
+    const t = await r.text();
+    let d = null;
+    try { d = t ? JSON.parse(t) : null; } catch (_) { d = t; }
+    if (!r.ok) {
+      const det = d && d.detail;
+      let msg = r.status + ' ' + r.statusText;
+      if (det && typeof det === 'object' && !Array.isArray(det) && det.error) msg = det.error;
+      else if (typeof det === 'string') msg = det;
+      else if (det) msg = JSON.stringify(det);
+      if (r.status === 401) msg += ' (set the API key with the key button)';
+      const e = new Error(msg); e.status = r.status; throw e;
+    }
+    return d;
+  }
+
+  // ---- small drawing helpers (SVG, text only) -------------------------------------------------------------
+  function lineChart(series, labels, h = 210) {
+    const w = 640, pad = 40;
+    const all = series.flatMap((s) => s.values);
+    const lo = Math.min(0, ...all), hi = Math.max(0, ...all), span = hi - lo || 1;
+    const X = (i) => pad + (i / Math.max(1, labels.length - 1)) * (w - pad - 10);
+    const Y = (v) => h - 22 - ((v - lo) / span) * (h - 36);
+    const kids = [svg('line', { x1: pad, x2: w - 8, y1: Y(0), y2: Y(0), stroke: 'rgba(156,178,204,.5)', 'stroke-dasharray': '4 4' })];
+    kids.push(svg('text', { x: 2, y: 12, fill: '#9cb2cc', 'font-size': 10 }, fmt.num(hi, 0)), svg('text', { x: 2, y: h - 8, fill: '#9cb2cc', 'font-size': 10 }, fmt.num(lo, 0)));
+    labels.forEach((l, i) => { if (i % 3 === 0 || i === labels.length - 1) kids.push(svg('text', { x: X(i), y: h - 6, fill: '#9cb2cc', 'font-size': 9, 'text-anchor': 'middle' }, l)); });
+    series.forEach((s, k) => {
+      kids.push(svg('path', { d: s.values.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' '), fill: 'none', stroke: s.color, 'stroke-width': s.main ? 2.6 : 1.6 }));
+      kids.push(svg('text', { x: pad + 8 + k * 110, y: 12, fill: s.color, 'font-size': 11 }, '\u25a0 ' + s.name));
+    });
+    return svg('svg', { viewBox: '0 0 ' + w + ' ' + h, width: '100%', height: h, role: 'img', 'aria-label': 'Weekly closing cash by scenario' }, kids);
+  }
+  function barChart(items, h = 150) {
+    if (!items.length) return el('div', { class: 'empty', text: 'No spending recorded in this range.' });
+    const w = 640, bw = Math.max(8, Math.min(46, (w - 20) / items.length - 6)), hi = Math.max(1, ...items.map((i) => i.value));
+    const kids = items.map((it, i) => {
+      const bh = Math.max(1, (it.value / hi) * (h - 34)), bx = 10 + i * (bw + 6);
+      return svg('g', {}, svg('rect', { x: bx, y: h - 18 - bh, width: bw, height: bh, fill: '#00e676', opacity: 0.8, rx: 2 }),
+        svg('text', { x: bx + bw / 2, y: h - 6, fill: '#9cb2cc', 'font-size': 9, 'text-anchor': 'middle' }, it.label.slice(2)));
+    });
+    return svg('svg', { viewBox: '0 0 ' + w + ' ' + h, width: '100%', height: h, role: 'img', 'aria-label': 'Monthly expenditure' }, kids);
+  }
+  const bar = (v, max, cls) => el('div', { class: 'ex-bar ' + (cls || '') }, el('i', { style: 'width:' + Math.max(0, Math.min(100, max ? (v / max) * 100 : 0)).toFixed(1) + '%' }));
+  const row = (k, v, cls) => el('div', { class: 'ex-row' }, el('span', { text: k }), el('span', { class: cls || '', text: v }));
+  const btn = (label, fn, kind) => el('button', { class: 'btn sm ' + (kind || ''), type: 'button', onclick: (e) => busy(e.currentTarget, fn) }, label);
+  const panel = (name, ...kids) => el('section', { class: 'ex-p' + (['forecast', 'payments', 'budgets', 'controls', 'audit_log'].includes(name) ? ' wide' : ''), id: 'ex-' + name }, el('h2', {}, el('span', { text: TITLES[name] || name })), ...kids);
+  const note = (t) => el('p', { class: 'ex-note', text: t });
+
+  // ---- section renderers ----------------------------------------------------------------------------------
+  const R = {};
+  R.alerts = (a) => !a.length ? el('div', { class: 'empty', text: 'No alerts. All monitored conditions are within limits.' }) :
+    el('div', {}, a.map((x1) => el('div', { class: 'ex-al' }, badge(x1.severity), el('b', { text: x1.title }), el('span', { class: 'muted', text: x1.detail }))));
+  R.position = (d) => {
+    const A = num(d.total_assets) || 0;
+    const group = (title, rows) => el('div', {}, el('b', { text: title }), rows.length ? rows.map((r) => row(r.account + ' ' + r.name, usd(r.amount))) : el('div', { class: 'muted', text: 'none' }));
+    return el('div', {}, row('Total assets', usd(d.total_assets)), bar(A, A), row('Total liabilities', usd(d.total_liabilities)), bar(num(d.total_liabilities) || 0, A, 'warn'),
+      row('Net equity', usd(d.net_equity), num(d.net_equity) < 0 ? 'neg' : 'pos'), bar(Math.max(0, num(d.net_equity) || 0), A),
+      row('Books balance', d.balanced ? 'yes' : 'NO, difference ' + d.difference, d.balanced ? 'pos' : 'neg'), row('Accumulated earnings', usd(d.accumulated_earnings)),
+      d.simulated_included ? note('Scope includes SIMULATED paper/testnet balances, which are not company money.') : null,
+      d.other_currencies.length ? note('Other currencies in the books are not converted: ' + d.other_currencies.join(', ')) : null,
+      group('Assets', d.assets), group('Liabilities', d.liabilities), group('Equity', d.equity));
+  };
+  R.liquidity = (d) => el('div', {}, row('Operating bank cash', usd(d.operating_cash)), row('Approved, unpaid payments', usd(d.committed_payments)),
+    row('Available operating funds', usd(d.available_operating), num(d.available_operating) < 0 ? 'neg' : 'pos'), row('Emergency reserve held', usd(d.reserve_held)),
+    row('Exchange cash', usd(d.exchange_cash)), row('Open positions at cost', usd(d.open_positions_at_cost)), row('Trading capital', usd(d.trading_capital)),
+    row('Treasury wallet (book value)', usd(d.treasury_wallet_book)), row('Monthly operating burn', usd(d.monthly_operating_burn)),
+    row('Runway (bank + reserve)', d.runway_months == null ? 'n/a' : d.runway_months + ' months'), table([{ k: 'account', label: 'Cash account' }, { k: 'name', label: 'Name' }, { k: 'balance', label: 'Balance', fmt: usd }], d.cash_accounts), note(d.formula));
+  R.trading_capital = (d) => el('div', {}, row('Trading capital', usd(d.trading_capital)), row('Exchange cash', usd(d.exchange_cash)), row('Open positions at cost', usd(d.open_positions_at_cost)));
+  const symTable = (rows, key) => table([{ k: 'environment', label: 'Env' }, { k: key, label: key }, { k: 'trades', label: 'Trades' }, { k: 'net_pnl', label: 'Net P&L', fmt: usd, cls: (v) => (num(v) < 0 ? 'neg' : 'pos') }, { k: 'win_rate', label: 'Win %' }], rows, 'No closed trades in this range.');
+  R.trading = (d) => el('div', {}, badge(d.label, d.scope === 'real' ? 'good' : 'warn'), row('Realized net (' + d.from + ' to ' + d.to + ')', usd(d.realized_net), num(d.realized_net) < 0 ? 'neg' : 'pos'), row('Realized net, all time', usd(d.realized_all_time)),
+    row('Closed trades', String(d.trades)), row('Win rate', d.win_rate == null ? 'n/a' : d.win_rate + '%'), row('Fees', usd(d.fees)),
+    table([{ k: 'environment', label: 'Env' }, { k: 'trades', label: 'Trades' }, { k: 'gross_profit', label: 'Gross profit', fmt: usd }, { k: 'gross_loss', label: 'Gross loss', fmt: usd }, { k: 'fees', label: 'Fees', fmt: usd }, { k: 'net_pnl', label: 'Net', fmt: usd, cls: (v) => (num(v) < 0 ? 'neg' : 'pos') }, { k: 'profit_factor', label: 'PF' }], d.environments, 'No closed trades in this range.'),
+    el('h3', { text: 'By symbol' }), symTable(d.by_symbol, 'symbol'), el('h3', { text: 'By strategy' }), symTable(d.by_strategy, 'strategy'), note(d.note));
+  R.unrealized = (d) => !d.available ? unavailable(d.reason || 'unavailable', 'Unrealized P&L') :
+    el('div', {}, badge('SIMULATED', 'warn'), row('Unrealized P&L', fmt.signed(d.unrealized_pnl), d.unrealized_pnl < 0 ? 'neg' : 'pos'), row('Realized P&L', fmt.signed(d.realized_pnl)), row('Equity', fmt.usd(d.equity)), row('Cash', fmt.usd(d.cash)), row('Fees paid', fmt.usd(d.fees_paid)),
+      table([{ k: 'symbol', label: 'Symbol' }, { k: 'qty', label: 'Qty', fmt: (v) => fmt.num(v, 6) }, { k: 'avg_cost', label: 'Avg cost', fmt: (v) => fmt.num(v, 4) }, { k: 'mark_price', label: 'Mark', fmt: (v) => fmt.num(v, 4) }, { k: 'market_value', label: 'Value', fmt: (v) => fmt.usd(num(v)) }], d.positions.filter((p) => p.symbol), 'No open simulated positions.'), note(d.note));
+  R.expenditure = (d) => {
+    const max = Math.max(1, ...d.by_department.map((x1) => num(x1.total) || 0));
+    return el('div', {}, row('Total expenditure (' + d.range.toUpperCase() + ')', usd(d.total)), row('Operating', usd(d.operating)), row('Trading costs', usd(d.trading_costs)), barChart(d.monthly.map((m) => ({ label: m.month, value: num(m.amount) || 0 }))),
+      table([{ k: 'department', label: 'Department' }, { k: 'total', label: 'Spent', fmt: usd }, { k: 'share_pct', label: 'Share', fmt: (v, r) => el('div', {}, fmt.pct(v, 1), bar(num(r.total) || 0, max)) }], d.by_department, 'No department spending in this range.'));
+  };
+  R.budgets = (d) => el('div', {}, row('Total budget ' + d.year, usd(d.total_budget)), row('Spent year to date', usd(d.total_actual) + (d.utilisation_pct == null ? '' : ' (' + d.utilisation_pct + '%)')), row('Year elapsed', d.year_elapsed_pct + '%'),
+    table([{ k: 'department', label: 'Department' }, { k: 'budget', label: 'Budget', fmt: usd }, { k: 'actual_ytd', label: 'Spent', fmt: usd }, { k: 'remaining', label: 'Remaining', fmt: usd, cls: (v) => (num(v) < 0 ? 'neg' : '') },
+      { k: 'utilisation_pct', label: 'Used', fmt: (v, r) => el('div', {}, v == null ? 'n/a' : v + '%', bar(num(r.actual_ytd) || 0, num(r.budget) || 0, r.status === 'over' ? 'bad' : r.status === 'watch' ? 'warn' : '')) },
+      { k: 'projected_year_end', label: 'Year-end pace', fmt: (v) => (v == null ? 'n/a' : usd(v)) }, { k: 'status', label: 'Status', fmt: (v) => badge(v) }], d.rows, 'No budgets or spending for this year.'),
+    can('budget.set') ? btn('Set budget', setBudget) : null, note(d.basis));
+  R.obligations = (d) => el('div', {}, row('Total outstanding obligations', usd(d.total), 'neg'), row('Accounts payable', usd(d.accounts_payable)), row('  of which overdue', usd(d.overdue_payables), num(d.overdue_payables) > 0 ? 'neg' : ''), row('Accrued expenses', usd(d.accrued_expenses)),
+    row('Taxes payable', usd(d.taxes_payable)), row('Approved, not yet booked', usd(d.approved_not_booked)), row('Awaiting approval (pipeline)', usd(d.pending_approval_pipeline)), row('Receivables outstanding (for context)', usd(d.receivables_outstanding)),
+    table([{ k: (r) => r, label: 'Aging' }, { k: (r) => d.ap_buckets[r], label: 'Payables', fmt: usd }], Object.keys(d.ap_buckets)),
+    table([{ k: 'party', label: 'Supplier' }, { k: 'number', label: 'Bill' }, { k: 'due_date', label: 'Due' }, { k: 'outstanding', label: 'Outstanding', fmt: usd }, { k: 'days_overdue', label: 'Days late' }], d.bills, 'No outstanding bills.'),
+    d.ap_ties_to_ledger ? null : note('WARNING: the payables subledger does not tie to the ledger.'), note(d.basis));
+  R.payments = (d) => el('div', {}, row('Awaiting approval', d.pending.count + ' / ' + usd(d.pending.total)), row('Approved, awaiting payment', d.approved.count + ' / ' + usd(d.approved.total)), row('Pending withdrawals', d.pending_withdrawals.count + ' / ' + usd(d.pending_withdrawals.total)),
+    row('Paid this month', d.paid_mtd.count + ' / ' + usd(d.paid_mtd.total)), row('Past due date', d.overdue.count + ' / ' + usd(d.overdue.total), d.overdue.count ? 'neg' : ''),
+    can('request.create') ? btn('New request', newRequest, 'primary') : null, el('h3', { text: 'Open requests' }), payTable(d.queue, true), el('h3', { text: 'Recently closed' }), payTable(d.recent, false));
+  function payTable(rows, withActions) {
+    const cols = [{ k: 'reference', label: 'Ref' }, { k: 'kind', label: 'Kind' }, { k: 'payee', label: 'Payee' }, { k: 'amount', label: 'Amount', fmt: (v, r) => fmt.num(num(v), 2) + ' ' + r.currency }, { k: 'due_date', label: 'Due', cls: (v, r) => (r.overdue ? 'neg' : '') },
+      { k: 'status', label: 'Status', fmt: (v) => badge(v) }, { k: 'requested_by', label: 'By' }];
+    if (withActions) cols.push({ k: (r) => r, label: '', fmt: (r) => actions(r) });
+    else cols.push({ k: (r) => r.payment_ref || r.decision_note || '', label: 'Ref / note' });
+    return table(cols, rows, withActions ? 'Nothing is waiting.' : 'Nothing closed yet.');
+  }
+  function actions(r) {
+    const b = [];
+    if (r.status === 'pending' && can('request.approve')) { b.push(btn('Approve', () => act(r, 'approve'))); b.push(btn('Reject', () => reject(r))); }
+    if (r.status === 'approved' && can('request.pay')) b.push(btn('Mark paid', () => pay(r)));
+    if (can('request.cancel')) b.push(btn('Cancel', () => act(r, 'cancel')));
+    return el('div', { class: 'ex-act' }, b);
+  }
+  R.forecast = (d) => {
+    const S = d.scenarios, keys = ['base', 'downside', 'upside'], colors = { base: '#00e676', downside: '#ff5252', upside: '#4fc3f7' };
+    const labels = S.base.weeks.map((w) => w.start.slice(5));
+    return el('div', {}, lineChart(keys.map((k) => ({ name: S[k].label, color: colors[k], main: k === 'base', values: S[k].weeks.map((w) => num(w.closing)) })), labels),
+      table([{ k: (r) => S[r].label, label: 'Scenario' }, { k: (r) => S[r].opening, label: 'Opening', fmt: usd }, { k: (r) => S[r].min_closing, label: 'Lowest', fmt: usd, cls: (v) => (num(v) < 0 ? 'neg' : '') }, { k: (r) => 'wk ' + S[r].min_week, label: 'At' },
+        { k: (r) => S[r].ending, label: 'Week 13', fmt: usd }, { k: (r) => S[r].first_negative_week, label: 'Cash gap', fmt: (v) => (v ? badge('week ' + v, 'bad') : badge('none', 'good')) }, { k: (r) => S[r].assumptions, label: 'Assumptions', wrap: true, fmt: (a) => 'receivables ' + a.receivables_delay_days + 'd late, overdue collected ' + Math.round(num(a.overdue_receivables_collected) * 100) + '%, burn x' + a.burn_multiplier + (a.includes_unapproved_requests ? ', incl. unapproved' : '') }], keys),
+      el('h3', { text: 'Base case by week' }),
+      table([{ k: 'week', label: 'Wk' }, { k: 'start', label: 'From' }, { k: 'inflow', label: 'In', fmt: usd }, { k: 'outflow', label: 'Out', fmt: usd }, { k: 'net', label: 'Net', fmt: usd, cls: (v) => (num(v) < 0 ? 'neg' : 'pos') }, { k: 'closing', label: 'Closing', fmt: usd, cls: (v) => (num(v) < 0 ? 'neg' : '') }], S.base.weeks),
+      d.notes.map(note));
+  };
+  R.reserve = (d) => el('div', {}, badge(d.status), row('Held (account ' + d.account + ')', usd(d.held)), row('Target', usd(d.target)), row('Shortfall', usd(d.shortfall), num(d.shortfall) > 0 ? 'neg' : ''), row('Coverage', d.coverage_pct == null ? 'n/a' : d.coverage_pct + '%'),
+    bar(num(d.held) || 0, num(d.target) || 0, d.status === 'underfunded' ? 'warn' : ''), row('Fixed target', usd(d.fixed_target)), row('Months of burn', String(d.months_of_burn)),
+    el('div', { class: 'ex-act' }, can('reserve.policy') ? btn('Set policy', setPolicy) : null, can('reserve.transfer') ? btn('Fund reserve', () => moveReserve('fund')) : null, can('reserve.transfer') ? btn('Release', () => moveReserve('release')) : null), note(d.target_rule));
+  R.system = (d) => el('div', {}, row('Kill switch', d.kill_switch ? 'ON' : 'off', d.kill_switch ? 'neg' : 'pos'), row('Live trading flag', d.live_trading_enabled ? 'ENABLED' : 'disabled'), row('Execution engine', d.execution_enabled ? 'enabled' : 'disabled'),
+    d.agents_unavailable ? unavailable('Agent registry unavailable (' + d.agents_unavailable + ').') : table([{ k: 'id', label: 'Agent' }, { k: 'health', label: 'Health', fmt: (v) => badge(v || 'n/a', v === 'ok' || v === 'healthy' ? 'good' : v === 'error' ? 'bad' : 'warn') }, { k: 'running', label: 'Running', fmt: (v) => String(v) }], d.agents, 'No agents reported.'));
+  R.controls = (d) => el('div', {}, row('Passed / warnings / failed', d.passed + ' / ' + d.warnings + ' / ' + d.failed, d.failed ? 'neg' : 'pos'),
+    table([{ k: 'status', label: '', fmt: (v) => badge(v) }, { k: 'name', label: 'Control', wrap: true }, { k: 'detail', label: 'Detail', wrap: true }], d.controls));
+  R.reconciliation = (d) => el('div', {}, table([{ k: 'id', label: '#' }, { k: 'kind', label: 'Kind' }, { k: 'source', label: 'Source' }, { k: 'account', label: 'Account' }, { k: 'status', label: 'Status', fmt: (v) => badge(v || 'n/a', v === 'reconciled' || v === 'ok' ? 'good' : 'warn') }, { k: 'date_to', label: 'To' }, { k: 'ran_at', label: 'Ran' }], d.runs, 'No reconciliation runs recorded.'),
+    row('Closed periods', d.closed_periods.join(', ') || 'none'), row('Periods with postings', d.periods_with_postings.join(', ') || 'none'));
+  R.audit_log = (d) => table([{ k: 'ts', label: 'When' }, { k: 'actor', label: 'Actor' }, { k: 'role', label: 'Role' }, { k: 'action', label: 'Action' }, { k: 'subject', label: 'Subject' }, { k: 'detail', label: 'Detail', wrap: true, fmt: (v) => JSON.stringify(v || {}) }], d, 'No executive actions recorded yet.');
+
+  // ---- actions --------------------------------------------------------------------------------------------
+  async function reload() { await load(); }
+  async function act(r, what) {
+    let body = {};
+    if (what === 'cancel') { const n = await prompt('Cancel ' + r.reference, 'Reason (optional)'); if (n === null) return; body = { note: n }; }
+    await x('/api/executive/payments/' + r.id + '/' + what, { method: 'POST', body }); toast(r.reference + ': ' + what + ' done', 'good'); await reload();
+  }
+  async function reject(r) {
+    const n = await prompt('Reject ' + r.reference, 'Reason (required)'); if (!n) return;
+    await x('/api/executive/payments/' + r.id + '/reject', { method: 'POST', body: { note: n } }); toast(r.reference + ' rejected', 'good'); await reload();
+  }
+  async function pay(r) {
+    const ref = await prompt('Mark ' + r.reference + ' paid', 'Bank / exchange / chain payment reference'); if (!ref) return;
+    const out = await x('/api/executive/payments/' + r.id + '/pay', { method: 'POST', body: { ref } });
+    toast(out.warning || r.reference + ' paid and booked to the ledger', out.warning ? '' : 'good'); await reload();
+  }
+  function field(label, type, extra) { const i = el(type === 'select' ? 'select' : 'input', Object.assign({ 'aria-label': label }, type === 'select' ? {} : { type }, extra || {})); return { i, w: el('label', {}, label, i) }; }
+  async function form(title, fields, submitLabel) {
+    const v = await modal(title, el('div', { class: 'ex-form' }, fields.map((f) => f.w)), [{ label: 'Cancel', value: 'no' }, { label: submitLabel, value: 'ok', kind: 'primary' }]);
+    return v === 'ok';
+  }
+  async function newRequest() {
+    const kind = field('Kind', 'select'); KINDS.forEach((k) => kind.i.append(el('option', { value: k, text: k })));
+    const f = { payee: field('Payee', 'text'), amount: field('Amount', 'number', { step: 'any', min: '0' }), due: field('Due date', 'date'), dept: field('Department (required for expense)', 'text'), doc: field('Bill document id (optional)', 'text'), exp: field('Expense account (expense)', 'text'), from: field('From account (withdrawal, e.g. 1020)', 'text'), to: field('To account (blank = external)', 'text'), desc: field('Description', 'text') };
+    if (!(await form('New payment or withdrawal request', [kind, ...Object.values(f)], 'Submit'))) return;
+    const nz = (i) => i.value.trim() || null;
+    await x('/api/executive/payments', { method: 'POST', body: { kind: kind.i.value, payee: f.payee.i.value.trim(), amount: f.amount.i.value, due_date: f.due.i.value, currency: ctl().currency, description: f.desc.i.value.trim(), department: nz(f.dept.i), document_id: nz(f.doc.i), expense_account: nz(f.exp.i), from_account: nz(f.from.i), to_account: nz(f.to.i) } });
+    toast('Request submitted for approval', 'good'); await reload();
+  }
+  async function setBudget() {
+    const f = { d: field('Department', 'text'), p: field('Period (YYYY or YYYY-MM)', 'text', { value: String(new Date().getUTCFullYear()) }), a: field('Amount', 'number', { step: 'any', min: '0' }) };
+    if (!(await form('Set departmental budget', Object.values(f), 'Save'))) return;
+    await x('/api/executive/budgets', { method: 'PUT', body: { department: f.d.i.value.trim(), period: f.p.i.value.trim(), amount: f.a.i.value, currency: ctl().currency } }); toast('Budget saved', 'good'); await reload();
+  }
+  async function setPolicy() {
+    const f = { t: field('Fixed target amount', 'number', { step: 'any', min: '0', value: '0' }), m: field('Months of operating burn (0-60)', 'number', { step: '1', min: '0', max: '60', value: '3' }) };
+    if (!(await form('Emergency reserve policy', Object.values(f), 'Save'))) return;
+    await x('/api/executive/reserve', { method: 'PUT', body: { currency: ctl().currency, target: f.t.i.value || '0', months_of_burn: parseInt(f.m.i.value || '0', 10) } }); toast('Reserve policy saved', 'good'); await reload();
+  }
+  async function moveReserve(direction) {
+    const f = { a: field('Amount', 'number', { step: 'any', min: '0' }), r: field('Reference (bank transfer id)', 'text') };
+    if (!(await form(direction === 'fund' ? 'Fund the emergency reserve (bank to reserve)' : 'Release from the reserve (reserve to bank)', Object.values(f), 'Book transfer'))) return;
+    await x('/api/executive/reserve/transfer', { method: 'POST', body: { direction, amount: f.a.i.value, ref: f.r.i.value.trim(), currency: ctl().currency } }); toast('Transfer booked to the ledger', 'good'); await reload();
+  }
+
+  // ---- page -----------------------------------------------------------------------------------------------
+  function kpiCard(k) {
+    let v;
+    if (k.kind === 'count') v = fmt.num(num(k.value), 0); else if (k.kind === 'pct') v = k.value == null ? 'n/a' : fmt.pct(num(k.value)); else if (k.kind === 'text') v = k.value == null ? '\u2026' : String(k.value); else v = k.value == null ? 'n/a' : usd(k.value);
+    return el('div', { class: 'ex-kpi ' + (k.tone || ''), id: 'kpi-' + k.id }, el('div', { class: 'ex-kl', text: k.label }), el('div', { class: 'ex-kv', text: v }), el('div', { class: 'ex-ks', text: k.sub || '' }), k.note ? el('div', { class: 'ex-kn', text: k.note }) : null);
+  }
+  function render(v) {
+    $('#ex-meta').textContent = LABEL[v.role] + ' view | as of ' + v.as_of + ' | scope ' + v.scope + ' | range ' + v.range.toUpperCase() + ' | ' + v.currency + ' | generated ' + v.generated_at;
+    const kids = [el('div', { class: 'ex-kpis' }, v.kpis.map(kpiCard))];
+    const grid = el('div', { class: 'ex-grid' });
+    for (const [name, data] of Object.entries(v.sections)) {
+      if (name === 'alerts') { kids.push(el('section', { class: 'ex-p', id: 'ex-alerts', style: 'margin-bottom:12px' }, el('h2', { text: TITLES.alerts }), R.alerts(data))); continue; }
+      try { grid.append(panel(name, R[name](data))); } catch (e) { grid.append(panel(name, unavailable('Could not draw this section: ' + e.message))); }
+    }
+    if (v.async_sections.includes('blockchain')) grid.append(el('section', { class: 'ex-p wide', id: 'ex-chain' }, el('h2', { text: 'Blockchain balances' }), el('div', { class: 'empty', text: 'Reading balances from the chain\u2026' })));
+    kids.push(grid);
+    root.replaceChildren(...kids);
+  }
+  async function loadChain() {
+    const box = $('#ex-chain'); if (!box) return;
+    const card = $('#kpi-blockchain_balances');
+    const setCard = (val, sub) => { if (!card) return; card.querySelector('.ex-kv').textContent = val; card.querySelector('.ex-ks').textContent = sub; };
+    try {
+      const d = await x('/api/executive/blockchain?currency=' + encodeURIComponent(ctl().currency));
+      const body = el('div', {});
+      if (!d.available) { body.append(unavailable(d.reason, 'Blockchain')); setCard('n/a', d.reason); }
+      else {
+        const live = d.networks.filter((n) => n.connected && n.balance != null);
+        setCard(live.length ? live.filter((n) => n.mainnet).map((n) => n.balance + ' ' + n.native).join(' | ') || 'no mainnet balance' : 'not connected', 'book value of treasury wallet ' + usd(d.book_value_usd));
+        body.append(row('Treasury wallet book value (ledger)', usd(d.book_value_usd)), row('Wallet address', d.wallet ? d.wallet.address : 'no wallet created'),
+          table([{ k: 'label', label: 'Network' }, { k: 'mainnet', label: 'Type', fmt: (v) => (v ? 'mainnet' : 'testnet') }, { k: 'balance', label: 'Balance', fmt: (v, r) => (v == null ? (r.error || r.note || 'n/a') : v + ' ' + r.native) }, { k: 'block', label: 'Block' }, { k: 'connected', label: 'RPC', fmt: (v) => badge(v ? 'connected' : 'offline', v ? 'good' : 'warn') }], d.networks, 'No RPC endpoints configured.'),
+          el('h3', { text: 'Pending on-chain transactions' }), table([{ k: 'network', label: 'Network' }, { k: 'kind', label: 'Kind' }, { k: 'value', label: 'Value' }, { k: 'status', label: 'Status', fmt: (v) => badge(v) }, { k: 'summary', label: 'Summary', wrap: true }], d.pending_transactions, 'None pending.'), note(d.note));
+      }
+      box.replaceChildren(el('h2', { text: 'Blockchain balances' }), body);
+    } catch (e) { setCard('n/a', e.message); box.replaceChildren(el('h2', { text: 'Blockchain balances' }), unavailable(e.message, 'Blockchain')); }
+  }
+  function tabs() {
+    const box = $('#ex-tabs'); box.replaceChildren();
+    const allowed = st.me ? st.me.views : ROLES;
+    ROLES.forEach((r) => box.append(el('button', { class: 'btn sm ex-tab', type: 'button', role: 'tab', 'aria-selected': String(r === st.role), disabled: !allowed.includes(r), onclick: () => { st.role = r; localStorage.setItem('eti_exec_role', r); st.me = null; load(); } }, LABEL[r])));
+  }
+  async function load() {
+    tabs();
+    const c = ctl();
+    root.replaceChildren(el('div', { class: 'empty', text: 'Loading\u2026' }));
+    try {
+      if (!st.me) { st.me = await x('/api/executive/roles'); PERM = st.me.permissions; tabs(); }
+      st.view = await x('/api/executive/view/' + st.role + '?scope=' + c.scope + '&range=' + c.range + '&currency=' + encodeURIComponent(c.currency));
+      st.retried = false; render(st.view); loadChain();
+    } catch (e) {
+      const m = /limited to the (\w+)/.exec(e.message || '');
+      if (e.status === 403 && m && ROLES.includes(m[1]) && !st.retried) { st.retried = true; st.role = m[1]; st.me = null; return load(); }
+      root.replaceChildren(unavailable(e.message, 'Could not load the ' + LABEL[st.role] + ' view'));
+    }
+  }
+  function exportKpis() {
+    if (!st.view) return;
+    const safe = (s) => { s = String(s == null ? '' : s); return /^[=+\-@\t\r]/.test(s) && isNaN(Number(s)) ? "'" + s : s; };
+    const q = (s) => '"' + safe(s).replace(/"/g, '""') + '"';
+    const rows = [['kpi', 'value', 'detail']].concat(st.view.kpis.map((k) => [k.label, k.value, k.sub]));
+    download('executive-' + st.role + '-' + st.view.as_of + '.csv', rows.map((r) => r.map(q).join(',')).join('\n'), 'text/csv');
+  }
+  $('#ex-actor').value = localStorage.getItem('eti_exec_actor') || '';
+  $('#ex-actor').addEventListener('change', () => { localStorage.setItem('eti_exec_actor', $('#ex-actor').value.trim()); });
+  ['ex-scope', 'ex-range', 'ex-cur'].forEach((id) => $('#' + id).addEventListener('change', load));
+  $('#ex-refresh').addEventListener('click', load);
+  $('#ex-csv').addEventListener('click', exportKpis);
+  setInterval(() => { if (!document.hidden && !$('#dlg').open) load(); }, 60000);
+  window.__exec = { R, kpiCard, lineChart };
+  load();
+})();
+</script>
+{% endblock %}

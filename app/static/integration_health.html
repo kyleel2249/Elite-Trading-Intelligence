@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ETI API Integration Health Center</title>
+<style>
+  :root { --bg:#0f1318; --fg:#e8edf2; --mut:#9aa7b4; --card:#18202a; --bd:#2a3644; --ok:#2fbf71; --warn:#e0a526; --bad:#e5534b; --info:#4cc2ff; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f8fa; --fg:#14202b; --mut:#53606d; --card:#fff; --bd:#d0d7de; --ok:#1a7f4b; --warn:#9a6700; --bad:#cf222e; --info:#0b6bcb; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif; max-width:1100px; margin-inline:auto; }
+  h1 { font-size:1.3rem; margin:0 0 4px; } .mut { color:var(--mut); font-size:.88rem; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:12px 0; }
+  input[type=password] { padding:8px; border-radius:8px; border:1px solid var(--bd); background:var(--card); color:var(--fg); min-width:220px; }
+  button { padding:8px 12px; border-radius:8px; border:1px solid var(--bd); background:var(--card); color:var(--fg); cursor:pointer; }
+  button:focus-visible, input:focus-visible { outline:3px solid var(--info); outline-offset:2px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:14px; }
+  .card h2 { font-size:1rem; margin:0; display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .badge { font-size:.75rem; padding:2px 8px; border-radius:999px; border:1px solid currentColor; white-space:nowrap; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); } .info { color:var(--info); }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin:10px 0 0; font-size:.88rem; } dt { color:var(--mut); } dd { margin:0; word-break:break-word; }
+  ul.ep { margin:6px 0 0; padding-left:18px; font-size:.85rem; }
+  #sum { font-size:.95rem; } @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+</head>
+<body>
+<h1>API Integration Health Center</h1>
+<p class="mut">Status comes from real provider requests only. A key that is merely present shows as “unverified”. No secret value is ever sent to or displayed in this page.</p>
+<div class="bar">
+  <button id="refresh" type="button">Refresh</button>
+  <label class="mut" for="key">API key (only to run “Verify now”; kept in memory, never stored):</label>
+  <input id="key" type="password" autocomplete="off" placeholder="X-API-Key">
+  <button id="verify" type="button">Verify now</button>
+  <span id="msg" class="mut" role="status" aria-live="polite"></span>
+</div>
+<p id="sum"></p>
+<div id="grid" class="grid" aria-live="polite"></div>
+<p class="mut" id="foot"></p>
+<script>
+(function () {
+  var API = '/api/analytics/intel/health-center', grid = document.getElementById('grid'), msg = document.getElementById('msg'), sum = document.getElementById('sum'), foot = document.getElementById('foot');
+  var CLS = { ok: 'ok', unconfigured: 'bad', unverified: 'warn', unauthorized: 'bad', plan_restricted: 'warn', degraded: 'warn', down: 'bad', stale: 'warn', not_verified_by_worker: 'warn' };
+  var LABEL = { ok: 'Operational', unconfigured: 'Not configured', unverified: 'Unverified', unauthorized: 'Unauthorized', plan_restricted: 'Plan restricted', degraded: 'Degraded', down: 'Down', stale: 'Stale', not_verified_by_worker: 'Awaiting Worker' };
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; }
+  function ago(sec) { if (sec == null) return 'never'; if (sec < 90) return Math.round(sec) + ' s ago'; if (sec < 5400) return Math.round(sec / 60) + ' min ago'; if (sec < 172800) return Math.round(sec / 3600) + ' h ago'; return Math.round(sec / 86400) + ' d ago'; }
+  function when(iso) { if (!iso) return 'never'; var d = new Date(iso); return isNaN(d) ? 'unknown' : d.toLocaleString() + ' (' + ago((Date.now() - d.getTime()) / 1000) + ')'; }
+  function row(dl, k, v) { dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, v)); }
+  function card(i) {
+    var c = el('section', 'card'), h = el('h2'), b = el('span', 'badge ' + (CLS[i.status] || 'info'), LABEL[i.status] || i.status);
+    h.appendChild(el('span', null, i.name)); h.appendChild(b); c.appendChild(h); c.appendChild(el('div', 'mut', i.status_text || ''));
+    var dl = el('dl');
+    row(dl, 'Credential', i.env + (i.configured ? ' (set)' : ' (missing)'));
+    row(dl, 'Used for', (i.used_for || []).join(', '));
+    row(dl, 'Last success', when(i.last_success));
+    row(dl, 'Last error', i.last_error ? i.last_error.kind + ' — ' + when(i.last_error.at) : 'none recorded');
+    row(dl, 'Data freshness', i.data_age_seconds == null ? 'no successful retrieval yet' : 'retrieved ' + ago(i.data_age_seconds));
+    var q = i.quota || {};
+    row(dl, 'Quota', q.limit ? q.remaining + ' of ' + q.limit + ' remaining' + (q.resets_at ? ' (resets ' + q.resets_at + ')' : '') : 'not reported by provider' + (q.local_rate_limit_per_minute ? '; local cap ' + q.local_rate_limit_per_minute + '/min' : ''));
+    row(dl, 'Requests', i.requests + ' total, ' + i.failures + ' failed, ' + i.retries + ' retries' + (i.avg_latency_ms != null ? ', avg ' + i.avg_latency_ms + ' ms' : ''));
+    if (i.last_event_count != null) row(dl, 'Last feed size', i.last_event_count + ' events');
+    var sa = i.subscription_access || {}; row(dl, 'Subscription access', sa.level === 'n/a' ? 'n/a' : sa.level + (sa.verified_at ? ' (verified ' + when(sa.verified_at) + ')' : ' (not verified)'));
+    c.appendChild(dl);
+    var eps = sa.endpoints || {}, keys = Object.keys(eps);
+    if (keys.length) { var ul = el('ul', 'ep'); keys.forEach(function (k) { var li = el('li', eps[k] === 'ok' ? 'ok' : 'warn', k + ': ' + eps[k]); ul.appendChild(li); }); c.appendChild(ul); }
+    if (i.verifying) c.appendChild(el('div', 'mut', 'Verification in progress…'));
+    if (i.note) c.appendChild(el('div', 'mut', i.note));
+    return c;
+  }
+  function render(d) {
+    grid.textContent = ''; (d.integrations || []).forEach(function (i) { grid.appendChild(card(i)); });
+    var s = d.summary || {}; sum.textContent = s.operational + ' of ' + s.configured + ' configured integrations operational' + ((s.missing_credentials || []).length ? '. Missing: ' + s.missing_credentials.map(function (m) { return m.env + (m.required ? '' : ' (optional)'); }).join(', ') : '') + '.';
+    foot.textContent = 'Generated ' + new Date(d.generated_at).toLocaleString() + '. ' + (d.notes || []).join(' ') + ((d.auto_verification_scheduled || []).length ? ' Verifying in background: ' + d.auto_verification_scheduled.join(', ') + '.' : '');
+  }
+  async function load() { msg.textContent = 'Loading…'; try { var r = await fetch(API); if (!r.ok) throw new Error('HTTP ' + r.status); render(await r.json()); msg.textContent = ''; } catch (e) { msg.textContent = 'Could not load: ' + e.message; } }
+  document.getElementById('refresh').addEventListener('click', load);
+  document.getElementById('verify').addEventListener('click', async function () {
+    var k = document.getElementById('key').value; if (!k) { msg.textContent = 'Enter the API key to verify.'; return; }
+    msg.textContent = 'Verifying with real provider requests…';
+    try { var r = await fetch(API + '/verify', { method: 'POST', headers: { 'X-API-Key': k } }); if (r.status === 401 || r.status === 403) throw new Error('API key rejected'); if (!r.ok) throw new Error('HTTP ' + r.status); render(await r.json()); msg.textContent = 'Verification complete.'; }
+    catch (e) { msg.textContent = 'Verify failed: ' + e.message; }
+  });
+  load(); setInterval(load, 30000);
+})();
+</script>
+</body>
+</html>

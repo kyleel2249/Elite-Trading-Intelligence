@@ -25,6 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Redis (runs the queue integration tests instead of skipping them)
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+
       - name: Compile Python application
         run: python -m compileall -q app tests
 

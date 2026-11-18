@@ -48,7 +48,7 @@ class _Base:
         self.db = db
         self.timeout = timeout
 
-    async def _get(self, url: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> Any:
+    async def _get(self, url: str, params: Optional[dict] = None, headers: Optional[dict] = None, as_text: bool = False) -> Any:
         """GET with bounded retry on 429/503 (honours Retry-After, capped at 5s). Every outcome is recorded."""
         last: Optional[Exception] = None
         for attempt in range(3):
@@ -66,7 +66,7 @@ class _Base:
                     await asyncio.sleep(wait)
                     continue
                 r.raise_for_status()
-                data = r.json()
+                data = r.text if as_text else r.json()
                 record_status(self.db, self.provider, True)
                 return data
             except Exception as exc:  # noqa: BLE001 - recorded then re-raised

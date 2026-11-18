@@ -1,8 +1,10 @@
 """Provider-backed intelligence: economic/earnings calendar, token unlocks, provider health.
 
-Mounted under /api/analytics/intel. Read-only; nothing here can place an order. Provider failures are reported
+Mounted by app.main's router loop at /api/analytics/intel (independent of app.api.analytics, so a failure here never
+disables the other analytics routes). Read-only; nothing here can place an order. Provider failures are reported
 as structured errors (never a fabricated empty success).
 """
+import asyncio
 import hmac
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -13,12 +15,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from app.config import get_settings
 from app.providers import intel as intel_logic
 from app.providers.feed import to_readiness_events
+from app.providers.health import build_health_center, schedule_auto_verification, verify_all
+from app.providers.whale_alert import summarize_flows
 from app.providers.base import ProviderError
 from app.providers.registry import Registry, get_registry
 from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti.api.intel")
-router = APIRouter(prefix="/intel", tags=["analytics-intel"])
+router = APIRouter(prefix="/api/analytics/intel", tags=["analytics-intel"])
 
 _STATUS = {"not_configured": 503, "auth": 502, "plan_restricted": 502, "rate_limited": 429, "circuit_open": 503,
            "bad_request": 422, "bad_response": 502, "upstream": 502}
@@ -42,9 +46,24 @@ async def provider_health_log(limit: int = Query(100, ge=1, le=200), reg: Regist
 
 @router.post("/providers/probe")
 async def provider_probe(reg: Registry = Depends(get_registry), _auth=Depends(require_api_key)):
-    """Real, read-only request per provider (spends a small amount of quota). Authenticated."""
-    return {"fmp": await reg.fmp.probe() if reg.fmp.configured else {"status": "not_configured"},
-            "tokenomist": await reg.tokenomist.probe() if reg.tokenomist.configured else {"status": "not_configured"}}
+    """Real, read-only requests against every configured provider (spends a little quota). Authenticated; results are recorded."""
+    return await verify_all(reg)
+
+
+@router.get("/health-center")
+async def health_center(auto_verify: bool = True, reg: Registry = Depends(get_registry)):
+    """Integration Health Center data. With auto_verify, configured providers that were never verified (or whose verification
+    expired) are probed in the background; a provider is only 'ok' after a real request succeeded."""
+    scheduled = schedule_auto_verification(reg) if auto_verify else []
+    return {**build_health_center(reg), "auto_verification_scheduled": scheduled}
+
+
+@router.post("/health-center/verify")
+async def health_center_verify(only: Optional[str] = None, reg: Registry = Depends(get_registry), _auth=Depends(require_api_key)):
+    """Verify now (authenticated). `only` is a comma list of: fmp, tokenomist, whale_alert."""
+    names = [n.strip() for n in only.split(",") if n.strip()] if only else None
+    results = await verify_all(reg, names)
+    return {"verification": results, **build_health_center(reg)}
 
 
 @router.get("/calendar/economic")
@@ -64,11 +83,12 @@ async def economic_calendar(days: int = Query(7, ge=1, le=90), currencies: Optio
 def _feed_auth(authorization: Optional[str] = Header(default=None), reg: Registry = Depends(get_registry)) -> None:
     """Bearer check for the Worker's ETI_EVENT_FEED_TOKEN. Fails closed in production when no token is configured."""
     if not reg.event_feed_token:
-        if (get_settings().app_env or "").strip().lower() in PROTECTED_ENVS:
+        if (getattr(get_settings(), "app_env", "") or "").strip().lower() in PROTECTED_ENVS:
             raise HTTPException(status_code=503, detail="EVENT_FEED_TOKEN is not configured")
         return
     supplied = authorization[7:] if authorization and authorization.startswith("Bearer ") else ""
     if not hmac.compare_digest(supplied.encode(), reg.event_feed_token.encode()):
+        reg.feed.record_rejected()
         raise HTTPException(status_code=401, detail="invalid feed token")
 
 
@@ -80,8 +100,9 @@ async def readiness_event_feed(days: int = Query(14, ge=1, le=30), reg: Registry
         res, attempts = await reg.capabilities["calendar"].call("economic_calendar", start - timedelta(days=1), start + timedelta(days=days))
     except ProviderError as e:
         raise _http(e)
-    return {**to_readiness_events(res.data), "source": res.provider, "generated_at": res.fetched_at.isoformat(),
-            "failover_attempts": attempts}
+    mapped = to_readiness_events(res.data)
+    reg.feed.record_ok(len(mapped["events"]))
+    return {**mapped, "source": res.provider, "generated_at": res.fetched_at.isoformat(), "failover_attempts": attempts}
 
 
 @router.get("/calendar/earnings")
@@ -125,3 +146,44 @@ async def token_unlocks(token_id: str, days: int = Query(30, ge=1, le=365), reg:
     out = intel_logic.unlock_risk(ev.data, meta.data[0], now, horizon_days=days)
     return {"token_id": token_id, **out, "provenance": ev.provenance(), "failover_attempts": attempts,
             "corroboration": intel_logic.corroborate([{"provider": ev.provider}])}
+
+
+@router.get("/fundamentals/{symbol}")
+async def fundamentals(symbol: str, period: str = Query("FY", pattern="^(FY|Q1|Q2|Q3|Q4)$"), limit: int = Query(4, ge=1, le=12),
+                       reg: Registry = Depends(get_registry)):
+    """FMP profile, quote, income statements and key metrics. Sections are independent: one failing section never hides the others."""
+    cap = reg.capabilities["fundamentals"]
+    sections: dict[str, Any] = {}
+    errors: list[ProviderError] = []
+
+    async def section(name: str, method: str, *args: Any) -> None:
+        try:
+            res, _ = await cap.call(method, *args)
+            sections[name] = {"status": "ok", "data": res.data, "provenance": res.provenance()}
+        except ProviderError as e:
+            errors.append(e)
+            sections[name] = {"status": "error", "error": e.kind}
+
+    await asyncio.gather(section("profile", "company_profile", symbol), section("quote", "quote", symbol),
+                         section("income_statements", "income_statements", symbol, period, limit),
+                         section("key_metrics", "key_metrics", symbol, period, limit))
+    if all(v["status"] == "error" for v in sections.values()):
+        raise _http(errors[0])
+    return {"symbol": symbol.upper(), "period": period, "sections": sections,
+            "corroboration": intel_logic.corroborate([{"provider": "fmp"}]),
+            "notes": ["FMP is one provider; ETI's SEC-based screens (app/alpha/fundamentals.py) are an independent source for cross-checking.",
+                      "Figures are as reported by the provider; check units and restatements before relying on them."]}
+
+
+@router.get("/whales/{blockchain}/{symbol}")
+async def whale_flows(blockchain: str, symbol: str, lookback_minutes: int = Query(60, ge=1, le=1440),
+                      min_usd: float = Query(1_000_000, ge=0, allow_inf_nan=False), reg: Registry = Depends(get_registry)):
+    """Recent large transfers (Whale Alert Enterprise REST), classified as exchange inflow/outflow, wallet-to-wallet, internal or mint/burn.
+    Transfers are not trades: no buy/sell signal is produced."""
+    try:
+        res, attempts = await reg.capabilities["whale_activity"].call("recent_transactions", blockchain, symbol, lookback_minutes, min_usd)
+    except ProviderError as e:
+        raise _http(e)
+    return {"blockchain": blockchain.lower(), "symbol": symbol.upper(), "summary": summarize_flows(res.data), "flows": res.data[:200],
+            "provenance": res.provenance(), "failover_attempts": attempts,
+            "corroboration": intel_logic.corroborate([{"provider": res.provider}])}

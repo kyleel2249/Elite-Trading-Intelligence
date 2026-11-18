@@ -52,6 +52,6 @@ export function inferAssetClass(symbol: string): AssetClass {
   if (/(USDT|USDC|BUSD|FDUSD|BTC|ETH)$/.test(s) && s.length > 5) return "crypto";
   const fx = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD"];
   if (s.length === 6 && fx.includes(s.slice(0, 3)) && fx.includes(s.slice(3))) return "fx";
-  if (/^[A-Z]{1,5}$/.test(s)) return "stock";
+  if (/^[A-Z]{1,5}(\.[A-Z]{1,2})?$/.test(s)) return "stock";
   return "unknown";
 }

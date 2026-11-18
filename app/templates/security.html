@@ -1,0 +1,138 @@
+{% extends "eti_base.html" %}
+{% block title %}Security & Compliance{% endblock %}
+{% block content %}
+<style>#main .grid > *{min-width:0}#main td,#main th{overflow-wrap:anywhere;word-break:break-word}#main .scroll table{width:100%}#main input{max-width:100%}</style>
+<h1>Security &amp; compliance</h1>
+<div class="sub">Role-based access, MFA step-up, multi-signature approvals, a tamper-evident audit log, withdrawal allowlist, transaction limits, fraud detection and encrypted disaster recovery. Privileged actions need the one-time code below (kept in memory only, never stored).</div>
+
+<section class="panel" style="margin-top:12px" aria-labelledby="h-id">
+  <h2 id="h-id">Your access <span class="chip" id="me-chip">loading…</span></h2>
+  <div class="kpis" id="me-kpis" aria-live="polite"></div>
+  <form class="form" id="f-mfa" style="margin-top:8px">
+    <label>MFA code for privileged actions (TOTP or recovery code)<input id="mfa-code" inputmode="numeric" autocomplete="one-time-code" maxlength="16" placeholder="123456"></label>
+    <div><button class="btn sm" type="button" id="b-enroll">Enrol / re-enrol MFA</button> <button class="btn sm" type="button" id="b-confirm">Confirm enrolment code</button></div>
+  </form>
+  <div id="mfa-out" class="sub" aria-live="polite"></div>
+</section>
+
+<section class="panel" style="margin-top:12px" aria-labelledby="h-po"><h2 id="h-po">Security posture <button class="btn sm" id="b-posture" type="button">Refresh</button></h2><div id="posture"></div></section>
+
+<div class="grid" style="margin-top:12px">
+  <section class="panel s6" aria-labelledby="h-ap"><h2 id="h-ap">Multi-signature approvals</h2>
+    <form class="form" id="f-appr"><label>Sealed quote id (from a previewed send)<input name="quote_id" autocomplete="off" required></label><label>Reason<input name="reason" maxlength="240"></label><button class="btn sm primary" type="submit">Request approval</button></form>
+    <div id="approvals"></div></section>
+  <section class="panel s6" aria-labelledby="h-al"><h2 id="h-al">Withdrawal allowlist <span class="chip" id="al-chip"></span></h2>
+    <form class="form" id="f-allow"><label>Network<input name="network" value="ethereum_sepolia" required></label><label>Address<input name="address" required autocomplete="off"></label><label>Label<input name="label" maxlength="64"></label><button class="btn sm primary" type="submit">Propose destination</button></form>
+    <div id="allowlist"></div></section>
+</div>
+
+<div class="grid" style="margin-top:12px">
+  <section class="panel s6" aria-labelledby="h-li"><h2 id="h-li">Transaction limits</h2>
+    <form class="form" id="f-limit"><label>Role (or *)<input name="role" value="*"></label><label>Network (or *)<input name="network" value="*"></label>
+      <label>Per-transaction (wei)<input name="per_tx_wei" inputmode="numeric"></label><label>24h total (wei)<input name="daily_wei" inputmode="numeric"></label><label>No approval at or below (wei)<input name="approval_above_wei" inputmode="numeric"></label><button class="btn sm primary" type="submit">Save limit</button></form>
+    <div id="limits"></div></section>
+  <section class="panel s6" aria-labelledby="h-fr"><h2 id="h-fr">Fraud alerts &amp; account signals</h2><div id="fraud"></div></section>
+</div>
+
+<div class="grid" style="margin-top:12px">
+  <section class="panel s6" aria-labelledby="h-au"><h2 id="h-au">Audit log <span class="chip" id="au-chip"></span> <button class="btn sm" id="b-verify" type="button">Verify chain</button></h2><div id="audit"></div></section>
+  <section class="panel s6" aria-labelledby="h-dr"><h2 id="h-dr">Disaster recovery</h2>
+    <div id="dr-status" class="sub"></div>
+    <form class="form" id="f-dr"><label>Backup passphrase (14+ characters; never stored)<input name="passphrase" type="password" minlength="14" autocomplete="new-password" required></label>
+      <div><button class="btn sm" type="button" id="b-drill">Run recovery drill</button> <button class="btn sm primary" type="button" id="b-backup">Download encrypted backup</button></div></form>
+    <p class="sub">Restore into an empty database with <code>python -m app.governance.dr restore backup.json</code> (passphrase in GOV_BACKUP_PASSPHRASE). Back up GOVERNANCE_KEY separately and offline.</p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const { $, el, toast, busy, apiKey } = ETI;
+  const code = () => ($('#mfa-code').value || '').trim();
+  async function call(path, opts) {
+    opts = opts || {};
+    const h = {};
+    if (apiKey.get()) h['X-API-Key'] = apiKey.get();
+    if (code()) h['X-MFA-Code'] = code();
+    if (opts.body !== undefined) h['Content-Type'] = 'application/json';
+    const r = await fetch('/api/security' + path, { method: opts.method || 'GET', headers: h, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined });
+    const t = await r.text(); let d = null; try { d = t ? JSON.parse(t) : null; } catch (_) { d = t; }
+    if (!r.ok) throw new Error((d && d.detail && (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail))) || (r.status + ' ' + r.statusText));
+    $('#mfa-code').value = '';                 // a TOTP code is single-use: clear it after every call
+    return d;
+  }
+  const tag = (s) => el('span', { class: 'chip ' + (s === 'pass' || s === 'approved' || s === 'executed' ? 'pos' : s === 'fail' || s === 'rejected' || s === 'block' ? 'neg' : ''), text: s });
+  function tbl(cols, rows, empty) {
+    if (!rows.length) return el('p', { class: 'sub', text: empty || 'Nothing yet.' });
+    return el('div', { class: 'scroll' }, el('table', {}, el('thead', {}, el('tr', {}, cols.map((c) => el('th', { text: c[0] })))),
+      el('tbody', {}, rows.map((r) => el('tr', {}, cols.map((c) => { const v = c[1](r); return el('td', {}, v instanceof Node ? v : document.createTextNode(v == null ? '' : String(v))); }))))));
+  }
+  const act = (label, fn, kind) => el('button', { class: 'btn sm ' + (kind || ''), type: 'button', onclick: (e) => busy(e.currentTarget, async () => { try { await fn(); await all(); } catch (x) { toast(x.message, 'bad'); } }) }, label);
+
+  async function loadMe() {
+    try {
+      const m = await call('/me');
+      $('#me-chip').textContent = m.role;
+      $('#me-kpis').replaceChildren(...[['Principal', m.name], ['Role', m.role], ['Auth via', m.via], ['MFA enrolled', m.mfa_enrolled ? 'yes' : 'no'], ['MFA enforced', m.mfa_required ? 'yes' : 'no (local)']]
+        .map((x) => el('div', { class: 'kpi' }, el('div', { class: 'l', text: x[0] }), el('div', { class: 'v', text: x[1] }))));
+    } catch (e) { $('#me-chip').textContent = 'no access'; $('#me-kpis').replaceChildren(el('p', { class: 'neg', text: e.message })); }
+  }
+  async function loadPosture() {
+    const p = await call('/posture');
+    $('#posture').replaceChildren(el('p', { class: 'sub', text: Object.entries(p.summary).map((x) => x[1] + ' ' + x[0]).join(' · ') + ' · environment: ' + p.environment }),
+      tbl([['Control', (c) => c.title], ['Status', (c) => tag(c.status)], ['Evidence', (c) => c.detail]], p.checks));
+  }
+  async function loadApprovals() {
+    const d = await call('/approvals');
+    $('#approvals').replaceChildren(tbl([['#', (a) => a.id], ['Action', (a) => a.action], ['By', (a) => a.requester], ['Signed', (a) => a.approvals + '/' + a.required], ['Status', (a) => tag(a.status)],
+      ['', (a) => a.status === 'pending' ? el('span', {}, act('Approve', () => call('/approvals/' + a.id + '/vote', { method: 'POST', body: { decision: 'approve' } }), 'ok'), ' ', act('Reject', () => call('/approvals/' + a.id + '/vote', { method: 'POST', body: { decision: 'reject' } }), 'danger')) : '']], d.approvals, 'No approval requests.'));
+  }
+  async function loadAllow() {
+    const d = await call('/allowlist');
+    $('#al-chip').textContent = d.cooldown_hours + 'h cooling-off';
+    $('#allowlist').replaceChildren(tbl([['Network', (e) => e.network], ['Address', (e) => e.address], ['Status', (e) => tag(e.usable ? 'usable' : e.status)], ['Usable from', (e) => e.activates_at || ''],
+      ['', (e) => el('span', {}, e.status === 'pending' ? act('Activate (approved #' + e.approval_id + ')', () => call('/allowlist/' + e.id + '/activate', { method: 'POST', body: { approval_id: e.approval_id } })) : '', ' ',
+        e.status !== 'revoked' ? act('Revoke', () => call('/allowlist/' + e.id, { method: 'DELETE' }), 'danger') : '')]], d.entries, 'No destinations proposed.'));
+  }
+  async function loadLimits() {
+    const d = await call('/limits');
+    $('#limits').replaceChildren(tbl([['Role', (l) => l.role], ['Network', (l) => l.network], ['Per tx', (l) => l.per_tx_wei || '—'], ['24h', (l) => l.daily_wei || '—'], ['No-approval ≤', (l) => l.approval_above_wei || '—'],
+      ['', (l) => act('Delete', () => call('/limits/' + l.id, { method: 'DELETE' }), 'danger')]], d.limits, 'No governance limits set (chain policy caps still apply).'));
+  }
+  async function loadFraud() {
+    const d = await call('/fraud/alerts');
+    $('#fraud').replaceChildren(tbl([['When', (a) => a.created_at.slice(0, 19)], ['Verdict', (a) => tag(a.verdict)], ['Score', (a) => a.score], ['Subject', (a) => a.subject], ['Rules', (a) => a.rules.map((r) => r.rule).join(', ')],
+      ['', (a) => a.status === 'open' ? act('Resolve', async () => { const t = window.prompt('Resolution note'); if (!t) throw new Error('A resolution note is required'); await call('/fraud/alerts/' + a.id + '/resolve', { method: 'POST', body: { resolution: t } }); }) : 'resolved']], d.alerts, 'No fraud alerts.'),
+      d.account_signals.length ? tbl([['Account signal', (s) => s.signal], ['Severity', (s) => s.severity], ['Detail', (s) => s.detail]], d.account_signals) : el('p', { class: 'sub', text: 'No account-takeover signals in the last 24h.' }));
+  }
+  async function loadAudit() {
+    const [d, h] = await Promise.all([call('/audit?limit=30'), call('/audit/head')]);
+    $('#au-chip').textContent = 'head #' + h.seq + ' ' + h.hash.slice(0, 12);
+    $('#audit').replaceChildren(tbl([['#', (r) => r.seq], ['Time', (r) => r.ts.slice(0, 19)], ['Actor', (r) => r.actor], ['Action', (r) => r.action], ['Subject', (r) => r.subject]], d.entries));
+  }
+  async function loadDr() { const d = await call('/dr/status'); $('#dr-status').textContent = 'Last backup: ' + (d.last.backup || 'never') + ' · last drill: ' + (d.last.drill || 'never') + ' · KDF ' + d.kdf_iterations + ' iterations'; }
+  const section = (fn, id) => fn().catch((e) => { const n = $(id); if (n) n.replaceChildren(el('p', { class: 'sub neg', text: e.message })); });
+  async function all() {
+    await Promise.all([loadMe(), section(loadPosture, '#posture'), section(loadApprovals, '#approvals'), section(loadAllow, '#allowlist'), section(loadLimits, '#limits'),
+      section(loadFraud, '#fraud'), section(loadAudit, '#audit'), section(loadDr, '#dr-status')]);
+  }
+  const form = (id, fn) => $(id).addEventListener('submit', (e) => { e.preventDefault(); busy(e.submitter || e.target.querySelector('button'), async () => { try { await fn(Object.fromEntries(new FormData(e.target))); await all(); } catch (x) { toast(x.message, 'bad'); } }); });
+  form('#f-appr', (d) => call('/approvals', { method: 'POST', body: { action: 'chain.send', quote_id: d.quote_id.trim(), reason: d.reason || null } }).then(() => toast('Approval requested', 'ok')));
+  form('#f-allow', (d) => call('/allowlist', { method: 'POST', body: { network: d.network.trim(), address: d.address.trim(), label: d.label || null } }).then(() => toast('Proposed: now collect approver votes', 'ok')));
+  form('#f-limit', (d) => call('/limits', { method: 'PUT', body: { role: d.role.trim() || '*', network: d.network.trim() || '*', per_tx_wei: d.per_tx_wei || null, daily_wei: d.daily_wei || null, approval_above_wei: d.approval_above_wei || null } }).then(() => toast('Limit saved', 'ok')));
+  $('#b-posture').addEventListener('click', (e) => busy(e.currentTarget, loadPosture));
+  $('#b-verify').addEventListener('click', (e) => busy(e.currentTarget, async () => { const v = await call('/audit/verify'); toast(v.ok ? 'Audit chain intact (' + v.rows + ' rows)' : 'CHAIN BROKEN at #' + v.broken_at + ': ' + v.reason, v.ok ? 'ok' : 'bad'); }));
+  $('#b-enroll').addEventListener('click', (e) => busy(e.currentTarget, async () => {
+    try { const r = await call('/mfa/enroll', { method: 'POST' });
+      $('#mfa-out').replaceChildren(el('p', {}, 'Add this secret to an authenticator app, then enter a code and press Confirm. Secret: ', el('code', { text: r.secret })), el('p', { class: 'sub', text: r.otpauth_uri })); } catch (x) { toast(x.message, 'bad'); } }));
+  $('#b-confirm').addEventListener('click', (e) => busy(e.currentTarget, async () => {
+    try { const r = await call('/mfa/confirm', { method: 'POST', body: { code: code() } });
+      $('#mfa-out').replaceChildren(el('p', { class: 'pos', text: 'MFA enrolled. Save these single-use recovery codes now; they are not shown again:' }), el('pre', { text: r.recovery_codes.join('\n') })); await loadMe(); } catch (x) { toast(x.message, 'bad'); } }));
+  const pass = () => $('#f-dr').elements.passphrase.value;
+  $('#b-drill').addEventListener('click', (e) => busy(e.currentTarget, async () => { try { const r = await call('/dr/drill', { method: 'POST', body: { passphrase: pass() } }); toast(r.ok ? 'Recovery drill passed' : 'Recovery drill FAILED', r.ok ? 'ok' : 'bad'); await loadDr(); } catch (x) { toast(x.message, 'bad'); } }));
+  $('#b-backup').addEventListener('click', (e) => busy(e.currentTarget, async () => { try { const r = await call('/dr/backup', { method: 'POST', body: { passphrase: pass() } });
+    ETI.download('eti-governance-backup-' + r.meta.created.slice(0, 10) + '.json', JSON.stringify(r), 'application/json'); toast('Encrypted backup downloaded', 'ok'); await loadDr(); } catch (x) { toast(x.message, 'bad'); } }));
+  document.addEventListener('DOMContentLoaded', all);
+})();
+</script>
+{% endblock %}

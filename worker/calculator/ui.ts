@@ -1,25 +1,37 @@
 /**
  * Dashboard fragments for the profit and leverage calculator. Interpolated into the dashboard template literal in
  * worker/index.ts, so every string here must contain no backticks, no dollar-brace sequences and no backslashes.
- * The arithmetic is core.ts's computePosition, embedded verbatim. Nothing here places an order or sends data anywhere
- * except one read-only GET to /api/markets/classify to choose sensible contract-size defaults for the chart symbol.
+ * The arithmetic is core.ts's computePosition, embedded verbatim.
+ *
+ * The calculator is anchored to the ENTRY price (typed, taken from the chart price, or set by clicking the chart).
+ * "Place entry + stop + target" does not talk to any venue itself: it copies the calculation into the dashboard's existing
+ * order ticket (symbol, quantity, limit price) and the protective-levels plan (stop and TP1), then calls the dashboard's own
+ * submitOrder('buy'), so every existing safeguard, the final confirmation dialog and the server-side checks still apply.
+ * A limit entry rests on the book and fills automatically when the market reaches it; the stop and target then exit
+ * automatically on INTERNAL PAPER (on exchange testnet they are alert-only, as the portfolio panel already states).
+ * The only network call made here is one read-only GET to /api/markets/classify to choose contract-size defaults.
+ *
+ * It also carries the roomy, scrollable chart layout (worker/ui/chart-layout.ts) because this module is already
+ * interpolated into the dashboard after the chart code runs.
  */
 import { computePosition } from "./core.ts";
+import { CHART_LAYOUT_CSS, CHART_LAYOUT_JS } from "../ui/chart-layout.ts";
 
-export const CALC_CSS = `
+export const CALC_CSS = CHART_LAYOUT_CSS + `
 .cl{margin-top:14px}.cl h2{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 .clgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0}.clgrid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);min-width:0}
 .clgrid input,.clgrid select{width:100%;min-width:0;padding:8px 10px;font-size:13px}.clgrid .wide{grid-column:span 2}.clgrid input[type=range]{padding:0;height:34px}
 .clbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}.clbar button{padding:6px 12px;font-size:12px}
-.clinfo{border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12px}.clwarn{border:1px solid #b65c38;color:#ffb08c;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12px}.clerr{border:1px solid #7c2f3d;color:#ff9aab;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12px}
+.clinfo{border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12px}.clwarn{border:1px solid #b65c38;color:#ffb08c;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12px}.clerr{border:1px solid #7c2f3d;color:#ff9aab;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12px}.clok{border:1px solid #1f6f55;color:#7be3b9;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12px}
 .clkpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:10px 0}.clkpi{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#0b1422;min-width:0}.clkpi span{display:block;font-size:11px;color:var(--muted)}.clkpi b{display:block;font-size:15px;overflow-wrap:anywhere}
 .cl .pos{color:#21d69a}.cl .neg{color:#ff637d}.clwrap{overflow-x:auto;border:1px solid #1d2a3e;border-radius:10px}.cl table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}.cl th{color:var(--muted);text-align:left;font-weight:600;padding:7px 9px;border-bottom:1px solid #1d2a3e}.cl td{padding:6px 9px;border-bottom:1px solid #121c2c}.cl tr.cur td{background:#10233a}.cl tr.imm td{color:#ff9aab}
+.clexec{border:1px solid #1d2a3e;border-radius:10px;padding:10px 12px;margin:12px 0;background:#0b1422}.clexec h3{font-size:13px;margin:0 0 6px}.clexec label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}.clexec .clchk{flex-direction:row;align-items:center;gap:6px}.clexec select{padding:7px 10px;font-size:13px;max-width:100%}.clexec button.clgo{padding:8px 16px;font-size:13px;border-color:#1f6f55;color:#7be3b9}
 @media(max-width:700px){.clgrid .wide{grid-column:span 1}}
 `;
 
 export const CALC_HTML = `
 <section class="panel cl" id="calcPanel" aria-labelledby="calcTitle">
-<h2 id="calcTitle">Profit &amp; Leverage Calculator <span class="muted" style="font-size:12px;font-weight:400">planning only · no orders are placed</span></h2>
+<h2 id="calcTitle">Profit &amp; Leverage Calculator <span class="muted" style="font-size:12px;font-weight:400">anchored to your entry price · can place the order for you (paper / testnet)</span></h2>
 <div class="clinfo" id="clSym" aria-live="polite">Chart symbol: not loaded yet.</div>
 <div class="clgrid">
 <label>Direction<select id="clSide"><option value="buy">Long (buy)</option><option value="sell">Short (sell)</option></select></label>
@@ -40,12 +52,17 @@ export const CALC_HTML = `
 <label>Quote to account rate<input id="clFx" type="number" inputmode="decimal" min="0" step="any" value="1" title="1 for USD/USDT quotes. For a GBP-quoted pair into a USD account, enter the GBP to USD rate."></label>
 <label>Target net profit (optional)<input id="clTp" type="number" inputmode="decimal" step="any" placeholder="amount, account currency"></label>
 </div>
-<div class="clbar"><button type="button" id="clUseLast">Use chart price as entry</button><button type="button" id="clReset">Reset</button><span class="muted" id="clUnits" style="font-size:12px"></span></div>
+<div class="clbar"><button type="button" id="clUseLast">Use chart price as entry</button><button type="button" id="clReset">Reset</button><label class="clchk muted" style="display:inline-flex;flex-direction:row;gap:6px;align-items:center;font-size:12px"><input type="checkbox" id="clLink" checked> Clicking the chart sets the entry</label><span class="muted" id="clUnits" style="font-size:12px"></span></div>
+<div class="clexec" id="clExec">
+<h3>Execute this plan automatically <span class="muted" style="font-weight:400">paper / testnet only · uses the order panel's venue, safeguards and confirmation</span></h3>
+<div class="clbar"><label>Entry order<select id="clMode" aria-label="Entry order type"><option value="limit">Limit at the entry price (rests, then fills automatically when the market reaches it)</option><option value="market">Market now at the live chart price</option></select></label><button type="button" id="clPlace" class="clgo">Place entry + stop + target</button></div>
+<div class="clinfo" id="clPlaceMsg" aria-live="polite">Fill in the entry (and optionally stop and target), then place it. The stop and target are attached as the order's protective exits.</div>
+</div>
 <div id="clMsgs" aria-live="polite"></div>
 <div class="clkpis" id="clKpis"></div>
 <h3 style="font-size:13px;margin:14px 0 6px">Leverage ladder <span class="muted" style="font-weight:400">same position size at other leverage levels</span></h3>
 <div class="clwrap"><table id="clLadder"><thead><tr><th>Leverage</th><th>Margin</th><th>Est. liquidation</th><th>Distance</th><th>Net at exit</th><th>ROI on margin</th></tr></thead><tbody></tbody></table></div>
-<p class="muted" style="font-size:11px;margin:8px 0 0">Liquidation is an estimate from a standard isolated-margin model (entry price, leverage and the maintenance margin you enter). The venue's own risk engine, mark price, margin tiers and funding decide the real figure. Fee, slippage and maintenance defaults are assumptions, not your account's rates. Linear contracts only; inverse contracts are not modelled.</p>
+<p class="muted" style="font-size:11px;margin:8px 0 0">Liquidation is an estimate from a standard isolated-margin model (entry price, leverage and the maintenance margin you enter). The venue's own risk engine, mark price, margin tiers and funding decide the real figure. Fee, slippage and maintenance defaults are assumptions, not your account's rates. Linear contracts only; inverse contracts are not modelled. Spot paper and testnet orders are unleveraged and long-only: leverage here only changes the margin and liquidation estimates.</p>
 </section>
 `;
 
@@ -64,10 +81,13 @@ function pct(v){return v===null||!isFinite(v)?'-':v.toFixed(2)+'%';}
 function kpi(label,val,cls){var d=document.createElement('div');d.className='clkpi';var s=document.createElement('span');s.textContent=label;var b=document.createElement('b');b.textContent=val;if(cls)b.className=cls;d.appendChild(s);d.appendChild(b);return d;}
 function msg(cls,t){var d=document.createElement('div');d.className=cls;d.textContent=t;return d;}
 function sign(v){return v===null||!isFinite(v)?'':v>=0?'pos':'neg';}
+function inputs(){
+ return {side:g('clSide').value,entry:n('clEntry'),exit:n('clExit'),stop:n('clStop'),sizeBy:g('clSizeBy').value,quantity:n('clQty'),margin:n('clMargin'),leverage:n('clLev'),feePct:n('clFee'),slippagePct:n('clSlip'),fundingPct:n('clFund'),mmrPct:n('clMmr'),contractSize:n('clCs'),fxRate:n('clFx'),targetProfit:n('clTp')};
+}
 function run(){
  var sizeBy=g('clSizeBy').value;
  g('clQtyL').style.display=sizeBy==='quantity'?'':'none';g('clMarginL').style.display=sizeBy==='margin'?'':'none';
- var r=computePosition({side:g('clSide').value,entry:n('clEntry'),exit:n('clExit'),stop:n('clStop'),sizeBy:sizeBy,quantity:n('clQty'),margin:n('clMargin'),leverage:n('clLev'),feePct:n('clFee'),slippagePct:n('clSlip'),fundingPct:n('clFund'),mmrPct:n('clMmr'),contractSize:n('clCs'),fxRate:n('clFx'),targetProfit:n('clTp')});
+ var r=computePosition(inputs());
  var msgs=g('clMsgs'),k=g('clKpis'),tb=g('clLadder').getElementsByTagName('tbody')[0];msgs.textContent='';k.textContent='';tb.textContent='';g('clUnits').textContent='';
  if(!r.ok){(r.errors||[]).forEach(function(e){msgs.appendChild(msg('clerr',e));});return;}
  (r.warnings||[]).forEach(function(w){msgs.appendChild(msg('clwarn',w));});
@@ -94,6 +114,38 @@ IDS.forEach(function(i){if(i!=='clLev'&&i!=='clInst'){g(i).addEventListener('inp
 function lastPrice(){var t=$('last').textContent.replace(/,/g,'').trim(),v=Number(t);return isFinite(v)&&v>0?v:null;}
 g('clUseLast').addEventListener('click',function(){var v=lastPrice();if(v===null){g('clSym').textContent='No live chart price yet: type the entry price manually.';return;}g('clEntry').value=v;run();});
 g('clReset').addEventListener('click',function(){g('clSide').value='buy';g('clInst').value='crypto';applyPreset();['clEntry','clExit','clStop','clTp'].forEach(function(i){g(i).value='';});g('clSizeBy').value='quantity';g('clQty').value=1;g('clMargin').value=100;g('clFund').value=0;g('clMmr').value=0.5;g('clFx').value=1;setLev(10);run();});
+/* Entry follows chart clicks: the chart ticket sets its price field first, then this listener copies it into the entry. */
+if($('stack'))$('stack').addEventListener('click',function(){
+ if(!g('clLink').checked||!$('ctPrice'))return;
+ var v=Number($('ctPrice').value);
+ if(isFinite(v)&&v>0){g('clEntry').value=v;run();}
+});
+/* Place entry + protective exits through the dashboard's own order ticket and submitOrder (confirmation dialog included). */
+function fire(id,type){var e=$(id);if(e)e.dispatchEvent(new Event(type,{bubbles:true}));}
+function say(t,cls){var m=g('clPlaceMsg');m.className=cls||'clinfo';m.textContent=t;}
+g('clPlace').addEventListener('click',function(){
+ if(g('clSide').value!=='buy'){say('Spot paper and testnet trading is long-only, so a short plan cannot be placed here. Set Direction to Long, or keep this plan for reference.','clerr');return;}
+ if(typeof submitOrder!=='function'||!$('orderType')||!$('orderQuantity')){say('The order panel is not available on this page.','clerr');return;}
+ var mode=g('clMode').value,live=lastPrice(),entry=n('clEntry'),stop=n('clStop'),exit=n('clExit');
+ if(mode==='market'){if(live===null){say('No live chart price yet: wait for the chart to load, or use a limit entry.','clerr');return;}entry=live;g('clEntry').value=entry;}
+ if(entry===null||!(entry>0)){say('Enter the entry price first (or click the chart, or use the chart price).','clerr');return;}
+ var r=computePosition(inputs());
+ if(!r.ok){say('Fix the calculator first: '+(r.errors||[]).join(' | '),'clerr');return;}
+ var units=Math.floor(r.units*1e6)/1e6;
+ if(!(units>0)){say('The position size rounds to zero. Increase the quantity or margin.','clerr');return;}
+ if(stop!==null&&!(stop<entry)){say('For a long, the stop must be below the entry price.','clerr');return;}
+ if(exit!==null&&!(exit>entry)){say('For a long, the target must be above the entry price.','clerr');return;}
+ $('orderSymbol').value=$('symbol').value;
+ $('orderType').value=mode==='limit'?'limit':'market';fire('orderType','change');
+ if($('orderLimitPrice')){$('orderLimitPrice').value=mode==='limit'?entry:'';fire('orderLimitPrice','input');}
+ $('orderQuantity').value=units;fire('orderQuantity','input');
+ var pl={planStop:stop,planTp1:exit,planTp2:null,planTp3:null};
+ Object.keys(pl).forEach(function(k){if($(k))$(k).value=pl[k]===null?'':pl[k];});
+ var venue=$('orderBroker')?$('orderBroker').value:'eti_paper';
+ var lev=n('clLev');
+ say('Order ticket filled from this calculation: BUY '+px(units)+' '+$('symbol').value+(mode==='limit'?' limit at '+px(entry)+' (fills automatically when the market reaches it)':' at market (about '+px(entry)+')')+(stop!==null?', stop '+px(stop):'')+(exit!==null?', target '+px(exit):'')+'. Venue: '+venue+'. '+(lev&&lev>1?'Spot orders are unleveraged: this buys the full '+money(units*entry)+' of notional. ':'')+'Confirm in the dialog to submit.','clok');
+ submitOrder('buy');
+});
 var seq=0;
 async function symInfo(){
  var s=$('symbol').value,my=++seq;if(!s)return;
@@ -108,4 +160,4 @@ g('clInst').addEventListener('change',function(){g('clInst').dataset.auto='off';
 $('symbol').addEventListener('change',symInfo);$('symMarket').addEventListener('change',function(){setTimeout(symInfo,400);});
 setLev(g('clLev').value);run();symInfo();
 })();
-`;
+` + CHART_LAYOUT_JS;

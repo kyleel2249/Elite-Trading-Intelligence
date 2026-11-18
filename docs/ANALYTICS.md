@@ -1,53 +1,45 @@
 # ETI analytics: implementation matrix
 
-See **[CAPABILITY_MAP.md](CAPABILITY_MAP.md)** for how the 31 requested items map onto existing ETI code.
+See **[CAPABILITY_MAP.md](CAPABILITY_MAP.md)** for how the 31 requested items map onto existing ETI code (its rows for calendars,
+token unlocks and whale activity are superseded by [PROVIDERS.md](PROVIDERS.md)).
 
-Status key: **UNIT** = covered by offline unit tests (synthetic data or fake transport). **ROUTE** = also exercised through
-FastAPI's TestClient against the real app with fake market/provider HTTP (`tests/test_analytics_api.py`). **NOT RUN LIVE** = never
-executed against a live provider or exchange. Nothing below is classified PASS, because PASS requires verification against real data.
+Status key: **UNIT** = offline unit tests (synthetic data or fake transport). **ROUTE** = also exercised through FastAPI's
+TestClient against the real app with fake market/provider HTTP. **NOT RUN LIVE** = never executed against a live provider or
+exchange. Nothing below is PASS: PASS requires verification against real data, which the Integration Health Center and
+`scripts/verify_deployment.py` provide on a deployed instance.
 
-All routes are under `/api/analytics`. Auth: none for GET/compute routes; `POST /intel/providers/probe` needs `X-API-Key`;
-`GET /intel/calendar/feed` needs `Authorization: Bearer $EVENT_FEED_TOKEN` (required when `APP_ENV` is production/staging).
-CPU-heavy routes are bounded (Monte Carlo paths x horizon <= 2,000,000; walk-forward grid <= 60 combinations) and run in a worker thread.
+All routes are under `/api/analytics`. Auth: none for GET/compute routes; `POST /intel/providers/probe` and
+`POST /intel/health-center/verify` need `X-API-Key`; `GET /intel/calendar/feed` needs `Authorization: Bearer $EVENT_FEED_TOKEN`
+(required when `APP_ENV` is production/staging). CPU-heavy routes are bounded (Monte Carlo paths x horizon <= 2,000,000; walk-forward
+grid <= 60 combinations) and run in a worker thread. The intel router is mounted once, by `app.main`'s router loop, at
+`/api/analytics/intel`.
 
 | Capability | Method + route | Provider / data | Status |
 |---|---|---|---|
-| Scan + ranking + watchlist | GET `/scan` | MarketService candles (Binance/Alpaca) | PARTIAL (UNIT + ROUTE with fake candles; NOT RUN LIVE) |
-| Regime | GET `/regime` | MarketService | PARTIAL (UNIT + ROUTE) |
-| Unusual volume | GET `/unusual-volume` | MarketService | PARTIAL (UNIT) |
-| Volatility breakout | GET `/volatility-breakout` | MarketService | PARTIAL (UNIT) |
-| Correlation | GET `/correlation` | MarketService | PARTIAL (UNIT + ROUTE) |
-| Monte Carlo | GET `/monte-carlo` | MarketService | PARTIAL (UNIT + ROUTE incl. size limit) |
+| Scan + ranking + watchlist | GET `/scan` | MarketService candles | PARTIAL (UNIT + ROUTE; NOT RUN LIVE) |
+| Regime / unusual volume / breakout | GET `/regime`, `/unusual-volume`, `/volatility-breakout` | MarketService | PARTIAL (UNIT; regime ROUTE) |
+| Correlation, Monte Carlo | GET `/correlation`, `/monte-carlo` | MarketService | PARTIAL (UNIT + ROUTE incl. limits) |
 | Stress / scenarios | POST `/stress`, `/scenario`; GET `/stress/scenarios` | request body | PARTIAL (UNIT + ROUTE) |
-| Walk-forward | POST `/walk-forward` | MarketService | PARTIAL (UNIT + ROUTE incl. grid limit) |
-| Strategy lab | POST `/strategy-lab/compare` | MarketService | PARTIAL (UNIT) |
-| Tax lots / CSV | POST `/tax/realized-gains` | request body | PARTIAL (UNIT + ROUTE; not tax advice) |
-| Multi-currency | POST `/portfolio/multi-currency` | caller FX rates | PARTIAL (UNIT) |
-| Live vs backtest | POST `/live-vs-backtest` | request body | PARTIAL (UNIT) |
-| Risk alerts | POST `/risk-alerts` | request body | PARTIAL (UNIT) |
-| Research dossier | POST `/research` | evidence in body + optional candles | PARTIAL (UNIT) |
-| NL query router | POST `/query` | none (rules) | PARTIAL (UNIT + ROUTE) |
-| Voice page | static `/static/assistant.html` | browser Web Speech API + `/query` | NOT RUN (JS syntax checked only) |
-| Provider health | GET `/intel/providers`, `/intel/providers/health-log` | in-process | PARTIAL (UNIT + ROUTE) |
-| Provider probe | POST `/intel/providers/probe` | FMP, Tokenomist (live) | BLOCKED until keys are set |
-| Economic calendar | GET `/intel/calendar/economic` | FMP | BLOCKED (ROUTE with fake FMP; no key verified) |
-| Readiness feed | GET `/intel/calendar/feed` | FMP -> Worker readiness format | BLOCKED (UNIT + ROUTE incl. bearer auth) |
-| Earnings calendar | GET `/intel/calendar/earnings` | FMP | BLOCKED |
-| Event risk | GET `/intel/event-risk` | FMP | BLOCKED (UNIT + ROUTE with fake FMP) |
-| Token unlocks | GET `/intel/unlocks/{token_id}` | Tokenomist | BLOCKED (UNIT + ROUTE with fake Tokenomist) |
-| Whale Alert adapter | none | Whale Alert | NOT BUILT (existing on-chain whale analysis: `app/alpha/whales.py`) |
+| Walk-forward, strategy lab | POST `/walk-forward`, `/strategy-lab/compare` | MarketService | PARTIAL (UNIT + ROUTE incl. grid limit) |
+| Tax lots, multi-currency, live vs backtest, risk alerts | POST `/tax/realized-gains`, `/portfolio/multi-currency`, `/live-vs-backtest`, `/risk-alerts` | request body | PARTIAL (UNIT; tax ROUTE; not tax advice) |
+| Research dossier, NL query | POST `/research`, `/query` | rules / evidence in body | PARTIAL (UNIT; query ROUTE) |
+| Voice page | `/static/assistant.html` | browser Web Speech API + `/query` | NOT RUN (JS syntax checked only) |
+| Health Center | GET `/intel/health-center`; POST `/intel/health-center/verify`; page `/static/integration_health.html` | in-process state from real requests | PARTIAL (UNIT + ROUTE; page not run in a browser) |
+| Provider health / probe | GET `/intel/providers`, `/intel/providers/health-log`; POST `/intel/providers/probe` | in-process | PARTIAL (UNIT + ROUTE) |
+| Economic calendar | GET `/intel/calendar/economic` | FMP | BLOCKED until a live verification succeeds (ROUTE with fake FMP) |
+| Readiness feed | GET `/intel/calendar/feed` | FMP -> Worker readiness format | BLOCKED until the Worker fetches it (UNIT + ROUTE incl. bearer auth) |
+| Earnings calendar | GET `/intel/calendar/earnings` | FMP | BLOCKED (live) |
+| Fundamentals | GET `/intel/fundamentals/{symbol}` | FMP profile/quote/income/key-metrics | BLOCKED (live); ROUTE incl. section independence |
+| Event risk | GET `/intel/event-risk` | FMP | BLOCKED (live); UNIT + ROUTE |
+| Token unlocks | GET `/intel/unlocks/{token_id}` | Tokenomist | BLOCKED (live); UNIT + ROUTE |
+| Whale transfers | GET `/intel/whales/{blockchain}/{symbol}` | Whale Alert Enterprise REST | BLOCKED (needs the Enterprise plan + key); UNIT + ROUTE |
 | Strategy marketplace | none | | NOT BUILT |
 
-Dependencies: Python stdlib only for `app/analytics`; `httpx` (already in requirements) for providers; `pydantic-settings` for provider env.
-New environment variables: `FMP_API_KEY`, `TOKENOMIST_API_KEY`, `EVENT_FEED_TOKEN`, `TOKENOMIST_CREDIT_RESERVE`, `WHALE_ALERT_API_KEY` (reserved).
+New environment variables: `FMP_API_KEY`, `TOKENOMIST_API_KEY`, `WHALE_ALERT_API_KEY` (optional), `EVENT_FEED_TOKEN`, `TOKENOMIST_CREDIT_RESERVE`.
 
 ## Verification status (honest)
-- GitHub Actions `test` job (real dependency install, compileall, full pytest, `import app.main`): passed on PR #8, which already contained the analytics and provider code (unit tests only).
-- PR #9 added the route-level tests; they exposed a real defect (provider failures flattened to a generic `upstream` error, so an unconfigured provider returned 502 instead of 503 `not_configured`). That was fixed on `main` in commit 5a2fdc9. The result of CI after that fix has not been observed by the analytics author; confirm the latest `main` run is green.
-- The Cloudflare "Workers Builds" check fails on PRs #7, #8 and #9 (it predates this work); its log is only in the Cloudflare dashboard.
-- No live provider or exchange request has been made. Live evidence: `PYTHONPATH=. python scripts/live_provider_check.py` with the keys, or the workflow template in `docs/live-provider-check.workflow.yml`.
+- GitHub Actions `test` job (real dependency install, compileall, full pytest, `import app.main`): passed on PR #8 (analytics + providers, unit tests only). PR #9 added route-level tests which exposed a real defect (provider failures flattened to `upstream`); fixed on `main` in 5a2fdc9. CI results after later merges were not observed by the analytics author: confirm the latest `main` run is green.
+- The Cloudflare "Workers Builds" check fails on PRs #7-#9 (predates this work); its log is only in the Cloudflare dashboard.
+- No live provider request has been made by the author. After the keys are set on the deployed backend, open `/static/integration_health.html`, press "Verify now", or run `scripts/verify_deployment.py`; only then can an integration be called operational.
 
-## Endpoint test plan against live data
-For each route: data compared with the provider's own site for 3 sample events/tokens; response time recorded; provider errors surface as the documented 4xx/5xx; quota consumption checked (`GET /intel/providers`).
-
-See `docs/PROVIDERS.md` for provider selection, pricing, limits and licence notes.
+See `docs/PROVIDERS.md` for provider selection, pricing, limits, event-feed wiring and licence notes.

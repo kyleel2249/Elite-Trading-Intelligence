@@ -5,6 +5,8 @@
 import { manageStop, type TradeLevels } from "./levels.ts";
 import type { OmnisignalResult } from "./omnisignal.ts";
 import type { ClosedTrade } from "./performance.ts";
+import { paperPolicyGate } from "../risk/paper-gate.ts";
+import type { RiskPolicy } from "../risk/policy.ts";
 
 export interface PaperConfig {
   startingEquity: number; feeRate: number; slippageBps: number; riskFraction: number; maxNotionalFraction: number; maxOpenPositions: number;
@@ -14,8 +16,11 @@ export interface PaperConfig {
   lossPauseMs: number;
   /** Optional hard cap on a single order's quantity (base units). null = no cap beyond the notional limits. */
   maxOrderQuantity: number | null;
+  /** Balanced autonomous risk policy (worker/risk/policy.ts). When set, an entry must also pass it and is sized by it
+   *  (never larger than the legacy size). null = legacy behaviour only. The scheduled and API paper paths set it. */
+  policy: RiskPolicy | null;
 }
-export const DEFAULT_PAPER_CONFIG: PaperConfig = { startingEquity: 10_000, feeRate: 0.001, slippageBps: 5, riskFraction: 0.005, maxNotionalFraction: 1, maxOpenPositions: 3, maxEntryDeviationBps: 15, maxDailyLossPct: 3, maxConsecutiveLosses: 4, reentryCooldownMs: 3_600_000, lossPauseMs: 86_400_000, maxOrderQuantity: null };
+export const DEFAULT_PAPER_CONFIG: PaperConfig = { startingEquity: 10_000, feeRate: 0.001, slippageBps: 5, riskFraction: 0.005, maxNotionalFraction: 1, maxOpenPositions: 3, maxEntryDeviationBps: 15, maxDailyLossPct: 3, maxConsecutiveLosses: 4, reentryCooldownMs: 3_600_000, lossPauseMs: 86_400_000, maxOrderQuantity: null, policy: null };
 
 export interface PaperPosition {
   clientOrderId: string; symbol: string; direction: 1 | -1; qty: number; remainingQty: number; entry: number; stop: number; initialStop: number;
@@ -86,8 +91,18 @@ export class PaperEngine {
     const slipFactor = this.cfg.slippageBps / 1e4, fill = marketPrice * (1 + dir * slipFactor);
     const dist = Math.abs(fill - plan.stopLoss);
     if (!(dist > 0) || (fill - plan.stopLoss) * dir <= 0) return this.reject(plan, ["Stop is not on the protective side of the fill price"], now, id);
-    const qty = Math.min((s.equity * this.cfg.riskFraction) / dist, (s.equity * this.cfg.maxNotionalFraction) / fill);
+    let qty = Math.min((s.equity * this.cfg.riskFraction) / dist, (s.equity * this.cfg.maxNotionalFraction) / fill);
     if (!(qty > 0)) return this.reject(plan, ["Position size computes to zero"], now, id);
+
+    // Balanced risk policy (when enabled): 50% notional cap, 50% cash reserve, net reward-to-risk >= 1.5, drawdown and loss limits.
+    // It can only make the position smaller or refuse it; it never raises the legacy size.
+    if (this.cfg.policy) {
+      const fractions3 = [0.4, 0.3, 0.3];
+      const g = paperPolicyGate({ policy: this.cfg.policy, equity: s.equity, dayStartEquity: s.dayStartEquity, startingEquity: this.cfg.startingEquity, positions: s.positions, closed: s.closed, direction: dir, fill, stop: plan.stopLoss,
+        targets: plan.takeProfits.map((t, i) => ({ price: t.price, fraction: fractions3[i] })), feeRate: this.cfg.feeRate, slippageRate: slipFactor });
+      if (!g.ok) return this.reject(plan, g.reasons, now, id);
+      qty = Math.min(qty, g.quantity);
+    }
 
     // In-process safeguards (no external service): finite values, quantity cap and a simulated free-cash check.
     // Free cash = equity minus the notional already committed to open positions, so exposure can never exceed the simulated balance.

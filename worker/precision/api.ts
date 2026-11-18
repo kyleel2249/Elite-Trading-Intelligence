@@ -14,6 +14,8 @@ import { DEFAULT_CONFIG, ENGINE_NAME, ENGINE_VERSION, resolveConfig, scoreConfig
 import { parseFundamentalContext, parseNewsContext } from "./context.ts";
 import { SUPPORTED_MARKETS, parseInstrument } from "./engine.ts";
 import { STRATEGIES, buildSignal, isStrategy } from "./service.ts";
+import { paperAccountRisk } from "./account.ts";
+import type { RiskContext } from "../algo/validation.ts";
 import { ledgerSummary, runPrecisionCycle } from "./cycle.ts";
 import { SYMBOL_RE, keys, loadContext, parseExpectancy, precisionStore, tokenMatches, type PrecisionEnv } from "./stores.ts";
 import { isFiniteNumber, isRecord } from "./util.ts";
@@ -72,7 +74,17 @@ export async function handlePrecision(req: Request, env: PrecisionEnv): Promise<
   const inst = parseInstrument(symbol);
   if (!inst) return reply({ error: "unsupported_market", symbol, detail: "Only crypto spot pairs with a recognised quote currency are supported.", markets: SUPPORTED_MARKETS }, 422);
 
-  const built = await buildSignal(env, symbol, strategy, url.searchParams.get("provider"));
+  // Optional account-level risk input from the internal paper account. It exposes account state, so it needs the admin token.
+  let risk: RiskContext | undefined;
+  const account = url.searchParams.get("account");
+  if (account !== null) {
+    if (account !== "paper") return reply({ error: "invalid_account", supported: ["paper"] }, 400);
+    if (!env.ETI_PRECISION_ADMIN_TOKEN) return reply({ error: "admin_disabled", detail: "account=paper needs the ETI_PRECISION_ADMIN_TOKEN Worker secret, because it reveals account state." }, 403);
+    const auth = req.headers.get("authorization") || "";
+    if (!tokenMatches(auth.startsWith("Bearer ") ? auth.slice(7) : null, env.ETI_PRECISION_ADMIN_TOKEN)) return reply({ error: "unauthorized" }, 401, { "www-authenticate": "Bearer" });
+    risk = (await paperAccountRisk(env as any, symbol, Date.now())) ?? undefined;
+  }
+  const built = await buildSignal(env, symbol, strategy, url.searchParams.get("provider"), risk);
   return reply(built.body, built.status);
 }
 

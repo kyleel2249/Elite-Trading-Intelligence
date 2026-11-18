@@ -94,3 +94,21 @@ ETI_PERP_MIN_NOTIONAL=5
 # LLM token management (optional; defaults shown)
 ETI_LLM_MAX_INPUT_TOKENS=8000
 ETI_LLM_CACHE_TTL=900
+
+# Corporate wallets (see docs/WALLETS.md). ETI never holds wallet private keys.
+# External execution is OFF unless this is exactly "enabled". Needs the D1 database (atomic exactly-once claim).
+ETI_WALLET_EXECUTION=
+# WebAuthn relying party; defaults to the request host / origin. Set explicitly if you serve from several hostnames.
+ETI_WALLET_RP_ID=
+ETI_WALLET_ORIGINS=
+# Optional: allow synced passkeys (default refuses them so approvals need device-bound keys); comma-separated AAGUID allow-list of approved hardware keys
+ETI_WALLET_ALLOW_SYNCED_PASSKEYS=
+ETI_WALLET_AAGUIDS=
+# Timelock (seconds) for governance actions: signer, policy, whitelist and recovery-key changes (default 86400)
+ETI_WALLET_GOV_TIMELOCK_SEC=
+# Signing gateway (HSM / MPC / cloud KMS) that holds the keys: HTTPS URL and a shared HMAC secret (set as Worker secrets, never in git)
+ETI_SIGNER_URL=
+ETI_SIGNER_SECRET=
+# Binance withdrawal key (withdraw permission only, IP-restricted, with Binance's own address whitelist enabled)
+BINANCE_WITHDRAW_API_KEY=
+BINANCE_WITHDRAW_SECRET_KEY=

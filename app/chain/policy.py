@@ -26,7 +26,7 @@ def to_units(amount: str | Decimal, decimals: int = 18) -> int:
         return int(q)
 
 
-def violations(*, network: Network, limits: Limits, kill_switch: bool, kind: str, notional_wei: int, sent_today_wei: int,
+def violations(*, network: Network, limits: Limits, kill_switch: bool, kind: str, notional_wei: int,
                to: Optional[str] = None, wallet: Optional[str] = None, destination_allowed: bool = True,
                token_allowed: bool = True, slippage_bps: Optional[int] = None, router_configured: bool = True) -> list[str]:
     v: list[str] = []
@@ -50,8 +50,4 @@ def violations(*, network: Network, limits: Limits, kill_switch: bool, kind: str
             v.append("token is not on the token allowlist")
     if kind == "swap" and (slippage_bps is None or not 1 <= slippage_bps <= limits.max_slippage_bps):
         v.append(f"slippage must be between 1 and {limits.max_slippage_bps} bps")
-    if notional_wei > limits.max_tx_wei:
-        v.append(f"amount {fmt_units(notional_wei)} {network.native} exceeds the per-transaction cap of {fmt_units(limits.max_tx_wei)}")
-    if sent_today_wei + notional_wei > limits.max_daily_wei:
-        v.append(f"would exceed the 24h cap of {fmt_units(limits.max_daily_wei)} {network.native} (already used {fmt_units(sent_today_wei)})")
     return v

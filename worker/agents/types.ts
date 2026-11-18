@@ -89,14 +89,20 @@ export class MessageBus {
   }
 }
 
+export interface OrderFlowContext {
+  provider: string; generatedAt: string;
+  tape: { trades: number; buyVolume: number; sellVolume: number; delta: number; deltaPct: number; cumulativeDelta: number };
+  depth: { spreadBps: number; imbalance: number; microprice: number; bidNotional: number; askNotional: number };
+  dataQuality: { tradeAgeMs: number; tradeCount: number; notes?: string[] };
+}
 export interface MarketInput {
   symbol: string; interval: string; candles: Kline[]; depth: Depth | null; provider: string; fetchedAt: number;
   crossCheck: { provider: string; price: number } | null;
   benchmark: { symbol: string; candles: Kline[] } | null;
-  failures: Record<string, string>;
+  failures: Record<string, string>; orderFlow?: OrderFlowContext | null;
 }
 /** Caller-supplied research data. The agents never invent any of it; absent data yields insufficient_data. */
-export interface SuppliedData { fundamentals?: unknown; macro?: unknown; news?: unknown; onchain?: unknown }
+export interface SuppliedData { fundamentals?: unknown; macro?: unknown; news?: unknown; onchain?: unknown; orderFlow?: unknown }
 export interface AccountState { equityUsd?: number; availableUsd?: number; positionQuantity?: number; dailyPnlPct?: number; drawdownPct?: number; openRiskPct?: number }
 export interface Integrity { killSwitch: boolean; liveFlagSet: boolean; executionTokenConfigured: boolean; auditLogConfigured: boolean }
 export interface Ctx { market: MarketInput; supplied: SuppliedData; now: number; integrity: Integrity }

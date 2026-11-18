@@ -54,6 +54,13 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <form class="bar" id="controls" autocomplete="off">
 <label>Symbol<input type="text" id="symbol" value="BTCUSDT" maxlength="20" pattern="[A-Za-z0-9]{5,20}" required></label>
 <label>Strategy<select id="strategy"><option value="scalp">Scalp</option><option value="intraday" selected>Intraday</option><option value="swing">Swing</option><option value="position">Position</option></select></label>
+<label>Venue / Market<select id="market"><option value="bybit:linear" selected>Bybit Linear Futures</option><option value="bybit:inverse">Bybit Inverse Futures</option><option value="bybit:spot">Bybit Spot</option><option value="bitget:USDT-FUTURES">Bitget USDT Futures</option><option value="bitget:USDC-FUTURES">Bitget USDC Futures</option><option value="bitget:COIN-FUTURES">Bitget Coin Futures</option><option value="bitget:SPOT">Bitget Spot</option></select></label>
+<label>Account equity (quote currency)<input type="number" id="equity" min="0" step="any" placeholder="e.g. 10000 USDT / USD"></label>
+<label>Risk %<input type="number" id="risk" min="0.01" max="5" step="0.01" value="1"></label>
+<label>Leverage<input type="number" id="leverage" min="1" max="100" step="1" value="1"></label>
+<label>Fee bps<input type="number" id="fee" min="0" max="500" step="0.1" placeholder="Optional"></label>
+<label>Slippage bps<input type="number" id="slippage" min="0" max="500" step="0.1" placeholder="Optional"></label>
+<label>Inverse contract value<input type="number" id="contract-value" min="0" step="any" placeholder="Required for inverse"></label>
 <label class="inline"><input type="checkbox" id="e-swift" checked> Swift-inspired</label>
 <label class="inline"><input type="checkbox" id="e-gainz" checked> Gainz-inspired</label>
 <label>Auto-refresh<select id="auto"><option value="0">Off</option><option value="30">30 s</option><option value="60" selected>60 s</option><option value="120">120 s</option></select></label>
@@ -64,11 +71,15 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <section class="card s12" id="decision" aria-labelledby="h-dec"><h2 id="h-dec">Independent decision</h2><div id="decision-body" class="muted">Loading…</div></section>
 <section class="card s6" id="swift"><h2>Swift-inspired engine</h2><div id="swift-body" class="muted">–</div></section>
 <section class="card s6" id="gainz"><h2>GainzAlgo-inspired engine</h2><div id="gainz-body" class="muted">–</div></section>
+ <section class="card s12" id="v3-alpha"><h2>ETIAlgo V3 Alpha — closed-candle signal indicator</h2><div id="v3-alpha-body" class="muted">–</div></section>
+<section class="card s12" id="v3-ledger"><h2>V3 Alpha signal history & forward performance</h2><div id="v3-ledger-body" class="muted">Signal history loads after analysis.</div></section>
 <section class="card s6"><h2>Independent evidence families</h2><div id="evidence" class="muted">–</div></section>
 <section class="card s6"><h2>Validation</h2><div id="validation" class="muted">–</div></section>
 <section class="card s12"><h2>Eight-timeframe matrix</h2><div id="matrix" class="scroll muted">–</div></section>
 <section class="card s6"><h2>Momentum, EMA, volatility, breakout</h2><div id="indicators" class="muted">–</div></section>
 <section class="card s6"><h2>Liquidity and order book</h2><div id="liquidity" class="muted">–</div></section>
+<section class="card s6"><h2>Funding and open interest</h2><div id="derivatives" class="muted">–</div></section>
+<section class="card s6"><h2>Structured trade plan</h2><div id="trade-plan" class="muted">Add account equity to calculate position size. No order is submitted.</div></section>
 <section class="card s12" id="universe"><h2>Universe scan (all liquid USDT pairs)</h2><div class="bar"><button type="button" id="uni-go">Load universe leaderboard</button></div><div id="uni-body" class="muted">Shows the stored, rolling scan of the whole liquid universe with coverage and data age. Rows older than the staleness limit are not ranked.</div></section>
 <section class="card s12"><h2>Elite Trader research</h2><div id="elite" class="muted">–</div></section>
 <section class="card s12" id="scanner"><h2>Opportunity scanner and leaderboard</h2><form class="bar" id="scan-form" autocomplete="off"><label>Symbols (up to 4, comma separated)<input type="text" id="scan-symbols" value="BTCUSDT,ETHUSDT,SOLUSDT" maxlength="80" style="width:280px"></label><button type="submit" id="scan-go">Scan</button></form><div id="scan-body" class="muted">Ranks by evidence quality (validator score, reward/risk, liquidity), not by predicted profit. HOLD and REJECTED are valid outcomes and are not ranked.</div></section>
@@ -76,7 +87,7 @@ export const OMNI_HTML = `<!doctype html><html lang="en"><head><meta charset="ut
 <form class="bar" id="paper-auth" autocomplete="off"><label>Paper API token (kept in memory only, never stored)<input type="password" id="token" autocomplete="off" spellcheck="false"></label><button type="submit">Connect</button><button type="button" id="p-eval">Evaluate (analyse only)</button><button type="button" id="p-open" class="primary">Evaluate &amp; open paper position</button><button type="button" id="p-tick">Tick position</button><button type="button" id="p-kill" class="danger">Engage kill switch</button></form>
 <div id="paper-body" class="muted">Enter the paper API token to load simulated positions, performance and the audit trail.</div></section>
 <section class="card s12"><h2>Not available yet (nothing here is simulated)</h2><div class="small muted">Strategy optimisation and model rollback, real-time alerts, exchange testnet execution, Elite Trader database inputs to fusion. Confidence is an evidence score, not a probability of profit.</div></section>
-</div><p class="small muted">Analytical research tool, not financial advice. Simulated results do not guarantee future results.</p></div><script src="/omnisignal.js"></script></body></html>`;
+</div><p class="small muted">Analytical research tool, not financial advice. Simulated results do not guarantee future results.</p></div><script src="/bitget-client.js"></script><script src="/omnisignal.js"></script></body></html>`;
 
 export const OMNI_JS = String.raw`(function(){
 "use strict";
@@ -115,7 +126,18 @@ function renderDecision(p){
  if(f.rejectedEngine)box.appendChild(note("Disagreement: "+f.rejectedEngine.engine+" was rejected. "+f.rejectedEngine.reason,"warn"));
  var dis=/SWIFT_.*_GAINZ_/.test(f.agreement||"");if(dis&&!f.rejectedEngine)box.appendChild(note("Engines disagree and independent evidence was not decisive, so ETI stands aside.","warn"));
  var det=el("details",null,el("summary",{text:"Why (decision trail)"}),list(p.reasons,"No reasons recorded"));box.appendChild(det);
- var dq=p.dataQuality||{};box.appendChild(el("div",{class:"muted small",text:"Provider: "+(dq.provider||"–")+" | timeframes loaded: "+((dq.timeframesLoaded||[]).join(", ")||"–")+" | order book: "+(dq.orderBook||"–")+" | cross-provider check: "+(dq.providerCrossCheck||"–")}));
+ if(p.fvg&&p.fvg.precision){
+  var fp=p.fvg.precision,fb=el("div"),best=fp.best;
+  fb.appendChild(el("div",{class:"muted small",text:"ETI INSTITUTIONAL FVG PRECISION · "+(fp.direction||"WAIT")+" · "+(fp.summary&&fp.summary.green||0)+" green qualified zone(s)"}));
+  if(best){
+   var zone=best.zone||{},targets=best.targets||[];
+   fb.appendChild(note((best.direction||"WAIT")+" · "+best.state+" · Entry "+fmt(best.entry&&best.entry.price)+" · FVG "+fmt(zone.lower)+"–"+fmt(zone.upper)+" · SL "+fmt(best.stopLoss)+" · TP1 "+fmt(targets[0]&&targets[0].price)+" · "+(best.riskReward===null?"RR unavailable":num(best.riskReward)+"R"),best.highlight==="green"?"ok":"warn"));
+   (best.explanation||[]).slice(0,4).forEach(function(v){fb.appendChild(el("div",{class:"muted small",text:"• "+v}));});
+  }else fb.appendChild(note("No fully qualified precision entry. Wait for a fresh green FVG and confirmed retest.","warn"));
+  fb.appendChild(el("div",{class:"muted small",text:"A green zone is a qualified, unmitigated setup; a confirmed signal is separate. Precision analysis is advisory and cannot place an order."}));
+  box.appendChild(fb);
+ }
+ var dq=p.dataQuality||{};box.appendChild(el("div",{class:"muted small",text:"Provider: "+(dq.provider||"–")+" | market: "+(dq.venue||"–")+" "+(dq.category||"")+" | timeframes loaded: "+((dq.timeframesLoaded||[]).join(", ")||"–")+" | order book: "+(dq.orderBook||"–")+" | cross-provider check: "+(dq.providerCrossCheck||"–")}));
  put("decision-body",box)}
 
 function renderEngine(id,e){
@@ -170,6 +192,18 @@ function renderLiquidity(p){
  if(l.largeOrders&&l.largeOrders.length)box.appendChild(el("details",null,el("summary",{text:"Large resting orders ("+l.largeOrders.length+")"}),list(l.largeOrders.map(function(o){return JSON.stringify(o)}))));
  box.appendChild(el("div",{class:"small muted",text:l.caveat}));put("liquidity",box)}
 
+function renderDerivatives(p){
+ var d=p.derivatives;if(!d){put("derivatives",el("div",{class:"muted",text:"Choose a futures market to load funding-rate and open-interest context."}));return}
+ var box=el("div");box.appendChild(kv([["Status",d.status],["Funding",d.fundingPercent==null?"–":num(d.fundingPercent,4)+"%"],["Funding bias",String(d.fundingBias||"unknown").replace(/_/g," ")],["Crowding",String(d.crowding||"unknown").replace(/_/g," ")],["Open interest",fmt(d.openInterest)],["OI change",d.openInterestChangePct==null?"–":num(d.openInterestChangePct,2)+"%"],["Snapshot age",d.ageMs==null?"–":Math.round(d.ageMs/1000)+" s"],["Source",d.source||"–"]]));
+ if(d.notes&&d.notes.length)box.appendChild(list(d.notes));put("derivatives",box)
+}
+function renderTradePlan(p){
+ var t=p.tradePlan;if(!t){put("trade-plan",el("div",{class:"muted",text:"No position sizing calculated. Enter account equity; trade levels remain available without it."}));return}
+ var box=el("div");box.appendChild(kv([["Plan status",t.valid?"valid":"blocked",t.valid?"bull":"bear"],["Quantity",num(t.quantity,6)+" "+(t.quantityUnit==="contracts"?"contracts":"base units")],["Notional",fmt(t.notional)],["Risk budget",fmt(t.riskBudget)],["Planned stop risk",fmt(t.plannedStopRisk)],["Remaining risk",fmt(t.remainingRiskBudget)],["Margin estimate",fmt(t.estimatedMargin)],["Leverage",t.leverage+"x"],["Round-trip costs",t.estimatedRoundTripCosts==null?"not supplied":fmt(t.estimatedRoundTripCosts)],["Gross R to final target",t.grossRewardRiskToFinalTarget==null?"–":num(t.grossRewardRiskToFinalTarget,2)+"R"],["Net R",t.netRewardRiskToFinalTarget==null?"not estimated":num(t.netRewardRiskToFinalTarget,2)+"R"]]));
+ if(t.targets&&t.targets.length)box.appendChild(paperTable(["Target","Price","Close %","Gross P&L","R"],t.targets.map(function(x){return [x.label,fmt(x.price),num(x.closeFraction*100,1)+"%",fmt(x.grossProfit),num(x.rewardRisk,2)+"R"]})));
+ if(t.blockers&&t.blockers.length)box.appendChild(note(t.blockers.join("; "),"bad"));if(t.notes&&t.notes.length)box.appendChild(list(t.notes));
+ box.appendChild(note("Position-sizing calculation only. This endpoint cannot submit orders. Use quote-currency equity. Exchange maintenance tiers, funding payments, borrow interest and liquidation fees are excluded.","ok"));put("trade-plan",box)
+}
 function renderElite(p){
  var e=p.elite;if(!e){put("elite",el("div",{class:"muted",text:"Elite Trader assessment runs only when the engines propose a trade."}));return}
  if(!e.available){put("elite",el("div",{class:"muted",text:e.reason||"Unavailable"}));return}
@@ -180,16 +214,33 @@ function renderElite(p){
  box.appendChild(el("div",{class:"small muted",text:"Investor disclosures: "+e.disclosures.reason}));
  box.appendChild(el("div",{class:"small muted",text:e.limitations}));put("elite",box)}
 
-function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p);renderElite(p)}
-function clearAll(msg){["decision-body","swift-body","gainz-body","evidence","validation","matrix","indicators","liquidity","elite"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
+function renderV3Alpha(p){
+ var a=p.v3Alpha;if(!a){put("v3-alpha-body",el("div",{class:"muted",text:"V3 Alpha data unavailable."}));return}
+ var cls=a.direction>0?"bull":a.direction<0?"bear":"neutral",box=el("div");
+ box.appendChild(kv([["Signal",a.action,cls],["Status",a.status],["Evidence score",a.score+"/100"],["Threshold",a.threshold],["Regime",a.regime],["Closed candle",a.evaluatedCandleTime?when(a.evaluatedCandleTime):"–"]]));
+ if(a.entryZone)box.appendChild(kv([["Entry zone",fmt(a.entryZone[0])+" – "+fmt(a.entryZone[1])],["Stop-loss",fmt(a.stopLoss),"bear"],["TP1 / TP2 / TP3",(a.takeProfits||[]).map(function(t){return fmt(t.price)+" ("+t.rewardRisk+"R)"}).join(" / "),"bull"]]));
+ var scores=a.componentScores||{},t=el("table"),b=el("tbody");t.appendChild(el("thead",null,el("tr",null,el("th",{text:"Evidence family"}),el("th",{text:"Score"}))));
+ Object.keys(scores).forEach(function(k){var v=scores[k];b.appendChild(el("tr",null,el("td",{text:k.replace(/([A-Z])/g," $1")}),el("td",{class:"num "+(v>0?"bull":v<0?"bear":"neutral"),text:num(v,0)})))});t.appendChild(b);box.appendChild(el("div",{class:"scroll"},t));
+ if(a.confirmations&&a.confirmations.length)box.appendChild(el("details",null,el("summary",{text:"Confirmations ("+a.confirmations.length+")"}),list(a.confirmations)));
+ if(a.warnings&&a.warnings.length)box.appendChild(note(a.warnings.join(" "),"warn"));
+ box.appendChild(el("div",{class:"small muted",text:"Closed-candle evidence score, not a win probability. V3 Alpha can veto an opposing setup; the independent validator and execution safeguards retain final authority. No orders are submitted."}));put("v3-alpha-body",box)}
 
-function params(){var sym=$("symbol").value.trim().toUpperCase();var eng=[];if($("e-swift").checked)eng.push("swift");if($("e-gainz").checked)eng.push("gainz");return {symbol:sym,strategy:$("strategy").value,engines:eng}}
+function loadV3Ledger(){var root=$("v3-ledger-body");if(!root)return;Promise.all([fetch("/api/algo/v3-alpha/signals?limit=20").then(function(r){if(!r.ok)throw new Error("Signal ledger unavailable ("+r.status+")");return r.json()}),fetch("/api/algo/v3-alpha/performance").then(function(r){if(!r.ok)throw new Error("Performance data unavailable ("+r.status+")");return r.json()})]).then(function(data){var history=data[0].signals||[],p=data[1],box=el("div");box.appendChild(kv([["Resolved sample",p.sampleSize],["Wins / losses",p.wins+" / "+p.losses],["Win rate",p.winRate===null?"Withheld (<30)":(p.winRate*100).toFixed(1)+"%"],["Expectancy",p.expectancyR===null?"Withheld (<30)":p.expectancyR.toFixed(2)+"R"],["Net R",Number(p.netR||0).toFixed(2)+"R"]]));var table=el("table"),body=el("tbody");table.appendChild(el("thead",null,el("tr",null,el("th",{text:"Symbol"}),el("th",{text:"Side"}),el("th",{text:"Score"}),el("th",{text:"Regime"}),el("th",{text:"Outcome"}))));history.forEach(function(s){body.appendChild(el("tr",null,el("td",{text:s.symbol}),el("td",{text:Number(s.direction)>0?"BUY":"SELL"}),el("td",{text:s.score+"/"+s.threshold}),el("td",{text:s.regime}),el("td",{text:s.outcome||"Pending"})))});table.appendChild(body);box.appendChild(el("div",{class:"scroll"},table));box.appendChild(el("div",{class:"small muted",text:p.note+" Outcomes are simulated from signal-close entries, not confirmed exchange fills."}));put("v3-ledger-body",box)}).catch(function(e){put("v3-ledger-body",el("div",{class:"muted",text:e.message}))})}
+function renderAll(p){state.last=p;renderDecision(p);renderEngine("swift-body",p.fusion.swift);renderEngine("gainz-body",p.fusion.gainz);renderV3Alpha(p);loadV3Ledger();renderEvidence(p);renderValidation(p);renderMatrix(p);renderIndicators(p);renderLiquidity(p);renderDerivatives(p);renderTradePlan(p);renderElite(p)}
+function clearAll(msg){["decision-body","swift-body","gainz-body","v3-alpha-body","evidence","validation","matrix","indicators","liquidity","derivatives","trade-plan","elite"].forEach(function(id){put(id,el("div",{class:"muted",text:"–"}))});put("decision-body",el("div",null,el("div",{class:"big DATA_UNRELIABLE",text:"DATA UNRELIABLE"}),note(msg,"bad")))}
+
+function params(){var sym=$("symbol").value.trim().toUpperCase();var eng=[];if($("e-swift").checked)eng.push("swift");if($("e-gainz").checked)eng.push("gainz");var parts=$("market").value.split(":");var venue=parts[0],category=parts[1],market=(category==="spot"||category==="SPOT")?"spot":"futures";var equityText=$("equity").value.trim();return {symbol:sym,strategy:$("strategy").value,engines:eng,venue:venue,market:market,category:category,equity:equityText?Number(equityText):undefined,riskFraction:equityText?Number($("risk").value)/100:undefined,leverage:Number($("leverage").value)||1,feeBps:$("fee").value.trim()?Number($("fee").value):undefined,slippageBps:$("slippage").value.trim()?Number($("slippage").value):undefined,contractValue:$("contract-value").value.trim()?Number($("contract-value").value):undefined}}
 function analyse(){
  var q=params();if(!/^[A-Z0-9]{5,20}$/.test(q.symbol)){setStatus("Symbol must be 5-20 letters or digits, e.g. BTCUSDT",true);return Promise.resolve()}
  if(!q.engines.length){setStatus("Enable at least one engine",true);return Promise.resolve()}
  if(state.busy)return Promise.resolve();state.busy=true;$("refresh").disabled=true;setStatus("Analysing "+q.symbol+"…");
- return api("/api/omnisignal?symbol="+encodeURIComponent(q.symbol)+"&strategy="+q.strategy+"&engines="+q.engines.join(",")).then(function(r){
-  if(r.ok&&r.body&&r.body.fusion){renderAll(r.body);setStatus("Updated "+new Date().toLocaleTimeString()+" - "+q.symbol+" "+q.strategy)}
+ var prepare=Promise.resolve();
+ if(q.venue==="bitget"){
+  if(!window.ETIBitget)prepare=Promise.reject(new Error("Bitget browser adapter did not load"));
+  else prepare=window.ETIBitget.loadSignalInputs({symbol:q.symbol,strategy:q.strategy,market:q.market,category:q.category}).then(function(marketData){q.marketData=marketData;setStatus("Bitget browser feed loaded; running ETI analysis…")});
+ }
+ return prepare.then(function(){return api("/api/omnisignal",{method:"POST",body:q})}).then(function(r){
+  if(r.ok&&r.body&&r.body.fusion){renderAll(r.body);setStatus("Updated "+new Date().toLocaleTimeString()+" - "+q.symbol+" "+q.strategy+(q.venue==="bitget"?" · Bitget browser feed":""))}
   else{clearAll(r.body&&r.body.error?"Market data unavailable ("+r.body.error+"). No stale values are shown.":"Request failed (HTTP "+r.status+")");setStatus("Analysis failed",true)}
  }).catch(function(e){clearAll("Network error: "+e.message);setStatus("Analysis failed",true)}).then(function(){state.busy=false;$("refresh").disabled=false})}
 

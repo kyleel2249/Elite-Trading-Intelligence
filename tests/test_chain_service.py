@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +11,6 @@ from fastapi.testclient import TestClient
 from app.chain import service as chain_service
 from app.chain.crypto import address_from_private, is_address, keccak256
 from app.chain.models import ChainAllowlist, ChainEvent, ChainTransaction, ChainWallet
-from app.chain.networks import NETWORKS
 from app.chain.rpc import RpcError
 from app.chain.service import ChainError, ChainService
 from app.database import SessionLocal, init_db
@@ -81,8 +79,6 @@ def env(monkeypatch):
     for k in ("CHAIN_MAX_TX_NATIVE", "CHAIN_MAX_DAILY_NATIVE", "CHAIN_MAX_SLIPPAGE_BPS", "CHAIN_REQUIRE_ALLOWLIST", "CHAIN_MAINNET_SEND_ENABLED"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("EXECUTION_VAULT_KEY", Fernet.generate_key().decode())
-    monkeypatch.setenv("CHAIN_MAX_TX_NATIVE", "0.05")
-    monkeypatch.setenv("CHAIN_MAX_DAILY_NATIVE", "0.08")
     monkeypatch.setenv("CHAIN_DEX_ROUTER_SEPOLIA", ROUTER)
     monkeypatch.setenv("CHAIN_WRAPPED_NATIVE_SEPOLIA", WRAPPED)
     fake = FakeRpc()
@@ -126,7 +122,7 @@ def test_wallet_is_vault_gated_unique_and_never_exposes_the_key(env, monkeypatch
 
 
 # ------------------------------------------------------------------------------------------------ policy
-def test_transfer_requires_allowlist_cap_and_valid_input(env):
+def test_transfer_requires_allowlist_and_valid_input(env):
     _, db = env
     s = svc(db); s.create_wallet()
     p = run(s.preview_transfer("sepolia", DEST, "0.01"))
@@ -134,9 +130,9 @@ def test_transfer_requires_allowlist_cap_and_valid_input(env):
     s.allow_add(network="*", address=DEST, kind="destination")
     ok = run(s.preview_transfer("sepolia", DEST, "0.01"))
     assert ok["allowed"] and ok["quote_id"] and ok["value_wei"] == str(10 ** 16) and ok["fees"]["type"] == 2
-    big = run(s.preview_transfer("sepolia", DEST, "0.06"))
-    assert not big["allowed"] and any("per-transaction cap" in v for v in big["violations"])
-    for bad_to, bad_amt in ((("0x123"), "0.01"), (DEST, "0"), (DEST, "0.0000000000000000001")):
+    big = run(s.preview_transfer("sepolia", DEST, "0.5"))                    # no per-transaction cap: balance is the only limit
+    assert big["allowed"] and big["quote_id"]
+    for bad_to, bad_amt in (("0x123", "0.01"), (DEST, "0"), (DEST, "0.0000000000000000001")):
         with pytest.raises(ChainError) as e:
             run(s.preview_transfer("sepolia", bad_to, bad_amt))
         assert e.value.status == 422
@@ -201,22 +197,22 @@ def test_tampered_and_expired_quotes_are_rejected(env, monkeypatch):
         with pytest.raises(ChainError) as e:
             run(s.send(bad, "SEND"))
         assert e.value.status == 400
-    monkeypatch.setattr(chain_service.time, "time", lambda: time.time.__call__() + 1000 if False else 4102444800.0)
+    monkeypatch.setattr(chain_service, "time", SimpleNamespace(time=lambda: 4102444800.0))   # year 2100: the quote is long expired
     with pytest.raises(ChainError) as e2:
         run(s.send(q, "SEND"))
     assert "expired" in e2.value.message and not fake.sent
 
 
-def test_daily_cap_accumulates_across_sends(env):
-    _, db = env
+def test_no_daily_cap_repeat_sends_are_limited_only_by_balance(env):
+    fake, db = env
     s = ready(db)
     run(s.send(run(s.preview_transfer("sepolia", DEST, "0.05"))["quote_id"], "SEND"))
-    p = run(s.preview_transfer("sepolia", DEST, "0.05"))
-    assert not p["allowed"] and any("24h cap" in v for v in p["violations"])
-    assert run(s.preview_transfer("sepolia", DEST, "0.02"))["allowed"]
+    assert run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]
+    fake.balance = 10 ** 15                                                   # the real constraint is still enforced
+    assert not run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]
 
 
-def test_broadcast_failure_is_recorded_honestly_and_does_not_count_toward_caps(env):
+def test_broadcast_failure_is_recorded_honestly_and_does_not_block_a_retry(env):
     fake, db = env
     s = ready(db); fake.fail_send = True
     with pytest.raises(ChainError) as e:
@@ -224,7 +220,7 @@ def test_broadcast_failure_is_recorded_honestly_and_does_not_count_toward_caps(e
     assert e.value.status == 502
     row = db.query(ChainTransaction).one()
     assert row.status == "broadcast_failed" and "nonce too low" in row.error
-    assert run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]       # failed broadcasts do not consume the daily cap
+    assert run(s.preview_transfer("sepolia", DEST, "0.05"))["allowed"]       # a failed broadcast does not block retrying
 
 
 def test_receipts_decide_confirmed_vs_failed(env):
@@ -253,6 +249,9 @@ def test_swap_buy_preview_enforces_token_allowlist_and_slippage(env):
     assert ok["expected_out_wei"] == str(2 * 10 ** 16) and ok["min_out_wei"] == str(2 * 10 ** 16 * 9950 // 10000)
     loose = run(s.preview_swap("sepolia", "buy", TOKEN, "0.01", 900))
     assert not loose["allowed"] and any("slippage" in v for v in loose["violations"])
+    with pytest.raises(ChainError) as e:
+        run(s.preview_swap("sepolia", "buy", TOKEN, "0", 50))
+    assert e.value.status == 422
 
 
 def test_swap_sell_needs_an_exact_approval_first(env):
@@ -326,3 +325,27 @@ def test_api_flow_without_key_material_in_any_response(env):
     assert [e["event"] for e in c.get("/api/chain/events").json()["events"]][0] == "tx_broadcast"
     st = c.get("/api/chain/status").json()
     assert st["wallet"]["address"] == r.json()["address"] and st["networks"][0]["connected"] is True
+    assert c.get("/wallet").status_code == 200
+
+
+def test_infura_key_builds_endpoints_and_secret_only_goes_to_infura(monkeypatch):
+    from app.chain.networks import rpc_headers, rpc_url
+
+    key = "0123456789abcdef0123456789abcdef"
+    for k in ("CHAIN_RPC_ETHEREUM", "CHAIN_RPC_SEPOLIA", "INFURA_API_KEY", "INFURA_API_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    assert rpc_url("ethereum") is None
+    assert rpc_url("sepolia") == "https://ethereum-sepolia-rpc.publicnode.com"
+    monkeypatch.setenv("INFURA_API_KEY", "not-a-key")
+    assert rpc_url("ethereum") is None
+    monkeypatch.setenv("INFURA_API_KEY", key)
+    assert rpc_url("ethereum") == f"https://mainnet.infura.io/v3/{key}"
+    assert rpc_url("base") == f"https://base-mainnet.infura.io/v3/{key}"
+    assert rpc_url("polygon-amoy") == f"https://polygon-amoy.infura.io/v3/{key}"
+    monkeypatch.setenv("CHAIN_RPC_ETHEREUM", "https://mine.example/x")
+    assert rpc_url("ethereum") == "https://mine.example/x"
+    assert rpc_headers(rpc_url("sepolia")) == {}
+    monkeypatch.setenv("INFURA_API_SECRET", "s3cr3t")
+    assert rpc_headers(rpc_url("sepolia"))["Authorization"].startswith("Basic ")
+    assert rpc_headers("https://mine.example/x") == {}
+    assert rpc_headers("https://evil.com/.infura.io") == {}

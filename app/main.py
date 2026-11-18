@@ -22,6 +22,7 @@ from app.schemas import HealthResponse
 from app.risk.engine import RiskEngine, OrderProposal
 from app.integrations.alpaca import AlpacaClient
 from app.integrations.binance import BinanceClient
+from app.integrations.bybit import BybitClient
 from app.integrations.oanda import OandaClient
 from app.integrations.quiver.client import QuiverClient
 from app.integrations.liquid.client import LiquidClient
@@ -49,7 +50,7 @@ from app.api.knowledge import router as knowledge_router
 from app.api.backtest import router as backtest_router
 from app.api.intelligence_data import router as intelligence_data_router
 from app.api.stream import router as stream_router
-from app.security.auth import require_api_key, require_persistence_auth
+from app.security.auth import PROTECTED_ENVS, require_api_key, require_persistence_auth
 from app.api.pretrade import router as pretrade_router
 from app.api.execution import router as execution_router
 from app.api.paper import router as paper_router
@@ -59,8 +60,6 @@ from app.api.strategies import router as strategies_router
 from app.prediction_ledger.api import router as predictions_router
 from app.prediction_ledger.job import prediction_resolver_job
 from app.prediction_ledger.service import record_from_forecast
-from app.api.capital_protection import router as capital_protection_router
-from app.security.auth import PROTECTED_ENVS, require_api_key
 
 logger = logging.getLogger("eti")
 
@@ -183,10 +182,19 @@ async def lifespan(app: FastAPI):
     if (alpha_job is not None and getattr(settings, "alpha_research_enabled", False)
             and (getattr(settings, "app_env", "") or "").strip().lower() != "test"):
         await _start_component("alpha_research_job", alpha_job.start)
+    if getattr(settings, "symbol_sync_enabled", True) and (getattr(settings, "app_env", "") or "").strip().lower() != "test":
+        # Keep exchange pair lists (Bybit, Bitget spot + futures, Alpaca) synced every minute from boot, not only after the first API call.
+        from app.market import symbols as symbol_catalogue
+        symbol_catalogue.ensure_sync_started(settings)
     try:
         yield
     finally:
         # Keep cleaning up even if one component fails during shutdown.
+        try:
+            from app.market import symbols as symbol_catalogue
+            await symbol_catalogue.stop_sync()
+        except Exception:
+            logger.warning("shutdown: symbol sync did not stop cleanly", exc_info=True)
         stops = [execution_supervisor_job.stop(), paper_job.stop(), investor_monitor_job.stop(),
                  prediction_resolver_job.stop(), reconcile_job.stop(), mtm_job.stop(), stream_hub.stop()]
         if alpha_job is not None:
@@ -205,6 +213,9 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+from app.governance.transport import SecurityHeadersMiddleware  # noqa: E402
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(knowledge_router)
 app.include_router(backtest_router)
@@ -230,10 +241,13 @@ for _module_path, _label in (
     ("app.api.command_centre", "command_centre"),
     ("app.api.futures_paper", "futures_paper"),
     ("app.api.futures_calc", "futures_calc"),
-    ("app.api.chain", "chain"),
+    # app.api.chain is hosted by app.api.command_centre (mounted once there; mounting it here as well
+    # registered every /api/chain route twice and produced duplicate OpenAPI operation IDs).
     ("app.api.intel", "intel"),
     ("app.api.market_symbols", "market_symbols"),
     ("app.api.valuation", "valuation"),
+    ("app.api.accounting", "accounting"),
+    ("app.api.governance", "governance"),
 ):
     try:
         _mod = __import__(_module_path, fromlist=["router"])
@@ -303,7 +317,7 @@ class OrderRequest(BaseModel):
 
 class ForecastScoreRequest(BaseModel):
     symbol: str = Field("BTCUSDT", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9./_-]+$")
-    provider: Literal["binance", "alpaca"] = "binance"
+    provider: Literal["bybit", "binance", "alpaca"] = "bybit"
     realized_price: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
 
 
@@ -389,6 +403,7 @@ async def reconcile_run(_auth=Depends(require_api_key)):
 async def providers_status(settings: Settings = Depends(get_settings)):
     alpaca = AlpacaClient(settings)
     binance = BinanceClient(settings)
+    bybit = BybitClient(settings)
     quiver = QuiverClient(settings)
     liquid = LiquidClient(settings)
     try:
@@ -399,6 +414,7 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         adaptive_status = {"running": False, "error": "unavailable"}
     return {
         "alpaca": await alpaca.health(),
+        "bybit": await bybit.health(),
         "binance": await binance.health(),
         "oanda": await OandaClient(settings).health(),
         "quiver": await quiver.health(),
@@ -417,6 +433,11 @@ async def providers_status(settings: Settings = Depends(get_settings)):
         "quiver_configured": settings.quiver_configured,
         "liquid_configured": settings.liquid_configured,
     }
+
+
+@app.get("/api/providers/bybit/stream/status")
+async def bybit_stream_status():
+    return stream_hub.bybit.status()
 
 
 @app.get("/api/providers/binance/stream/status")
@@ -441,7 +462,7 @@ async def feeds_news(q: str = "markets OR bitcoin OR federal reserve", settings:
 
 @app.get("/api/market/snapshot", dependencies=[Depends(require_persistence_auth)])
 async def market_snapshot(
-    provider: str = "binance",
+    provider: str = "bybit",
     symbol: str = "BTCUSDT",
     persist: bool = False,
     settings: Settings = Depends(get_settings),
@@ -472,7 +493,7 @@ async def market_order_book(
 
 @app.get("/api/market/history")
 async def market_history(
-    provider: str = "binance",
+    provider: str = "bybit",
     symbol: str = "BTCUSDT",
     interval: str = Query("1h", pattern=r"^[0-9]{1,2}[smhdwM]$"),
     limit: int = Query(100, ge=1, le=1000),
@@ -493,7 +514,7 @@ async def intelligence_traders():
 @app.get("/api/intelligence/council", dependencies=[Depends(require_persistence_auth)])
 async def run_council(
     symbol: str = "BTCUSDT",
-    provider: str = "binance",
+    provider: str = "bybit",
     persist: bool = False,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
@@ -583,7 +604,7 @@ async def list_decisions(limit: int = Query(20, ge=1, le=100), db: Session = Dep
 
 @app.get("/api/intelligence/forecast", dependencies=[Depends(require_persistence_auth)])
 async def intelligence_forecast(
-    symbol: str = "BTCUSDT", provider: str = "binance", horizon: str = "intraday",
+    symbol: str = "BTCUSDT", provider: str = "bybit", horizon: str = "intraday",
     persist: bool = False, settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
 ):
     mkt = MarketService(settings)
@@ -641,10 +662,10 @@ async def forecast_accuracy(symbol: Optional[str] = None, db: Session = Depends(
 async def evaluate_risk_demo(symbol: str = "BTCUSDT", side: str = "buy", qty: float = 0.01,
                              environment: str = "paper", equity: float = 10000.0):
     settings = get_settings()
-    snapshot = await MarketService(settings).get_snapshot("binance", symbol)
+    snapshot = await MarketService(settings).get_snapshot("bybit", symbol)
     ctx = build_risk_context(None, settings, environment=environment, snapshot=snapshot)
     engine = RiskEngine(settings)
-    proposal = OrderProposal(provider="binance", environment=environment, symbol=symbol, side=side,
+    proposal = OrderProposal(provider="bybit", environment=environment, symbol=symbol, side=side,
                              qty=qty, equity=equity, current_open_positions=0, daily_realized_pnl_pct=0.0,
                              current_drawdown_pct=0.0, data_age_seconds=ctx.data_age_seconds,
                              data_status=ctx.data_status, reference_price=snapshot.get("price") if snapshot else None)

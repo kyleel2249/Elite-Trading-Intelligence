@@ -352,6 +352,10 @@ LIVE_EVALUATORS = {
     "lynch_garp": ("app.alpha.fundamentals.garp_screen", "live PEG screen on SEC XBRL EPS and current price; NOT a backtest"),
     "druck_liquidity_regime": ("app.alpha.macro.liquidity_regime", "live liquidity regime from FRED (needs FRED_API_KEY); NOT a backtest"),
     "dalio_cycle_balance": ("app.alpha.macro.growth_inflation_quadrant", "live growth x inflation proxy from FRED; NOT a backtest"),
+    "templeton_global_contrarian": ("app.alpha.styles.contrarian_value", "live screen: deep drawdown + stabilisation + quality pass; global-valuation leg not implemented; NOT a backtest"),
+    "burry_deep_value": ("app.alpha.styles.deep_value", "live screen on SEC statements: FCF yield and price/book; can surface value traps; NOT a backtest"),
+    "soros_reflexivity_macro": ("app.alpha.styles.reflexivity", "price/positioning leg only (late-stage boom); the macro leg is NOT implemented; NOT a backtest"),
+    "activist_concentration": ("app.alpha.styles.activist_presence", "13D/13G filing presence only; stake size and intent are not parsed; NOT a backtest"),
     "special_situations": ("app.alpha.macro.credit_cycle", "credit-cycle leg only (HY spread percentile); event/distressed legs remain unimplemented"),
 }
 for _sid, (_fn, _note) in LIVE_EVALUATORS.items():

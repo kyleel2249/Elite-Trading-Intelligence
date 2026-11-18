@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     max_correlated_exposure_pct: float = 25.0
     # Hard notional cap per position as % of equity (product rule).
     max_position_notional_pct: float = 6.0
+    # Fractional Kelly used by /api/valuation sizing. Clamped to [0.25, 0.50]; keep 0.25 until
+    # out-of-sample evidence supports more.
+    kelly_fraction: float = 0.25
     require_live_confirmation: bool = True
 
     # --- ETI CAPITAL PROTECTION SYSTEM (independent of the LLM / signal engines) ---
@@ -104,6 +107,11 @@ class Settings(BaseSettings):
     binance_testnet_enabled: bool = True
     binance_live_trading_enabled: bool = False
 
+    bybit_api_key: Optional[str] = None
+    bybit_api_secret: Optional[str] = None
+    bybit_testnet_enabled: bool = True
+    bybit_live_trading_enabled: bool = False
+
     # OANDA v20 (forex, spot metals, index/commodity CFDs). Paper = OANDA practice account.
     oanda_api_token: Optional[str] = None
     oanda_account_id: Optional[str] = None
@@ -126,6 +134,7 @@ class Settings(BaseSettings):
 
     # --- Global Alpha Intelligence ---
     alpha_research_enabled: bool = True
+    symbol_sync_enabled: bool = True   # one-minute refresh of Bybit / Bitget / Alpaca pair lists, started at boot (never in the test environment)
     alpha_research_interval_seconds: int = 3600
     alpha_crypto_scan_limit: int = 40
     alpha_equity_universe: str = ""  # comma separated tickers to always scan
@@ -184,6 +193,12 @@ class Settings(BaseSettings):
                 return "postgresql+psycopg2://" + v[len(prefix):]
         return v
 
+    @field_validator("kelly_fraction", mode="after")
+    @classmethod
+    def _clamp_kelly_fraction(cls, v: float) -> float:
+        """Fractional Kelly stays within [0.25, 0.50] however the environment is set."""
+        return max(0.25, min(float(v), 0.50))
+
     @property
     def alpaca_configured(self) -> bool:
         return bool(self.alpaca_api_key and self.alpaca_secret_key)
@@ -191,6 +206,10 @@ class Settings(BaseSettings):
     @property
     def binance_configured(self) -> bool:
         return bool(self.binance_api_key and self.binance_secret_key)
+
+    @property
+    def bybit_configured(self) -> bool:
+        return bool(self.bybit_api_key and self.bybit_api_secret)
 
     @property
     def oanda_configured(self) -> bool:

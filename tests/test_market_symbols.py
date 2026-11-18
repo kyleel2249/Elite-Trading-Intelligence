@@ -8,8 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.integrations.bybit import BybitClient
 from app.market import binance_hosts as bh
 from app.market import symbols as sym
+from app.market.service import MarketService
 
 INFO = {"symbols": [
     {"symbol": "BTCUSDT", "status": "TRADING", "baseAsset": "BTC", "quoteAsset": "USDT", "isSpotTradingAllowed": True},
@@ -132,7 +134,7 @@ def test_public_history_returns_candles_and_names_the_host_that_served_them(clie
         assert path == "/api/v3/klines" and params["symbol"] == "BTCUSDT"
         return KLINES, "https://api1.binance.com"
     monkeypatch.setattr(bh, "get_json", fake)
-    r = client.get("/api/market/public-history", params={"symbol": "btcusdt", "interval": "1h", "limit": 3})
+    r = client.get("/api/market/public-history", params={"provider": "binance", "symbol": "btcusdt", "interval": "1h", "limit": 3})
     assert r.status_code == 200 and r.headers["x-binance-host"] == "api1.binance.com"
     j = r.json()
     assert len(j) == 3 and j[0]["close"] == 1.5 and j[0]["symbol"] == "BTCUSDT" and "data_status" in j[0]
@@ -144,18 +146,18 @@ def test_public_history_error_mapping(client, monkeypatch):
     async def bad(*a, **k):
         raise bh.BinanceBadRequest(400)
     monkeypatch.setattr(bh, "get_json", bad)
-    assert client.get("/api/market/public-history", params={"symbol": "NOPEUSDT"}).status_code == 404
+    assert client.get("/api/market/public-history", params={"provider": "binance", "symbol": "NOPEUSDT"}).status_code == 404
 
     async def blocked(*a, **k):
         raise bh.BinanceUnavailable([("https://api.binance.com", "HTTP 451")])
     monkeypatch.setattr(bh, "get_json", blocked)
-    r = client.get("/api/market/public-history", params={"symbol": "BTCUSDT"})
+    r = client.get("/api/market/public-history", params={"provider": "binance", "symbol": "BTCUSDT"})
     assert r.status_code == 502 and "location" in r.json()["detail"]
 
     async def junk(*a, **k):
         return {"not": "a list"}, "https://api.binance.com"
     monkeypatch.setattr(bh, "get_json", junk)
-    assert client.get("/api/market/public-history", params={"symbol": "BTCUSDT"}).status_code == 502
+    assert client.get("/api/market/public-history", params={"provider": "binance", "symbol": "BTCUSDT"}).status_code == 502
 
 
 def test_binance_hosts_status_endpoint_excludes_binance_us(client):
@@ -168,3 +170,120 @@ def test_chart_page_uses_symbol_search_and_public_history_without_synthetic_data
     assert "/api/market/symbols" in js and "/api/market/public-history" in js and "Math.random" not in js
     html = client.get("/static/market3d.html").text
     assert 'id="symlist"' in html and 'id="prov"' in html
+
+
+def test_bybit_catalogue_paginates_spot_linear_and_inverse_instruments():
+    calls = []
+
+    def handler(req):
+        params = dict(req.url.params)
+        category, cursor = params["category"], params.get("cursor")
+        calls.append((category, cursor))
+        rows = {
+            ("spot", None): [{"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT",
+                              "status": "Trading", "marginTrading": "both"}],
+            ("spot", "spot-next"): [{"symbol": "ETHUSDT", "baseCoin": "ETH", "quoteCoin": "USDT",
+                                     "status": "Trading", "marginTrading": "none"}],
+            ("linear", None): [{"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT",
+                                "status": "Trading", "contractType": "LinearPerpetual"}],
+            ("inverse", None): [{"symbol": "BTCUSD", "baseCoin": "BTC", "quoteCoin": "USD",
+                                 "status": "Trading", "contractType": "InversePerpetual"}],
+        }[(category, cursor)]
+        next_cursor = "spot-next" if category == "spot" and cursor is None else ""
+        return httpx.Response(200, json={"retCode": 0, "result": {"list": rows, "nextPageCursor": next_cursor}})
+
+    items = asyncio.run(sym._fetch_bybit(httpx.MockTransport(handler)))
+    assert ("spot", "spot-next") in calls
+    assert {row["market"] for row in items} == {"spot", "linear", "inverse"}
+    assert {row["symbol"] for row in items if row["market"] == "spot"} == {"BTCUSDT", "ETHUSDT"}
+    assert next(row for row in items if row["symbol"] == "BTCUSDT" and row["market"] == "spot")["margin_eligible"] is True
+    assert next(row for row in items if row["market"] == "linear")["symbol"] == "BTCUSDT"
+    assert next(row for row in items if row["market"] == "inverse")["symbol"] == "BTCUSD"
+
+
+def test_bybit_derivatives_context_api_returns_funding_and_open_interest(client, monkeypatch):
+    async def fake(self, symbol, category="linear", interval="1h", limit=50):
+        return {
+            "provider": "bybit", "symbol": symbol, "category": category,
+            "funding": {"funding_rate": 0.0001, "funding_time": 1700000000000},
+            "open_interest": [{"timestamp": 1000, "open_interest": 10.0},
+                              {"timestamp": 2000, "open_interest": 12.0}],
+            "open_interest_interval": interval, "open_interest_sample_count": min(2, limit),
+            "latest_open_interest": {"timestamp": 2000, "open_interest": 12.0},
+            "open_interest_change_fraction": 0.2, "read_only": True,
+        }
+
+    monkeypatch.setattr(MarketService, "get_derivatives_context", fake)
+    response = client.get("/api/market/bybit/derivatives-context",
+                          params={"symbol": "BTCUSDT", "category": "linear", "interval": "1h", "limit": 20})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "bybit" and body["category"] == "linear"
+    assert body["funding"]["funding_rate"] == 0.0001
+    assert body["latest_open_interest"]["open_interest"] == 12.0
+    assert body["read_only"] is True
+
+
+def test_bybit_derivatives_context_api_rejects_spot_and_invalid_intervals(client):
+    assert client.get("/api/market/bybit/derivatives-context",
+                      params={"symbol": "BTCUSDT", "category": "spot"}).status_code == 422
+    assert client.get("/api/market/bybit/derivatives-context",
+                      params={"symbol": "BTCUSDT", "category": "linear", "interval": "2h"}).status_code == 422
+
+
+def test_bybit_public_proxy_forwards_only_allowlisted_market_data(client, monkeypatch):
+    async def fake_payload(self, path, params):
+        assert path == "/v5/market/kline"
+        assert params == {"category": "linear", "symbol": "BTCUSDT", "interval": "60", "limit": "10"}
+        return {"retCode": 0, "retMsg": "OK", "result": {"list": [["1", "100", "102", "99", "101", "5"]]}}
+    monkeypatch.setattr("app.api.market_symbols.BybitClient.get_public_payload", fake_payload)
+    response = client.get("/api/market/bybit/proxy/kline",
+                          params={"category": "linear", "symbol": "BTCUSDT", "interval": "60", "limit": "10"})
+    assert response.status_code == 200
+    assert response.json()["retCode"] == 0
+    assert response.json()["result"]["list"][0][4] == "101"
+
+
+def test_bybit_public_proxy_rejects_unapproved_paths_parameters_and_categories(client):
+    assert client.get("/api/market/bybit/proxy/private").status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "linear", "symbol": "BTCUSDT", "interval": "60", "api_key": "leak"}).status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "option", "symbol": "BTCUSDT", "interval": "60"}).status_code == 422
+    assert client.get("/api/market/bybit/proxy/kline",
+                      params={"category": "linear", "symbol": "../../private", "interval": "60"}).status_code == 422
+
+
+def test_bybit_egress_region_reports_fly_machine_region(client, monkeypatch):
+    monkeypatch.setenv("FLY_REGION", "fra")
+    response = client.get("/api/market/bybit/region")
+    assert response.status_code == 200
+    assert response.json()["egress_region"] == "fra"
+    assert response.json()["read_only"] is True
+    assert response.json()["account_residency_unchanged"] is True
+
+
+def test_bybit_public_client_retries_secondary_global_host_from_frankfurt(monkeypatch):
+    hosts = []
+
+    def handler(request):
+        hosts.append(request.url.host)
+        if request.url.host == "api.bybit.com":
+            return httpx.Response(403, request=request, text="blocked")
+        return httpx.Response(200, request=request, json={
+            "retCode": 0, "retMsg": "OK",
+            "result": {"category": "spot", "list": [["1", "100", "102", "99", "101", "5"]]},
+        })
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "app.integrations.bybit.client.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    result = asyncio.run(BybitClient(settings()).get_public_payload(
+        "/v5/market/kline",
+        {"category": "spot", "symbol": "BTCUSDT", "interval": "1", "limit": "1"},
+    ))
+    assert result["retCode"] == 0
+    assert hosts == ["api.bybit.com", "api.bytick.com"]

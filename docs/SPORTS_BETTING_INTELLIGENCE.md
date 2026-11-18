@@ -27,6 +27,16 @@ Optional Worker variable:
 
 ## Autonomous schedule and quota protection
 
+### Provider failures (HTTP 505 and other 5xx)
+
+OddsPapi's gateway can answer a scan with a 5xx such as `505 HTTP Version Not Supported`. ETI handles this as follows:
+
+- Every OddsPapi call has a 15 s timeout and up to 3 attempts with exponential backoff (and `Retry-After` honoured). Retried: timeouts, network errors, 408/425/500/502/503/504/505 and the provider's `RATE_LIMITED` 429. Not retried: 401/403/404/other 4xx and malformed payloads. A 505 is not retryable by the HTTP specification, but provider gateways emit it spuriously, so it is retried a bounded number of times.
+- The request URL carries the API key, so it is never included in errors, logs or responses.
+- A failing odds call for one fixture no longer fails the scan. The scan returns `200` with `partial: true`, `fixtures_requested`, `fixture_count` (fixtures actually scanned) and `provider_errors[]` (fixture, `kind`, `provider_status`, `retryable`). It stops early after 3 consecutive fixture failures so a down provider does not burn quota. Partial scans send `x-eti-partial: 1` and are never cached, so a retry can fill the gaps.
+- If the fixtures call fails, or every odds call fails, the scan returns `502` (`504` on timeout) with `error: global_football_scan_failed`, `provider_status`, `kind`, `retryable` and a plain-language `hint`. The dashboard shows the hint and a warning when a result is partial.
+- A persistent 505 after retries is a provider-side fault: retry in a minute and report the time to OddsPapi support if it continues. ETI cannot fix the provider's gateway.
+
 The Worker scheduled handler invokes the sports scan and history sync. OddsPapi requires sport-wide fixture date ranges to be shorter than 48 hours, so both queries use a 47-hour window. History results are processed oldest-first within that window. D1 job locks prevent duplicate execution when multiple cron schedules fire:
 - ETI_SPORTS_SCAN_INTERVAL_MINUTES defaults to 360 (six hours), minimum 60.
 - ETI_SPORTS_HISTORY_SYNC_MINUTES defaults to 1440 (24 hours), minimum 360.

@@ -4,7 +4,8 @@ import { AGENT_IDS, AGENT_ROSTER, makeReport, noData, validateReport } from "./t
 import type { Depth, Integrity, Kline, MarketInput } from "./types.ts";
 import { buildProposal } from "./analysts.ts";
 import { fundamentalAnalyst } from "./fundamental.ts";
-import { evaluateDecision, riskManager, securityAnalyst } from "./controls.ts";
+import { cryptoIntelligence } from "./analysts.ts";
+import { evaluateDecision, prepareTicket, riskManager, securityAnalyst } from "./controls.ts";
 import type { DecisionRecord } from "./controls.ts";
 import { deliberate, finalize } from "./commander.ts";
 import { analyze } from "./orchestrator.ts";
@@ -66,6 +67,16 @@ test("risk manager approves/reduces a sane trade and sizes within limits", () =>
   const r = riskManager({ proposal, market: m, account, integrity, security: { severity: "none" }, hazard: null, now: NOW });
   assert.equal(r.approved, true, JSON.stringify(r.vetoes));
   assert.ok(r.sizing && r.sizing.quantity > 0 && r.sizing.notionalUsd <= 20_000 + 1 && r.sizing.riskPctOfEquity <= 1 + 1e-9);
+});
+
+test("Execution Specialist creates internal-paper tickets with attached protective levels", () => {
+  const cs = candles(300, 0.002, 0.004), m = market(cs), proposal = buildProposal("BTCUSDT", "buy", cs)!;
+  const risk = riskManager({ proposal, market: m, account, integrity, security: { severity: "none" }, hazard: null, now: NOW });
+  const review = prepareTicket({ request: { broker: "eti_paper", clientOrderId: "eti-agent-order-0001", riskConfirmed: true }, action: "BUY", proposal, risk, account, integrity, decisionId: "agent-decision-1" });
+  assert.equal(review.eligible, true, JSON.stringify(review.blockers));
+  assert.equal(review.ticket?.broker, "eti_paper");
+  assert.equal(review.ticket?.plan?.stop, proposal.stop);
+  assert.deepEqual([review.ticket?.plan?.tp1, review.ticket?.plan?.tp2, review.ticket?.plan?.tp3], proposal.targets);
 });
 
 test("risk manager vetoes: kill switch, missing account, event hazard, high security severity, stale data", () => {
@@ -152,9 +163,22 @@ test("fundamental agent can form a view from provider tokenomics alone, and abst
   assert.equal(r.status, "ok"); assert.equal(r.stance, "bearish");
 });
 
-test("caller-supplied data wins over provider data", () => {
-  const m = mergeSupplied({ macro: { a: 1 }, news: { items: [] } }, { macro: { b: 2 } });
-  assert.deepEqual(m.macro, { b: 2 }); assert.deepEqual(m.news, { items: [] });
+test("caller-supplied data wins over provider data, including order-flow context", () => {
+  const m = mergeSupplied({ macro: { a: 1 }, news: { items: [] }, orderFlow: { tape: { deltaPct: -10 } } }, { macro: { b: 2 }, orderFlow: { tape: { deltaPct: 25 } } });
+  assert.deepEqual(m.macro, { b: 2 }); assert.deepEqual(m.news, { items: [] }); assert.deepEqual(m.orderFlow, { tape: { deltaPct: 25 } });
+});
+test("crypto agent consumes only fresh, sufficiently sampled aggressor delta as low-weight evidence", () => {
+  const cs = candles(300, 0.001, 0.003);
+  const flow = { provider: "bybit", generatedAt: new Date(NOW).toISOString(), tape: { trades: 50, buyVolume: 80, sellVolume: 20, delta: 60, deltaPct: 60, cumulativeDelta: 60 }, depth: { spreadBps: 1.2, imbalance: 0.2, microprice: 100, bidNotional: 50000, askNotional: 40000 }, dataQuality: { tradeAgeMs: 500, tradeCount: 50 } };
+  const ctx = { market: { ...market(cs), orderFlow: flow }, supplied: {}, now: NOW, integrity };
+  const report = cryptoIntelligence(ctx);
+  assert.equal(report.status, "ok");
+  assert.ok(report.evidence.some(x => x.label === "aggressor_delta_pct" && x.value === 60));
+  assert.ok(report.evidence.some(x => x.label === "flow_spread_bps"));
+  assert.ok(report.evidence.some(x => x.label === "flow_depth_imbalance"));
+  assert.ok(report.evidence.some(x => x.label === "aggressor_delta"));
+  const stale = cryptoIntelligence({ ...ctx, market: { ...ctx.market, orderFlow: { ...flow, dataQuality: { tradeAgeMs: 300000, tradeCount: 50 } } } });
+  assert.ok(stale.warnings.some(x => /stale/.test(x)));
 });
 
 test("routes: dashboard, roster, providers feed agents, auth, and structural veto on execute", async () => {
@@ -171,8 +195,20 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
   const realFetch = globalThis.fetch; globalThis.fetch = (async () => { brokerCalls++; return new Response("{}"); }) as any;
   try {
     assert.equal(await (await app.fetch(new Request("https://e.test/other"), env)).text(), "base"); assert.equal(baseCalls, 1);
-    const page = await app.fetch(new Request("https://e.test/agents"), env); assert.equal(page.status, 200); assert.match(await page.text(), /ETI Agent Intelligence Center/);
+    const page = await app.fetch(new Request("https://e.test/agents"), env); assert.equal(page.status, 200); const pageHtml = await page.text(); assert.match(pageHtml, /ETI Agent Intelligence Center/); assert.match(pageHtml, /Load D1 history/); assert.match(pageHtml, /beforeId/);
     const roster: any = await (await app.fetch(new Request("https://e.test/api/agents"), env)).json(); assert.equal(roster.agents.length, 12); assert.equal(roster.liveExecutionAllowed, false);
+    const disabledAuto: any = await (await app.fetch(new Request("https://e.test/api/agents/autopilot"), env)).json();
+    assert.equal(disabledAuto.scheduler.cron, "*/5 * * * *");
+    assert.equal(disabledAuto.liveOrdersAllowed, false);
+    assert.equal(disabledAuto.ready, false);
+    assert.ok(disabledAuto.blockedReasons.includes("autopilot_disabled"));
+    const autoEnv: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_EXECUTION_TOKEN: env.ETI_EXECUTION_TOKEN, ETI_EXECUTION_LOG: { get: async () => null } };
+    const readyAuto: any = await (await app.fetch(new Request("https://e.test/api/agents/autopilot"), autoEnv)).json();
+    assert.equal(readyAuto.ready, true, "the scheduled paper controller should report ready when its gates and storage are configured");
+    assert.equal(readyAuto.councilRunsBeforeStrategyGates, true);
+    assert.equal(readyAuto.recordsNoTradeDecisions, true);
+    assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions"), env)).status, 401);
+    assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions", { headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN } }), env)).status, 503);
     const a: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&interval=1h"), env)).json();
     assert.equal(a.reports.length, 12); assert.deepEqual(a.providers, status); assert.equal(a.reports.find((x: any) => x.agent === "news").status, "ok");
     const off: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&providers=0"), env)).json();

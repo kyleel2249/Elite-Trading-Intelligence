@@ -244,7 +244,7 @@ def test_futures_and_options_sizing_use_multipliers():
 
 # ------------------------------------------------------------------ routing honesty
 def test_routes_match_the_adapters_that_exist():
-    assert [r["provider"] for r in routes_for(classify("BTCUSDT"))] == ["binance"]
+    assert [r["provider"] for r in routes_for(classify("BTCUSDT"))] == ["bybit"]
     assert [r["provider"] for r in routes_for(classify("AAPL"))] == ["alpaca"]
     assert routes_for(classify("VOD.L")) == [] and routes_for(classify("ESZ6")) == []
     fx = routes_for(classify("EURUSD"))
@@ -283,7 +283,7 @@ async def test_snapshot_labels_proxies_and_invents_nothing():
     nothing = await route_snapshot("VOD.L", market_service=_FakeMarket())
     assert nothing["price"] is None and nothing["data_status"] == "provider_not_integrated"
     btc = await route_snapshot("BTCUSDT", market_service=_FakeMarket())
-    assert btc["provider"] == "binance" and btc["price"] == 100.0 and "is_proxy" not in btc
+    assert btc["provider"] == "bybit" and btc["price"] == 100.0 and "is_proxy" not in btc
 
 
 # ------------------------------------------------------------------ RiskEngine integration

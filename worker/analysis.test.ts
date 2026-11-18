@@ -21,6 +21,9 @@ import { aggregateBuckets, parseYahooChart, yahooSymbol } from "./analysis/marke
 import { calibrateTechnical, wilson } from "./analysis/calibrate.ts";
 import { DEFAULT_FRED, form4Urls, parseForm4Xml } from "./analysis/fundamental-sources.ts";
 import { cached } from "./analysis/api.ts";
+import { extractTopLevel, llamaToInput, parseGithubActivity, parseGithubUrl, parseGoPlus, parseLlamaHead, pickContract, curatedProfile } from "./analysis/crypto-sources.ts";
+import { fetchUnlockEvents, guardCredits, normalizeUnlockEvent, summarizeUnlocks, type KVLike } from "./analysis/tokenomist.ts";
+import { mergeCrypto } from "./analysis/crypto-pipeline.ts";
 
 const NOW = Date.UTC(2026, 10, 9, 12, 0, 0), HR = 3600000;
 const k = (i: number, o: number, h: number, l: number, c: number, v = 100): Kline => [NOW - (400 - i) * HR, o, h, l, c, v];
@@ -321,15 +324,17 @@ test("input validation: symbols and candles", () => {
   assert.ok(sanitizeCandles([[1, 2, 3, 1, 2, 5]]).error === undefined); assert.match(sanitizeCandles([[1, 2, 1, 3, 2, 5]]).error!, /inconsistent/); assert.match(sanitizeCandles([[1, "x", 3, 1, 2, 5]]).error!, /non-finite/); assert.match(sanitizeCandles("no").error!, /array/);
   const dup = sanitizeCandles([[2, 1, 2, 1, 1.5, 1], [1, 1, 2, 1, 1.5, 1], [2, 1, 2, 1, 1.6, 1]]); assert.deepEqual(dup.rows.map(r => r[0]), [1, 2]);
 });
-test("asset class inference", () => { assert.equal(inferAssetClass("BTCUSDT"), "crypto"); assert.equal(inferAssetClass("EURUSD"), "fx"); assert.equal(inferAssetClass("AAPL"), "stock"); });
+test("asset class inference", () => { assert.equal(inferAssetClass("BTCUSDT"), "crypto"); assert.equal(inferAssetClass("EURUSD"), "fx"); assert.equal(inferAssetClass("AAPL"), "stock"); assert.equal(inferAssetClass("BRK.B"), "stock"); assert.equal(inferAssetClass("TOOLONGNAME"), "unknown"); });
 test("rate limiter blocks bursts and recovers after the window", () => {
   const ip = "t-" + Math.random(); let blocked: number | null = null; for (let i = 0; i < 40; i++) blocked = rateLimited(ip, 2, 1000, 60);
   assert.ok(blocked !== null && blocked > 0); assert.equal(rateLimited(ip, 2, 1000 + 61000, 60), null);
 });
 const call = (path: string, init?: RequestInit) => handleAnalysis(new Request("https://eti.test" + path, init), {});
-const post = (path: string, body: unknown) => call(path, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "api-" + Math.random() }, body: JSON.stringify(body) });
+const postEnv = (path: string, body: unknown, env: Record<string, string> = {}) => handleAnalysis(new Request("https://eti.test" + path, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "api-" + Math.random() }, body: JSON.stringify(body) }), env);
+const post = (path: string, body: unknown) => postEnv(path, body);
+const PAID = { ETI_ANALYSIS_PLAN: "paid" };
 test("API: catalog, method and symbol validation", async () => {
-  const c = await (await call("/api/analysis")).json() as any; assert.equal(c.submitsOrder, false); assert.deepEqual(c.configured, { FRED_API_KEY: false, SEC_USER_AGENT: false, COINGECKO_API_KEY: false, NEWS_FEEDS_JSON: false });
+  const c = await (await call("/api/analysis")).json() as any; assert.equal(c.submitsOrder, false); assert.deepEqual(c.configured, { SENTIMENT_AI: false, TOKENOMIST_API_KEY: false, GITHUB_TOKEN: false, CRYPTO_PROFILES_JSON: false, institutionalDb: false, FRED_API_KEY: false, SEC_USER_AGENT: false, COINGECKO_API_KEY: false, NEWS_FEEDS_JSON: false });
   assert.equal((await call("/api/analysis/technical", { method: "DELETE" })).status, 405);
   assert.equal((await call("/api/analysis/technical?symbol=bad%20sym")).status, 400);
   assert.equal((await call("/api/analysis/mtf?symbol=BTCUSDT&strategy=yolo")).status, 400);
@@ -337,7 +342,7 @@ test("API: catalog, method and symbol validation", async () => {
 });
 test("API: POST technical analyses supplied candles and rejects malformed ones", async () => {
   const rows = reindex(series(300, { drift: 0.25, noise: 0.5, seed: 3 }));
-  const r = await post("/api/analysis/technical?symbol=AAPL&timeframe=1h", { candles: rows }); assert.equal(r.status, 200); const j = await r.json() as any; assert.equal(j.report.domain, "technical"); assert.ok(j.structure && j.volumeProfile);
+  const r = await postEnv("/api/analysis/technical?symbol=AAPL&timeframe=1h", { candles: rows }, PAID); assert.equal(r.status, 200); const j = await r.json() as any; assert.equal(j.report.domain, "technical"); assert.ok(j.structure && j.volumeProfile); assert.equal(j.dataQuality.detail, "full");
   assert.equal((await post("/api/analysis/technical?symbol=AAPL", { candles: [[1, 2, 1, 3, 2, 1]] })).status, 400);
   assert.equal((await post("/api/analysis/technical?symbol=AAPL", { candles: reindex(series(20)) })).status, 422);
 });
@@ -386,7 +391,8 @@ test("stock fundamentals ingest SEC statements, Form 4 insiders and a derived ma
   const facts = { entityName: "Acme", facts: { "us-gaap": { Revenues: { units: { USD: [f("2024-12-31", "2024-01-01", 1000), f("2025-12-31", "2025-01-01", 1200)] } }, NetIncomeLoss: { units: { USD: [f("2024-12-31", "2024-01-01", 140), f("2025-12-31", "2025-01-01", 180)] } }, OperatingIncomeLoss: { units: { USD: [f("2025-12-31", "2025-01-01", 240)] } }, NetCashProvidedByUsedInOperatingActivities: { units: { USD: [f("2025-12-31", "2025-01-01", 260)] } }, PaymentsToAcquirePropertyPlantAndEquipment: { units: { USD: [f("2025-12-31", "2025-01-01", 60)] } } }, dei: { EntityCommonStockSharesOutstanding: { units: { shares: [{ end: "2026-01-31", val: 100 }] } } } } };
   const subs = { filings: { recent: { form: ["4"], filingDate: [new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10)], accessionNumber: ["0001234567-26-000001"], primaryDocument: ["xslF345X05/f4.xml"] } } };
   const chart = { chart: { result: [{ meta: { regularMarketPrice: 40, regularMarketTime: Math.floor(Date.now() / 1000) }, timestamp: [], indicators: { quote: [{}] } }] } };
-  await withFetch(u => u.includes("company_tickers") ? json({ 0: { ticker: "ACME", cik_str: 1234567 } }) : u.includes("companyfacts") ? json(facts) : u.includes("submissions") ? json(subs) : u.endsWith("f4.xml") ? new Response(FORM4) : u.includes("yahoo") ? json(chart) : new Response("no", { status: 404 }), async () => {
+  const concept = (u: string) => { const c = u.match(/\/(us-gaap|dei)\/([A-Za-z]+)\.json/); if (!c) return new Response("no", { status: 404 }); const src = c[1] === "dei" ? facts.facts.dei?.[c[2] as "EntityCommonStockSharesOutstanding"] : (facts.facts["us-gaap"] as any)[c[2]]; return src ? json({ entityName: "Acme", units: src.units }) : new Response("nf", { status: 404 }); };
+  await withFetch(u => u.includes("ticker.txt") ? new Response("acme\t1234567\n" + "x".repeat(2000)) : u.includes("companyconcept") ? concept(u) : u.includes("submissions") ? json(subs) : u.endsWith("f4.xml") ? new Response(FORM4) : u.includes("yahoo") ? json(chart) : new Response("no", { status: 404 }), async () => {
     const r = await handleAnalysis(new Request("https://eti.test/api/analysis/fundamental?symbol=ACME", { headers: { "cf-connecting-ip": "s-" + Math.random() } }), { SEC_USER_AGENT: "ETI test@example.com" });
     assert.equal(r.status, 200); const j = await r.json() as any;
     assert.ok(!j.missing.includes("insider and institutional activity"), "insider data should now be present");
@@ -446,8 +452,8 @@ test("calibration: no look-ahead, honest on a random walk, wilson interval sane"
   assert.ok(A.some(x => x.index > cut + 20 && B.find(y => y.index === x.index)!.score !== x.score), "sanity: scores after the poisoned point do differ");
 });
 test("API: calibrate endpoint works on supplied candles and refuses short history", async () => {
-  const ok = await post("/api/analysis/calibrate?symbol=AAPL&timeframe=1d&horizon=10&maxSamples=40", { candles: series(900, { drift: 0.05, noise: 0.9, seed: 12 }) }); assert.equal(ok.status, 200); const j = await ok.json() as any; assert.ok(j.samples >= 30 && j.summary && j.caveats.length);
-  assert.equal((await post("/api/analysis/calibrate?symbol=AAPL", { candles: series(100) })).status, 422);
+  const ok = await postEnv("/api/analysis/calibrate?symbol=AAPL&timeframe=1d&horizon=10&maxSamples=40", { candles: series(900, { drift: 0.05, noise: 0.9, seed: 12 }) }, PAID); assert.equal(ok.status, 200); const j = await ok.json() as any; assert.ok(j.samples >= 30 && j.summary && j.caveats.length);
+  assert.equal((await postEnv("/api/analysis/calibrate?symbol=AAPL", { candles: series(100) }, PAID)).status, 422);
 });
 test("cache helper degrades to a direct call without the Cache API and honours worthCaching", async () => {
   let calls = 0; assert.equal(await cached("k", 60, async () => ++calls), 1); assert.equal(await cached("k", 60, async () => ++calls, () => false), 2);
@@ -467,4 +473,171 @@ test("FX fundamentals use the operator-configured event calendar; no calendar is
     const without = await (await handleAnalysis(new Request("https://eti.test/api/analysis/fundamental?symbol=EURUSD", { headers: { "cf-connecting-ip": "e-" + Math.random() } }), { FRED_API_KEY: "k" })).json() as any;
     assert.ok(!without.extras.eventRisk); assert.ok(without.warnings.some((w: string) => /unverified, not clear/.test(w)));
   });
+});
+
+// =============================== Free-plan setup ===============================
+import { FREE_LIMITS, PAID_LIMITS, planOf, resolveDetail } from "./analysis/plan.ts";
+test("plan: Free is the default and the safe choice; paid must be explicit", () => {
+  assert.equal(planOf({}).plan, "free"); assert.equal(planOf({ ETI_ANALYSIS_PLAN: "nonsense" }).plan, "free"); assert.equal(planOf({ ETI_ANALYSIS_PLAN: "PAID" }).plan, "paid");
+  assert.deepEqual([FREE_LIMITS.defaultDetail, FREE_LIMITS.allowFullDetail, FREE_LIMITS.calibrateAllowed], ["lite", false, false]); assert.ok(FREE_LIMITS.maxCandles < PAID_LIMITS.maxCandles && FREE_LIMITS.maxNewsItems < PAID_LIMITS.maxNewsItems);
+  assert.equal(planOf({ ETI_ANALYSIS_ALLOW_FULL: "true" }).allowFullDetail, true, "explicit override for people who raised their own CPU limit");
+  assert.deepEqual(resolveDetail(undefined, FREE_LIMITS), { detail: "lite", downgraded: false }); assert.deepEqual(resolveDetail("full", FREE_LIMITS), { detail: "lite", downgraded: true }); assert.deepEqual(resolveDetail(undefined, PAID_LIMITS), { detail: "full", downgraded: false });
+});
+test("Free plan: analysis defaults to lite, silently-requested full is downgraded and SAYS so, candles are capped", async () => {
+  const rows = reindex(series(400, { drift: 0.25, noise: 0.5, seed: 3 }));
+  const dflt = await (await postEnv("/api/analysis/technical?symbol=AAPL&timeframe=1h", { candles: rows })).json() as any;
+  assert.equal(dflt.dataQuality.detail, "lite"); assert.equal(dflt.volumeProfile, null); assert.equal(dflt.candles, FREE_LIMITS.maxCandles);
+  const forced = await (await postEnv("/api/analysis/technical?symbol=AAPL&timeframe=1h&detail=full", { candles: rows })).json() as any;
+  assert.equal(forced.dataQuality.detail, "lite"); assert.match(forced.dataQuality.note, /downgraded to lite on the free plan/);
+  const paid = await (await postEnv("/api/analysis/technical?symbol=AAPL&timeframe=1h&detail=full", { candles: rows }, PAID)).json() as any; assert.equal(paid.dataQuality.detail, "full"); assert.equal(paid.candles, 250);
+});
+test("Free plan: calibration is refused with an actionable explanation; the catalog advertises the plan", async () => {
+  const r = await postEnv("/api/analysis/calibrate?symbol=AAPL", { candles: series(900) }); assert.equal(r.status, 403); const j = await r.json() as any; assert.equal(j.error, "plan_limit"); assert.match(j.detail, /npm run calibrate/);
+  const c = await (await call("/api/analysis")).json() as any; assert.equal(c.plan.plan, "free"); assert.equal(c.plan.calibrationAllowed, false); assert.equal(c.plan.defaultDetail, "lite");
+  assert.equal((await (await handleAnalysis(new Request("https://eti.test/api/analysis"), PAID)).json() as any).plan.calibrationAllowed, true);
+});
+test("Free plan: oversized news payloads are trimmed to the most recent items, not rejected", async () => {
+  const items = Array.from({ length: 200 }, (_, i) => ({ id: "n" + i, title: "Bitcoin rises on adoption headline " + i, source: "Wire", sourceType: "wire", publishedAt: new Date(Date.now() - i * 60000).toISOString() }));
+  const j = await (await postEnv("/api/analysis/news?symbol=BTCUSDT", items.length ? { items } : { items })).json() as any;
+  assert.ok(j.events.length <= FREE_LIMITS.maxNewsItems, "clusters cannot exceed the capped item count");
+});
+
+// =============================== crypto data sources ===============================
+const GOPLUS = { code: 1, message: "OK", result: { "0xabc0000000000000000000000000000000000001": {
+  is_open_source: "1", is_proxy: "1", is_mintable: "0", is_honeypot: "0", hidden_owner: "0", can_take_back_ownership: "0", transfer_pausable: "0", is_blacklisted: "0", selfdestruct: "0", external_call: "0",
+  buy_tax: "0", sell_tax: "0.03", owner_address: "0x1111111111111111111111111111111111111111", creator_percent: "0.04",
+  holders: [{ address: "0x000000000000000000000000000000000000dead", percent: "0.20", is_contract: 0 }, { address: "0xaaa", percent: "0.15", is_contract: 1, tag: "Binance" }, { address: "0xbbb", percent: "0.10", is_contract: 1, is_locked: 1 }, { address: "0xccc", percent: "0.08", is_contract: 1 }, { address: "0xddd", percent: "0.05", is_contract: 0 }],
+  dex: [{ name: "Uniswap V3", liquidity: "2500000.5", pair: "0x1" }, { name: "Sushi", liquidity: "500000", pair: "0x2" }],
+  lp_holders: [{ address: "0x000000000000000000000000000000000000dead", percent: "0.40", is_locked: 1 }, { address: "0xeee", percent: "0.60", is_locked: 0 }] } } };
+test("GoPlus: holder concentration excludes burn/locked/labelled wallets and says it is a lower bound; flags and liquidity map correctly", () => {
+  const g = parseGoPlus(GOPLUS, "0xABC0000000000000000000000000000000000001");
+  assert.equal(g.input.holders!.top10Pct, 13);                // 0.08 unlabelled contract + 0.05 EOA; burn, exchange-tagged and locked are excluded
+  assert.equal(g.input.holders!.excludesExchangesAndBurn, true); assert.equal(g.input.holders!.insiderPct, 4);
+  assert.equal(g.input.liquidity!.dexLiquidityUsd, 3000001); assert.equal(g.input.security!.liquidityLockedPct, 40); assert.equal(g.input.security!.sellTaxPct, 3); assert.equal(g.input.security!.upgradeable, true); assert.equal(g.input.security!.honeypot, false);
+  assert.ok(g.warnings.some(w => /1 of the top holders are unlabelled contracts/.test(w))); assert.ok(g.notes.some(n => /lower bound/.test(n)));
+  assert.throws(() => parseGoPlus({ code: 1, result: {} }, "0xdead"), /no record/);
+});
+test("engine: honeypot is CRITICAL (-> high_risk), a 60% tax is critical, unlocked LP is flagged, and an insider-heavy unlock is flagged", () => {
+  const base = { symbol: "T", now: NOW, asOf: "2026-11-08", purpose: "A long enough description of what this project actually does for users.", supply: { total: 1e9, circulating: 5e8, fdvUsd: 1e9, marketCapUsd: 5e8 }, liquidity: { volume24hUsd: 5e7, dexLiquidityUsd: 5e6 }, team: { publiclyIdentified: true }, exchanges: { tier1Count: 2 }, holders: { top10Pct: 15, excludesExchangesAndBurn: true }, security: { audits: [{ firm: "A" }], sourceVerified: true, upgradeable: false, mintable: false } };
+  assert.equal((cryptoFundamentals({ ...base, security: { ...base.security, honeypot: true } }).extras as any).legitimacy, "high_risk");
+  assert.equal((cryptoFundamentals({ ...base, security: { ...base.security, sellTaxPct: 60 } }).extras as any).legitimacy, "high_risk");
+  const lp = cryptoFundamentals({ ...base, security: { ...base.security, liquidityLockedPct: 5 } }); assert.ok((lp.extras as any).redFlags.some((f: any) => /liquidity-pool tokens are locked/.test(f.flag)));
+  const soon = new Date(NOW + 10 * 86400000).toISOString(), ins = cryptoFundamentals({ ...base, unlocks: [{ date: soon, tokens: 4e7, insider: true }] });
+  assert.ok((ins.extras as any).redFlags.some((f: any) => /team\/investor allocations/.test(f.flag)));
+  assert.equal((cryptoFundamentals({ ...base, unlocks: [{ date: soon, tokens: 4e7, insider: false }] }).extras as any).redFlags.filter((f: any) => /team\/investor/.test(f.flag)).length, 0);
+});
+test("engine: an established asset is not 'unverified' for lacking contract data, but red flags still win", () => {
+  const btc = { symbol: "BTC", now: NOW, marketCapRank: 1, ageYears: 17, exchanges: { tier1Count: 6 }, liquidity: { volume24hUsd: 3e10 }, supply: { total: 19.9e6, circulating: 19.9e6, max: 21e6, fdvUsd: 2.1e12, marketCapUsd: 2e12 } };
+  const r = cryptoFundamentals(btc); assert.equal((r.extras as any).legitimacy, "substantive"); assert.match((r.extras as any).establishedBasis, /Established asset/);
+  assert.equal((cryptoFundamentals({ ...btc, marketCapRank: 400 }).extras as any).legitimacy, "unverified");
+  assert.equal((cryptoFundamentals({ ...btc, security: { honeypot: true } }).extras as any).legitimacy, "high_risk");
+});
+test("DeFiLlama: head-only extraction reads flat keys, arrays and ignores keys beyond the cut", () => {
+  const head = '{"id":"1","name":"Aave","url":"https://aave.com","description":"has \\"quotes\\" and [brackets]","audits":"2","audit_note":null,"gecko_id":"aave","category":"Lending","audit_links":["https://certik.com/a","https://openzeppelin.com/b","ftp://bad"],"forkedFrom":["Compound"],"github":["aave"],"chainTvls":{"Ethereum":{"tvl":[{"date":1,"totalLiquidityUSD":5';
+  const p = parseLlamaHead(head, "aave"); assert.equal(p.audits, 2); assert.deepEqual(p.auditLinks, ["https://certik.com/a", "https://openzeppelin.com/b"]); assert.equal(p.category, "Lending"); assert.deepEqual(p.forkedFrom, ["Compound"]); assert.equal(p.geckoId, "aave");
+  const i = llamaToInput(p, 5e9); assert.deepEqual(i.input.security!.audits!.map(a => a.firm), ["certik.com", "openzeppelin.com"]); assert.equal(i.input.network!.tvlUsd, 5e9); assert.ok(i.notes.some(n => /Forked code/.test(n)));
+  assert.equal(parseLlamaHead('{"audits":"0","audit_links":[]}', "x").audits, 0); assert.deepEqual(extractTopLevel('{"a":"unterminated [', ["a"]), {});
+});
+test("GitHub: repo URLs are validated; activity maps commits, last push and archived repos", () => {
+  assert.deepEqual(parseGithubUrl("https://github.com/bitcoin/bitcoin"), { owner: "bitcoin", repo: "bitcoin" }); assert.equal(parseGithubUrl("https://evil.com/github.com/a/b"), null); assert.equal(parseGithubUrl("https://github.com/a"), null);
+  const a = parseGithubActivity({ full_name: "o/r", pushed_at: "2026-11-01T00:00:00Z", html_url: "https://github.com/o/r" }, { all: [...Array(39).fill(0), ...Array(13).fill(4)] }, '<https://api.github.com/x?page=2>; rel="next", <https://api.github.com/x?page=137>; rel="last"', NOW);
+  assert.equal(a.input.development!.commits90d, 52); assert.match(a.notes[0], /137 contributors/); assert.equal(parseGithubActivity({ archived: true, pushed_at: "2026-11-01T00:00:00Z" }, null, null, NOW).input.development!.lastCommitDate, "1970-01-01T00:00:00Z");
+});
+test("curated profiles: only whitelisted, type-checked fields survive; bad JSON is reported, never thrown", () => {
+  const env = { CRYPTO_PROFILES_JSON: JSON.stringify({ FOO: { team: { publiclyIdentified: true, founders: ["A", 5, "B"], notes: "x".repeat(900) }, regulatory: { risk: "high" }, audits: [{ firm: "Acme", url: "javascript:alert(1)" }, { nofirm: 1 }], unlocks: [{ date: "2026-12-01", tokens: 5 }, { date: "bad" }], evil: "<script>", knownExploitUnresolved: true, source: "ops" } }) };
+  const p = curatedProfile(env, "foo").profile!; assert.deepEqual(p.team!.founders, ["A", "B"]); assert.equal(p.team!.notes!.length, 400); assert.equal(p.regulatory!.risk, "high"); assert.equal(p.audits!.length, 1); assert.equal(p.audits![0].url, undefined); assert.equal(p.unlocks!.length, 1); assert.ok(!("evil" in p)); assert.equal(p.knownExploitUnresolved, true);
+  assert.equal(curatedProfile(env, "BAR").profile, null); assert.match(curatedProfile({ CRYPTO_PROFILES_JSON: "{bad" }, "X").error!, /not valid JSON/); assert.equal(pickContract({ "binance-smart-chain": "0x" + "a".repeat(40), ethereum: "not-an-address" })!.chainId, 56);
+  assert.deepEqual(mergeCrypto({ liquidity: { volume24hUsd: 5 } }, { liquidity: { dexLiquidityUsd: 9, volume24hUsd: undefined } }).liquidity, { volume24hUsd: 5, dexLiquidityUsd: 9 });
+});
+
+// =============================== Tokenomist (native port) ===============================
+const kvStore = () => { const m = new Map<string, string>(); const kv: KVLike = { get: async k => m.get(k) ?? null, put: async (k, v) => { m.set(k, v); } }; return { kv, m }; };
+const TOK = (page: number, totalPages: number, used = 10) => ({ status: true, metadata: { totalPages, credit: { used, limit: 1000, resetAt: "2026-12-01T00:00:00Z" } }, data: [{ unlockDate: new Date(Date.now() + page * 5 * 86400000).toISOString(), cliffUnlocks: { cliffAmount: "1000000", cliffValue: "500000", valueToMarketCap: "1.2", allocationBreakdown: [{ standardAllocationName: "Founder Team", cliffAmount: "700000" }, { standardAllocationName: "Community", cliffAmount: "300000" }] } }, { unlockDate: null }] });
+test("Tokenomist: normalisation, derived summary and credit guard match the Python client", async () => {
+  const e = normalizeUnlockEvent(TOK(1, 1).data[0])!; assert.equal(e.tokens, 1e6); assert.equal(e.insider, true); assert.equal(normalizeUnlockEvent({ unlockDate: null }), null); assert.equal(normalizeUnlockEvent({ unlockDate: "2026-12-01", cliffUnlocks: { cliffAmount: "0" } }), null);
+  const s = summarizeUnlocks([e, { ...e, date: new Date(NOW + 9e8).toISOString(), insider: false }], 1e7, NOW); assert.equal(s.count, 2); assert.equal(s.pctOfCirculating, 20); assert.equal(s.insiderShare, 0.5); assert.ok(!("events" in s), "summary never carries the raw schedule");
+  assert.throws(() => guardCredits({ used: 950, limit: 1000 }, 0.1), /reserve/); guardCredits({ used: 500, limit: 1000 }, 0.1); guardCredits(null, 0.1);
+});
+test("Tokenomist: paginates, persists quota to KV, stops at the credit reserve, and maps auth/plan errors", async () => {
+  const { kv, m } = kvStore(); let calls = 0;
+  await withFetch(u => { calls++; assert.match(u, /\/v5\/unlock\/events\/arbitrum\?start=/); const page = Number(new URL(u).searchParams.get("page")); return json(TOK(page, 2, 10 + page)); }, async () => {
+    const r = await fetchUnlockEvents("arbitrum", { TOKENOMIST_API_KEY: "k" }, (u, i) => fetch(u, i), kv, NOW); assert.equal(r.events.length, 2); assert.equal(calls, 2); assert.equal(JSON.parse(m.get("analysis:tokenomist:quota")!).used, 12);
+  });
+  m.set("analysis:tokenomist:quota", JSON.stringify({ used: 980, limit: 1000 })); calls = 0;
+  await withFetch(() => { calls++; return json(TOK(1, 1)); }, async () => { await assert.rejects(() => fetchUnlockEvents("arbitrum", { TOKENOMIST_API_KEY: "k" }, (u, i) => fetch(u, i), kv, NOW), /reserve/); assert.equal(calls, 0, "no credit may be spent below the reserve"); });
+  await assert.rejects(() => fetchUnlockEvents("x/../y", { TOKENOMIST_API_KEY: "k" }, fetch, undefined, NOW), /invalid token id/); await assert.rejects(() => fetchUnlockEvents("arbitrum", {}, fetch, undefined, NOW), /TOKENOMIST_API_KEY/);
+  await withFetch(() => new Response("no", { status: 403 }), async () => { await assert.rejects(() => fetchUnlockEvents("arbitrum", { TOKENOMIST_API_KEY: "k" }, (u, i) => fetch(u, i), undefined, NOW), /plan restriction/); });
+});
+
+// =============================== crypto pipeline end to end (mocked network) ===============================
+const CG_COIN = { id: "testcoin", name: "Test Coin", description: { en: "A decentralised settlement network for tokenised assets with on-chain fee revenue." }, genesis_date: "2019-01-01", market_cap_rank: 300, links: { repos_url: { github: ["https://github.com/testorg/testcoin"] } },
+  platforms: { ethereum: "0xabc0000000000000000000000000000000000001" }, market_data: { total_supply: 1e9, circulating_supply: 6e8, max_supply: 1e9, current_price: { usd: 1 }, market_cap: { usd: 6e8 }, fully_diluted_valuation: { usd: 1e9 }, total_volume: { usd: 5e7 } }, developer_data: { commit_count_4_weeks: 10 },
+  tickers: [{ market: { identifier: "a", name: "A" }, trust_score: "green" }, { market: { identifier: "b", name: "B" }, trust_score: "green" }] };
+const cryptoMock = (over: Record<string, (u: string) => Response> = {}) => (u: string) => {
+  for (const [k, h] of Object.entries(over)) if (u.includes(k)) return h(u);
+  if (u.includes("coingecko.com/api/v3/search")) return json({ coins: [{ id: "testcoin", symbol: "TST", market_cap_rank: 300 }] });
+  if (u.includes("coingecko.com/api/v3/coins/")) return json(CG_COIN);
+  if (u.includes("gopluslabs")) return json(GOPLUS);
+  if (u.includes("api.llama.fi/protocol/")) return new Response('{"audits":"2","audit_links":["https://certik.com/x"],"category":"Dexes","gecko_id":"testcoin","chainTvls":{"x":{"tvl":[]}}}');
+  if (u.includes("api.llama.fi/tvl/")) return new Response("123456789");
+  if (u.includes("api.github.com") && u.endsWith("/stats/participation")) return json({ all: Array(52).fill(5) });
+  if (u.includes("api.github.com") && u.includes("/contributors")) return new Response("[]", { headers: { link: '<https://api.github.com/x?page=42>; rel="last"' } });
+  if (u.includes("api.github.com")) return json({ full_name: "testorg/testcoin", pushed_at: new Date(Date.now() - 2 * 86400000).toISOString(), html_url: "https://github.com/testorg/testcoin" });
+  if (u.includes("tokenomist.ai")) return json(TOK(1, 1));
+  return new Response("not mocked: " + u, { status: 404 });
+};
+const getFund = async (sym: string, env: Record<string, string>) => (await handleAnalysis(new Request(`https://eti.test/api/analysis/fundamental?symbol=${sym}&assetClass=crypto`, { headers: { "cf-connecting-ip": "c-" + Math.random() } }), env)).json() as Promise<any>;
+test("crypto pipeline: every source contributes, the response says which, and the raw Tokenomist schedule is never returned", async () => {
+  const profiles = JSON.stringify({ TST: { team: { publiclyIdentified: true, founders: ["A. Founder"] }, regulatory: { risk: "low" }, source: "ops review 2026-10", asOf: "2026-10-30" } });
+  await withFetch(cryptoMock(), async () => {
+    const j = await getFund("TST", { TOKENOMIST_API_KEY: "k", CRYPTO_PROFILES_JSON: profiles });
+    assert.deepEqual(j.extras.dataSources.used.slice(0, 5).map((s: string) => s.split(" ")[0]), ["CoinGecko", "GoPlus", "DeFiLlama", "GitHub", "Tokenomist"]); assert.ok(j.extras.dataSources.used.some((s: string) => /operator profile/.test(s)));
+    assert.equal(j.extras.legitimacy, "substantive"); assert.ok(j.completeness > 0.8, "completeness " + j.completeness);
+    assert.ok(j.findings.some((f: any) => f.kind === "holder concentration")); assert.ok(j.extras.unlockSummary.count >= 1);
+    const raw = JSON.stringify(j); assert.ok(!raw.includes("allocationBreakdown") && !raw.includes("cliffUnlocks") && !/"unlocks"\s*:/.test(raw), "no raw Tokenomist payload may appear in a public response");
+  });
+});
+test("crypto pipeline: a failing source lowers coverage and is reported; it never aborts the analysis", async () => {
+  await withFetch(cryptoMock({ gopluslabs: () => new Response("boom", { status: 500 }), "api.github.com": () => new Response("limit", { status: 403 }) }), async () => {
+    const j = await getFund("TST", {});
+    assert.equal(j.status === "unavailable", false); const un = j.extras.dataSources.unavailable.map((u: any) => u.source);
+    assert.ok(un.includes("GoPlus") && un.includes("GitHub") && un.includes("Tokenomist") && un.includes("operator profile")); assert.match(j.setupRequired ?? "", /GITHUB_TOKEN|TOKENOMIST|CRYPTO_PROFILES_JSON/);
+  });
+});
+test("crypto pipeline: a honeypot found by GoPlus drives the intelligence verdict to AVOID regardless of a bullish chart", async () => {
+  const bad = JSON.parse(JSON.stringify(GOPLUS)); bad.result["0xabc0000000000000000000000000000000000001"].is_honeypot = "1";
+  await withFetch(cryptoMock({ gopluslabs: () => json(bad) }), async () => {
+    const f = await getFund("TST", {}); assert.equal(f.extras.legitimacy, "high_risk");
+    const b = centralIntelligence({ symbol: "TSTUSDT", assetClass: "crypto", strategy: "swing", mtf: mtfUp(), fundamental: f, now: NOW }); assert.equal(b.verdict, "AVOID");
+  });
+});
+
+test("SMC API returns confirmed structure, liquidity and order-block evidence without enabling trades", async () => {
+  const candles = reindex(flat(80, 100));
+  const req = new Request("https://eti.test/api/analysis/smc?symbol=BTCUSDT&timeframe=1h", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: "BTCUSDT", timeframe: "1h", candles }),
+  });
+  const res = await handleAnalysis(req, {} as any), body: any = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, "ready");
+  assert.equal(body.timeframe, "1h");
+  assert.ok(Array.isArray(body.structure.events));
+  assert.ok(Array.isArray(body.liquidityPools));
+  assert.ok(Array.isArray(body.liquiditySweeps));
+  assert.ok(Array.isArray(body.orderBlocks));
+  assert.ok(Array.isArray(body.displacement));
+  assert.ok(body.volumeProfile && Number.isFinite(body.volumeProfile.poc), "SMC response includes a calculated point of control");
+  assert.ok(Number.isFinite(body.volumeProfile.vah) && Number.isFinite(body.volumeProfile.val), "SMC response includes value-area bounds");
+  assert.match(body.volumeProfile.method, /OHLCV approximation/);
+  assert.equal(body.canTriggerTrade, false);
+  assert.equal(body.submitsOrder, false);
+  assert.equal(body.liveExecutionAllowed, false);
+});
+test("SMC API rejects unsupported timeframes and malformed candles", async () => {
+  const post = (timeframe: string, candles: unknown) => handleAnalysis(new Request("https://eti.test/api/analysis/smc?symbol=BTCUSDT", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ symbol: "BTCUSDT", timeframe, candles }),
+  }), {} as any);
+  assert.equal((await post("7h", flat(80))).status, 400);
+  assert.equal((await post("1h", [[1, 2]])).status, 400);
 });

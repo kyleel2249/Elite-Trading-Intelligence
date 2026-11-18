@@ -10,12 +10,16 @@
  * Worker answers unknown routes with a JSON 404, exactly as before.
  */
 import { withMotion } from "./ui/motion.ts";
+import { BITGET_CLIENT_JS } from "./ui/bitget-client.ts";
+import { LIQUIDITY_CSS, LIQUIDITY_JS } from "./ui/liquidity-intelligence.ts";
+import { handleLiquidity } from "./liquidity/api.ts";
+import { TRADING_TERMINAL_CSS, TRADING_TERMINAL_HTML, TRADING_TERMINAL_JS } from "./ui/trading-terminal.ts";
+import { PWA_ICON, PWA_MANIFEST, PWA_SERVICE_WORKER } from "./ui/pwa.ts";
 import { handleExecution } from "./execution.ts";
 import { handlePortfolio } from "./portfolio/routes.ts";
 import { CALC_CSS, CALC_HTML, CALC_JS } from "./calculator/ui.ts";
 import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
 import { PERP_CSS, PERP_HTML, PERP_JS, PERP_ORDER_HTML } from "./perp/ui.ts";
-import { VIZ_CSS, VIZ_HTML, VIZ_JS } from "./viz3d/ui.ts";
 import type { ExecutionEnv } from "./execution.ts";
 import { handleMarket } from "./market.ts";
 import { handleSignals } from "./signals.ts";
@@ -27,6 +31,7 @@ import { handleTestnetExecute } from "./algo/testnet-api.ts";
 import { handleManage } from "./algo/manage.ts";
 import { handleAlerts } from "./algo/alerts-api.ts";
 import { handleAnalysis } from "./analysis/api.ts";
+import { handleExtremeForecast } from "./analysis/extremes.ts";
 import type { AnalysisEnv } from "./analysis/fundamental-sources.ts";
 import { handleKnowledge } from "./knowledge.ts";
 import { handleReadiness } from "./readiness/api.ts";
@@ -38,7 +43,6 @@ import { handleAuth } from "./auth/routes.ts";
 
 export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
   ETI_EDGE?: string;
-  MARKET_CACHE?: KVNamespace;
   BACKEND_URL?: string;
 }
 
@@ -101,13 +105,37 @@ const html = `<!doctype html>
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#14233b,#080d16 55%);color:#eaf2ff;font:14px Inter,system-ui,sans-serif}
 header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}h1{font-size:22px;margin:0}small,.muted{color:var(--muted)}main{padding:22px 4vw;max-width:1600px;margin:auto}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}input,select,button{background:#0b1422;color:#eaf2ff;border:1px solid var(--line);border-radius:8px;padding:10px}button{cursor:pointer}button.active{border-color:var(--green);color:var(--green)}
-.grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(280px,3fr);gap:14px;align-items:start}.panel{background:linear-gradient(145deg,#121e30,#0d1624);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.panel h2{font-size:15px;margin:0 0 12px}.chart{height:350px;width:100%}canvas{width:100%;height:100%}.lower{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}.panel{background:linear-gradient(145deg,#121e30,#0d1624);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.panel h2{font-size:15px;margin:0 0 12px}.chart{height:350px;width:100%}.chart.big{height:clamp(560px,72vh,900px);min-height:560px;position:relative;overflow:hidden;border:1px solid #203b59;border-radius:10px;background:#091729}.chart.big #chartAdvanced{position:absolute;inset:0;width:100%;height:100%;z-index:1}.chart.big #chart{position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;z-index:2}.chart.big.legacy #chartAdvanced{display:none}.chart.big.legacy #chart{opacity:1;pointer-events:auto}.chart.big #chartAdvanced canvas{display:block}canvas{width:100%;height:100%}
+/* Contained chart workspace sized for a 1920 × 1080 desktop canvas. */
+.chart-workspace{width:100%;max-width:100%;margin:0;padding:16px;border:1px solid var(--line);border-radius:14px;overflow:hidden;min-width:0}
+.chart-workspace>h2,.chart-workspace>.meta,.chart-workspace>#legend,.chart-workspace>#overlayNote{margin-left:0;margin-right:0}
+.chart-workspace>h2{padding-top:0}
+.chart-workspace #stack{width:100%;max-width:100%;margin:0}
+.chart-workspace .chart.big{width:100%;height:clamp(520px,58vh,620px);min-height:520px;max-height:620px;border:1px solid #203b59;border-radius:10px}
+.chart-workspace .paneBox{width:100%;height:54px}
+.chart-workspace:fullscreen{width:100%;height:100%;max-width:none;margin:0;padding:12px;background:#080d16;border:0;border-radius:0;overflow:auto}
+.chart-workspace:fullscreen .chart.big{height:calc(100vh - 180px);min-height:420px;max-height:none}
+@media(max-width:700px){.chart-workspace{padding:12px}.chart-workspace .chart.big{height:70svh;min-height:420px;max-height:620px}.chart-workspace .paneBox{height:64px}}
+/* Desktop layout tuned for a 1920 × 1080 workspace while remaining fluid. */
+@media(min-width:1440px) and (min-height:800px){
+  header{min-height:72px;padding:12px 24px;gap:16px}
+  main{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px}
+  .toolbar{gap:8px;margin-bottom:10px}
+  .chart-workspace{padding:14px}
+  .chart-workspace .chart.big{height:min(58vh,620px);min-height:520px;max-height:620px}
+  .chart-workspace .paneBox{height:54px}
+  .chart-workspace>h2{padding-top:0;margin-bottom:8px}
+  .chart-workspace>.meta{margin-top:4px;margin-bottom:8px}
+  .chart-workspace>#legend{margin-bottom:8px}
+}
+
+.institutional-panel{min-width:0}.im-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}.im-card,.im-subpanel{min-width:0;border:1px solid var(--line);border-radius:10px;padding:12px;background:#0b1422}.im-card small{display:block;color:var(--muted);font-size:11px}.im-card b{display:block;font-size:17px;margin:6px 0;font-variant-numeric:tabular-nums}.im-card span{display:block;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.im-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.im-subpanel h3{font-size:13px;margin:0 0 9px}.im-list{display:grid;gap:7px}.im-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #1d2a3e;font-size:12px}.im-row:last-child{border-bottom:0}.im-row strong{font-variant-numeric:tabular-nums;text-align:right}.im-tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:10px;color:var(--muted);white-space:nowrap}.im-tag.bull{color:#62e6b7;border-color:#1c8d6c}.im-tag.bear{color:#ff8da0;border-color:#a63e58}.im-foot{font-size:11px;color:var(--muted);line-height:1.5;margin-top:10px}.im-empty{color:var(--muted);font-size:12px}@media(max-width:900px){.im-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.im-grid,.im-columns{grid-template-columns:1fr}}.lower{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:8px 5px;text-align:right;border-bottom:1px solid #1d2a3e;font-size:12px}th:first-child,td:first-child{text-align:left}.bid{color:var(--green)}.ask,.sell{color:var(--red)}.buy{color:var(--green)}.status{color:var(--green)}.meta{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);margin:8px 0 14px}.scroll{max-height:360px;overflow:auto}
 @media(max-width:1100px){.lower{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:700px){.grid,.lower{grid-template-columns:1fr}.chart{height:280px}}
 
 .execution-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.execution-grid label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}.execution-grid input,.execution-grid select{width:100%;min-width:0}.execution-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.execution-actions button{font-weight:650}.btn-buy{background:#123b32;border-color:#1c8d6c;color:#62e6b7}.btn-sell{background:#401e2a;border-color:#a63e58;color:#ff8da0}.btn-live{border-color:#b65c38;color:#ffb08c}.execution-note{font-size:12px;color:var(--muted);line-height:1.5}.execution-output{white-space:pre-wrap;overflow-wrap:anywhere;background:#09111d;border:1px solid var(--line);border-radius:8px;padding:10px;min-height:42px}.history-table{max-height:320px;overflow:auto}
-.execpanel{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;padding:14px}.execpanel .execution-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.execpanel .execution-grid input,.execpanel .execution-grid select{padding:8px}.execpanel summary{cursor:pointer;color:var(--muted);font-size:12px}.execpanel details{margin:0 0 10px}.execpanel .meta{margin:6px 0 10px;gap:6px 14px}
+.execpanel{position:static;max-height:none;overflow:visible;overscroll-behavior:auto;padding:14px}.execpanel .execution-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.execpanel .execution-grid input,.execpanel .execution-grid select{padding:8px}.execpanel summary{cursor:pointer;color:var(--muted);font-size:12px}.execpanel details{margin:0 0 10px}.execpanel .meta{margin:6px 0 10px;gap:6px 14px}
 .authbanner{margin:0 0 8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0b1422;font-size:12px;color:var(--muted)}.authbanner.warn{border-color:#b65c38;color:#ffb08c;background:#2a1710}.authbanner.ok{border-color:#1c8d6c;color:#8ff0c8}.authenvs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}.authenvs span{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}.authenvs span.on{border-color:#1c8d6c;color:#8ff0c8}.authenvs span.off{border-color:#8a3a4a;color:#ff9db0}
 .pxbar{display:flex;gap:8px 14px;flex-wrap:wrap;align-items:center;color:var(--muted);margin:0 0 8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0b1422}.pxbar b{color:#eaf2ff;font-variant-numeric:tabular-nums}.pxbar button{padding:3px 8px;font-size:12px;margin-left:auto}
 .execpanel .execution-actions{position:sticky;bottom:-14px;background:linear-gradient(#0d1624d9,#0d1624);padding:10px 0 12px;margin:10px 0 0;z-index:2}.execpanel .execution-actions button{flex:1 1 30%}
@@ -115,24 +143,23 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 @media(max-width:700px){.execpanel{position:static;max-height:none;overflow:visible}.execpanel .execution-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.execpanel .execution-actions{position:static;padding:0;background:none}}
 
 .legend{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}.legend button{padding:4px 10px;font-size:12px;border-radius:999px;color:var(--muted)}.legend button.on{border-color:var(--blue);color:#cfe3ff;background:#10223a}
-.stack{position:relative}.stack canvas{display:block}.chart.big{height:430px}.paneBox{height:96px;border-top:1px solid #1d2a3e}
+.stack{position:relative}.stack canvas{display:block}.chart.big{height:clamp(560px,72vh,900px);min-height:560px}.paneBox{height:112px;border-top:1px solid #1d2a3e}
 .tip{position:absolute;display:none;z-index:5;pointer-events:none;background:#0b1422f2;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.55;white-space:nowrap;box-shadow:0 6px 24px #0008}
 .sigcharts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:8px 0 14px}.sigcharts canvas{height:210px}.sigcharts .execution-note{margin-bottom:4px}
 .ev{margin:6px 0 0;padding-left:18px}.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 3px 3px 0;background:#4a5d78;vertical-align:middle}.dot.win{background:#21d69a}.dot.loss{background:#ff637d}.dot.hc{outline:2px solid #f0c674}
-@media(max-width:700px){.chart.big{height:320px}.sigcharts{grid-template-columns:1fr}.paneBox{height:84px}}
+@media(max-width:700px){.chart.big{height:clamp(420px,64vh,620px);min-height:420px}.sigcharts{grid-template-columns:1fr}.paneBox{height:96px}}
 ${PORTFOLIO_CSS}
 ${CALC_CSS}
 ${PERP_CSS}
-${VIZ_CSS}
 </style></head><body>
-<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><div id="connection" class="status">Connecting…</div></div></header>
+<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><a href="/terminal" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">PRO TRADING TERMINAL →</a><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><a href="/agents" style="color:var(--blue)">AI Agents</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
-<div class="toolbar"><select id="symVenue" aria-label="Exchange" title="Show Binance and Bitget pairs together (Binance preferred for shared pairs), or only one exchange. Bitget pairs are chart-only."><option value="">All exchanges</option><option value="binance">Binance</option><option value="bitget">Bitget</option></select><select id="symMarket" aria-label="Market type" title="Spot pairs, USDT/USDC-margined perpetual futures, or Metals: gold, silver, platinum, palladium, copper and gold-backed tokens from both Binance markets"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option><option value="metals">Metals (gold, silver, copper)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search Binance pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symEti" class="muted" aria-live="polite" style="font-size:12px;display:none"></span><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
+<div class="toolbar"><select id="symVenue" aria-label="Exchange" title="Choose Bybit or Bitget public spot, margin and futures market data. Live orders require the master ETI token and explicit confirmation."><option value="bybit" selected>Bybit (market data)</option><option value="bitget">Bitget (spot, margin &amp; futures)</option></select><select id="symMarket" aria-label="Market type" title="Spot pairs, USDT/USDC-margined perpetual futures, or Metals: gold, silver, platinum, palladium, copper and gold-backed tokens listed on Bybit"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option><option value="margin">Margin (cross / isolated)</option><option value="metals">Metals (gold, silver, copper)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search exchange pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symEti" class="muted" aria-live="polite" style="font-size:12px;display:none"></span><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="refresh" class="active">Refresh market</button><span class="muted" id="stamp">Waiting for market data…</span></div>
-<div class="grid"><section class="panel"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
+<div class="grid"><section class="panel chart-workspace"><h2>Live Market Chart</h2><div class="meta"><span>Last <b id="last">—</b></span><span>24h volume <b id="volume">—</b></span><span>24h change <b id="change">—</b></span><span>Provider <b id="provider">—</b></span><span id="stale" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px"></span></div><div id="legend" class="legend" role="group" aria-label="Chart layers"><select id="chartStyle" aria-label="Chart style"><option value="candles">Candlesticks</option><option value="line">Line</option><option value="area">Area</option></select><button type="button" id="chartFit">Fit chart</button><span id="chartOhlc" class="muted" aria-live="polite">Crosshair: inspect candle OHLC</span><button class="on" data-layer="ema" aria-pressed="true">EMA 20/50/200 + 20-bar range</button><button class="on" data-layer="bb" aria-pressed="true">Bollinger bands</button><button class="on" data-layer="levels" aria-pressed="true">Entry / stop / targets</button><button class="on" data-layer="markers" aria-pressed="true">Signal flips</button><button class="on" data-layer="replay" aria-pressed="true">Replay trades</button><button class="on" data-layer="ribbon" aria-pressed="true">Engine ribbon</button><button class="on" data-layer="volume" aria-pressed="true">Volume rule</button><button class="on" data-layer="trades" aria-pressed="true">My trades and orders</button></div>
 <span id="overlayNote" role="status" style="display:none;color:#ffb08c;border:1px solid #b65c38;border-radius:6px;padding:0 8px;margin-bottom:8px"></span>
-<div id="stack" class="stack"><div class="chart big"><canvas id="chart" role="img" aria-label="Candlestick chart with ETI signal engine overlays"></canvas></div><div class="paneBox"><canvas id="paneRsi" role="img" aria-label="RSI 14 with engine momentum zones"></canvas></div><div class="paneBox"><canvas id="paneMacd" role="img" aria-label="MACD histogram and lines"></canvas></div><div class="paneBox"><canvas id="paneAdx" role="img" aria-label="ADX 14 trend strength"></canvas></div><div class="paneBox"><canvas id="paneScore" role="img" aria-label="ETI engine score per candle"></canvas></div><div id="tip" class="tip" role="status"></div></div>
+<div id="stack" class="stack"><div class="chart big" id="liveChartFrame"><div id="chartAdvanced" role="img" aria-label="Advanced live candlestick chart with exchange prices, volume, indicators and ETI signal levels"></div><canvas id="chart" role="img" aria-label="Fallback candlestick chart with ETI signal engine overlays"></canvas></div><div class="paneBox"><canvas id="paneRsi" role="img" aria-label="RSI 14 with engine momentum zones"></canvas></div><div class="paneBox"><canvas id="paneMacd" role="img" aria-label="MACD histogram and lines"></canvas></div><div class="paneBox"><canvas id="paneAdx" role="img" aria-label="ADX 14 trend strength"></canvas></div><div class="paneBox"><canvas id="paneScore" role="img" aria-label="ETI engine score per candle"></canvas></div><div id="tip" class="tip" role="status"></div></div>
 <div id="chartTicket" class="chartticket" role="region" aria-label="Trade from the chart">
 <style>.chartticket{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#0b1422}.chartticket .ct-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px}.chartticket label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}.chartticket input{width:130px}.calcgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px}.calcgrid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}.calckpi{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin:10px 0}.calckpi div{border:1px solid var(--line);border-radius:8px;padding:8px;background:#0b1422}.calckpi b{display:block;font-size:15px;color:var(--text)}@media(max-width:600px){.chartticket input{width:100%}.chartticket .ct-row>*{flex:1 1 120px}}</style>
 <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>Trade from the chart</b><span class="muted" id="ctCursor" aria-live="off">Click the chart to pick a price, or type one.</span></div>
@@ -145,10 +172,10 @@ ${VIZ_CSS}
 <h2>Order Execution</h2>
 <div class="pxbar" aria-live="polite"><span>Chart symbol <b id="orderChartSymbol">—</b></span><span>Market price <b id="orderMarketPrice">—</b></span><button type="button" id="useMarketPrice" title="Copy the live chart price into the limit price field">Use as limit</button></div>
 <div class="meta"><span>Execution status <b id="executionStatus">Checking…</b></span><span>Broker <b id="brokerStatus">Checking…</b></span><span>Safeguards <b id="safeguardStatus">Checking…</b></span><span>Kill switch <b id="killSwitchStatus">Checking…</b></span></div>
-<details class="execution-note"><summary>Execution safeguards (read before trading)</summary><p class="execution-note">Orders are sent only after you preview and confirm them. ETI Internal Paper and exchange testnets authenticate automatically with short-lived server-side sessions: nothing to type, and nothing stored in this page. Exchange testnet keys are read from Worker secrets; if they are missing or rejected, orders run in ETI Internal Paper and this panel says so. Live mode stays disabled and needs the live switch, live broker keys, the execution token and the separate live activation secret. Protect this dashboard with Cloudflare Access. Never enter withdrawal or transfer credentials here.</p></details>
+<details class="execution-note"><summary>Execution safeguards (read before trading)</summary><p class="execution-note">Orders are sent only after you preview and confirm them. ETI Internal Paper and exchange testnets use isolated short-lived sessions. Bitget Live requires the master ETI execution token and a Bitget API key with trade permission enabled and withdrawals disabled. Spot, cross/isolated margin and futures orders use real funds. The global kill switch, order-id deduplication, quantity/notional limits and futures leverage cap remain active. Protect this dashboard with Cloudflare Access. Never enter withdrawal or transfer credentials here.</p></details>
 <div class="execution-grid">
-<label>Venue<select id="orderBroker"><option value="eti_paper">ETI Internal Paper (automatic)</option><option value="alpaca">Alpaca paper (exchange testnet)</option><option value="binance">Binance testnet (exchange)</option></select></label>
-<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off" list="symbolList"><datalist id="symbolList"></datalist></label>
+<label>Venue<select id="orderBroker"><option value="eti_paper">ETI Internal Paper (automatic)</option><option value="alpaca">Alpaca paper (exchange testnet)</option><option value="binance">Binance testnet (exchange)</option><option value="bitget">Bitget Live (real funds)</option></select></label>
+<label>Symbol<input id="orderSymbol" value="BTCUSDT" maxlength="24" autocomplete="off" list="symbolList"><datalist id="symbolList"></datalist></label><label id="bitgetMarketWrap" style="display:none">Bitget product<select id="orderBitgetMarket"><option value="spot">Spot</option><option value="margin-crossed">Cross margin</option><option value="margin-isolated">Isolated margin</option><option value="usdt-futures">USDT futures</option><option value="usdc-futures">USDC futures</option><option value="coin-futures">Coin futures</option></select></label><label id="bitgetLeverageWrap" style="display:none">Bitget leverage (1–150x)<input id="orderBitgetLeverage" type="number" min="1" max="150" step="1" value="10"></label><label id="bitgetMarginModeWrap" style="display:none">Futures margin mode<select id="orderBitgetMarginMode"><option value="isolated">Isolated</option><option value="crossed">Cross</option></select></label><label id="bitgetLoanTypeWrap" style="display:none">Margin borrowing<select id="orderBitgetLoanType"><option value="normal">No auto-borrow</option><option value="autoLoan">Auto-borrow</option><option value="autoRepay">Auto-repay</option><option value="autoLoanAndRepay">Auto-borrow + repay</option></select></label>
 <label>Order type<select id="orderType"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop-loss (sell, Internal Paper)</option></select></label>
 <label>Quantity<input id="orderQuantity" type="number" min="0" step="any" placeholder="Enter quantity"></label>
 <label>Amount (<span id="orderQuote">USDT</span>)<input id="orderAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter amount to trade"><small id="orderAmountNote" class="mut" aria-live="polite">Type an amount and the quantity is filled in at the reference price.</small></label>
@@ -173,6 +200,20 @@ ${PERP_ORDER_HTML}
 <div style="margin-top:12px"><strong>Order preview / response</strong><div id="orderOutput" class="execution-output" style="margin-top:7px">No order prepared.</div></div>
 </aside>
 </div>
+<section class="panel institutional-panel" id="institutionalPanel" style="margin-top:14px">
+ <div class="toolbar" style="justify-content:space-between;align-items:center"><div><h2 style="margin:0">Institutional Market Intelligence</h2><span class="muted" id="imSubtitle">Structure, liquidity and auction context for the selected market</span></div><div style="display:flex;gap:8px;align-items:center"><span class="rdchip" id="imStatus">Waiting for candles</span><button type="button" id="imRefresh">Refresh intelligence</button></div></div>
+ <div class="im-grid" id="imMetrics" aria-live="polite"><div class="im-card"><small>Market structure</small><b>Awaiting analysis</b><span>Selected symbol / timeframe</span></div><div class="im-card"><small>Volume profile</small><b>—</b><span>POC · VAH · VAL</span></div><div class="im-card"><small>Liquidity context</small><b>—</b><span>Equal highs/lows and sweeps</span></div><div class="im-card"><small>Last structure event</small><b>—</b><span>BOS / CHoCH confirmation</span></div></div>
+ <div class="im-columns">
+  <div class="im-subpanel"><h3>Structure &amp; trend</h3><div id="imStructure" class="execution-note">Waiting for confirmed swing analysis…</div></div>
+  <div class="im-subpanel"><h3>Volume profile · 70% value area</h3><div id="imProfile" class="execution-note">Waiting for profile calculation…</div></div>
+  <div class="im-subpanel"><h3>Liquidity pools &amp; sweeps</h3><div id="imLiquidity" class="execution-note">Waiting for liquidity analysis…</div></div>
+  <div class="im-subpanel"><h3>Liquidity + FVG manipulation monitor</h3><div id="imLiquidityFvg" class="execution-note">Waiting for combined sweep, reach and FVG qualification…</div></div>
+  <div class="im-subpanel"><h3>Recent BOS / CHoCH events</h3><div id="imEvents" class="execution-note">Waiting for confirmed events…</div></div>
+  <div class="im-subpanel"><h3>Order blocks &amp; mitigation</h3><div id="imOrderBlocks" class="execution-note">Waiting for validated order blocks…</div></div>
+  <div class="im-subpanel"><h3>Displacement &amp; participation</h3><div id="imDisplacement" class="execution-note">Waiting for displacement analysis…</div></div>
+ </div>
+ <div class="im-foot" id="imMethod">Analysis uses closed candles and confirmed pivots. Volume profile is an OHLCV approximation, not tick-level exchange volume-at-price. This panel is descriptive and does not submit orders.</div>
+</section>
 <section class="panel" id="calcPanel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Profit &amp; Leverage Calculator</h2><span class="muted" id="calcMeta">Estimates only</span></div>
 <p class="execution-note">For USDT-margined contracts with isolated margin. It never places an order. Leverage magnifies losses as well as profits. Liquidation is an estimate that ignores fees, funding and tiered maintenance margins: confirm with the exchange before relying on it.</p>
@@ -198,8 +239,6 @@ ${CALC_HTML}
 ${PERP_HTML}
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
-
-${VIZ_HTML}
 <section class="panel" id="signalPanel" style="margin-top:14px">
 <h2>ETI AI Signal Engine</h2>
 <div class="meta"><span>Decision <b id="signalAction">ANALYSING…</b></span><span>Score <b id="signalScore">—</b></span><span>Conviction <b id="signalConviction">—</b></span><span>Historical win rate <b id="signalWinRate">Not validated</b></span><span>Provider <b id="signalProvider">—</b></span></div>
@@ -233,7 +272,7 @@ ${VIZ_HTML}
 <pre id="rdText" class="execution-output" style="display:none"></pre>
 <section class="panel" id="intelPanel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Analysis Intelligence</h2><span class="muted" id="intelMeta">Technical, multi-timeframe, fundamental and news engines, weighed by a central intelligence layer</span></div>
-<div class="toolbar"><select id="intelStrategy"><option value="intraday">Intraday</option><option value="scalp">Scalp</option><option value="swing">Swing</option><option value="position">Position</option></select><select id="intelDetail" title="Lite skips the heaviest detectors to fit Workers Free CPU limits"><option value="full">Full detail</option><option value="lite">Lite (low CPU)</option></select><button id="intelRun">Run analysis for selected symbol</button></div>
+<div class="toolbar"><select id="intelStrategy"><option value="intraday">Intraday</option><option value="scalp">Scalp</option><option value="swing">Swing</option><option value="position">Position</option></select><select id="intelDetail" title="Lite skips the heaviest detectors to fit Workers Free CPU limits"><option value="lite">Lite (Free plan)</option><option value="full">Full (needs Paid plan)</option></select><button id="intelRun">Run analysis for selected symbol</button></div>
 <div id="intelOut" class="execution-note">Not run yet. Analysis is evidence for review, not an instruction to trade; it never places orders.</div>
 </section>
 <section class="panel" style="margin-top:14px">
@@ -249,16 +288,19 @@ ${VIZ_HTML}
 </section>
 <p class="muted">Market panels use public exchange data. Order entry submits broker orders only after authenticated preview and explicit confirmation. Market data may be delayed or interrupted. ETI does not request or use withdrawal, transfer, funding, or wallet-management permissions.</p>
 </main>
-<script>
-const $=id=>document.getElementById(id);let socket=null, candles=[], book={bids:[],asks:[]}, trades=[];
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script><script src="/bitget-client.js"></script><script>
+const $=id=>document.getElementById(id);let socket=null, candles=[], book={bids:[],asks:[]}, trades=[],pricePrecision=2;
 const fmt=n=>Number(n).toLocaleString(undefined,{maximumFractionDigits:6});
+function decimalPlaces(v){if(v===null||v===undefined||v==='')return 0;let t=String(v).trim().toLowerCase(),e=0;if(t.indexOf('e')>=0){const p=t.split('e');t=p[0];e=Number(p[1])||0;}const f=(t.split('.')[1]||'').length;return Math.max(0,Math.min(20,f-e));}
+function capturePricePrecision(values){(values||[]).forEach(v=>{const n=Number(v);if(Number.isFinite(n)&&n>0)pricePrecision=Math.max(pricePrecision,decimalPlaces(v));});pricePrecision=Math.min(20,pricePrecision);}
+function fp(v){const n=Number(v);return Number.isFinite(n)&&n>0?n.toLocaleString(undefined,{useGrouping:true,minimumFractionDigits:pricePrecision,maximumFractionDigits:pricePrecision}):'—';}
 function resize(c){const dpr=devicePixelRatio||1, r=c.getBoundingClientRect();c.width=r.width*dpr;c.height=r.height*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);return {x,w:r.width,h:r.height};}
 /* ===== ETI signal-engine chart layer: every chart draws the engine's own per-candle output (/api/signals chart payload) ===== */
 const BARS=120,PAD_R=116,FUTURE=14,FONT='11px Inter,system-ui,sans-serif';
 const C={up:'#21d69a',down:'#ff637d',ema20:'#f0c674',ema50:'#56a8ff',ema200:'#c792ea',grid:'#24334a',muted:'#8fa3bd',text:'#eaf2ff',entry:'#e6edf7',amber:'#f0c674'};
 const layers={ema:true,bb:true,levels:true,markers:true,replay:true,ribbon:true,volume:true,trades:true};
 let sig=null,sigSeq=0,sigWantProvider=null,sigTimer=null,hoverIdx=-1,chartLines=[],chartScale=null;
-function fp(v){v=Number(v);if(!isFinite(v))return '—';const a=Math.abs(v),d=a>=1000?2:a>=100?3:a>=1?4:6;return v.toLocaleString(undefined,{minimumFractionDigits:Math.min(d,2),maximumFractionDigits:d});}
+function fp(v){const n=Number(v);return Number.isFinite(n)&&n>0?n.toLocaleString(undefined,{useGrouping:true,minimumFractionDigits:pricePrecision,maximumFractionDigits:pricePrecision}):'—';}
 const sg=v=>(v>0?'+':'')+v;
 function rgba(hex,a){const n=parseInt(hex.slice(1),16);return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';}
 function sigValid(){return !!(sig&&sig.chart&&sig.symbol===$('symbol').value&&sig.interval===$('interval').value);}
@@ -270,6 +312,104 @@ function pill(x,px0,y,text,color,textColor){x.font=FONT;const tw=x.measureText(t
 function spread(labels,gap,lo,hi){labels.sort((a,b)=>a.y-b.y);for(let i=0;i<labels.length;i++){labels[i].ly=Math.max(lo,i?Math.max(labels[i].y,labels[i-1].ly+gap):labels[i].y);}for(let i=labels.length-1;i>=0;i--){labels[i].ly=Math.min(labels[i].ly,hi-(labels.length-1-i)*gap);}return labels;}
 function updateOverlayNote(){const e=$('overlayNote');if(sigValid()&&provider&&sig.provider!==provider){e.style.display='inline-block';e.textContent='Overlays computed on '+sig.provider+' candles; chart candles from '+provider;}else e.style.display='none';}
 
+
+let etiLiquidityFvg=null,etiLiquidityFvgKey='',etiLiquidityFvgAt=0,etiLiquidityFvgSeq=0,etiLiquidityFvgBusyKey='';let etiLiquidityCanvas=null;
+let liveChart=null,liveCandle=null,liveVolume=null,liveEma20=null,liveEma50=null,liveEma200=null,liveBbUpper=null,liveBbLower=null,liveRibbon=null,liveLine=null,liveArea=null,livePriceLines=[],liveAdvancedKey='',liveSelectionKey='';
+window.ETILiveChart={isAdvanced:()=>!!liveCandle,priceToCoordinate:price=>{const p=Number(price);if(!Number.isFinite(p))return null;if(liveCandle)return liveCandle.priceToCoordinate(p);if(!chartScale||!Number.isFinite(chartScale.lo)||!Number.isFinite(chartScale.hi)||chartScale.hi<=chartScale.lo)return null;return chartScale.bot-(p-chartScale.lo)/(chartScale.hi-chartScale.lo)*(chartScale.bot-chartScale.top);},timeToCoordinate:time=>{const t=Math.floor(Number(time)/1000);return Number.isFinite(t)&&liveChart?liveChart.timeScale().timeToCoordinate(t):null;}};
+function livePriceFormat(){return {type:'price',precision:pricePrecision,minMove:Math.pow(10,-pricePrecision)};}
+function liveEma(period){let prev=null,k=2/(period+1);return candles.map(v=>{const close=Number(v[4]);prev=prev===null?close:close*k+prev*(1-k);return {time:Math.floor(Number(v[0])/1000),value:prev};});}
+function initAdvancedLiveChart(){
+ const host=$('chartAdvanced'),frame=$('liveChartFrame');
+ if(!host||!frame)return;
+ try{
+  if(!window.LightweightCharts)throw new Error('Advanced chart library unavailable');
+  liveChart=LightweightCharts.createChart(host,{width:host.clientWidth,height:host.clientHeight,layout:{background:{color:'#091729'},textColor:'#8fa3bd',fontFamily:'Inter,system-ui,sans-serif'},grid:{vertLines:{color:'#142a42'},horzLines:{color:'#142a42'}},rightPriceScale:{borderColor:'#233b56',minimumWidth:PAD_R,autoScale:true,scaleMargins:{top:.04,bottom:.04}},timeScale:{borderColor:'#233b56',timeVisible:true,secondsVisible:false,barSpacing:100,minBarSpacing:100,rightOffset:6},crosshair:{mode:LightweightCharts.CrosshairMode.Normal},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true}});
+  liveCandle=liveChart.addCandlestickSeries({upColor:'#21d69a',downColor:'#ff637d',borderUpColor:'#21d69a',borderDownColor:'#ff637d',wickUpColor:'#21d69a',wickDownColor:'#ff637d',priceFormat:livePriceFormat()});
+  liveVolume=liveChart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'volume',scaleMargins:{top:.84,bottom:0},lastValueVisible:false,priceLineVisible:false});
+  liveRibbon=liveChart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'ribbon',scaleMargins:{top:.94,bottom:0},lastValueVisible:false,priceLineVisible:false});
+  liveEma20=liveChart.addLineSeries({color:'#f0c674',lineWidth:1,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
+  liveEma50=liveChart.addLineSeries({color:'#56a8ff',lineWidth:1,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
+  liveEma200=liveChart.addLineSeries({color:'#c792ea',lineWidth:1,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
+  liveBbUpper=liveChart.addLineSeries({color:'rgba(86,168,255,.5)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
+  liveBbLower=liveChart.addLineSeries({color:'rgba(86,168,255,.5)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
+  liveLine=liveChart.addLineSeries({color:'#56adff',lineWidth:2,visible:false,priceLineVisible:false,priceFormat:livePriceFormat()});
+  liveArea=liveChart.addAreaSeries({lineColor:'#56adff',topColor:'rgba(86,173,255,.24)',bottomColor:'rgba(86,173,255,0)',visible:false,priceLineVisible:false,priceFormat:livePriceFormat()});
+  liveChart.subscribeCrosshairMove(p=>{const d=p&&p.seriesData&&p.seriesData.get(liveCandle);$('chartOhlc').textContent=d?'O '+fp(d.open)+'  H '+fp(d.high)+'  L '+fp(d.low)+'  C '+fp(d.close):'Crosshair: inspect candle OHLC';});
+  liveChart.subscribeClick(p=>{if(!p||!p.point||!liveCandle)return;const v=liveCandle.coordinateToPrice(p.point.y);if(!Number.isFinite(v))return;if($('ctPrice')){$('ctPrice').value=v.toFixed(pricePrecision);if(typeof ctRefresh==='function')ctRefresh();$('ctCursor').textContent='Price '+fp(v)+' selected';}});
+  new ResizeObserver(()=>{if(liveChart)liveChart.applyOptions({width:host.clientWidth,height:host.clientHeight});drawLiquidityFvgCanvas();}).observe(host);
+  frame.classList.remove('legacy');
+ }catch(e){liveChart=null;liveCandle=null;frame.classList.add('legacy');$('chartOhlc').textContent='Advanced chart unavailable · native ETI canvas fallback active';}
+}
+function renderAdvancedLiveChart(){
+ if(!liveChart||!liveCandle)return;
+ const selection=$('symbol').value+'|'+$('interval').value,tail=candles.length?candles[candles.length-1]:'',portfolio=layers.trades&&typeof pfChartData==='function'?pfChartData():null;
+ if(portfolio){const prices=[];(portfolio.fills||[]).forEach(f=>prices.push(f.price));(portfolio.positions||[]).forEach(p=>prices.push(p.avgEntry,p.levels&&p.levels.stop,...(p.levels&&p.levels.tp||[])));(portfolio.open||[]).forEach(o=>prices.push(o.type==='stop'?o.stopPrice:o.limitPrice));capturePricePrecision(prices);}
+ const portfolioKey=portfolio?JSON.stringify({fills:portfolio.fills,positions:portfolio.positions,open:portfolio.open}):'';
+ const key=selection+'|'+pricePrecision+'|'+candles.length+'|'+(tail?tail.join('|'):'')+'|'+(sigSeq||0)+'|'+JSON.stringify(chartLines)+'|'+JSON.stringify(layers)+'|'+portfolioKey+'|'+JSON.stringify(etiLiquidityFvg)+'|'+$('chartStyle').value;
+ if(key===liveAdvancedKey)return;liveAdvancedKey=key;
+ liveCandle.applyOptions({priceFormat:livePriceFormat()});[liveEma20,liveEma50,liveEma200,liveBbUpper,liveBbLower,liveLine,liveArea].forEach(x=>x.applyOptions({priceFormat:livePriceFormat()}));
+ if(!candles.length){liveCandle.setData([]);liveVolume.setData([]);liveEma20.setData([]);liveEma50.setData([]);liveEma200.setData([]);liveBbUpper.setData([]);liveBbLower.setData([]);liveRibbon.setData([]);liveLine.setData([]);liveArea.setData([]);livePriceLines.forEach(p=>{try{liveCandle.removePriceLine(p);}catch(e){}});livePriceLines=[];return;}
+ const rows=candles.map(v=>({time:Math.floor(Number(v[0])/1000),open:Number(v[1]),high:Number(v[2]),low:Number(v[3]),close:Number(v[4])}));
+ liveCandle.setData(rows);
+ liveVolume.setData(candles.map(v=>({time:Math.floor(Number(v[0])/1000),value:Number(v[5])||0,color:Number(v[4])>=Number(v[1])?'rgba(33,214,154,.28)':'rgba(255,99,125,.28)'})));
+ const aligned=()=>{const out=[];if(sigValid()&&sig.chart&&Array.isArray(sig.chart.times)){const map=new Map(sig.chart.times.map((t,i)=>[Math.floor(Number(t)/1000),i]));return candles.map(v=>{const j=map.get(Math.floor(Number(v[0])/1000));return j===undefined?null:j;});}return null;};
+ const ix=aligned(),series=(name,period)=>ix?candles.map((v,i)=>{const j=ix[i],val=j===null?null:sig.chart[name]&&sig.chart[name][j];return val==null?null:{time:Math.floor(Number(v[0])/1000),value:Number(val)};}).filter(Boolean):liveEma(period);
+ liveEma20.setData(series('ema20',20));liveEma50.setData(series('ema50',50));liveEma200.setData(series('ema200',200));
+ liveEma20.applyOptions({visible:layers.ema});liveEma50.applyOptions({visible:layers.ema});liveEma200.applyOptions({visible:layers.ema});
+ const upper=ix?series('bbUpper',20):[],lower=ix?series('bbLower',20):[];
+ liveBbUpper.setData(upper);liveBbLower.setData(lower);liveBbUpper.applyOptions({visible:layers.bb&&upper.length>0});liveBbLower.applyOptions({visible:layers.bb&&lower.length>0});
+ liveVolume.applyOptions({visible:layers.volume});
+ const ribbonData=ix?candles.map((v,i)=>{const j=ix[i],score=j===null?null:sig.chart.score&&sig.chart.score[j],direction=j===null?0:sig.chart.direction&&sig.chart.direction[j];return score==null?null:{time:Math.floor(Number(v[0])/1000),value:Number(score),color:direction===1?'rgba(33,214,154,.85)':'rgba(255,99,125,.85)'};}).filter(Boolean):[];liveRibbon.setData(ribbonData);liveRibbon.applyOptions({visible:layers.ribbon&&ribbonData.length>0});
+ const style=$('chartStyle').value;liveCandle.applyOptions({visible:style==='candles'});liveLine.applyOptions({visible:style==='line'});liveArea.applyOptions({visible:style==='area'});
+ const closes=candles.map(v=>({time:Math.floor(Number(v[0])/1000),value:Number(v[4])}));if(style==='line')liveLine.setData(closes);if(style==='area')liveArea.setData(closes);
+ const marks=[];
+ if(layers.markers)for(let i=2;i<candles.length;i++){const a=candles[i-2],b=candles[i];if(Number(b[3])>Number(a[2]))marks.push({time:Math.floor(Number(b[0])/1000),position:'belowBar',color:'#21d69a',shape:'arrowUp',text:'Bull FVG'});else if(Number(b[2])<Number(a[3]))marks.push({time:Math.floor(Number(b[0])/1000),position:'aboveBar',color:'#ff637d',shape:'arrowDown',text:'Bear FVG'});}
+ if(layers.markers&&ix&&sig.chart.markers)sig.chart.markers.forEach(m=>marks.push({time:Math.floor(Number(m.time)/1000),position:m.label==='BUY'?'belowBar':'aboveBar',color:m.label==='BUY'?'#21d69a':'#ff637d',shape:m.label==='BUY'?'arrowUp':'arrowDown',text:String(m.label||'SIGNAL')+' '+String(m.score==null?'':m.score)}));
+ if(layers.replay&&ix&&sig.chart.replay)(sig.chart.replay||[]).forEach(t=>marks.push({time:Math.floor(Number(t.time)/1000),position:t.label==='BUY'?'belowBar':'aboveBar',color:t.outcome==='win'?'#21d69a':t.outcome==='loss'?'#ff637d':'#91a9c4',shape:'circle',text:'Replay '+(t.outcome||'open')}));
+ if(portfolio){(portfolio.fills||[]).forEach(f=>{const i=typeof pfCandleIdx==='function'?pfCandleIdx(f.at):-1;if(i<0||i>=candles.length)return;const buy=f.side==='buy';marks.push({time:Math.floor(Number(candles[i][0])/1000),position:buy?'belowBar':'aboveBar',color:buy?'#21d69a':'#ff637d',shape:buy?'arrowUp':'arrowDown',text:(f.side||'FILL').toUpperCase()+' '+fp(f.price)});});(portfolio.positions||[]).forEach(p=>marks.push({time:Math.floor(Number(candles[candles.length-1][0])/1000),position:p.side==='short'?'aboveBar':'belowBar',color:p.side==='short'?'#ff637d':'#21d69a',shape:'square',text:'OPEN '+String(p.side||'POSITION').toUpperCase()}));}
+ if(etiLiquidityFvg&&etiLiquidityFvg.latestSweep){const sw=etiLiquidityFvg.latestSweep,ts=Math.floor(Number(sw.time)/1000);if(candles.some(v=>Math.floor(Number(v[0])/1000)===ts))marks.push({time:ts,position:sw.direction==='BUY'?'belowBar':'aboveBar',color:'#d5a8ff',shape:'circle',text:(sw.side==='buy_side'?'BSL':'SSL')+' SWEEP'});}
+ marks.sort((a,b)=>a.time-b.time);liveCandle.setMarkers(marks.slice(-100));
+ livePriceLines.forEach(p=>{try{liveCandle.removePriceLine(p);}catch(e){}});livePriceLines=[];
+ if(sigValid()&&sig.chart&&layers.levels){const L=sig.chart.levels,levels=[['ENTRY',L.entry,C.entry],['STOP',L.stopLoss,C.down]].concat((L.targets||[]).map((p,i)=>['TP'+(i+1),p,C.up]));levels.forEach(v=>{if(Number.isFinite(Number(v[1]))&&Number(v[1])>0)livePriceLines.push(liveCandle.createPriceLine({price:Number(v[1]),color:v[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:v[0]}));});}
+ chartLines.forEach(l=>{if(Number(l.price)>0)livePriceLines.push(liveCandle.createPriceLine({price:Number(l.price),color:l.color||'#f0c674',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:l.label||'ETI level'}));});
+ if(etiLiquidityFvg){const lf=etiLiquidityFvg,add=(label,price,color,style=2)=>{const n=Number(price);if(Number.isFinite(n)&&n>0)livePriceLines.push(liveCandle.createPriceLine({price:n,color,lineWidth:1,lineStyle:style,axisLabelVisible:true,title:label}));};
+ (lf.pools||[]).slice(0,8).forEach(p=>add((p.side==='buy_side'?'BSL':'SSL')+' · '+p.touches+' tests',p.price,p.side==='buy_side'?'#b58cff':'#56adff',2));
+ if(lf.latestSweep)add('SWEPT '+lf.latestSweep.side.toUpperCase(),lf.latestSweep.level,'#d5a8ff',0);
+ if(lf.manipulation&&lf.manipulation.estimatedReach){add('SWEEP REACH LOW',lf.manipulation.estimatedReach.low,'#d5a8ff',3);add('SWEEP REACH HIGH',lf.manipulation.estimatedReach.high,'#d5a8ff',3);}
+ const z=lf.precision&&lf.precision.best;if(z){const col=z.highlight==='green'?'#21d69a':z.highlight==='red'?'#ff637d':'#e6c36a';add('LIQ-FVG '+z.direction+' LOWER',z.zone.lower,col,2);add('LIQ-FVG '+z.direction+' UPPER',z.zone.upper,col,2);add('CE ENTRY '+fp(z.entry.price),z.entry.price,col,0);if(z.stopLoss)add('LIQ-FVG STOP',z.stopLoss,'#ff637d',2);(z.targets||[]).forEach((t,i)=>add('LIQ-FVG TP'+(i+1),t.price,'#21d69a',2));}}
+ if(portfolio){const addPortfolioLine=(label,price,color)=>{const n=Number(price);if(Number.isFinite(n)&&n>0)livePriceLines.push(liveCandle.createPriceLine({price:n,color:color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:label}));};(portfolio.positions||[]).forEach(p=>{addPortfolioLine('POSITION '+fp(p.avgEntry),p.avgEntry,'#e6edf7');addPortfolioLine('POSITION SL',p.levels&&p.levels.stop,'#ff637d');(p.levels&&p.levels.tp||[]).forEach((v,i)=>addPortfolioLine('POSITION TP'+(i+1),v,'#21d69a'));});(portfolio.open||[]).forEach(o=>addPortfolioLine('OPEN '+String(o.side||'ORDER').toUpperCase(),o.type==='stop'?o.stopPrice:o.limitPrice,'#f0c674'));}
+ if(selection!==liveSelectionKey){liveChart.timeScale().fitContent();liveSelectionKey=selection;}
+ drawLiquidityFvgCanvas();
+}
+
+function drawLiquidityFvgCanvas(){
+ const host=$('chartAdvanced');if(!host||!liveChart||!liveCandle)return;
+ if(!etiLiquidityCanvas){etiLiquidityCanvas=document.createElement('canvas');etiLiquidityCanvas.setAttribute('aria-hidden','true');etiLiquidityCanvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4;';host.appendChild(etiLiquidityCanvas);}
+ const rect=host.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,Math.floor(rect.width)),h=Math.max(1,Math.floor(rect.height));
+ etiLiquidityCanvas.width=Math.floor(w*dpr);etiLiquidityCanvas.height=Math.floor(h*dpr);
+ const x=etiLiquidityCanvas.getContext('2d');if(!x)return;x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
+ if(!etiLiquidityFvg)return;
+ const z=etiLiquidityFvg.precision&&etiLiquidityFvg.precision.best;
+ if(z){const a=liveCandle.priceToCoordinate(Number(z.zone.upper)),b=liveCandle.priceToCoordinate(Number(z.zone.lower));if(a!==null&&b!==null&&Number.isFinite(a)&&Number.isFinite(b)){
+  const top=Math.max(0,Math.min(a,b)),bottom=Math.min(h,Math.max(a,b)),green=z.highlight==='green',fill=green?'rgba(33,214,154,.11)':z.highlight==='red'?'rgba(255,99,125,.08)':'rgba(230,195,106,.09)',stroke=green?'rgba(33,214,154,.9)':z.highlight==='red'?'rgba(255,99,125,.8)':'rgba(230,195,106,.8)';
+  x.fillStyle=fill;x.fillRect(0,top,w,Math.max(1,bottom-top));x.strokeStyle=stroke;x.lineWidth=1;x.setLineDash([5,4]);[a,b].forEach(y=>{x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke();});x.setLineDash([]);
+  x.font='11px Inter,system-ui,sans-serif';x.fillStyle=stroke;x.fillText('LIQUIDITY + FVG · '+z.direction+' · CE '+fp(z.entry.price),10,Math.max(14,top-6));
+ }}
+ const band=etiLiquidityFvg.manipulation&&etiLiquidityFvg.manipulation.estimatedReach;
+ if(band){const a=liveCandle.priceToCoordinate(Number(band.high)),b=liveCandle.priceToCoordinate(Number(band.low));if(a!==null&&b!==null&&Number.isFinite(a)&&Number.isFinite(b)){const top=Math.max(0,Math.min(a,b)),bottom=Math.min(h,Math.max(a,b));x.fillStyle='rgba(181,140,255,.045)';x.fillRect(0,top,w,Math.max(1,bottom-top));x.strokeStyle='rgba(181,140,255,.65)';x.setLineDash([3,5]);[a,b].forEach(y=>{x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke();});x.setLineDash([]);x.fillStyle='#c8a9ff';x.font='10px Inter,system-ui,sans-serif';x.fillText('ESTIMATED SWEEP-EXTENSION BAND',10,Math.max(14,top-4));}}
+}
+async function refreshLiquidityFvg(force){
+ if(!candles.length)return;const sym=$('symbol').value,tf=$('interval').value,info=symInfo(),tail=candles.at(-1),key=[sym,tf,info.venue,info.market,tail&&tail[0]].join('|');
+ if(etiLiquidityFvgKey===key&&Date.now()-etiLiquidityFvgAt<30000)return;
+ if(etiLiquidityFvgBusyKey===key)return;
+ etiLiquidityFvgKey=key;etiLiquidityFvgBusyKey=key;const seq=++etiLiquidityFvgSeq;
+ try{const r=await fetch('/api/analysis/liquidity-fvg?symbol='+encodeURIComponent(sym)+'&timeframe='+encodeURIComponent(tf)+'&assetClass=crypto',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candles:{[tf]:candles.map(v=>v.map(Number))}}),cache:'no-store'});
+ const d=await r.json();if(seq!==etiLiquidityFvgSeq)return;if(!r.ok)throw Error(d.detail||d.error||'HTTP '+r.status);
+ if([$('symbol').value,$('interval').value,symVenueOf(),symMkt(),candles.at(-1)&&candles.at(-1)[0]].join('|')!==key)return;
+ etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();const lf=$('imLiquidityFvg');if(lf){const z=d.precision&&d.precision.best,band=d.manipulation&&d.manipulation.estimatedReach;lf.textContent='Combined '+(d.autopilotEligible?d.direction:'WAIT')+' · evidence '+d.score+'/100 · manipulation '+(d.manipulation&&d.manipulation.level||'unknown')+' ('+(d.manipulation&&d.manipulation.score||0)+'/100) · likely '+String(d.manipulation&&d.manipulation.likelySide||'none').replace(/_/g,' ')+' liquidity '+(d.manipulation&&d.manipulation.likelySweepPrice?fp(d.manipulation.likelySweepPrice):'—')+(band?' · estimated reach '+fp(band.low)+'–'+fp(band.high):'')+(z?' · '+z.direction+' FVG '+fp(z.zone.lower)+'–'+fp(z.zone.upper)+' · CE '+fp(z.entry.price):' · no qualified FVG')+' · '+(d.blocks||[]).slice(0,2).join('; ');}renderAdvancedLiveChart();drawChart();
+ }catch(e){if(seq===etiLiquidityFvgSeq){etiLiquidityFvg=null;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();}}
+ finally{if(etiLiquidityFvgBusyKey===key)etiLiquidityFvgBusyKey='';}
+}
 function drawChart(){
  updateOverlayNote();
  const c=$('chart'),r=resize(c),x=r.x,w=r.w,h=r.h;x.clearRect(0,0,w,h);
@@ -286,7 +426,7 @@ function drawChart(){
  const py=v=>bot-(v-lo)/(hi-lo)*(bot-top);chartScale={top:top,bot:bot,lo:lo,hi:hi,plotW:g.plotW};
  x.font=FONT;x.lineWidth=1;
  for(let i=0;i<=5;i++){const y=top+i*(bot-top)/5;x.strokeStyle=C.grid;x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.fillStyle=C.muted;x.fillText(fp(hi-(hi-lo)*i/5),g.plotW+6,y+4);}
- const bw=Math.max(1,Math.min(14,g.step*.62));
+ const bw=Math.max(2,Math.min(18,g.step*.72));
  // engine conviction ribbon: one cell per candle, colour = BUY/SELL lean, opacity = |score|
  if(ok&&layers.ribbon){for(let i=0;i<n;i++){const j=J[i];if(j<0)continue;const s=ch.score[j];x.fillStyle=rgba(ch.direction[j]===1?C.up:C.down,.12+.88*Math.min(1,Math.abs(s)/100));x.fillRect(g.x(i)-g.step/2+.5,3,Math.max(1,g.step-1),8);}x.fillStyle=C.muted;x.font='9px Inter,system-ui,sans-serif';x.fillText('ENGINE LEAN',g.plotW+6,10);x.font=FONT;}
  x.save();x.beginPath();x.rect(0,top-6,g.plotW,bot-top+12);x.clip();
@@ -364,7 +504,7 @@ function drawScorePane(){const r=paneCtx('paneScore');if(!r.ok)return;const x=r.
  paneTitle(r,'ETI engine score · bar opacity = conviction (low under 30, medium 30-54, high 55 and above = tradeable setup) · amber dot = lowered by method disagreement');
  const k=lastAligned(r);if(k>=0){const s=ch.score[r.J[k]];pill(x,r.g.plotW+4,py(s),sg(s),ch.direction[r.J[k]]===1?C.up:C.down);}
  paneCross(r);}
-function drawPanes(){drawRsi();drawMacd();drawAdx();drawScorePane();}
+function drawPanes(){drawRsi();drawMacd();drawAdx();drawScorePane();renderAdvancedLiveChart();refreshLiquidityFvg(false);}
 
 function edgeTag(x,t,col,xx,yy,right){x.font=FONT;const tw=x.measureText(t).width+8,x0=right?xx-tw:xx;x.fillStyle='rgba(8,13,22,.85)';x.fillRect(x0,yy-10,tw,15);x.fillStyle=col;x.textAlign='left';x.fillText(t,x0+4,yy+1);}
 function drawDepth(){
@@ -446,24 +586,95 @@ function wireChartInteractions(){const st=$('stack');
  document.querySelectorAll('#legend button').forEach(b=>{b.onclick=()=>{layers[b.dataset.layer]=!layers[b.dataset.layer];b.classList.toggle('on',layers[b.dataset.layer]);b.setAttribute('aria-pressed',String(layers[b.dataset.layer]));drawChart();};});}
 function scheduleSignal(){clearTimeout(sigTimer);sigTimer=setTimeout(loadSignal,1500);}
 function syncSignalProvider(){if(provider&&sig&&sig.provider!==provider&&sigWantProvider!==provider){sigWantProvider=provider;loadSignal();}}
-function renderBook(){const bids=book.bids.slice(0,15),asks=book.asks.slice(0,15);if(bids.length)$('bid').textContent=fmt(bids[0][0]);if(asks.length)$('ask').textContent=fmt(asks[0][0]);if(bids.length&&asks.length)$('spread').textContent=fmt(asks[0][0]-bids[0][0]);let rows='<table><tr><th>Side</th><th>Price</th><th>Quantity</th></tr>';for(const a of [...asks].reverse())rows+='<tr><td class="ask">ASK</td><td>'+fmt(a[0])+'</td><td>'+fmt(a[1])+'</td></tr>';for(const b of bids)rows+='<tr><td class="bid">BID</td><td>'+fmt(b[0])+'</td><td>'+fmt(b[1])+'</td></tr>';rows+='</table>';$('book').innerHTML=rows;drawDepth();}
-function renderTrades(){$('trades').innerHTML='<table><tr><th>Time</th><th>Side</th><th>Price</th><th>Quantity</th></tr>'+trades.slice(0,50).map(t=>'<tr><td>'+new Date(t.T).toLocaleTimeString()+'</td><td class="'+(t.m?'sell':'buy')+'">'+(t.m?'SELL':'BUY')+'</td><td>'+fmt(t.p)+'</td><td>'+fmt(t.q)+'</td></tr>').join('')+'</table>';}
-let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='';
+function renderBook(){const bids=book.bids.slice(0,15),asks=book.asks.slice(0,15);capturePricePrecision(bids.concat(asks).map(v=>v[0]));if(liveChart){liveAdvancedKey='';renderAdvancedLiveChart();}if(bids.length)$('bid').textContent=fp(bids[0][0]);if(asks.length)$('ask').textContent=fp(asks[0][0]);if(bids.length&&asks.length)$('spread').textContent=fp(asks[0][0]-bids[0][0]);let rows='<table><tr><th>Side</th><th>Price</th><th>Quantity</th></tr>';for(const a of [...asks].reverse())rows+='<tr><td class="ask">ASK</td><td>'+fp(a[0])+'</td><td>'+fmt(a[1])+'</td></tr>';for(const b of bids)rows+='<tr><td class="bid">BID</td><td>'+fp(b[0])+'</td><td>'+fmt(b[1])+'</td></tr>';rows+='</table>';$('book').innerHTML=rows;drawDepth();}
+function renderTrades(){capturePricePrecision(trades.map(t=>t.p));if(liveChart){liveAdvancedKey='';renderAdvancedLiveChart();}$('trades').innerHTML='<table><tr><th>Time</th><th>Side</th><th>Price</th><th>Quantity</th></tr>'+trades.slice(0,50).map(t=>'<tr><td>'+new Date(t.T).toLocaleTimeString()+'</td><td class="'+(t.m?'sell':'buy')+'">'+(t.m?'SELL':'BUY')+'</td><td>'+fp(t.p)+'</td><td>'+fmt(t.q)+'</td></tr>').join('')+'</table>';}
+let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='',bitgetSignalBar=0;
 function setConn(t,c){$('connection').textContent=t;$('connection').style.color=c;}
+let imKey='',imSeq=0;
+const imFmt=v=>Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{maximumFractionDigits:pricePrecision,minimumFractionDigits:pricePrecision}):'—';
+const imEsc=v=>String(v===null||v===undefined?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function imRow(label,value){return '<div class="im-row"><span>'+imEsc(label)+'</span><strong>'+imEsc(value)+'</strong></div>';}
+function imTag(value,kind){return '<span class="im-tag '+(kind==='bull'?'bull':kind==='bear'?'bear':'')+'">'+imEsc(value)+'</span>';}
+function renderInstitutionalIntel(d){
+ const st=d.structure||{},vp=d.volumeProfile||null,events=Array.isArray(st.events)?st.events:[],pools=Array.isArray(d.liquidityPools)?d.liquidityPools:[],sweeps=Array.isArray(d.liquiditySweeps)?d.liquiditySweeps:[],blocks=Array.isArray(d.orderBlocks)?d.orderBlocks:[],displacements=Array.isArray(d.displacement)?d.displacement:[],lastEvent=events.at(-1),stance=st.stance||'neutral',trend=String(st.trend||'undetermined');
+ $('imStatus').textContent=d.status==='ready'?'Updated · '+new Date(d.generatedAt).toLocaleTimeString():d.status||'Unavailable';
+ $('imSubtitle').textContent=d.symbol+' · '+d.timeframe+' · '+(d.dataQuality&&d.dataQuality.provider||'supplied candles')+' · '+(d.dataQuality&&d.dataQuality.candles||0)+' closed candles';
+ $('imMetrics').innerHTML='<div class="im-card"><small>Market structure</small><b>'+imEsc(trend.replace('_',' ').toUpperCase())+'</b><span>'+imTag(stance.toUpperCase(),stance==='bullish'?'bull':stance==='bearish'?'bear':'')+' · HH '+(st.higherHighs||0)+' / HL '+(st.higherLows||0)+' / LH '+(st.lowerHighs||0)+' / LL '+(st.lowerLows||0)+'</span></div><div class="im-card"><small>Volume profile · 70% VA</small><b>'+(vp?imFmt(vp.poc):'—')+'</b><span>'+(vp?'POC · VAH '+imFmt(vp.vah)+' · VAL '+imFmt(vp.val):'Insufficient profile history')+'</span></div><div class="im-card"><small>Liquidity context</small><b>'+pools.length+' pools · '+sweeps.length+' sweeps</b><span>Equal highs/lows and reclaimed levels</span></div><div class="im-card"><small>Latest structure event</small><b>'+(lastEvent?imEsc(lastEvent.type+' '+lastEvent.direction.toUpperCase()):'No recent event')+'</b><span>'+(lastEvent?imFmt(lastEvent.level)+' · '+new Date(lastEvent.time).toLocaleString():'No confirmed BOS / CHoCH in this sample')+'</span></div>';
+ $('imStructure').innerHTML='<div class="im-list">'+imRow('Trend',trend.replace('_',' '))+imRow('Stance',stance.toUpperCase())+imRow('Last swing high',st.lastSwingHigh?imFmt(st.lastSwingHigh.price):'—')+imRow('Last swing low',st.lastSwingLow?imFmt(st.lastSwingLow.price):'—')+imRow('Trend invalidation',st.invalidationLevel?imFmt(st.invalidationLevel):'Not defined')+'</div>';
+ $('imProfile').innerHTML=vp?'<div class="im-list">'+imRow('Point of control (POC)',imFmt(vp.poc))+imRow('Value area high (VAH)',imFmt(vp.vah))+imRow('Value area low (VAL)',imFmt(vp.val))+imRow('Current location',String(vp.location||'').replace('_',' '))+imRow('Distance from POC',Number(vp.distanceFromPocPct).toFixed(3)+'%')+imRow('Profile range',imFmt(vp.low)+' — '+imFmt(vp.high))+'</div><p class="execution-note">'+imEsc(vp.method||'OHLCV profile estimate')+'</p>':'<span class="im-empty">At least 20 closed candles are required to build a volume profile.</span>';
+ $('imLiquidity').innerHTML='<div class="im-list">'+(pools.length?pools.slice(-6).reverse().map(p=>imRow((p.kind||p.type||'Liquidity')+' · '+(p.side||'pool'),imFmt(p.price||p.level))).join(''):'<span class="im-empty">No qualifying equal-high / equal-low pool in this sample.</span>')+(sweeps.length?sweeps.slice(-4).reverse().map(x=>imRow('Sweep · '+(x.direction||x.side||'level'),imFmt(x.level||x.price))).join(''):'<span class="im-empty">No confirmed sweep/reclaim event in this sample.</span>')+'</div>';
+ $('imEvents').innerHTML=events.length?'<div class="im-list">'+events.slice(-8).reverse().map(e=>'<div class="im-row"><span>'+imTag(e.type+' · '+e.direction,e.direction==='bullish'?'bull':'bear')+'<br><small>'+new Date(e.time).toLocaleString()+'</small><br>'+imEsc(e.note||'Confirmed structure event')+'</span><strong>'+imFmt(e.level)+'</strong></div>').join('')+'</div>':'<span class="im-empty">No confirmed BOS / CHoCH event in the latest closed-candle sample.</span>';
+ $('imOrderBlocks').innerHTML=blocks.length?'<div class="im-list">'+blocks.slice(-6).reverse().map(x=>imRow((x.kind||'')+' · '+(x.mitigated?'mitigated':'fresh')+(x.hasFVG?' · FVG confluence':''),imFmt(x.low)+' — '+imFmt(x.high))).join('')+'</div>':'<span class="im-empty">No order block passed the displacement and structure-break rules in this sample.</span>';
+ $('imDisplacement').innerHTML=displacements.length?'<div class="im-list">'+displacements.slice(-6).reverse().map(x=>imRow(x.direction+' · '+new Date(x.time).toLocaleString(),Number(x.bodyAtr).toFixed(2)+' ATR · '+Number(x.volumeRatio).toFixed(2)+'× volume')).join('')+'</div>':'<span class="im-empty">No recent candle met the displacement threshold.</span>';
+}
+async function refreshInstitutionalIntel(force){
+ if(!candles.length)return;
+ const sym=$('symbol').value,tf=$('interval').value,market=symMkt(),venue=symVenueOf(),tail=candles.at(-1),key=[sym,tf,market,venue,tail&&tail[0]].join('|');
+ if(!force&&key===imKey)return;imKey=key;const seq=++imSeq;
+ $('imStatus').textContent='Analysing…';$('imSubtitle').textContent=sym+' · '+tf+' · '+venue+' '+market;
+ try{
+  const r=await fetch('/api/analysis/smc',{method:'POST',headers:{'content-type':'application/json'},cache:'no-store',body:JSON.stringify({symbol:sym,timeframe:tf,market,venue,provider:venue,candles:candles.map(v=>v.map(Number))}),signal:AbortSignal.timeout(15000)});
+  const d=await r.json();if(seq!==imSeq)return;if(!r.ok)throw new Error(d.detail||d.error||'Analysis request failed ('+r.status+')');
+  renderInstitutionalIntel(d);
+ }catch(e){if(seq!==imSeq)return;$('imStatus').textContent='Unavailable';$('imSubtitle').textContent=e.message||'Institutional analysis could not be loaded';}
+}
+$('imRefresh').addEventListener('click',()=>refreshInstitutionalIntel(true));
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
-function symInfo(){const m=symMkt(),s=$('symbol').value,c=SYM.all.filter(r=>r[0]===s&&r[3]===(m==='futures'?'futures':'spot')),row=(SYM.venue&&c.find(r=>symV(r)===SYM.venue))||c.find(r=>symV(r)==='binance')||c[0]||null;return{market:m,row:row,venue:row?symV(row):'binance'};}
-function symV(r){return r[5]||'binance';}
+function symInfo(){const raw=$('symMarket').value,m=symMkt(),s=$('symbol').value,venue=$('symVenue').value||SYM.venue||'bybit',selected=$('orderBitgetMarket')?$('orderBitgetMarket').value.toUpperCase():'';const c=SYM.all.filter(r=>r[0]===s&&r[3]===(raw==='margin'?'margin':m==='futures'?'futures':'spot')&&symV(r)===venue);const row=venue==='bitget'&&m==='futures'?(c.find(r=>String(r[6]||'').toUpperCase()===selected)||c.find(r=>SYM.cat&&String(r[6]||'').toUpperCase()===String(SYM.cat).toUpperCase())||null):(c[0]||null);return{market:m,row:row,venue:venue,productType:row&&row[6]||null};}
+function symV(r){return r[5]||'bybit';}
 function symVenueOf(){return symInfo().venue;}
-function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
-function mkt(){const i=symInfo();return (i.market==='futures'?'&market=futures':'')+(i.venue==='bitget'?'&venue=bitget'+(i.row&&i.row[6]?'&pt='+encodeURIComponent(i.row[6]):''):'');}
+function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value==='margin')return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
+function mkt(){const i=symInfo(),venue=i.venue||SYM.venue||'bybit';let q='&venue='+encodeURIComponent(venue);if(SYM.market==='margin')q+='&market=margin';else if(i.market==='futures'){q+='&market=futures';if(venue==='bitget')q+='&category='+encodeURIComponent(i.productType||$('orderBitgetMarket').value.toUpperCase());else q+='&category='+(/USD$/.test($('symbol').value)&&!/(USDT|USDC)$/.test($('symbol').value)?'inverse':'linear');}return q;}
 async function getJson(url){const r=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)}),txt=await r.text();let j=null;try{j=JSON.parse(txt);}catch(e){}if(!r.ok){let why=j&&j.detail?j.detail:txt.slice(0,160);if(j&&j.attempts)why+=' ['+j.attempts.map(a=>a.provider+':'+(a.errorClass||'ok')).join(', ')+']';throw Error(url.split('?')[0].replace('/api/market/','')+' HTTP '+r.status+' — '+why);}if(j===null)throw Error('Invalid JSON from '+url.split('?')[0]);return {data:j,provider:r.headers.get('x-eti-provider'),failover:r.headers.get('x-eti-failover')==='true'};}
 function schedule(ms){clearTimeout(loadTimer);loadTimer=setTimeout(load,ms);}
+let bitgetStream=null,bitgetStreamKey='';
+function closeBitgetStream(){if(bitgetStream){try{bitgetStream.close()}catch(e){}bitgetStream=null;}bitgetStreamKey='';}
+function ensureBitgetStream(info,key){
+ if(!window.ETIBitget||!window.ETIBitget.subscribe)return;
+ if(bitgetStream&&bitgetStreamKey===key)return;
+ closeBitgetStream();
+ const category=info.market==='futures'?(info.productType||$('orderBitgetMarket').value.toUpperCase()):'SPOT';
+ bitgetStreamKey=key;
+ bitgetStream=window.ETIBitget.subscribe({symbol:$('symbol').value,interval:$('interval').value,market:info.market,category:category},{
+  onStatus:function(s){if(s.state==='connected'){setConn('Bitget live WebSocket connected · '+category,'#21d69a');}else if(s.state==='reconnecting'||s.state==='connecting'){setConn('Bitget WebSocket '+s.state+' · REST recovery active','#f59e0b');setStale('Bitget streaming is reconnecting; REST snapshots remain active');}},
+  onMessage:function(ev){if(!ev||!ev.data)return;const d=ev.data;
+   if(ev.type==='ticker'){if(d.lastPrice>0){$('last').textContent=fp(d.lastPrice);$('volume').textContent=fmt(d.volume);const ch=Number(d.priceChangePercent||0);$('change').textContent=(ch>=0?'+':'')+ch.toFixed(2)+'%';$('change').style.color=ch>=0?'#21d69a':'#ff637d';capturePricePrecision([d.lastPrice,d.bidPrice,d.askPrice,d.markPrice,d.indexPrice]);}}
+   else if(ev.type==='candle'){const row=d.map(Number),last=candles[candles.length-1];if(!last||last[0]!==row[0])candles.push(row);else candles[candles.length-1]=row;if(candles.length>BARS)candles=candles.slice(-BARS);drawChart();renderAdvancedLiveChart();}
+   else if(ev.type==='depth'){book=d;renderBook();v3Push(book,$('symbol').value+'|'+symMkt());}
+   else if(ev.type==='trades'){const merged=(ev.data||[]).concat(trades||[]),seen={};trades=merged.filter(t=>{const k=String(t.T||t.time)+'|'+String(t.p||t.price)+'|'+String(t.q||t.qty);if(seen[k])return false;seen[k]=1;return true;}).sort((a,b)=>Number(b.T||b.time)-Number(a.T||a.time)).slice(0,100);renderTrades();}
+   $('stamp').textContent='Live Bitget update · '+new Date(ev.timestamp||Date.now()).toLocaleTimeString();
+  }
+ });
+}
+
 async function load(){
  const seq=++reqSeq,s=$('symbol').value,i=$('interval').value,key=s+'|'+i+'|'+mkt(),q='symbol='+encodeURIComponent(s)+mkt();
  try{
+  const info=symInfo();
+  if(info.venue==='bitget'){
+   if(!window.ETIBitget)throw Error('Bitget browser adapter did not load');
+   const category=info.market==='futures'?(info.productType||$('orderBitgetMarket').value.toUpperCase()):'SPOT';
+   if(info.market==='futures'&&!info.productType)throw Error('Selected Bitget contract is not present in the '+category+' catalogue. Refresh the pair list or select a listed contract.');
+   ensureBitgetStream(info,key);
+   const direct=await window.ETIBitget.marketData({symbol:s,interval:i,limit:BARS,market:info.market,category:category});
+   if(seq!==reqSeq)return;
+   pricePrecision=2;capturePricePrecision((direct.candles||[]).flatMap(v=>v.slice(1,5)));if(direct.ticker)capturePricePrecision([direct.ticker.lastPrice,direct.ticker.bidPrice,direct.ticker.askPrice]);
+   candles=direct.candles;book=direct.depth||{bids:[],asks:[]};trades=direct.trades||[];provider='bitget-browser';lastGoodAt=Date.now();lastGoodKey=key;
+   const problems=Object.keys(direct.failures||{}).map(k=>k+': '+direct.failures[k]);
+   const ticker=direct.ticker||{},feedLabel=SYM.market==='margin'?'MARGIN (spot book)':' '+category;$('volume').textContent=fmt(ticker.volume);const change=Number(ticker.priceChangePercent||0);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';
+   drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());refreshInstitutionalIntel(false);
+   $('last').textContent=fp(candles.at(-1)[4]);$('provider').textContent='Bitget browser-direct ('+feedLabel.trim()+')';
+   failCount=0;setStale(problems.length?'Partial Bitget context — '+problems[0].slice(0,140):'');
+   const signalBar=Number(candles.at(-1)[0]);if(!sig||sig.provider!=='bitget-browser'||bitgetSignalBar!==signalBar){bitgetSignalBar=signalBar;loadSignal();}
+   $('stamp').textContent='Updated '+new Date().toLocaleTimeString()+' via Bitget browser connection';
+   setConn('Bitget direct browser REST feed connected ('+feedLabel.trim()+')',problems.length?'#f59e0b':'#21d69a');
+   if(socket){socket.onclose=null;socket.close();socket=null;}
+   schedule(bitgetStream&&bitgetStream.getState().connected?30000:5000);return;
+  }
   const k=await getJson('/api/market/klines?'+q+'&interval='+encodeURIComponent(i)+'&limit='+BARS);
   if(seq!==reqSeq)return;
   const rows=k.data;if(!Array.isArray(rows)||!rows.length)throw Error('klines returned no candles');
+  pricePrecision=2;capturePricePrecision(rows.flatMap(v=>v.slice(1,5)));
   candles=rows.map(v=>v.map(Number));provider=k.provider;lastGoodAt=Date.now();lastGoodKey=key;syncSignalProvider();
   const pq='&provider='+encodeURIComponent(provider||'');
   const [d,t,tk]=await Promise.allSettled([getJson('/api/market/depth?'+q+'&limit=20'+pq),getJson('/api/market/trades?'+q+'&limit=50'+pq),getJson('/api/market/ticker?'+q+pq)]);
@@ -473,7 +684,7 @@ async function load(){
   if(t.status==='fulfilled'){trades=t.value.data.map(v=>({T:Number(v.time),m:!!v.isBuyerMaker,p:String(v.price),q:String(v.qty)}));}else problems.push('trades: '+t.reason.message);
   if(tk.status==='fulfilled'){const x=tk.value.data;$('volume').textContent=fmt(x.volume);const c=Number(x.priceChangePercent);$('change').textContent=(c>=0?'+':'')+c.toFixed(2)+'%';$('change').style.color=c>=0?'#21d69a':'#ff637d';}else{$('volume').textContent=fmt(candles.at(-1)[5])+' (last candle)';$('change').textContent='—';problems.push('ticker: '+tk.reason.message);}
   drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());
-  $('last').textContent=fmt(candles.at(-1)[4]);$('provider').textContent=provider+(k.failover?' (failover)':'');
+  $('last').textContent=fp(candles.at(-1)[4]);$('provider').textContent=provider+(k.failover?' (failover)':'');
   failCount=0;setStale(problems.length?'Partial data — '+problems[0].slice(0,140):'');
   $('stamp').textContent='Updated '+new Date().toLocaleTimeString()+' via '+provider;
   setConn(provider==='binance'&&socket&&socket.readyState===1?'Live stream + REST ('+provider+')':'REST feed connected ('+provider+')',k.failover?'#f59e0b':'#21d69a');
@@ -494,11 +705,11 @@ function connectWs(){
  clearTimeout(wsTimer);if(socket){socket.onclose=null;socket.close();}
  const s=$('symbol').value.toLowerCase(),sock=new WebSocket('wss://data-stream.binance.vision/stream?streams='+s+'@trade/'+s+'@depth20@100ms/'+s+'@kline_'+$('interval').value);socket=sock;
  sock.onopen=()=>{wsRetry=0;setConn('Live WebSocket + REST (binance)','#21d69a');};
- sock.onmessage=e=>{const msg=JSON.parse(e.data),d=msg.data;if(msg.stream.includes('@trade')){trades.unshift({T:d.T,m:d.m,p:d.p,q:d.q});trades=trades.slice(0,100);renderTrades();$('last').textContent=fmt(d.p);}else if(msg.stream.includes('@depth')){book={bids:d.bids.map(v=>v.map(Number)),asks:d.asks.map(v=>v.map(Number))};renderBook();}else if(msg.stream.includes('@kline')){const k=d.k,row=[k.t,k.o,k.h,k.l,k.c,k.v].map(Number);if(candles.length&&candles.at(-1)[0]===row[0])candles[candles.length-1]=row;else if(candles.length&&row[0]>candles.at(-1)[0]){candles.push(row);scheduleSignal();}candles=candles.slice(-BARS);drawChart();}};
+ sock.onmessage=e=>{const msg=JSON.parse(e.data),d=msg.data;if(msg.stream.includes('@trade')){trades.unshift({T:d.T,m:d.m,p:d.p,q:d.q});trades=trades.slice(0,100);capturePricePrecision([d.p]);renderTrades();$('last').textContent=fp(d.p);}else if(msg.stream.includes('@depth')){book={bids:d.bids.map(v=>v.map(Number)),asks:d.asks.map(v=>v.map(Number))};renderBook();}else if(msg.stream.includes('@kline')){const k=d.k;capturePricePrecision([k.o,k.h,k.l,k.c]);const row=[k.t,k.o,k.h,k.l,k.c,k.v].map(Number);if(candles.length&&candles.at(-1)[0]===row[0])candles[candles.length-1]=row;else if(candles.length&&row[0]>candles.at(-1)[0]){candles.push(row);scheduleSignal();}candles=candles.slice(-BARS);drawChart();}};
  sock.onclose=()=>{if(socket!==sock)return;const wait=Math.min(30000,1000*Math.pow(2,wsRetry++));setConn('WebSocket disconnected · REST polling active · reconnect in '+Math.round(wait/1000)+'s','#f59e0b');wsTimer=setTimeout(connectWs,wait);};
  sock.onerror=()=>sock.close();
 }
-function resetAndLoad(){sig=null;sigWantProvider=null;hoverIdx=-1;reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();renderSignalCharts();if(socket){socket.onclose=null;socket.close();socket=null;}loadSignal();load();}
+function resetAndLoad(){closeBitgetStream();sig=null;sigWantProvider=null;bitgetSignalBar=0;hoverIdx=-1;reqSeq++;candles=[];trades=[];book={bids:[],asks:[]};provider=null;failCount=0;lastGoodKey='';setStale('');drawChart();renderBook();renderTrades();renderSignalCharts();if(socket){socket.onclose=null;socket.close();socket=null;}if(symInfo().venue!=='bitget')loadSignal();load();}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let preparedOrder=null, executionStatus=null;
 /* ---- automatic, server-side execution sessions (HttpOnly cookies: this page never sees or stores a token) ---- */
@@ -536,7 +747,7 @@ async function renderAuthEnvs(){
 function selectedOrder(){
  const broker=$('orderBroker').value, type=$('orderType').value;
  const quantity=Number($('orderQuantity').value), symbol=$('orderSymbol').value.trim().toUpperCase();
- const order={broker,symbol,type,quantity,side:window.etiSelectedSide||'buy',timeInForce:$('orderTif').value};
+ const order={broker,symbol,type,quantity,side:window.etiSelectedSide||'buy',timeInForce:$('orderTif').value,bitgetMarket:$('orderBitgetMarket').value,leverage:Number($('orderBitgetLeverage').value),marginMode:$('orderBitgetMarginMode').value};
  if(type==='limit') order.limitPrice=Number($('orderLimitPrice').value);
  if(type==='stop') order.stopPrice=Number($('orderStopPrice').value);
  return order;
@@ -545,21 +756,21 @@ function orderValidation(o,requireCredentials=true){
  if(!/^[A-Z0-9._-]{2,24}$/.test(o.symbol))return 'Enter a valid symbol.';
  if(!Number.isFinite(o.quantity)||o.quantity<=0)return 'Enter a quantity greater than zero.';
  if(o.type==='limit'&&(!Number.isFinite(o.limitPrice)||o.limitPrice<=0))return 'Enter a valid limit price.';
- if(o.type==='stop'&&o.broker!=='eti_paper')return 'Stop-loss orders are available on ETI Internal Paper only. On exchange testnet use the alert-only levels.';
+ if(o.type==='stop'&&o.broker!=='eti_paper')return 'Standalone stop orders are available on ETI Internal Paper only. For Bitget futures, attach preset stop-loss and take-profit levels to the market or limit order.';
  if(o.type==='stop'&&o.side!=='sell')return 'A stop-loss order protects a long position: use Sell.';
  if(o.type==='stop'&&(!Number.isFinite(o.stopPrice)||o.stopPrice<=0))return 'Enter a valid stop price.';
  if(!$('operatorId').value.trim())return 'Enter an operator ID for the audit record.';
  return '';
 }
 function renderPreview(o){
- const summary={venue:o.broker==='eti_paper'?'ETI INTERNAL PAPER (simulated, no exchange)':o.broker,mode:o.broker==='eti_paper'?'internal paper (simulated)':'exchange paper/testnet',symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
+ const summary={venue:o.broker==='eti_paper'?'ETI INTERNAL PAPER (simulated, no exchange)':o.broker==='bitget'?'BITGET LIVE (real funds)':o.broker,mode:o.broker==='bitget'?'live':'exchange paper/testnet',market:o.broker==='bitget'?o.bitgetMarket:undefined,leverage:o.broker==='bitget'&&o.bitgetMarket.endsWith('futures')?o.leverage:undefined,marginMode:o.broker==='bitget'&&o.bitgetMarket.endsWith('futures')?o.marginMode:undefined,symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity};
  if(o.type==='limit')summary.limitPrice=o.limitPrice;
  {const px=o.type==='limit'?o.limitPrice:o.type==='stop'?o.stopPrice:orderRefPrice();if(px>0&&o.quantity>0){summary.referencePrice=px;summary['estimatedAmount_'+orderQuoteName()]=Math.round(o.quantity*px*100)/100;}}
  summary.executionSource={actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'};
  $('orderOutput').textContent='Review this order carefully before submission: | '+JSON.stringify(summary,null,2);
 }
 function describeOutcome(r,d){
- if(d&&d.ok&&d.outcome==='executed')return d.broker==='eti_paper'?'FILLED in ETI Internal Paper (simulated; no exchange contacted)'+(d.fill?' · '+d.fill.quantity+' @ '+Number(d.fill.price).toFixed(4):''):'EXECUTED on '+(d.mode==='testnet'?'Binance testnet':'Alpaca paper')+' · broker order '+d.brokerOrderId+' · status '+d.brokerStatus;
+ if(d&&d.ok&&d.outcome==='executed')return d.broker==='eti_paper'?'FILLED in ETI Internal Paper (simulated; no exchange contacted)'+(d.fill?' · '+d.fill.quantity+' @ '+Number(d.fill.price).toFixed(4):''):d.broker==='bitget'?'ACCEPTED by Bitget LIVE · order '+d.brokerOrderId+' · verify final fill in Bitget': 'EXECUTED on '+(d.mode==='testnet'?'Binance testnet':'Alpaca paper')+' · broker order '+d.brokerOrderId+' · status '+d.brokerStatus;
  if(d&&d.ok&&d.outcome==='resting')return 'ACCEPTED into the ETI internal paper book (simulated): it fills only when the market trades through its price';
  if(d&&d.outcome==='rejected')return 'REFUSED by ETI safeguards ('+(d.stage||'check')+'): '+((d.reasons&&d.reasons[0])||d.error)+' · the broker was NOT contacted';
  if(d&&d.outcome==='broker_rejected')return 'REJECTED by the broker (HTTP '+d.status+') · see the broker response below';
@@ -571,19 +782,20 @@ function describeOutcome(r,d){
 async function refreshExecutionStatus(){
  try{
   const r=await fetch('/api/execution/status',{cache:'no-store'}),d=await r.json();executionStatus=d;
-  const b=$('orderBroker').value,internal=b==='eti_paper';
-  const ready=internal||(b==='alpaca'?d.alpaca_paper_configured:d.binance_testnet_configured), name=internal?'ETI Internal Paper':b==='alpaca'?'Alpaca Paper':'Binance Testnet';
+  const b=$('orderBroker').value,internal=b==='eti_paper',bitget=b==='bitget';
+  const ready=internal||(b==='alpaca'?d.alpaca_paper_configured:bitget?d.live_trading_available:d.binance_testnet_configured), name=internal?'ETI Internal Paper':b==='alpaca'?'Alpaca Paper':bitget?'Bitget Live':'Binance Testnet';
   const sg=d.safeguards||{}, ok=!d.kill_switch&&(internal||(ready&&d.audit_log_configured))&&d.audit_log_configured;
-  $('executionStatus').textContent=d.kill_switch?'Halted (kill switch)':ok?'Ready · paper/testnet only':!d.audit_log_configured?'Needs audit log (KV binding)':'Needs '+name+' credentials (internal paper still works)';
+  $('executionStatus').textContent=d.kill_switch?'Halted (kill switch)':bitget&&!d.bitget_egress_verified?'Paused · Bitget private API egress not verified':ok?(bitget?'Ready · Bitget live orders (master token required)':'Ready · paper/testnet') :!d.audit_log_configured?'Needs audit log (KV binding)':'Needs '+name+' credentials / live activation';
   $('executionStatus').style.color=ok?'#21d69a':'#ffb08c';
-  if($('brokerStatus')){$('brokerStatus').textContent=name+(internal?' · simulated, no exchange':ready?' · credentials set':' · not configured');$('brokerStatus').style.color=ready?'#21d69a':'#ffb08c';}
+  if($('brokerStatus')){$('brokerStatus').textContent=name+(internal?' · simulated, no exchange':bitget&&!d.bitget_egress_verified?' · live paused until private egress verification':ready?' · credentials and activation set':' · not configured');$('brokerStatus').style.color=ready?'#21d69a':'#ffb08c';}
+  $('bitgetMarketWrap').style.display=bitget?'':'none';const bf=bitget&&$('orderBitgetMarket').value.endsWith('futures');$('bitgetLeverageWrap').style.display=bf?'':'none';$('bitgetMarginModeWrap').style.display=bf?'':'none';$('bitgetLoanTypeWrap').style.display=bitget&&($('orderBitgetMarket').value==='margin-crossed'||$('orderBitgetMarket').value==='margin-isolated')?'':'none';
   if($('safeguardStatus')){$('safeguardStatus').textContent=sg.engine==='in_process'?'In-process · max qty '+(sg.max_order_quantity==null?'unset':sg.max_order_quantity)+' · duplicate window '+sg.duplicate_window_seconds+'s'+(d.live_flag_ignored?' · live flag ignored':'')+(d.legacy_gateway_config_ignored?' · old gateway settings ignored (safe to delete)':''):'Unknown';$('safeguardStatus').style.color=sg.engine==='in_process'?'#21d69a':'#ff637d';}
   $('killSwitchStatus').textContent=d.kill_switch?'ACTIVE':'Inactive';
   $('killSwitchStatus').style.color=d.kill_switch?'#ff637d':'#21d69a';
  }catch(e){$('executionStatus').textContent='Status unavailable';$('executionStatus').style.color='#ff637d';}
 }
 async function refreshExecutionHistory(){
- const token=$('executionToken').value,env=$('orderBroker').value==='eti_paper'?'internal_paper':'exchange_testnet';
+ const token=$('executionToken').value,env=$('orderBroker').value==='eti_paper'?'internal_paper':$('orderBroker').value==='bitget'?'live':'exchange_testnet';
  $('executionHistory').textContent='Loading audit records…';
  try{
   const r=await fetch('/api/execution/history?environment='+env,{credentials:'same-origin',headers:token?{Authorization:'Bearer '+token}:{},cache:'no-store'}),d=await r.json();
@@ -597,24 +809,26 @@ async function refreshExecutionHistory(){
 }
 async function submitOrder(side){
  const o=selectedOrder();o.side=side;window.etiSelectedSide=side;
+ if(o.broker==='bitget'&&!(executionStatus&&executionStatus.bitget_egress_verified)){$('orderOutput').textContent='Bitget live execution is paused. Bitget blocks ETI Cloudflare Worker egress for public REST, and private order connectivity has not been verified. No order was sent. Public market data continues through the browser-direct feed. Keep API secrets on Cloudflare; never move them into the browser.';return;}
  const problem=orderValidation(o);if(problem){$('orderOutput').textContent=problem;return;}
  if(executionStatus&&executionStatus.kill_switch){$('orderOutput').textContent='Execution blocked: emergency kill switch is active.';return;}
  renderPreview(o);
- const modeLabel=o.broker==='eti_paper'?'INTERNAL PAPER, SIMULATED':'EXCHANGE '+(o.broker==='binance'?'BINANCE TESTNET':'ALPACA PAPER');
+ const modeLabel=o.broker==='eti_paper'?'INTERNAL PAPER, SIMULATED':o.broker==='bitget'?'BITGET LIVE, REAL FUNDS':'EXCHANGE '+(o.broker==='binance'?'BINANCE TESTNET':'ALPACA PAPER');
  const detail=side.toUpperCase()+' '+o.quantity+' '+o.symbol+' via '+o.broker.toUpperCase()+' ('+modeLabel+', '+o.type.toUpperCase()+')';
- if(!window.confirm('FINAL ORDER CONFIRMATION |  | '+detail+' |  | This submits a PAPER / TESTNET order. No real money is used. Continue?'))return;
+ if(!window.confirm('FINAL ORDER CONFIRMATION |  | '+detail+' |  | '+(o.broker==='bitget'?'This submits a LIVE Bitget order using real funds. Losses may be immediate. Confirm the market, quantity, leverage and margin mode. Continue?':'This submits a PAPER / TESTNET order. No real money is used. Continue?')))return;
  const clientOrderId='eti'+crypto.randomUUID().replace(/-/g,'').slice(0,29);
  const body={broker:o.broker,symbol:o.symbol,side:o.side,type:o.type,quantity:o.quantity,timeInForce:o.timeInForce,clientOrderId,riskConfirmed:true,executionSource:{actorType:'manual_user',actorId:$('operatorId').value.trim(),sourceName:'ETI Dashboard',triggerReason:'Manually submitted from dashboard'}};
+ if(o.broker==='bitget'){body.bitgetMarket=o.bitgetMarket;body.leverage=o.leverage;body.marginMode=o.marginMode;body.quoteAmount=Number($('orderAmount').value)||((o.side==='buy'&&o.type==='market')?o.quantity*orderRefPrice():undefined);body.referencePrice=o.type==='limit'?o.limitPrice:orderRefPrice();body.loanType=$('orderBitgetLoanType').value;body.tradeSide='open';body.marginCoin=o.bitgetMarket==='usdt-futures'?'USDT':o.bitgetMarket==='usdc-futures'?'USDC':undefined;}
  if(o.type==='limit')body.limitPrice=o.limitPrice;
  if(o.type==='stop')body.stopPrice=o.stopPrice;
- if(side==='buy'){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
+ if((side==='buy'&&o.broker!=='bitget')||(o.broker==='bitget'&&o.bitgetMarket.endsWith('futures'))){const pl=pfPlanFromForm();if(pl)body.plan=pl;}
  $('orderOutput').textContent='Submitting order…';
  try{
   const headers={'content-type':'application/json'};
   if($('executionToken').value)headers.Authorization='Bearer '+$('executionToken').value;
-  const send=()=>fetch('/api/orders',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify(body)});
+  const send=()=>fetch(o.broker==='bitget'?'/api/orders/live':'/api/orders',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify(body)});
   let r=await send();
-  if(r.status===401&&!$('executionToken').value){await startSessions();r=await send();}
+  if(r.status===401&&!$('executionToken').value&&o.broker!=='bitget'){await startSessions();r=await send();}
   const d=await r.json().catch(()=>({}));
   if(d.fallback&&d.notice)authBanner(d.notice,'warn');
   $('orderOutput').textContent=describeOutcome(r,d)+' | '+JSON.stringify(d,null,2);
@@ -622,13 +836,14 @@ async function submitOrder(side){
  }catch(e){$('orderOutput').textContent='Order submission failed before a response was received: '+e.message+' | Check the audit history before retrying.';pfKick();}
 }
 $('orderType').onchange=()=>{const t=$('orderType').value;$('limitPriceWrap').style.display=t==='limit'?'flex':'none';$('stopPriceWrap').style.display=t==='stop'?'flex':'none';};
-$('orderBroker').onchange=()=>{if($('orderBroker').value!=='eti_paper'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}$('orderTif').value=$('orderBroker').value==='binance'?'gtc':'day';refreshExecutionStatus();if(perpOn())perpLoad();};
+$('orderBroker').onchange=()=>{const b=$('orderBroker').value;if(b!=='eti_paper'&&b!=='bitget'&&!testnetOk&&!manualNeeded){$('orderBroker').value='eti_paper';authBanner('Exchange testnet is not available (credentials missing or rejected), so orders stay in ETI Internal Paper. No exchange testnet order will be placed.','warn');}if(b==='bitget'){authBanner('Bitget live orders require the master ETI_EXECUTION_TOKEN. Paper/testnet session tokens cannot authorise real-money orders.','warn');$('manualAuth').style.display='grid';}$('orderTif').value=b==='binance'||b==='bitget'?'gtc':'day';refreshExecutionStatus();if(perpOn())perpLoad();};
+$('orderBitgetMarket').onchange=()=>{const selected=$('orderBitgetMarket').value,f=selected.endsWith('futures');$('bitgetLeverageWrap').style.display=f?'':'none';$('bitgetMarginModeWrap').style.display=f?'':'none';$('bitgetLoanTypeWrap').style.display=selected.startsWith('margin-')?'':'none';if(SYM.venue==='bitget'&&SYM.market==='futures'){SYM.cat=selected.toUpperCase();const match=SYM.all.find(r=>symV(r)==='bitget'&&r[3]==='futures'&&String(r[6]||'').toLowerCase()===selected);if(match&&!SYM.all.some(r=>symV(r)==='bitget'&&r[0]===$('symbol').value&&String(r[6]||'').toLowerCase()===selected)){$('symbol').value=match[0];$('orderSymbol').value=match[0];}symFilters();symRebuild($('symbol').value);resetAndLoad();}};
 /* ===== Chart trading + profit & leverage calculator ===== */
 function drawChartLines(x,g,py,labels){chartLines.forEach(l=>{if(!(l.price>0))return;const y=py(l.price);x.lineWidth=1.2;x.strokeStyle=l.color;x.setLineDash(l.dash||[4,3]);x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.setLineDash([]);labels.push({y:y,t:l.label,c:l.color});});}
-function setChartLines(src,lines){chartLines=chartLines.filter(l=>l.src!==src).concat(lines.map(l=>Object.assign({src:src},l)));drawChart();}
+function setChartLines(src,lines){capturePricePrecision((lines||[]).map(l=>l.price));chartLines=chartLines.filter(l=>l.src!==src).concat(lines.map(l=>Object.assign({src:src},l)));drawChart();}
 function ctLast(){return Number(String($('last').textContent).replace(/,/g,''));}
-function ctRound(p){const a=Math.abs(p),d=a>=1000?2:a>=100?3:a>=1?4:6;return Number(p.toFixed(d));}
-function ctPriceAt(e){const s=chartScale;if(!s)return null;const r=$('chart').getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||x>s.plotW||y<s.top||y>s.bot)return null;return s.hi-(y-s.top)/(s.bot-s.top)*(s.hi-s.lo);}
+function ctRound(p){return Number(Number(p).toFixed(pricePrecision));}
+function ctPriceAt(e){if(liveCandle){const r=$('chartAdvanced').getBoundingClientRect(),y=e.clientY-r.top;if(y<0||y>r.height)return null;const v=liveCandle.coordinateToPrice(y);return Number.isFinite(v)?v:null;}const s=chartScale;if(!s)return null;const r=$('chart').getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||x>s.plotW||y<s.top||y>s.bot)return null;return s.hi-(y-s.top)/(s.bot-s.top)*(s.hi-s.lo);}
 function ctRefresh(){const p=Number($('ctPrice').value),last=ctLast();
  if(Number.isFinite(p)&&p>0){setChartLines('order',[{price:p,label:'ORDER '+fp(p),color:'#f0c674',dash:[6,3]}]);
   const rel=Number.isFinite(last)&&last>0?(p>last?'above':p<last?'below':'at'):'';
@@ -708,7 +923,8 @@ async function loadSignal(){
  const sym=$('symbol').value, iv=$('interval').value, seq=++sigSeq;
  $('signalAction').textContent='ANALYSING…';$('signalAction').style.color='#8fa3bd';
  try{
-  const r=await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider&&!mkt()?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
+  const directBitget=symInfo().venue==='bitget';
+  const r=directBitget?await fetch('/api/signals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol:sym,interval:iv,window:BARS,provider:'bitget-browser',market:symInfo().market,candles:candles}),cache:'no-store'}):await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider&&!mkt()?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
   const d=await r.json();
   if(seq!==sigSeq)return;
   if(!r.ok)throw Error(d.error||('HTTP '+r.status));
@@ -719,9 +935,9 @@ async function loadSignal(){
   $('signalConviction').textContent=d.conviction.toUpperCase()+(d.tradeable?' · tradeable setup':' · lean only');
   $('signalWinRate').textContent=d.historicalValidation.winRate===null?'Withheld · '+d.historicalValidation.sampleCount+' samples':d.historicalValidation.winRate+'% · n='+d.historicalValidation.sampleCount;
   $('signalProvider').textContent=d.provider+' · '+d.interval;
-  $('signalEntry').textContent=d.entry===null?'No trade':fmt(d.entry);
-  $('signalStop').textContent=d.stopLoss===null?'—':fmt(d.stopLoss);
-  $('signalTargets').innerHTML=d.targets.length?d.targets.map(t=>'TP'+t.target+': '+fmt(t.price)+' ('+t.rewardRisk+'R)').join('<br>'):'No targets · wait for confluence';
+  capturePricePrecision([d.entry,d.stopLoss].concat((d.targets||[]).map(t=>t.price)));$('signalEntry').textContent=d.entry===null?'No trade':fp(d.entry);
+  $('signalStop').textContent=d.stopLoss===null?'—':fp(d.stopLoss);
+  $('signalTargets').innerHTML=d.targets.length?d.targets.map(t=>'TP'+t.target+': '+fp(t.price)+' ('+t.rewardRisk+'R)').join('<br>'):'No targets · wait for confluence';
   $('signalSummary').textContent='Confidence is a confluence score, not a probability. '+d.historicalValidation.note;
   $('signalEvidence').innerHTML='<b>Evidence</b><ul class="ev">'+d.evidence.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
   $('signalAttribution').innerHTML='<b style="color:#eaf2ff">Strategy attribution</b> · regime '+esc(d.regime.state)+' (ADX '+esc(d.regime.adx)+')'+d.strategyAttribution.map(function(a){return '<div>'+esc(a.trader)+' — '+esc(a.contribution)+'</div>';}).join('');
@@ -836,11 +1052,9 @@ setInterval(loadSignal,60000);
 ${PORTFOLIO_JS}
 ${CALC_JS}
 pfInit();
-${PERP_JS}
-${VIZ_JS}
-const SYM={all:[],market:'spot',venue:'',quote:'',cat:'',q:'',at:0,warn:''};
-function symRows(){let rows=SYM.market==='metals'?SYM.all.filter(r=>r[4]==='metals'):SYM.all.filter(r=>r[3]===SYM.market);if(SYM.venue)rows=rows.filter(r=>symV(r)===SYM.venue);const seen={};return rows.map((r,i)=>[r,(SYM.market==='metals'&&r[3]!=='spot'?2:0)+(symV(r)==='binance'?0:1),i]).sort((a,b)=>a[1]-b[1]||a[2]-b[2]).map(x=>x[0]).filter(r=>seen[r[0]]?false:(seen[r[0]]=1));}
-function symVisible(){const t=SYM.q.trim().toUpperCase();return symRows().filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));}
+${PERP_JS}const SYM={all:[],market:'spot',venue:'bybit',quote:'',cat:'',q:'',at:0,warn:''};
+function symRows(){let rows=SYM.market==='metals'?SYM.all.filter(r=>r[4]==='metals'):SYM.all.filter(r=>r[3]===SYM.market);if(SYM.venue)rows=rows.filter(r=>symV(r)===SYM.venue);const seen={};return rows.map((r,i)=>[r,(SYM.market==='metals'&&r[3]!=='spot'?2:0)+(symV(r)==='bybit'?0:1),i]).sort((a,b)=>a[1]-b[1]||a[2]-b[2]).map(x=>x[0]).filter(r=>{const k=r[0]+'|'+(r[6]||'');return seen[k]?false:(seen[k]=1);});}
+function symVisible(){const t=SYM.q.trim().toUpperCase();return symRows().filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||(SYM.market==='futures'&&SYM.venue==='bitget'?String(r[6]||'')===SYM.cat:r[4]===SYM.cat))&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));}
 function symFill(sel,first,values,label){sel.textContent='';const a=document.createElement('option');a.value='';a.textContent=first;sel.appendChild(a);values.forEach(v=>{const o=document.createElement('option');o.value=v[0];o.textContent=label(v);sel.appendChild(o);});}
 const METAL_NAMES={XAU:'Gold',XAG:'Silver',XPT:'Platinum',XPD:'Palladium',XCU:'Copper',COPPER:'Copper',GOLD:'Gold',SILVER:'Silver',PLATINUM:'Platinum',PALLADIUM:'Palladium',PAXG:'Gold token PAXG',XAUT:'Gold token XAUT'};
 function symMetalLabel(r){return (METAL_NAMES[r[1]]||r[1])+' · '+r[1]+'/'+r[2]+' · '+(r[3]==='futures'?'perpetual':'spot');}
@@ -858,41 +1072,50 @@ async function etiMarketNote(){
  }catch(e){if(seq===etiNoteSeq){el.textContent='ETI market review unavailable ('+(e&&e.message?e.message:'error')+')';el.style.display='';}}
 }
 function symFilters(){
- const rows=symRows(),cnt={},cats={};rows.forEach(r=>{cnt[r[2]]=(cnt[r[2]]||0)+1;cats[r[4]]=(cats[r[4]]||0)+1;});
+ const rows=symRows(),cnt={},cats={};rows.forEach(r=>{cnt[r[2]]=(cnt[r[2]]||0)+1;const cat=SYM.market==='futures'&&SYM.venue==='bitget'?String(r[6]||'unknown'):r[4];cats[cat]=(cats[cat]||0)+1;});
  const qs=Object.keys(cnt).sort((a,b)=>(a==='USDT'?-1:b==='USDT'?1:cnt[b]-cnt[a]||(a<b?-1:1)));
  symFill($('symQuote'),'All quotes',qs.map(q=>[q]),v=>v[0]+' ('+cnt[v[0]]+')');$('symQuote').value=cnt[SYM.quote]?SYM.quote:'';SYM.quote=$('symQuote').value;
  const cs=Object.keys(cats).sort((a,b)=>(a==='crypto'?-1:b==='crypto'?1:a<b?-1:1));
- symFill($('symCat'),'All types',cs.map(c=>[c]),v=>v[0]+' ('+cats[v[0]]+')');$('symCat').value=cats[SYM.cat]?SYM.cat:'';SYM.cat=$('symCat').value;
+ symFill($('symCat'),SYM.market==='futures'&&SYM.venue==='bitget'?'All contract types':'All types',cs.map(c=>[c]),v=>(SYM.market==='futures'&&SYM.venue==='bitget'?({ 'USDT-FUTURES':'USDT Futures','USDC-FUTURES':'USDC Futures','COIN-FUTURES':'Coin Futures'}[v[0]]||v[0]):v[0])+' ('+cats[v[0]]+')');$('symCat').value=cats[SYM.cat]?SYM.cat:'';SYM.cat=$('symCat').value;
  $('symCat').style.display=SYM.market==='futures'&&cs.length>1?'':'none';
 }
 function symRebuild(want){
  const sel=$('symbol'),cur=want||sel.value,all=symRows(),rows=symVisible();
  const frag=document.createDocumentFragment();let hasCur=false;
- rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=SYM.market==='metals'?symMetalLabel(r):r[1]+'/'+r[2]+(r[4]&&r[4]!=='crypto'?' · '+r[4]:'');if(r[0]===cur)hasCur=true;frag.appendChild(o);});
+ rows.forEach(r=>{const o=document.createElement('option');o.value=r[0];o.textContent=(SYM.market==='metals'?symMetalLabel(r):r[1]+'/'+r[2]+(r[4]&&r[4]!=='crypto'?' · '+r[4]:''))+(r[5]==='bitget'&&r[6]?' · '+String(r[6]).replace('-FUTURES',' Futures'):'');if(r[0]===cur)hasCur=true;frag.appendChild(o);});
  sel.textContent='';
  if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
  sel.appendChild(frag);sel.value=cur;
- const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', refreshes every 10 min':'';
- $('symCount').textContent=rows.length+' of '+all.length+' '+(SYM.venue==='bitget'?'Bitget':SYM.venue==='binance'?'Binance':'Binance + Bitget')+' '+(SYM.market==='futures'?'perpetual futures':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'')+(SYM.venue==='bitget'||symVenueOf()==='bitget'?' · Bitget pairs are chart-only: ETI places no orders on Bitget.':'');
+ const refreshLabel='Exchange catalogues refresh every minute';const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', '+refreshLabel:'';
+ $('symCount').textContent=rows.length+' of '+all.length+' '+(SYM.venue==='bitget'?'Bitget':'Bybit')+' '+(SYM.market==='futures'?'perpetual futures':SYM.market==='margin'?'margin':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'')+(SYM.venue==='bitget'?' · Bitget chart, margin and futures data are selected directly.':'');
  const dl=$('symbolList');if(dl&&dl.dataset.n!==String(SYM.at)){dl.textContent='';SYM.all.filter(r=>r[3]==='spot').forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});dl.dataset.n=String(SYM.at);}
 }
 async function loadSymbols(){
  try{
-  const j=(await getJson('/api/market/symbols?venue=all')).data||{};
-  SYM.all=j.symbols||[];SYM.at=Date.now();
-  SYM.warn=(j.warnings||[]).length?'could not refresh '+j.warnings.map(w=>w.market).join(', ')+' list':'';
-  Object.keys(j.sources||{}).forEach(k=>{if(j.sources[k].stale)SYM.warn=(SYM.warn?SYM.warn+'; ':'')+k+' list is stale';});
+  const results=await Promise.allSettled([
+   getJson('/api/market/symbols?venue=bybit&market=all'),
+   window.ETIBitget.symbols('all'),
+   window.ETIBitget.symbols('margin'),
+   getJson('/api/market/symbols?venue=bybit&market=margin')
+  ]);
+  const prevAll=SYM.all||[];SYM.all=[];
+  const warnings=[];
+  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0||i===3?'Bybit':'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{const src=j.sources[k]||{};if(src.stale){const age=src.fetchedAt?Math.max(0,Math.round((Date.now()-Number(src.fetchedAt))/1000)):null;warnings.push('Bitget '+k+' catalogue is stale'+(age!==null?' · last success '+age+'s ago':' · no successful refresh recorded'));}});}else{const venue=(i===0||i===3?'bybit':'bitget'),isMargin=(i===2||i===3),kept=prevAll.filter(x=>symV(x)===venue&&(x[3]==='margin')===isMargin);SYM.all.push(...kept);warnings.push((venue==='bybit'?'Bybit':'Bitget')+(kept.length?' refresh failed; keeping the last known list':' catalogue unavailable'));}});
+  SYM.at=Date.now();
+  SYM.warn=warnings.join('; ');
+  if(!SYM.all.some(r=>symV(r)==='bybit'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bybit pairs unavailable.';
+  if(!SYM.all.some(r=>symV(r)==='bitget'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bitget pairs unavailable.';
   symFilters();symRebuild();
- }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any Binance symbol in Order Execution.';}
+ }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any valid exchange symbol in Order Execution.';}
 }
 function symMarketChanged(){
- SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';symFilters();
+ SYM.market=$('symMarket').value;SYM.quote='';SYM.cat='';if(SYM.market==='futures'&&symVenueOf()==='bitget'){const current=$('symbol').value,r=SYM.all.find(x=>symV(x)==='bitget'&&x[3]==='futures'&&x[0]===current)||symInfo().row;if(r&&r[6])$('orderBitgetMarket').value=String(r[6]).toLowerCase();else $('orderBitgetMarket').value='usdt-futures';}else if(SYM.market==='margin'&&symVenueOf()==='bitget')$('orderBitgetMarket').value='margin-crossed';else if(SYM.market==='spot'&&symVenueOf()==='bitget')$('orderBitgetMarket').value='spot';symFilters();
  const rows=symRows(),cur=$('symbol').value;let want='';
  if(rows.length&&!rows.some(r=>r[0]===cur)){const d=SYM.market==='metals'?(rows.find(r=>r[1]==='XAU')||rows.find(r=>r[1]==='PAXG')||rows[0]):(rows.find(r=>r[0]==='BTCUSDT')||rows[0]);$('symbol').value=d[0];want=d[0];}
- symRebuild(want);$('orderSymbol').value=$('symbol').value;resetAndLoad();syncOrderMarket();
+ symRebuild(want);$('orderSymbol').value=$('symbol').value;if(SYM.market==='futures'&&symVenueOf()==='bitget'){const br=symInfo().row;$('orderBitgetMarket').value=br&&br[6]?String(br[6]).toLowerCase():'usdt-futures';}resetAndLoad();syncOrderMarket();
  perpApplyMode();
  if(symMkt()==='futures')$('orderOutput').textContent='Futures mode: set leverage, then Buy / Long or Sell / Short. Preview shows margin and liquidation price.';
- if(SYM.market==='metals'&&!rows.length)$('symCount').textContent='No metals pairs in the Binance list yet (list unavailable or none listed). Try again shortly.';
+ if(SYM.market==='metals'&&!rows.length)$('symCount').textContent='No metals pairs in the selected exchange list yet (list unavailable or none listed). Try again shortly.';
  etiMarketNote();
 }
 $('symMarket').addEventListener('change',symMarketChanged);
@@ -900,15 +1123,25 @@ $('symVenue').addEventListener('change',()=>{SYM.venue=$('symVenue').value;SYM.q
 $('symSearch').addEventListener('input',()=>{SYM.q=$('symSearch').value;symRebuild();});
 $('symSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const t=SYM.q.trim().toUpperCase();if(!t)return;const rows=symRows(),m=rows.find(r=>r[0]===t)||rows.find(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(r[0].indexOf(t)>=0||r[1]===t));if(m){$('symbol').value=m[0];$('symbol').dispatchEvent(new Event('change'));$('symSearch').value='';SYM.q='';symRebuild();}});
 $('symQuote').addEventListener('change',()=>{SYM.quote=$('symQuote').value;symRebuild();});
-$('symCat').addEventListener('change',()=>{SYM.cat=$('symCat').value;symRebuild();});
-loadSymbols();setInterval(loadSymbols,600000);
-$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();etiMarketNote();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts()};wireChartInteractions();load();
+$('symCat').addEventListener('change',()=>{SYM.cat=$('symCat').value;if(SYM.market==='futures'&&SYM.venue==='bitget'&&SYM.cat){$('orderBitgetMarket').value=SYM.cat.toLowerCase();const eligible=symVisible();if(eligible.length&&!eligible.some(r=>r[0]===$('symbol').value)){$('symbol').value=eligible[0][0];$('orderSymbol').value=eligible[0][0];}symRebuild($('symbol').value);resetAndLoad();}else symRebuild();});
+initAdvancedLiveChart();$('chartStyle').addEventListener('change',()=>{liveAdvancedKey='';renderAdvancedLiveChart();});$('chartFit').addEventListener('click',()=>{if(liveChart)liveChart.timeScale().fitContent();});
+loadSymbols();setInterval(loadSymbols,60000);
+$('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();etiMarketNote();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts();if(liveChart)liveChart.applyOptions({width:$('chartAdvanced').clientWidth,height:$('chartAdvanced').clientHeight});};wireChartInteractions();load();setInterval(()=>refreshLiquidityFvg(false),45000);
 </script></body></html>`;
 const page = withMotion(html);
 
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/terminal") return new Response(TRADING_TERMINAL_HTML.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/terminal.css") return new Response(TRADING_TERMINAL_CSS, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/liquidity.css") return new Response(LIQUIDITY_CSS, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/liquidity.js") return new Response(LIQUIDITY_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=60", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/terminal.js") return new Response(TRADING_TERMINAL_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=60", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/bitget-client.js") return new Response(BITGET_CLIENT_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/manifest.webmanifest") return new Response(PWA_MANIFEST, { headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/app-icon.svg") return new Response(PWA_ICON, { headers: { "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" } });
+    if (url.pathname === "/sw.js") return new Response(PWA_SERVICE_WORKER, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-cache", "service-worker-allowed": "/", "x-content-type-options": "nosniff" } });
     if (url.pathname.startsWith("/api/orders") || url.pathname === "/api/execution/status" || url.pathname === "/api/execution/history") {
       return handleExecution(request, _env);
     }
@@ -942,20 +1175,22 @@ export default {
     if (url.pathname === "/omnisignal" || url.pathname === "/omnisignal.js") {
       return handleOmniUi(request) as Response;
     }
+    if (url.pathname === "/api/analysis/extremes") return handleExtremeForecast(request, _env);
     if (url.pathname === "/api/analysis" || url.pathname.startsWith("/api/analysis/")) {
       return handleAnalysis(request, _env);
     }
     if (url.pathname === "/api/omnisignal" || url.pathname === "/api/omnisignal/scan" || url.pathname === "/api/omnisignal/universe" || url.pathname === "/api/omnisignal/universe/refresh") {
       return handleOmnisignal(request, _env);
     }
+    if (url.pathname === "/api/liquidity/analyze") return handleLiquidity(request);
     if (url.pathname.startsWith("/api/market/")) {
       return handleMarket(request, _env);
     }
     if (url.pathname === "/__eti/status" || url.pathname === "/api/system/health") {
-      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Binance/Bybit/OKX public REST with failover (see /api/market/diag)", time: new Date().toISOString() });
+      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Bybit V5 Worker REST plus Bitget browser-direct public feed (Cloudflare Worker egress is blocked by Bitget)", market_data_transport: { bybit: "cloudflare-worker-rest", bitget: "browser-direct-rest", bitget_live_orders: "gated-until-private-egress-verified" }, time: new Date().toISOString() });
     }
     if (url.pathname === "/") {
-      return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+      return new Response(page.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     // Optional: forward everything else to a configured origin (BACKEND_URL). Unset by default.
     if (typeof _env.BACKEND_URL === "string" && _env.BACKEND_URL.trim()) return proxyToBackend(request, _env.BACKEND_URL.trim());

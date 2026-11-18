@@ -109,6 +109,19 @@ def garp_screen(facts: dict[str, Any], price: Optional[float], today: Optional[d
     return {**base, "peg": round(peg, 2), "verdict": "FAVORABLE" if peg < 1 else "FAIR" if peg <= 2 else "UNFAVORABLE"}
 
 
+def latest_metrics(facts: dict[str, Any]) -> dict[str, Any]:
+    """Latest shares outstanding (cover page, dei), free cash flow, equity and net income from the newest fiscal year."""
+    dei = ((facts.get("facts") or {}).get("dei") or {}).get("EntityCommonStockSharesOutstanding") or {}
+    pts = [e for e in (dei.get("units") or {}).get("shares", []) if e.get("val") and e.get("end")]
+    shares = float(max(pts, key=lambda e: (e["end"], e.get("filed", "")))["val"]) if pts else None
+    cfo, capex = annual_series(facts, "cfo"), annual_series(facts, "capex")
+    ys = sorted(cfo)
+    fcf = (cfo[ys[-1]] - capex.get(ys[-1], 0.0)) if ys else None
+    eq, ni = annual_series(facts, "equity"), annual_series(facts, "net_income")
+    return {"shares": shares, "fcf": fcf, "fcf_year": ys[-1] if ys else None, "equity": list(eq.values())[-1] if eq else None,
+            "net_income": list(ni.values())[-1] if ni else None}
+
+
 def valuation_component(garp: Optional[dict[str, Any]]) -> Optional[float]:
     if not garp or garp.get("verdict") not in ("FAVORABLE", "FAIR", "UNFAVORABLE") or garp.get("stale"):
         return None

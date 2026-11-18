@@ -8,7 +8,7 @@ const get = (path: string, env: any = {}, init: RequestInit = {}) => worker.fetc
 const j = async (r: Response) => ({ status: r.status, body: await r.json() as any });
 
 test("settings are read from env presence only; empty strings count as missing", () => {
-  assert.deepEqual(settingsFromEnv({ OANDA_API_TOKEN: "t", OANDA_ACCOUNT_ID: "" }), { oanda_api_token: "t", oanda_account_id: null, alpaca_api_key: null, alpaca_secret_key: null, binance_api_key: null, binance_secret_key: null });
+  assert.deepEqual(settingsFromEnv({ OANDA_API_TOKEN: "t", OANDA_ACCOUNT_ID: "" }), { oanda_api_token: "t", oanda_account_id: null, alpaca_api_key: null, alpaca_secret_key: null, binance_api_key: null, binance_secret_key: null, bybit_api_key: null, bybit_api_secret: null });
 });
 test("non-markets paths are not handled here", () => { assert.equal(handleMarketsApi(new Request("https://eti.test/api/market/klines")), null); });
 test("overview lists every asset class, clocks and the edge scope", async () => {
@@ -29,7 +29,7 @@ test("classify, profile and sessions endpoints", async () => {
 test("assess: reflects secrets presence (needs_setup vs configured) and sizes by ATR", async () => {
   const q = "/api/markets/assess?symbol=BTCUSDT&price=70000&atr=1500&account_equity=50000";
   const a = (await j(await get(q))).body;
-  assert.equal(a.sizing.stop_source, "atr_x1.5"); assert.ok(a.sizing.quantity > 0); assert.equal(a.execution.routes[0].provider, "binance");
+  assert.equal(a.sizing.stop_source, "atr_x1.5"); assert.ok(a.sizing.quantity > 0); assert.equal(a.execution.routes[0].provider, "bybit");
   const fx = (await j(await get("/api/markets/assess?symbol=EURUSD&price=1.085", {}))).body;
   assert.ok(["needs_setup", "wait_for_session"].includes(fx.verdict));
   if (fx.verdict === "needs_setup") assert.match(fx.reasons[0], /OANDA_API_TOKEN/);

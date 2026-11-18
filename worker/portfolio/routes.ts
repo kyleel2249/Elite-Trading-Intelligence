@@ -14,6 +14,10 @@ import { cancelExchange, cancelInternal, ensureInit, matchInternal, reconcile, s
 import { present, type ClosedTrade, type Environment } from "./ledger.ts";
 import { PortfolioStore, importKvToD1, isD1, openStore, storageConfigured, type KVL } from "./store.ts";
 import { loadMinuteBars } from "../algo/market-inputs.ts";
+import { buildPortfolioManager } from "./manager.ts";
+import { loadExchangePortfolioSnapshot } from "./exchanges.ts";
+import { buildCrossExchangeReconciliation, readAutonomyControls, saveAutonomyControls } from "./reconciliation.ts";
+import { readExchangeActivity, syncExchangeActivity } from "./exchange-sync.ts";
 
 export type PortfolioEnv = EngineEnv & { ETI_PORTFOLIO_DB?: any } & { ETI_EXECUTION_TOKEN?: string; ETI_SESSION_SECRET?: string; ETI_SESSION_SECRET_PREVIOUS?: string; ETI_AUTO_SESSIONS?: string; ETI_KEY_ROTATION_DAYS?: string; ETI_KILL_SWITCH?: string };
 const H = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -79,9 +83,28 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
   const environment = (ENVIRONMENTS as string[]).includes(asked || "") ? asked as Environment : (auth.master || auth.scopes.has("paper") ? "internal_paper" : "exchange_testnet");
   const need = scopeOf(environment);
   if (need && !can(auth, need)) return reply({ error: "environment_scope_mismatch", required_session: need, environment, message: "This view needs an " + LABEL[environment].toUpperCase() + " session. Sessions are isolated per environment." }, 403);
+  if (path === "/api/portfolio/manager" && req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+  if (path === "/api/portfolio/exchanges" && req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+  if (path === "/api/portfolio/exchanges") {
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Exchange account snapshots require the ETI master execution token or an administrator session with MFA." }, 403);
+    return reply(await loadExchangePortfolioSnapshot(env as any, now));
+  }
+  if (path === "/api/portfolio/exchange-activity") {
+    if (environment === "live") return reply({error:"live_disabled",message:"Live exchange activity synchronization is disabled."},423);
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Exchange activity sync requires the ETI master execution token or administrator MFA." }, 403);
+    if (req.method === "GET") { try { return reply(await readExchangeActivity(env as any, "exchange_testnet", now)); } catch(e) { return reply({error:"exchange_activity_unavailable",message:e instanceof Error?e.message:"read_failed"},503); } }
+    if (req.method === "POST") { try { const result=await syncExchangeActivity(env as any, "exchange_testnet", now, deps); await ((env.ETI_EXECUTION_LOG ?? {put:async()=>undefined}) as KVL).put("exec:audit:"+new Date(now).toISOString()+":exchange_activity_sync",JSON.stringify({at:now,environment,actor:auth.master?"master_token":"administrator",summary:result.summary}),{expirationTtl:60*60*24*90}); return reply(result); } catch(e) { return reply({error:"exchange_activity_sync_failed",message:e instanceof Error?e.message:"sync_failed"},503); } }
+    return reply({error:"method_not_allowed"},405);
+  }
+  if (path === "/api/portfolio/manager" && environment === "live") return reply({ environment, disabled: true, mode: "read_only_disabled", executionEnabled: false, message: "Live portfolio management is disabled; no live account data or orders are accessed." }, 423);
   if (environment === "live") return reply(post ? { error: "live_disabled", message: "Live trading is disabled; there is nothing to change." } : await buildState(env, deps, "live", now), post ? 423 : 200);
   if (!storageConfigured(env)) return reply({ error: "storage_not_configured", message: "Bind the ETI_PORTFOLIO_DB D1 database (preferred) or the ETI_EXECUTION_LOG KV namespace to store the portfolio." }, 503);
 
+  if (path === "/api/portfolio/manager" && req.method === "GET") {
+    const st = openStore(env, environment)!;
+    const { ledger } = await st.ledgerFast(now);
+    return reply(buildPortfolioManager(ledger, now));
+  }
   if (path === "/api/portfolio/state" && req.method === "GET") return reply(await buildState(env, deps, environment, now, (url.searchParams.get("symbol") || "").toUpperCase() || undefined));
   if (path === "/api/portfolio/history" && req.method === "GET") {
     const st = openStore(env, environment)!, { ledger: L } = await st.ledgerFast(now), rows = filterClosed(L.closed.slice().sort((a, b) => b.exitAt - a.exitAt), url.searchParams);
@@ -89,10 +112,40 @@ export async function handlePortfolio(req: Request, env: PortfolioEnv, deps: Eng
     if (url.searchParams.get("format") === "csv") return new Response(closedCsv(rows, label), { headers: { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": "attachment; filename=eti-closed-trades-" + environment + ".csv" } });
     return reply({ environment, label, total: L.closed.length, count: rows.length, trades: rows.slice(0, 500) });
   }
-  if (!post) return reply({ error: "method_not_allowed" }, 405);
+  if (!post) {
+    if (path === "/api/portfolio/reconciliation" && req.method === "GET") {
+      if (!isOperator(auth)) return reply({error:"operator_required"},403);
+      try { return reply(await buildCrossExchangeReconciliation(env as any, "exchange_testnet", now, deps)); }
+      catch(e) { return reply({error:"reconciliation_unavailable",message:e instanceof Error?e.message:"reconciliation_failed"},503); }
+    }
+    if (path === "/api/portfolio/autonomy" && req.method === "GET") {
+      if (!isOperator(auth)) return reply({error:"operator_required"},403);
+      return reply(await readAutonomyControls(env.ETI_EXECUTION_LOG as KVL | undefined,now));
+    }
+    return reply({ error: "method_not_allowed" }, 405);
+  }
   if (!auth.master) { const rl = await rateLimit(env as any, "pf:" + (auth.refs[need!] || "anon"), 120, 600, now); if (!rl.ok) return reply({ error: "rate_limited" }, 429); }
   const authRef = auth.master ? "master_token" : "session:" + (auth.refs[need!] || "?");
   const audit = async (what: string, detail: unknown) => { try { await ((env.ETI_EXECUTION_LOG ?? { put: async () => undefined }) as KVL).put("exec:audit:" + new Date(now).toISOString() + ":" + what, JSON.stringify({ at: new Date(now).toISOString(), what, environment, auth: authRef, detail }), { expirationTtl: 60 * 60 * 24 * 90 }); } catch { /* audit is best effort here; the ledger event is the record */ } };
+  if (path === "/api/portfolio/reconciliation") {
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Cross-exchange reconciliation requires the master execution token or administrator MFA." }, 403);
+    if (!["GET", "POST"].includes(req.method)) return reply({ error: "method_not_allowed" }, 405);
+    try {
+      const rec = await buildCrossExchangeReconciliation(env as any, environment as "internal_paper" | "exchange_testnet", now, deps);
+      await audit("cross_exchange_reconciliation", { ok: rec.ok, status: rec.status, problems: rec.problems.length });
+      return reply(rec);
+    } catch (e) { return reply({ error: "reconciliation_unavailable", message: e instanceof Error ? e.message : "reconciliation_failed" }, 503); }
+  }
+  if (path === "/api/portfolio/autonomy") {
+    if (!isOperator(auth)) return reply({ error: "operator_required", message: "Autonomous execution controls require the master execution token or administrator MFA." }, 403);
+    if (req.method === "GET") return reply(await readAutonomyControls(env.ETI_EXECUTION_LOG as KVL | undefined, now));
+    if (req.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
+    try {
+      const controls = await saveAutonomyControls(env.ETI_EXECUTION_LOG as KVL | undefined, body, authRef, now);
+      await audit("autonomy_controls", { enabled: controls.enabled, expiresAt: controls.expiresAt, executionDispatchEnabled: false });
+      return reply(controls);
+    } catch (e) { return reply({ error: e instanceof Error ? e.message : "invalid_autonomy_controls" }, 400); }
+  }
   if (path === "/api/portfolio/cancel") {
     const orderId = typeof body.orderId === "string" ? body.orderId : ""; if (!/^[A-Za-z0-9_.:-]{4,80}$/.test(orderId)) return reply({ error: "invalid_order_id" }, 400);
     const r = environment === "internal_paper" ? await cancelInternal(env, orderId, now, authRef) : await cancelExchange(env, deps, orderId, now);
@@ -138,5 +191,13 @@ export async function runPortfolioCycle(env: PortfolioEnv, deps: EngineDeps = {}
       if (r.idle) await st.kvPut("idle", { head: head2 }); // nothing active: sleep until a new event arrives
     } catch (e) { out[environment] = "error: " + (e instanceof Error ? e.message : "?"); }
   }
+  try {
+    const st=openStore(env,"exchange_testnet");
+    if(st){
+      const activity=await st.kvGet<{syncedAt:number}|null>("exchange_activity",null);
+      if(!activity||now-activity.syncedAt>=5*60_000) out.exchangeActivity=await syncExchangeActivity(env,"exchange_testnet",now,deps);
+      else out.exchangeActivity="recent_sync";
+    }
+  } catch(e) { out.exchangeActivity="error: "+(e instanceof Error?e.message:"sync_failed"); }
   return out;
 }

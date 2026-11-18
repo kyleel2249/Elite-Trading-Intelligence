@@ -48,6 +48,12 @@ Early Alpha (0-100) is asset-class weighted; unmeasured components are excluded,
 * **Derivatives** (`derivatives.py`): keyless Binance USD-M funding rate and open-interest history. Crowded-long positioning lowers conviction through a soft check and a bearish engine entry; it never approves and never vetoes alone. Thresholds are ETI parameters.
 * **New listings:** the first sweep seeds a baseline, later sweeps flag symbols not seen before (`GET /api/alpha/new-listings`); a new listing is stored with a NEW_LISTING reason and is not scored until it has 60 daily bars.
 
+## Catalysts, insiders and style screens (equities)
+* **SEC catalysts** (`catalysts.py`): confirmed 8-K item codes from EDGAR. Bankruptcy (1.03), delisting notice (3.01), non-reliance on financials (4.02) and obligation acceleration (2.04) within 90 days are a **hard veto**; impairment, cyber-incident and auditor-change items are soft negatives; other items (agreements, acquisitions, results, officer changes) are attention evidence with direction unknown. 8-K text is not read.
+* **Insider purchases:** Form 4 open-market purchases by officers/directors feed the `institutional` score component and an `insider_activity` engine. Sales are reported but never scored. No purchases means "not measured", never "bad". Filings are parsed with defusedxml; a malicious or malformed filing is skipped and counted.
+* **13D/13G:** presence of large-holder filings in the last year is recorded; stake size and intent are not parsed, and a 13G is a passive-holder filing.
+* **Style screens** (`styles.py`, soft evidence, never counted as independent agreement, not backtested): Templeton-style contrarian value, Burry-style deep value (FCF yield and price/book from SEC statements; can surface value traps), Soros-style late-stage boom (price/positioning leg only), activist presence. Kovner, Lien and distressed/event-credit styles remain unimplemented.
+
 ## Strategy lab
 Executable (price/volume): Donchian/Turtle-style, EMA trend, Minervini trend template + VCP, Darvas, Wyckoff spring, Livermore pivot, O'Neil breakout (technical leg), Williams volatility expansion, Raschke ADX pullback, 200-period MA, z-score baseline. Live evaluators (not backtestable): Buffett/Munger quality and Lynch GARP from SEC XBRL; Druckenmiller liquidity regime, Dalio growth x inflation proxy and a credit-cycle leg from FRED. Soros, Kovner, Lien, Templeton, Burry and activist styles remain unimplemented. Modules are inspired by public principles, not private systems.
 

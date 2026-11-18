@@ -1,145 +1,170 @@
-// Run: node --test worker/   (Node >= 22.18, or add --experimental-strip-types)
-// These tests mock upstream HTTP. They prove the proxy logic (failover,
-// validation, error handling) - NOT that the real exchanges are reachable.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleMarket, validateKlines, validateDepth, providerOrder } from "./market.ts";
-
-type Route = (url: URL) => { status: number; body: unknown } | "throw";
-const realFetch = globalThis.fetch;
-function mock(route: Route) {
-  globalThis.fetch = (async (input: any) => {
-    const r = route(new URL(String(input)));
-    if (r === "throw") throw new TypeError("network down");
-    return new Response(typeof r.body === "string" ? r.body : JSON.stringify(r.body), { status: r.status });
-  }) as typeof fetch;
-}
-test.afterEach(() => { globalThis.fetch = realFetch; });
+import { handleMarket, providerOrder, listBitgetSymbols, listBitgetMarginSymbols, _resetSymbolCache } from "./market.ts";
 
 const now = Date.now();
-const binanceK = (n: number) => Array.from({ length: n }, (_, i) => [now - (n - i) * 60000, "100", "101", "99", "100.5", "12.5", 0, "0", 1, "0", "0", "0"]);
-const bybitK = (n: number) => ({ retCode: 0, result: { list: Array.from({ length: n }, (_, i) => [String(now - i * 60000), "100", "101", "99", "100.5", "12.5", "1"]) } });
-const okxK = (n: number) => ({ code: "0", data: Array.from({ length: n }, (_, i) => [String(now - i * 60000), "100", "101", "99", "100.5", "12.5", "1", "1", "1"]) });
 const req = (path: string) => new Request("https://eti.test" + path);
+const bybitKline = { retCode: 0, result: { list: [[String(now), "100", "103", "99", "102", "12"]] } };
+const bybitTicker = { retCode: 0, result: { list: [{ lastPrice: "102", price24hPcnt: "0.02", highPrice24h: "103", lowPrice24h: "99", volume24h: "1000", turnover24h: "102000" }] } };
+const bitgetKline = { code: "00000", data: [[String(now), "100", "103", "99", "102", "12"]] };
+const bitgetTicker = { code: "00000", data: [{ symbol: "BTCUSDT", lastPr: "102", open24h: "100", high24h: "103", low24h: "99", baseVolume: "1000", quoteVolume: "102000", markPrice: "101.9", indexPrice: "102.1", fundingRate: "0.0001", openInterest: "12345", bid1Price: "101.99", ask1Price: "102.01", ts: String(now) }] };
+const realFetch = globalThis.fetch;
+test.afterEach(() => { globalThis.fetch = realFetch; _resetSymbolCache(); });
 
-test("binance healthy -> serves binance, no failover", async () => {
-  mock((u) => u.host === "data-api.binance.vision" ? { status: 200, body: binanceK(5) } : { status: 500, body: "x" });
-  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), { MARKET_PROVIDER_ORDER: "binance,bybit,okx" });
+test("Bybit remains the default venue and returns validated ascending OHLCV", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => { urls.push(String(input)); return new Response(JSON.stringify(bybitKline)); }) as any;
+  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), {});
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get("x-eti-provider"), "binance");
-  assert.equal(res.headers.get("x-eti-failover"), "false");
+  assert.equal(res.headers.get("x-eti-provider"), "bybit");
+  assert.equal(new URL(urls[0]).hostname, "api.bybit.com");
+  assert.match(urls[0], /category=spot/);
   const rows = await res.json() as number[][];
-  assert.equal(rows.length, 5);
+  assert.equal(rows[0][4], 102);
   assert.equal(rows[0].length, 6);
-  assert.ok(rows[0][0] < rows[4][0], "ascending by time");
 });
 
-test("binance 403 on every host -> fails over to bybit with correct mapping", async () => {
-  mock((u) => u.host.includes("binance") ? { status: 403, body: "Forbidden" } : u.host === "api.bybit.com" ? { status: 200, body: bybitK(4) } : { status: 500, body: "" });
-  const res = await handleMarket(req("/api/market/klines?symbol=ETHUSDT&interval=1h&limit=4"), { MARKET_PROVIDER_ORDER: "binance,bybit,okx" });
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("x-eti-provider"), "bybit");
-  assert.equal(res.headers.get("x-eti-failover"), "true");
-  assert.match(res.headers.get("x-eti-attempts")!, /binance:http_403_blocked/);
-  const rows = await res.json() as number[][];
-  assert.ok(rows[0][0] < rows[3][0], "bybit newest-first normalized to ascending");
+test("Bybit derivatives keep linear and inverse categories separate", async () => {
+  const categories: string[] = [];
+  globalThis.fetch = (async (input: any) => { categories.push(new URL(String(input)).searchParams.get("category") || ""); return new Response(JSON.stringify(bybitKline)); }) as any;
+  assert.equal((await handleMarket(req("/api/market/klines?symbol=BTCUSDT&market=futures"), {})).status, 200);
+  assert.equal((await handleMarket(req("/api/market/klines?symbol=BTCUSD&market=futures&category=inverse"), {})).status, 200);
+  assert.deepEqual(categories, ["linear", "inverse"]);
 });
 
-test("bybit+binance down -> okx; interval mapped (4h->4H)", async () => {
-  let okxUrl = "";
-  mock((u) => { if (u.host === "www.okx.com") { okxUrl = u.toString(); return { status: 200, body: okxK(3) }; } return { status: 403, body: "no" }; });
-  const res = await handleMarket(req("/api/market/klines?symbol=SOLUSDT&interval=4h&limit=3"), {});
-  assert.equal(res.headers.get("x-eti-provider"), "okx");
-  assert.match(okxUrl, /instId=SOL-USDT/);
-  assert.match(okxUrl, /bar=4H/);
+test("Bybit margin pairs are filtered from spot instruments and charted through the spot category", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input); urls.push(url);
+    if (url.includes("/instruments-info")) return new Response(JSON.stringify({ retCode: 0, result: { list: [
+      { symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "Trading", marginTrading: "both" },
+      { symbol: "ETHUSDT", baseCoin: "ETH", quoteCoin: "USDT", status: "Trading", marginTrading: "none" }
+    ] } }));
+    return new Response(JSON.stringify(bybitKline));
+  }) as any;
+  const symbols = await handleMarket(req("/api/market/symbols?venue=bybit&market=margin"), {});
+  assert.equal(symbols.status, 200);
+  const body = await symbols.json() as any;
+  assert.equal(body.symbols.length, 1);
+  assert.equal(body.symbols[0][0], "BTCUSDT");
+  assert.equal(body.symbols[0][3], "margin");
+  assert.equal(body.categories[0], "spot-margin");
+  const candles = await handleMarket(req("/api/market/klines?venue=bybit&market=margin&symbol=BTCUSDT&interval=1m"), {});
+  assert.equal(candles.status, 200);
+  assert.match(urls[1], /category=spot/);
 });
 
-test("8h is unsupported on bybit/okx: skipped, never substituted", async () => {
-  mock(() => ({ status: 403, body: "Forbidden" }));
-  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=8h"), {});
+test("Bitget spot candles, ticker and margin market data use the global public API", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    urls.push(String(input));
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/candles")) return new Response(JSON.stringify(bitgetKline));
+    if (path.endsWith("/fills")) return new Response(JSON.stringify({ code: "00000", data: [{ ts: String(now), price: "100", size: "1", side: "buy" }] }));
+    return new Response(JSON.stringify(bitgetTicker));
+  }) as any;
+  const candles = await handleMarket(req("/api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1m"), {});
+  assert.equal(candles.status, 200);
+  assert.equal(candles.headers.get("x-eti-provider"), "bitget");
+  assert.equal(new URL(urls[0]).hostname, "api.bitget.com");
+  assert.match(urls[0], /category=SPOT/);
+  assert.match(urls[0], /interval=1m/);
+  const margin = await handleMarket(req("/api/market/klines?venue=bitget&market=margin&symbol=BTCUSDT&interval=1m"), {});
+  assert.equal(margin.status, 200);
+  assert.match(urls[1], /category=SPOT/);
+  const marginTrades = await handleMarket(req("/api/market/trades?venue=bitget&market=margin&symbol=BTCUSDT"), {});
+  assert.equal(marginTrades.status, 200);
+  assert.match(urls[2], /category=MARGIN/);
+  const ticker = await handleMarket(req("/api/market/ticker?venue=bitget&symbol=BTCUSDT"), {});
+  assert.equal(ticker.status, 200);
+  assert.match(urls[3], /category=SPOT/);
+  const tickerData = await ticker.json() as any;
+  assert.equal(tickerData.lastPrice, 102);
+  assert.equal(tickerData.markPrice, 101.9);
+  assert.equal(tickerData.indexPrice, 102.1);
+  assert.equal(tickerData.fundingRate, 0.0001);
+  assert.equal(tickerData.openInterest, 12345);
+  assert.equal(tickerData.bidPrice, 101.99);
+  assert.equal(tickerData.askPrice, 102.01);
+});
+
+test("Bitget weekly candles are built from documented daily V3 candles", async () => {
+  const urls: string[] = [];
+  const monday = Date.UTC(2026, 0, 5);
+  globalThis.fetch = (async (input: any) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify({ code: "00000", data: [
+      [String(monday), "100", "105", "98", "102", "10", "1000"],
+      [String(monday + 86400000), "102", "110", "101", "108", "5", "500"]
+    ] }));
+  }) as any;
+  const response = await handleMarket(req("/api/market/klines?venue=bitget&symbol=BTCUSDT&interval=1w&limit=10"), {});
+  assert.equal(response.status, 200);
+  assert.match(urls[0], /interval=1D/);
+  assert.match(urls[0], /limit=70/);
+  const rows = await response.json() as number[][];
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], [monday, 100, 110, 98, 108, 15]);
+});
+
+test("Bitget USDT, USDC and Coin-M futures remain explicit and never cross-substitute", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => { urls.push(String(input)); return new Response(JSON.stringify(bitgetKline)); }) as any;
+  for (const category of ["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"]) {
+    const res = await handleMarket(req("/api/market/klines?venue=bitget&market=futures&category=" + category + "&symbol=BTCUSDT&interval=1m"), {});
+    assert.equal(res.status, 200);
+  }
+  assert.deepEqual(urls.map(u => new URL(u).searchParams.get("category")), ["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"]);
+  assert.deepEqual(providerOrder({}, "bitget_mix"), ["bitget_mix"]);
+  assert.deepEqual(providerOrder({}, "bybit"), ["bybit"]);
+});
+
+test("Bitget symbol discovery covers spot, all three futures products and margin-eligible pairs", async () => {
+  const categories: string[] = [];
+  const fetcher: any = async (input: string) => {
+    const u = new URL(input), category = u.searchParams.get("category") || "";
+    categories.push(category);
+    const data = [{ symbol: category === "COIN-FUTURES" ? "BTCUSD" : "BTCUSDT", baseCoin: "BTC", quoteCoin: category === "COIN-FUTURES" ? "USD" : "USDT", status: "online", type: "perpetual", maxCrossedLeverage: "3", maxIsolatedLeverage: "10" }];
+    return new Response(JSON.stringify({ code: "00000", data }));
+  };
+  const spot = await listBitgetSymbols("spot", fetcher);
+  assert.equal(spot.rows[0].s, "BTCUSDT");
+  const futures = await listBitgetSymbols("futures", fetcher);
+  assert.equal(futures.rows.length, 3);
+  assert.deepEqual(futures.rows.map(x => x.pt).sort(), ["COIN-FUTURES", "USDC-FUTURES", "USDT-FUTURES"]);
+  const margin = await listBitgetMarginSymbols(fetcher);
+  assert.equal(margin.rows[0].s, "BTCUSDT");
+  assert.deepEqual(categories, ["SPOT", "USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES", "MARGIN"]);
+});
+
+test("Bitget symbol API returns venue and product metadata for chart pair selectors", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const category = new URL(String(input)).searchParams.get("category");
+    return new Response(JSON.stringify({ code: "00000", data: [{ symbol: category === "COIN-FUTURES" ? "BTCUSD" : "BTCUSDT", baseCoin: "BTC", quoteCoin: category === "COIN-FUTURES" ? "USD" : "USDT", status: "online", type: "perpetual" }] }));
+  }) as any;
+  const response = await handleMarket(req("/api/market/symbols?venue=bitget&market=all"), {});
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.provider, "bitget");
+  assert.ok(body.categories.includes("SPOT"));
+  assert.ok(body.categories.includes("COIN-FUTURES"));
+  assert.ok(body.symbols.some((x: any[]) => x[5] === "bitget" && x[6] === "COIN-FUTURES"));
+});
+
+test("Bybit and Bitget are isolated venues; malformed upstream responses fail closed", async () => {
+  assert.equal((await handleMarket(req("/api/market/klines?venue=unknown"), {})).status, 400);
+  globalThis.fetch = (async () => new Response(JSON.stringify({ code: "00000", data: [] }))) as any;
+  const res = await handleMarket(req("/api/market/klines?venue=bitget&symbol=BTCUSDT"), {});
   assert.equal(res.status, 502);
-  const body = await res.json() as any;
-  assert.ok(body.attempts.some((a: any) => a.errorClass === "unsupported_by_provider"));
+  assert.equal((await res.json() as any).error, "market_data_unavailable");
 });
 
-test("all providers 403 -> 502 with real classification, never a fake 200", async () => {
-  mock(() => ({ status: 403, body: "Forbidden" }));
-  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m"), {});
-  assert.equal(res.status, 502);
-  const body = await res.json() as any;
-  assert.equal(body.error, "market_data_unavailable");
-  assert.equal(body.detail, "upstream_http_403");
-  assert.equal(body.classification, "http_403_blocked");
-  assert.ok(body.attempts.length >= 7);
-});
-
-test("network failure and malformed/empty payloads trigger failover", async () => {
-  mock((u) => u.host.includes("binance") ? "throw" : u.host === "api.bybit.com" ? { status: 200, body: { retCode: 0, result: { list: [] } } } : { status: 200, body: okxK(2) });
-  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=2"), {});
-  assert.equal(res.headers.get("x-eti-provider"), "okx");
-  assert.match(res.headers.get("x-eti-attempts")!, /bybit:invalid_payload/);
-});
-
-test("recovery: primary healthy again after failure", async () => {
-  mock(() => ({ status: 403, body: "x" }));
-  assert.equal((await handleMarket(req("/api/market/klines?symbol=BTCUSDT"), {})).status, 502);
-  mock((u) => u.host === "data-api.binance.vision" ? { status: 200, body: binanceK(3) } : { status: 500, body: "" });
-  const ok = await handleMarket(req("/api/market/klines?symbol=BTCUSDT"), {});
-  assert.equal(ok.status, 200);
-  assert.equal(ok.headers.get("x-eti-provider"), "binance");
-});
-
-test("depth: crossed book rejected, valid book sorted; trades normalized", async () => {
-  assert.throws(() => validateDepth({ bids: [[101, 1]], asks: [[100, 1]] }), /crossed/);
-  const d = validateDepth({ bids: [[99, 1], [100, 2]], asks: [[102, 1], [101, 1]] });
-  assert.deepEqual(d.bids[0], [100, 2]);
-  assert.deepEqual(d.asks[0], [101, 1]);
-  mock((u) => u.pathname === "/v5/market/recent-trade"
-    ? { status: 200, body: { retCode: 0, result: { list: [{ price: "100", size: "0.5", side: "Sell", time: String(now) }] } } }
-    : { status: 403, body: "" });
-  const res = await handleMarket(req("/api/market/trades?symbol=BTCUSDT&provider=bybit&limit=1"), {});
-  assert.equal(res.headers.get("x-eti-provider"), "bybit");
-  const t = await res.json() as any[];
-  assert.equal(t[0].isBuyerMaker, true, "taker sell => buyer is maker");
-});
-
-test("kline validation rejects bad OHLC", () => {
-  assert.throws(() => validateKlines([[1, 100, 99, 101, 100, 1]], 10), /low_above_high/);
-  assert.throws(() => validateKlines([[1, 200, 101, 99, 100, 1]], 10), /outside_range/);
-  assert.throws(() => validateKlines([[1, 100, 101, 99, NaN, 1]], 10), /non_finite/);
-  assert.throws(() => validateKlines([], 10), /empty/);
-});
-
-test("parameter validation and provider order", async () => {
-  assert.equal((await handleMarket(req("/api/market/klines?symbol=btc%20usdt"), {})).status, 400);
-  assert.equal((await handleMarket(req("/api/market/klines?interval=7m"), {})).status, 400);
-  assert.equal((await handleMarket(req("/api/market/klines?limit=5000"), {})).status, 400);
-  assert.equal((await handleMarket(new Request("https://eti.test/api/market/klines", { method: "POST" }), {})).status, 405);
-  assert.deepEqual(providerOrder({ MARKET_PROVIDER_ORDER: "okx,binance" }), ["okx", "binance"]);
-  assert.deepEqual(providerOrder({}, "okx"), ["okx", "bybit", "binance"]);
-  assert.deepEqual(providerOrder({}), ["bybit", "binance", "okx"]);
-});
-
-test("diagnostics report per-host status/latency without secrets", async () => {
-  mock((u) => u.host.includes("binance") ? { status: 403, body: "Forbidden" } : u.host === "api.bybit.com" ? { status: 200, body: bybitK(2) } : { status: 500, body: "" });
-  const res = await handleMarket(req("/api/market/diag?symbol=BTCUSDT&interval=1m"), { MARKET_PROVIDER_ORDER: "binance,bybit,okx" }); // binance first so the failover path under test is exercised
-  assert.equal(res.status, 200);
-  const d = await res.json() as any;
-  const binance = d.providers.find((p: any) => p.provider === "binance");
-  assert.equal(binance.connectionStatus, "blocked");
-  assert.equal(binance.hosts[0].upstreamStatus, 403);
-  assert.ok(typeof binance.hosts[0].latencyMs === "number");
-  assert.equal(d.failover.selected, "bybit");
-  assert.equal(d.failover.active, true);
-  assert.doesNotMatch(JSON.stringify(d), /api[_-]?key|secret|authorization|bearer/i);
-});
-
-import { getMarketData } from "./market.ts";
-test("binance klines keep a plausible taker-buy volume internally; the public API stays 6 columns", async () => {
-  const rows = binanceK(5).map((r, i) => { const x = [...r]; x[9] = i === 3 ? "999" : "5.0"; return x; }); // row 3: taker volume above total volume = implausible
-  mock((u) => u.host === "data-api.binance.vision" ? { status: 200, body: rows } : { status: 500, body: "x" });
-  const r = await getMarketData("klines", { symbol: "BTCUSDT", interval: "1m", limit: 5 }, ["binance"]) as any;
-  assert.equal(r.data[0].length, 7); assert.equal(r.data[0][6], 5); assert.equal(r.data[3].length, 6, "implausible taker volume is dropped, not trusted");
-  const res = await handleMarket(req("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5"), {}); const pub = await res.json() as number[][];
-  assert.ok(pub.every(x => x.length === 6));
+test("free Cloudflare-only market routing does not require Fly.io or a fixed egress IP", async () => {
+  const response = await handleMarket(req("/api/market/region"), {});
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.transport, "bybit-worker-rest+bitget-browser-direct");
+  assert.equal(body.fixedEgressIp, false);
+  assert.equal(body.accountResidencyIsNotChanged, true);
+  assert.equal(body.placementHint, "cloudflare:global");
 });

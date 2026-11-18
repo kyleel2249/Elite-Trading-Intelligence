@@ -5,7 +5,7 @@ Roles (low to high): analyst < trader < admin.
   trader   analyst + paper/testnet order execution and the position monitor
   admin    everything, including live-environment attempts (which are additionally gated by operator flags)
 The existing API_KEY remains the admin key. Extra keys come from ALPHA_ROLE_KEYS="key:role,key:role" (keys >= 16 chars).
-Same fail-closed behaviour as app.security.auth: with no keys configured, production/staging return 503, local dev is open.
+Same fail-closed behaviour as app.security.auth: with no keys configured only local environments (development, test, local) are open; every other environment returns 503.
 Keys are compared in constant time and are never logged; audit entries carry a short fingerprint only."""
 from __future__ import annotations
 
@@ -21,6 +21,9 @@ import app.security.auth as auth
 
 logger = logging.getLogger("eti.alpha")
 ROLES = {"analyst": 1, "trader": 2, "admin": 3}
+# Open (no key configured) only in these local environments; every other name fails closed. Deliberately not imported from
+# app.security.auth so this module cannot be broken by changes there.
+LOCAL_ENVS = frozenset({"development", "test", "local"})
 MIN_KEY_LEN = 16
 
 
@@ -80,7 +83,7 @@ def require_alpha_role(minimum: str) -> Callable[..., Access]:
         if problems:
             logger.warning("ALPHA_ROLE_KEYS entries ignored: %s", "; ".join(sorted(set(problems))))
         if not master and not role_keys:
-            if (settings.app_env or "").strip().lower() in auth.PROTECTED_ENVS:
+            if (settings.app_env or "").strip().lower() not in LOCAL_ENVS:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "no API keys configured; protected routes are disabled in this environment")
             return Access("admin", "dev-open")  # local development only
         who = resolve(x_api_key, settings)

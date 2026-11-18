@@ -1,5 +1,7 @@
 // Orchestrates the full ETI algorithmic signal: 8-timeframe analysis -> consensus -> levels -> independent validation.
 import type { Kline } from "../market.ts";
+import { analyzeDerivativesContext, type DerivativesSnapshot, type DerivativesAnalysis } from "./derivatives.ts";
+import { calculateTradePlan, type TradePlan } from "./trade-plan.ts";
 import { adaptiveBands, atrSeries, countertrendAllowed, emaFilter, positionSize, volatility, volumeMomentum } from "./indicators.ts";
 import { classifyRegime } from "./regime.ts";
 import { analyzeLiquidity, type DepthSnapshot, type LiquidityAnalysis } from "./liquidity.ts";
@@ -8,8 +10,8 @@ import { EXECUTION_TF, HOLDING_PERIOD, TF_SECONDS, TIMEFRAMES, analyzeTimeframe,
 import { DEFAULT_THRESHOLDS, validateSignal, type DataIntegrity, type RiskContext, type SignalClass, type Thresholds, type ValidationResult, type Weights } from "./validation.ts";
 
 export interface SignalInput {
-  symbol: string; strategy: Strategy; candles: Partial<Record<Timeframe, Kline[]>>; depth?: DepthSnapshot | null; prevLiquidity?: LiquidityAnalysis | null;
-  now?: number; provider?: string; providersAgree?: boolean; risk?: RiskContext; expectancyR?: number | null; expectancySamples?: number; equity?: number; riskFraction?: number;
+  symbol: string; strategy: Strategy; candles: Partial<Record<Timeframe, Kline[]>>; depth?: DepthSnapshot | null; prevLiquidity?: LiquidityAnalysis | null; derivatives?: DerivativesSnapshot | null;
+  now?: number; provider?: string; providersAgree?: boolean; risk?: RiskContext; expectancyR?: number | null; expectancySamples?: number; equity?: number; riskFraction?: number; maxNotionalFraction?: number; leverage?: number; feeBps?: number; slippageBps?: number; contractType?: "linear" | "inverse"; contractValue?: number;
   weights?: Weights; thresholds?: Thresholds; timeframeWeights?: Record<Timeframe, number>; maxStopPct?: number; minConsensusScore?: number;
 }
 export interface AlgoSignal {
@@ -17,7 +19,7 @@ export interface AlgoSignal {
   entry: number | null; entryZone: [number, number] | null; stopLoss: number | null; takeProfits: TradeLevels["targets"] | null; riskReward: number | null;
   confidence: number; confidenceType: "heuristic_score_not_probability"; expectedHolding: string; supportingIndicators: string[];
   consensus: Consensus; timeframes: Partial<Record<Timeframe, TimeframeAnalysis | null>>; regime: ReturnType<typeof classifyRegime> | null; liquidity: LiquidityAnalysis | null;
-  validation: ValidationResult | null; levels: TradeLevels | null; positionSize: number | null; generatedAt: string; expiresAt: string | null; invalidation: string[]; notes: string[];
+  validation: ValidationResult | null; levels: TradeLevels | null; positionSize: number | null; derivatives: DerivativesAnalysis | null; tradePlan: TradePlan | null; generatedAt: string; expiresAt: string | null; invalidation: string[]; notes: string[];
   tradeable: boolean; liveExecutionAllowed: boolean; ownIntellectualProperty: string;
 }
 const IP = "Independently engineered from publicly described technical-analysis concepts. No third-party source code or proprietary algorithm is used or reproduced.";
@@ -27,9 +29,11 @@ export function buildSignal(inp: SignalInput): AlgoSignal {
   const analyses: Partial<Record<Timeframe, TimeframeAnalysis | null>> = {};
   for (const tf of TIMEFRAMES) { const rows = inp.candles[tf]; analyses[tf] = rows ? analyzeTimeframe(tf, rows) : null; }
   const consensus = buildConsensus(analyses, strategy, inp.timeframeWeights);
-  const base = { symbol: inp.symbol, strategy, timeframes: analyses, consensus, generatedAt: new Date(now).toISOString(), expectedHolding: HOLDING_PERIOD[strategy], confidenceType: "heuristic_score_not_probability" as const, ownIntellectualProperty: IP };
+  const derivativeDirection = consensus.direction === "bull" ? 1 : consensus.direction === "bear" ? -1 : 0;
+  const derivatives = inp.derivatives ? analyzeDerivativesContext(inp.derivatives, derivativeDirection, now) : null;
+  const base = { symbol: inp.symbol, strategy, timeframes: analyses, consensus, derivatives, generatedAt: new Date(now).toISOString(), expectedHolding: HOLDING_PERIOD[strategy], confidenceType: "heuristic_score_not_probability" as const, ownIntellectualProperty: IP };
   const hold = (notes: string[], extra: Partial<AlgoSignal> = {}): AlgoSignal => ({ ...base, action: "HOLD", classification: "HOLD", direction: 0, price: null, entry: null, entryZone: null, stopLoss: null, takeProfits: null, riskReward: null, confidence: 0,
-    supportingIndicators: [], regime: null, liquidity: null, validation: null, levels: null, positionSize: null, expiresAt: null, invalidation: [], notes, tradeable: false, liveExecutionAllowed: false, ...extra });
+    supportingIndicators: [], regime: null, liquidity: null, validation: null, levels: null, positionSize: null, derivatives, tradePlan: null, expiresAt: null, invalidation: [], notes, tradeable: false, liveExecutionAllowed: false, ...extra });
 
   const rows = inp.candles[execTf];
   const execA = analyses[execTf];
@@ -48,15 +52,16 @@ export function buildSignal(inp: SignalInput): AlgoSignal {
   const levels = computeLevels(price, dir, a, vol.classification, st, { stopMult: regime.profile.stopMult, maxStopPct: inp.maxStopPct ?? 5 });
   const data: DataIntegrity = { fresh, providersAgree: inp.providersAgree ?? true, candlesComplete: rows.length >= 100, ageSec: Math.round(lastAge), provider: inp.provider ?? "unknown" };
   const validation = validateSignal({ direction: dir, emaFilter: ef, bands, volume: vm, structure: st, consensus, regime, liquidity, rewardRiskTP1: levels.targets[0].rewardRisk, rewardRiskTP3: levels.riskRewardToTP3,
-    stopExceedsMax: levels.exceedsMaxStop, data, risk: inp.risk ?? { withinLimits: true, reasons: [] }, expectancyR: inp.expectancyR ?? null, expectancySamples: inp.expectancySamples, weights: inp.weights, thresholds: th });
+    stopExceedsMax: levels.exceedsMaxStop, data, risk: inp.risk ?? { withinLimits: true, reasons: [] }, expectancyR: inp.expectancyR ?? null, expectancySamples: inp.expectancySamples, weights: inp.weights, thresholds: th, derivativesAdjustment: derivatives?.scoreAdjustment ?? 0 });
   const cls = validation.classification;
   const actionable = cls === "EARLY" || cls === "CONFIRMED" || cls === "HIGH_CONVICTION";
-  const size = inp.equity && inp.riskFraction ? positionSize(inp.equity, inp.riskFraction * regime.profile.exposureScale, price, levels.stop, vol.classification) : null;
+  const tradePlan = actionable && inp.equity && inp.riskFraction ? calculateTradePlan({ direction: dir, entry: levels.entry, stopLoss: levels.stop, takeProfits: levels.targets.map(t => ({ label: t.label, price: t.price, closeFraction: t.closeFraction })), equity: inp.equity, riskFraction: inp.riskFraction * regime.profile.exposureScale, maxNotionalFraction: inp.maxNotionalFraction, leverage: inp.leverage, feeBps: inp.feeBps, slippageBps: inp.slippageBps, contractType: inp.contractType, contractValue: inp.contractValue }) : null;
+  const size = tradePlan ? (tradePlan.valid ? tradePlan.quantity : null) : inp.equity && inp.riskFraction ? positionSize(inp.equity, inp.riskFraction * regime.profile.exposureScale, price, levels.stop, vol.classification) : null;
   const expires = now + TF_SECONDS[execTf] * 8 * 1000;
-  const supporting = [`EMA alignment ${ef.alignment}`, `Adaptive bands ${bands.trend}`, `Volume-weighted momentum ${vm.score}`, `Consensus ${consensus.bullish}B/${consensus.bearish}S/${consensus.neutral}N`, `Regime ${regime.regime}`, ...(liquidity ? [`Liquidity ${liquidity.status}`] : [])];
+  const supporting = [`EMA alignment ${ef.alignment}`, `Adaptive bands ${bands.trend}`, `Volume-weighted momentum ${vm.score}`, `Consensus ${consensus.bullish}B/${consensus.bearish}S/${consensus.neutral}N`, `Regime ${regime.regime}`, ...(liquidity ? [`Liquidity ${liquidity.status}`] : []), ...(derivatives?.notes ?? [])];
   return { ...base, action: actionable ? (dir > 0 ? "BUY" : "SELL") : "HOLD", classification: cls, direction: actionable ? dir : 0, price, entry: actionable ? levels.entry : null, entryZone: actionable ? levels.entryZone : null,
     stopLoss: actionable ? levels.stop : null, takeProfits: actionable ? levels.targets : null, riskReward: actionable ? levels.riskRewardToTP3 : null, confidence: Math.round(validation.score), supportingIndicators: supporting, regime, liquidity, validation, levels: actionable ? levels : null,
-    positionSize: actionable ? size : null, expiresAt: actionable ? new Date(expires).toISOString() : null,
+    positionSize: actionable ? size : null, tradePlan: actionable ? tradePlan : null, expiresAt: actionable ? new Date(expires).toISOString() : null,
     invalidation: actionable ? [`Close beyond stop ${levels.stop.toFixed(4)}`, "Adaptive band flips against the position with volume confirmation", "Data becomes stale or providers disagree", "Regime becomes abnormal", `Signal expires ${new Date(expires).toISOString()}`, "Stops are never widened to avoid a loss"] : [],
-    notes: [...validation.warnings, ...(validation.disagreement ? [validation.disagreement.explanation] : []), ...validation.hardFailures], tradeable: actionable && validation.hardFailures.length === 0, liveExecutionAllowed: validation.liveExecutionAllowed };
+    notes: [...validation.warnings, ...(derivatives?.notes ?? []), ...(tradePlan?.notes ?? []), ...(tradePlan?.blockers ?? []), ...(validation.disagreement ? [validation.disagreement.explanation] : []), ...validation.hardFailures], tradeable: actionable && validation.hardFailures.length === 0 && (!tradePlan || tradePlan.valid), liveExecutionAllowed: validation.liveExecutionAllowed };
 }

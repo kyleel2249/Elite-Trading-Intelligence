@@ -14,7 +14,7 @@ class Bad extends Error {}
 export function settingsFromEnv(env: Record<string, unknown> | undefined): MarketsSettings {
   const v = (k: string) => (typeof env?.[k] === "string" && (env![k] as string).length ? (env![k] as string) : null);
   return { oanda_api_token: v("OANDA_API_TOKEN"), oanda_account_id: v("OANDA_ACCOUNT_ID"), alpaca_api_key: v("ALPACA_API_KEY"),
-           alpaca_secret_key: v("ALPACA_SECRET_KEY"), binance_api_key: v("BINANCE_API_KEY"), binance_secret_key: v("BINANCE_SECRET_KEY") };
+           alpaca_secret_key: v("ALPACA_SECRET_KEY"), binance_api_key: null, binance_secret_key: null, bybit_api_key: v("BYBIT_API_KEY"), bybit_api_secret: v("BYBIT_API_SECRET") };
 }
 function str(q: URLSearchParams, k: string, re: RegExp, required = false): string | null {
   const v = q.get(k);

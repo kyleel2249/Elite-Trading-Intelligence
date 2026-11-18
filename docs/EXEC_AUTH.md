@@ -4,7 +4,14 @@ ETI authorizes every order **server-side**. Internal paper trading needs no manu
 exchange key; exchange testnets authenticate from server secrets; live trading is disabled and cannot be
 authorized by any credential.
 
-## How it works
+> **Two implementations exist in this repository.** The Cloudflare **Worker** (`worker/auth/session.ts`,
+> `credentials.ts`, `routes.ts`, KV-backed, secrets `ETI_SESSION_SECRET`, `ETI_EXECUTION_TOKEN`,
+> `ETI_AUTO_SESSIONS`) is the Cloudflare-native implementation. The Python/FastAPI backend (this document)
+> has its own, independent one for deployments that run the backend directly (Fly, Render, Docker, local).
+> They share principles but not cookies, storage or endpoints (Worker: `eti_paper` / `eti_testnet`, KV;
+> backend: `eti_session_ip` / `eti_session_xt`, SQL). Configure secrets for whichever one serves your traffic.
+
+## How the backend implementation works
 
 | Environment | Who may order | Credential | Where it lives |
 |---|---|---|---|
@@ -32,9 +39,9 @@ authorized by any credential.
 * **CSRF:** cookie-authenticated writes must be same-origin (`Sec-Fetch-Site`/`Origin`), on top of `SameSite=Strict`.
 * **Operator key** (`X-API-Key`) works as before for scripts and operator-only actions (account reset,
   MTM/reconcile runs, execution engine, backtest signal execution).
-* **Local development:** with no `API_KEY` and `APP_ENV` in `development|test|local` the endpoints stay open,
-  exactly as `require_api_key` already behaved. Any other `APP_ENV` fails closed, but still issues automatic
-  paper sessions.
+* **Fail-closed rule** is the same as `require_api_key`: with no `API_KEY` and `APP_ENV` in
+  `development|test|local` the endpoints stay open; any other `APP_ENV` (the default is `production`) requires a
+  session or the operator key. Automatic paper sessions work in both cases.
 
 ## Exchange testnet credentials
 
@@ -76,6 +83,6 @@ Paper: order-changing routes (`/orders`, `/orders/oco`, `/orders/{id}/cancel`, `
 * Automatic sessions are **not user accounts**: anyone who can load the dashboard can place paper orders on the
   shared paper account (simulated money). Set `EXEC_AUTO_SESSIONS=false` to require the operator key.
 * The paper API has no per-session account isolation (single `default` account).
-* Withdrawals and transfers do not exist in the code; a static test and a runtime path guard keep it that way.
-* Not every operator action in the dashboard is paper-scoped; MTM/reconcile runs and account reset still need
-  the operator key and will show a 401 message in the page.
+* No code path calls an exchange withdrawal or transfer endpoint; a static test and a runtime path guard keep it that way.
+* Not every operator action in the dashboard is paper-scoped; MTM/reconcile runs, the private paper-trading reads
+  and account reset need the operator key and show a 401 message in the page.

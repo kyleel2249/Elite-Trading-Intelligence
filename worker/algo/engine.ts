@@ -2,6 +2,7 @@
 import type { Kline } from "../market.ts";
 import type { Strategy, Timeframe } from "./timeframes.ts";
 import type { DepthSnapshot } from "./liquidity.ts";
+import type { DerivativesSnapshot } from "./derivatives.ts";
 
 export type EngineName = "swift" | "gainz";
 export type EngineStatus = "SIGNAL" | "NEUTRAL" | "INVALIDATED";
@@ -36,6 +37,6 @@ export interface EngineInput {
   now?: number;
   maxStopPct?: number;
 }
-export interface FusionContext extends EngineInput { depth?: DepthSnapshot | null }
+export interface FusionContext extends EngineInput { depth?: DepthSnapshot | null; derivatives?: DerivativesSnapshot | null }
 
 export const ENGINE_IP = "Independently engineered from publicly described technical-analysis concepts. No third-party source code or proprietary algorithm is used or reproduced.";

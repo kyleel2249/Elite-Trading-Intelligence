@@ -60,4 +60,7 @@ def init_db() -> None:
     from app.paper import sql_store as _paper_tables  # noqa: F401  (internal paper exchange tables: paper_accounts, paper_audit_log)
     from app.security import auth_models as _auth_models  # noqa: F401  (execution sessions + auth audit)
     from app.futures import models as _futures_models  # noqa: F401  (futures paper simulation tables)
+    from app.accounting import models as _accounting_models  # noqa: F401  (double-entry ledger, append-only)
+    from app.executive import models as _executive_models  # noqa: F401  (executive centre: budgets, payment register, reserve policy, audit)
+    from app.governance import models as _governance_models  # noqa: F401  (RBAC principals, audit chain, approvals, allowlist, limits, fraud)
     Base.metadata.create_all(bind=engine)
