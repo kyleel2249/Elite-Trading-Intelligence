@@ -269,7 +269,7 @@ function select(id){
  panel.innerHTML='<strong style="color:'+esc2(bull?st.bull:st.bear)+'">FVG '+(bull?'▲ bullish':'▼ bearish')+' · '+esc2(z.timeframe)+(z.timeframe===curTf()?'':' (higher timeframe)')+'</strong> <button type="button" id="fvgClose" aria-label="Close zone details">Close</button><dl>'
   +dt('Upper',price(z.upper))+dt('Lower',price(z.lower))+dt('Midpoint (CE)',price(z.mid))+dt('Gap size',price(z.sizeAbs)+' · '+z.sizePct+'% · '+z.sizeAtr+' ATR')
   +dt('Formation price',price(z.formationPrice))+dt('Formed',new Date(z.formationTime).toLocaleString())+dt('Status',STATUS[z.status]+(z.active?' (active)':''))
-  +dt('Mitigation',z.mitigationPct+'%'+(z.active&&z.mitigationPct?' — unfilled '+price(z.remainingLower)+'–'+price(z.remainingUpper):''))
+  +dt('Mitigation',z.mitigationPct+'%'+(z.active&&z.mitigationPct?' — unfilled portion '+price(z.remainingLower)+'–'+price(z.remainingUpper):''))
   +dt('Touches',z.touches+(z.ceTouched?' (midpoint reached)':''))+dt('Age',z.ageBars+' bars')+dt('Strength',z.strength+'/100')+dt('Freshness',Math.round(z.freshness*100)+'%')
   +dt('Displacement',z.displacementAtr+' ATR body')+dt('Volume vs average',z.volumeRatio+'×')
   +dt('Confluence',z.confluence.length?z.confluence.map(function(c){return c.timeframe+' ('+c.overlapPct+'% overlap)';}).join(', '):'none')
