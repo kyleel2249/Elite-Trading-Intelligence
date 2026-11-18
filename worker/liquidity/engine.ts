@@ -45,7 +45,7 @@ export function analyzeLiquidity(input:LiquidityInput){
   history.forEach(snapshot=>{const seen=new Set<string>();[...cleanLevels(snapshot.bids,"bid").map(x=>[x[0],x[1],"bid"] as const),...cleanLevels(snapshot.asks,"ask").map(x=>[x[0],x[1],"ask"] as const)].forEach(([p,_q,side])=>seen.add(side+":"+Math.round(p/Math.max(mid*0.0001,Number.EPSILON))));seen.forEach(key=>historyCounts.set(key,(historyCounts.get(key)||0)+1));});
   const tolerance=Math.max(mid*0.000025,Number.EPSILON),bucket=Math.max(mid*0.0001,Number.EPSILON);
   const prevMap=new Map<string,number>();
-  [...prevBids.map(x=>[x[0],x[1],"bid"] as const),...prevAsks.map(x=>[x[0],x[1],"ask"] as const)].forEach(([p,q,s])=>prevMap.set(s+":"+Math.round(p/bucket),q));
+  [...prevBids.map(x=>[x[0],x[1],"bid"] as const),...prevAsks.map(x=>[x[0],x[1],"ask"] as const)].forEach(([p,q,s])=>prevMap.set(s+":"+Math.round(p/bucket),p*q));
   const trades=(input.trades||[]).filter(t=>finite(t.price)&&finite(t.qty)&&t.price>0&&t.qty>0).slice(0,300);
   let buyNotional=0,sellNotional=0;
   trades.forEach(t=>{const side=t.side||(t.isBuyerMaker?"sell":"buy");if(side==="buy")buyNotional+=t.price*t.qty;else if(side==="sell")sellNotional+=t.price*t.qty;});
