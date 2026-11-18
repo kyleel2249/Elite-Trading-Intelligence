@@ -76,7 +76,7 @@ test("terminal chart is full-width and institutional intelligence plus recent tr
   assert.ok(monitor > ticket, "market structure monitor follows the chart and planning ticket");
   assert.ok(institutional > monitor, "institutional intelligence follows the market structure monitor");
   assert.ok(trades > institutional, "recent trades follow institutional intelligence at the bottom");
-  assert.match(TRADING_TERMINAL_CSS, /\.tt-work\\{display:grid;grid-template-columns:minmax\\(0,1fr\\)/);
-  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\\{height:clamp\\(560px,72vh,900px\\);min-height:560px;width:100%\\}/);
-  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart-card\\{grid-column:1\\/-1;width:100%;min-width:0\\}/);
+  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-work{display:grid;grid-template-columns:minmax(0,1fr)"), "chart workspace has one full-width column");
+  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart{height:clamp(560px,72vh,900px);min-height:560px;width:100%}"), "chart has expanded desktop height and full width");
+  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart-card{grid-column:1/-1;width:100%;min-width:0}"), "chart card spans the entire workspace");
 });
