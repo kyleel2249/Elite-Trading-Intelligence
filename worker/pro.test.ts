@@ -31,6 +31,10 @@ test("the Pro page is wired to the existing exchange, SMC, agent and account ser
   assert.match(html, /id="ven"/);
   assert.match(html, /Full ETI Dashboard/);
   assert.match(html, /id="mkt"/);
+  assert.match(html, /pro-advanced-chart/);
+  assert.match(html, /class="card c12 pro-advanced-chart"/);
+  assert.match(html, /\.chart\{height:680px/);
+  assert.match(html, /height:460px;min-height:400px/);
   // Bitget signal, SMC and chart share the same candle set: the signal is rejected if candles belong to another selection.
   assert.match(html, /Bitget candles for this selection are not loaded/);
   // A Bybit response served by another provider is flagged, never presented as Bybit.
