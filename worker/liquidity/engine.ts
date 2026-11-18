@@ -4,7 +4,7 @@ export interface TradePrint { time?: number; price: number; qty: number; side?: 
 export type Candle = [number, number, number, number, number, number];
 export interface LiquidityInput {
   symbol: string; venue: string; market: string; category?: string;
-  depth: DepthBook; previousDepth?: DepthBook | null; trades?: TradePrint[]; candles?: Candle[];
+  depth: DepthBook; previousDepth?: DepthBook | null; history?: DepthBook[]; trades?: TradePrint[]; candles?: Candle[];
 }
 export interface LiquidityLevel { price: number; qty: number; notional: number; side: "bid" | "ask"; persistence: number; classification: string }
 const finite=(v:unknown):v is number=>typeof v==="number"&&Number.isFinite(v);
@@ -41,6 +41,8 @@ export function analyzeLiquidity(input:LiquidityInput){
   if(bestBid>=bestAsk)throw new Error("crossed_or_locked_order_book");
   const mid=(bestBid+bestAsk)/2,spreadBps=(bestAsk-bestBid)/mid*10000;
   const previous=input.previousDepth||null,prevBids=cleanLevels(previous?.bids,"bid"),prevAsks=cleanLevels(previous?.asks,"ask");
+  const history=(input.history||[]).slice(-90),historyCounts=new Map<string,number>();
+  history.forEach(snapshot=>{const seen=new Set<string>();[...cleanLevels(snapshot.bids,"bid").map(x=>[x[0],x[1],"bid"] as const),...cleanLevels(snapshot.asks,"ask").map(x=>[x[0],x[1],"ask"] as const)].forEach(([p,_q,side])=>seen.add(side+":"+Math.round(p/Math.max(mid*0.0001,Number.EPSILON))));seen.forEach(key=>historyCounts.set(key,(historyCounts.get(key)||0)+1));});
   const tolerance=Math.max(mid*0.000025,Number.EPSILON),bucket=Math.max(mid*0.0001,Number.EPSILON);
   const prevMap=new Map<string,number>();
   [...prevBids.map(x=>[x[0],x[1],"bid"] as const),...prevAsks.map(x=>[x[0],x[1],"ask"] as const)].forEach(([p,q,s])=>prevMap.set(s+":"+Math.round(p/bucket),q));
@@ -51,11 +53,12 @@ export function analyzeLiquidity(input:LiquidityInput){
   const all=[...bids.map(([p,q])=>({price:p,qty:q,notional:p*q,side:"bid" as const})),...asks.map(([p,q])=>({price:p,qty:q,notional:p*q,side:"ask" as const}))];
   const typical=median(all.map(x=>x.notional)),threshold=Math.max(typical*2.25,mid*0.00002);
   const levels:LiquidityLevel[]=all.map(x=>{
-    const key=x.side+":"+Math.round(x.price/bucket),old=prevMap.get(key),persistence=old===undefined?0:1;
+    const key=x.side+":"+Math.round(x.price/bucket),old=prevMap.get(key),persistence=historyCounts.get(key)||0;
     const nearby=trades.filter(t=>Math.abs(t.price-x.price)<=Math.max(bucket*2,t.price*0.00005));
     const traded=nearby.reduce((s,t)=>s+t.price*t.qty,0);
     let classification="normal";
     if(x.notional>=threshold)classification="large";
+    if(persistence>=Math.max(3,Math.ceil(history.length*.5)))classification="persistent";
     if(old!==undefined&&x.notional>=old*1.2)classification="replenished";
     if(old!==undefined&&x.notional<old*0.35)classification="pulled";
     if(old!==undefined&&traded>=old*0.35&&x.notional<old*0.8)classification="absorbed";
@@ -63,7 +66,7 @@ export function analyzeLiquidity(input:LiquidityInput){
   }).sort((a,b)=>b.notional-a.notional).slice(0,80);
   const largeBids=levels.filter(x=>x.side==="bid"&&x.notional>=threshold).sort((a,b)=>b.notional-a.notional);
   const largeAsks=levels.filter(x=>x.side==="ask"&&x.notional>=threshold).sort((a,b)=>b.notional-a.notional);
-  const behaviour={persistent:levels.filter(x=>x.persistence).length,pulled:levels.filter(x=>x.classification==="pulled").length,absorbed:levels.filter(x=>x.classification==="absorbed").length,replenished:levels.filter(x=>x.classification==="replenished").length};
+  const behaviour={persistent:levels.filter(x=>x.classification==="persistent").length,pulled:levels.filter(x=>x.classification==="pulled").length,absorbed:levels.filter(x=>x.classification==="absorbed").length,replenished:levels.filter(x=>x.classification==="replenished").length};
   const candles=candleSignals(input.candles||[]);
   const imbalance=(bids.slice(0,20).reduce((s,x)=>s+x[0]*x[1],0)-asks.slice(0,20).reduce((s,x)=>s+x[0]*x[1],0))/(bids.slice(0,20).reduce((s,x)=>s+x[0]*x[1],0)+asks.slice(0,20).reduce((s,x)=>s+x[0]*x[1],0)||1);
   const buyAligned=deltaPct>8&&imbalance>0.08,bearAligned=deltaPct< -8&&imbalance< -0.08;
@@ -82,7 +85,7 @@ export function analyzeLiquidity(input:LiquidityInput){
     source:"exchange order-book snapshot + recent executed trades",mid,spreadBps,depth:{bidCount:bids.length,askCount:asks.length,imbalance,levels},
     walls:{bids:largeBids.slice(0,8),asks:largeAsks.slice(0,8)},behaviour,orderFlow:{buyNotional,sellNotional,delta,deltaPct,tradeCount:trades.length},
     priceAction:candles,confluence:{score,direction,setup:direction==="WAIT"?"NO_CONFIRMED_SETUP":"LIQUIDITY_CONFLUENCE_WATCH",buyAligned,bearAligned,sweepAligned,fvgAligned},
-    dataQuality:{freshnessMs:freshness,previousDepthAvailable:!!previous,tradePrints:trades.length,candleCount:(input.candles||[]).length,warnings},
+    dataQuality:{freshnessMs:freshness,previousDepthAvailable:!!previous,historicalSnapshots:history.length,tradePrints:trades.length,candleCount:(input.candles||[]).length,warnings},
     disclaimer:"Research signal only. Order-book depth is exchange-specific and can be cancelled or spoofed. This analysis does not estimate actual liquidation locations and cannot guarantee execution or profit."
   };
 }
