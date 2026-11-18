@@ -29,19 +29,19 @@ test("portfolio fragments are safe to embed in the dashboard template (no backti
 
 test("dashboard uses a static, contained 1920x1080 chart layout with no 3D animation", async () => {
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
-  assert.match(html, /main\\{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px/);
+  assert.ok(html.includes("main{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px"));
   assert.match(html, /id="eti-motion"/);
   assert.doesNotMatch(html, /etiBg|eti-motion-js|eti-in|eti-seen|eti-hot/);
-  assert.doesNotMatch(html, /perspective\\(|rotateX\\(|rotateY\\(|translateZ\\(|transform-style/);
-  assert.match(html, /\.panel\\{[^}]*transform:none!important/);
-  assert.match(html, /button:hover:not\\(:disabled\\),button:active:not\\(:disabled\\)\\{transform:none!important/);
+  for (const token of ["perspective(", "rotateX(", "rotateY(", "translateZ(", "transform-style"]) assert.equal(html.includes(token), false);
+  assert.ok(html.includes(".panel{") && html.includes("transform:none!important"));
+  assert.ok(html.includes("button:hover:not(:disabled),button:active:not(:disabled){transform:none!important"));
   assert.match(html, /class="panel chart-workspace"/, "main chart remains a dashboard panel");
   assert.match(html, /\.chart-workspace\{width:100%;max-width:100%;margin:0;padding:16px/, "chart stays inside dashboard content width with panel spacing");
   assert.match(html, /\.chart-workspace \.chart\.big\{width:100%;height:clamp\(520px,58vh,620px\);min-height:520px;max-height:620px/, "chart height is bounded for a 1080px desktop viewport");
   assert.match(html, /\.chart-workspace:fullscreen/, "chart workspace supports native fullscreen mode");
-  assert.match(html, /@media\\(min-width:1440px\\) and \\(min-height:800px\\)/, "dashboard includes desktop sizing rules for the 1920x1080 target");
-  assert.match(html, /\.chart-workspace \.chart\.big\\{height:min\\(58vh,620px\\);min-height:520px;max-height:620px\\}/, "desktop chart is sized within the screen");
-  assert.match(html, /\.chart-workspace \.paneBox\\{height:54px\\}/, "indicator panes use compact desktop sizing");
+  assert.ok(html.includes("@media(min-width:1440px) and (min-height:800px)"));
+  assert.ok(html.includes(".chart-workspace .chart.big{height:min(58vh,620px);min-height:520px;max-height:620px}"));
+  assert.ok(html.includes(".chart-workspace .paneBox{height:54px}"));
   assert.match(html, /id="chartAdvanced"/);
   assert.match(html, /id="paneRsi"/);
   assert.match(html, /id="paneMacd"/);
