@@ -12,20 +12,16 @@ test("Bitget browser adapter parses and exposes public REST helpers", () => {
   assert.ok(BITGET_CLIENT_JS.includes("https://capi.bitget.com"));
 });
 
-test("Bitget browser adapter falls back from a blocked V3 request to the V2 public endpoint", async () => {
-  const calls: string[] = [];
-  const now = Date.now();
+test("Bitget REST candle reads use ETI same-origin proxy rather than browser CORS requests", async () => {
+  const calls: string[] = [], now = Date.now();
   const sandbox: any = {
-    window: {},
-    AbortSignal,
-    Response,
+    window: { location: { origin: "https://eti.test" } }, AbortSignal, Response,
     fetch: async (url: string) => {
       calls.push(url);
-      if (url.includes("/api/v3/")) return new Response(JSON.stringify({ cloudflare: "block" }), { status: 403 });
       return new Response(JSON.stringify({ code: "00000", data: [
-        [String(now), "3", "3.5", "2.5", "3.2", "4"],
         [String(now - 120000), "1", "1.5", "0.5", "1.2", "2"],
-        [String(now - 60000), "2", "2.5", "1.5", "2.2", "3"]
+        [String(now - 60000), "2", "2.5", "1.5", "2.2", "3"],
+        [String(now), "3", "3.5", "2.5", "3.2", "4"]
       ] }), { status: 200 });
     }
   };
@@ -34,10 +30,9 @@ test("Bitget browser adapter falls back from a blocked V3 request to the V2 publ
   assert.equal(rows.length, 3);
   assert.equal(rows[0][0], now - 120000);
   assert.equal(rows[2][0], now);
-  assert.ok(calls.some(url => url.includes("/api/v3/market/candles")));
-  assert.ok(calls.some(url => url.includes("/api/v2/spot/market/candles")));
+  assert.ok(calls.every(url => new URL(url).origin === "https://eti.test"));
+  assert.ok(calls.some(url => new URL(url).pathname === "/api/market/klines"));
 });
-
 test("Bitget browser adapter normalizes spot, futures and margin symbol catalogues", async () => {
   const sandbox: any = {
     window: {}, AbortSignal, Response,
@@ -66,10 +61,10 @@ test("Bitget browser adapter normalizes candles, order book, trades and derivati
     fetch: async (url: string) => {
       const u = new URL(url), path = u.pathname;
       let data: any = [];
-      if (path.endsWith("/candles")) data = [[String(now), "100", "101", "99", "100.5", "20"], [String(now - 60000), "99", "100", "98", "99.5", "18"]];
-      if (path.endsWith("/orderbook")) data = { bids: [["100", "10"]], asks: [["101", "12"]] };
-      if (path.endsWith("/fills")) data = [{ ts: String(now), price: "100.5", size: "2", side: "buy" }];
-      if (path.endsWith("/tickers")) data = [{ symbol: "BTCUSDT", lastPr: "100.5", open: "98", high24h: "102", low24h: "96", baseVolume: "500", quoteVolume: "50000", priceChangePercent: "0.02", fundingRate: "0.0008", openInterest: "12500", ts: String(now) }];
+      if (path.endsWith("/klines")) data = [[String(now), "100", "101", "99", "100.5", "20"], [String(now - 60000), "99", "100", "98", "99.5", "18"]];
+      if (path.endsWith("/depth")) data = { bids: [["100", "10"]], asks: [["101", "12"]] };
+      if (path.endsWith("/trades")) data = [{ ts: String(now), price: "100.5", size: "2", side: "buy" }];
+      if (path.endsWith("/ticker")) data = [{ symbol: "BTCUSDT", lastPr: "100.5", open: "98", high24h: "102", low24h: "96", baseVolume: "500", quoteVolume: "50000", priceChangePercent: "2", fundingRate: "0.0008", openInterest: "12500", ts: String(now) }];
       return new Response(JSON.stringify({ code: "00000", data }), { status: 200 });
     }
   };
