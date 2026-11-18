@@ -175,7 +175,7 @@ function subscribePrivate(opts,handlers){
  opts=opts||{};handlers=handlers||{};
 
  var ws=null,closed=false,retry=0,retryTimer=null,pingTimer=null,watchdog=null,lastMessageAt=0,connected=false,authenticated=false;
- var url=opts.url||((window.location&&window.location.protocol==="https:"?"wss:":"ws:")+"//"+(window.location&&window.location.host||"")+"/api/bitget/ws/private");
+ var url=opts.url||((window.location&&window.location.protocol==="https:"?"wss:":"ws:")+"//"+(window.location&&window.location.host||"")+"/api/bitget/ws/private?environment="+encodeURIComponent(opts.environment==="demo"?"demo":"production")+"&account="+encodeURIComponent(opts.account==="classic"?"classic":"uta"));
  function status(state,detail){if(typeof handlers.onStatus==="function")handlers.onStatus({state:state,detail:detail||"",connected:connected,authenticated:authenticated,lastMessageAt:lastMessageAt,retry:retry});}
  function emit(type,data,raw){if(typeof handlers.onMessage==="function")handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null});}
  function stopTimers(){if(pingTimer)clearInterval(pingTimer);if(watchdog)clearInterval(watchdog);pingTimer=null;watchdog=null;}
@@ -185,12 +185,105 @@ function subscribePrivate(opts,handlers){
   try{ws=new WebSocket(url);}catch(e){scheduleReconnect(e&&e.message||"websocket_unavailable");return;}
   var current=ws;
   current.onopen=function(){if(closed||ws!==current)return;connected=true;lastMessageAt=Date.now();status("connecting");pingTimer=setInterval(function(){if(ws===current&&current.readyState===1)try{current.send("ping")}catch(e){}},30000);watchdog=setInterval(function(){if(ws===current&&connected&&Date.now()-lastMessageAt>65000){try{current.close()}catch(e){}}},10000);};
-  current.onmessage=function(event){if(ws!==current||closed)return;lastMessageAt=Date.now();var raw=event.data;if(raw==="pong"||raw==="ping")return;var msg;try{msg=typeof raw==="string"?JSON.parse(raw):raw}catch(e){emit("raw",raw,null);return;}if(!msg)return;if(msg.event==="status"){authenticated=msg.state==="authenticated";status(msg.state);emit("status",msg,null);return;}if(msg.event==="error"){emit("error",msg,msg);if(msg.code==="unauthorized"||msg.code==="bitget_login_rejected")try{current.close()}catch(e){}return;}var topic=String((msg.arg||{}).topic||"");if(topic==="account"||topic==="order"||topic==="position"||topic==="fill")emit(topic,{action:msg.action||null,ts:streamTime(msg.ts),data:Array.isArray(msg.data)?msg.data:[]},msg);else emit("raw",msg,msg);};
+  current.onmessage=function(event){if(ws!==current||closed)return;lastMessageAt=Date.now();var raw=event.data;if(raw==="pong"||raw==="ping")return;var msg;try{msg=typeof raw==="string"?JSON.parse(raw):raw}catch(e){emit("raw",raw,null);return;}if(!msg)return;if(msg.event==="status"){authenticated=msg.state==="authenticated";status(msg.state);emit("status",msg,null);return;}if(msg.event==="error"){emit("error",msg,msg);if(msg.code==="unauthorized"||msg.code==="bitget_login_rejected")try{current.close()}catch(e){}return;}var arg=msg.arg||{},topic=String(arg.topic||arg.channel||"");if(topic==="orders")topic="order";if(topic==="positions")topic="position";if(topic==="account"||topic==="order"||topic==="position"||topic==="fill")emit(topic,{action:msg.action||null,ts:streamTime(msg.ts),data:Array.isArray(msg.data)?msg.data:[]},msg);else emit("raw",msg,msg);};
   current.onerror=function(){if(ws===current&&!closed)try{current.close()}catch(e){}};
   current.onclose=function(){if(ws!==current||closed)return;connected=false;ws=null;scheduleReconnect("socket_closed");};
  }
  connect();
  return {close:function(){closed=true;connected=false;authenticated=false;if(retryTimer)clearTimeout(retryTimer);stopTimers();if(ws){var current=ws;ws=null;try{current.close()}catch(e){}}status("closed");},getState:function(){return {connected:connected,authenticated:authenticated,lastMessageAt:lastMessageAt,retry:retry};}};
 }
-window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs,subscribe:subscribe,subscribePrivate:subscribePrivate};
+
+function transportEndpoint(environment,account,protocol){
+ if(protocol==="sbe"){if(account!=="uta")throw new Error("SBE is only supported for UTA public market data");if(environment!=="production")throw new Error("SBE demo endpoint is not documented");return "wss://ws.bitget.com/v3/ws/public/sbe";}
+ if(account==="classic"){if(environment==="demo")throw new Error("Classic V2 demo endpoint is not documented");return "wss://ws.bitget.com/v2/ws/public";}
+ return environment==="demo"?"wss://wspap.bitget.com/v3/ws/public":"wss://ws.bitget.com/v3/ws/public";
+}
+function transportArgs(opts){
+ var symbol=String(opts.symbol||"").toUpperCase(),account=opts.account==="classic"?"classic":"uta",market=opts.market==="futures"?"futures":"spot",category=opts.category||"USDT-FUTURES",iv=String(opts.interval||"1m");
+ if(!/^[A-Z0-9]{5,20}$/.test(symbol))throw new Error("Invalid Bitget WebSocket symbol");
+ if(account==="classic"){
+  var inst=market==="futures"?String(category).toUpperCase():"SPOT",v2iv=({"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D","1w":"1W"})[iv]||"1m",candle="candle"+v2iv;
+  return [{instType:inst,channel:"ticker",instId:symbol},{instType:inst,channel:"books5",instId:symbol},{instType:inst,channel:"trade",instId:symbol},{instType:inst,channel:candle,instId:symbol}];
+ }
+ var product=market==="futures"?String(category).toLowerCase():"spot";
+ return [{instType:product,topic:"ticker",symbol:symbol},{instType:product,topic:"books5",symbol:symbol},{instType:product,topic:"publicTrade",symbol:symbol},{instType:product,topic:"kline",symbol:symbol,interval:({"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D","1w":"1W"})[iv]||"1m"}];
+}
+function decodeSbeFrame(raw){
+ var bytes=raw instanceof ArrayBuffer?new Uint8Array(raw):ArrayBuffer.isView(raw)?new Uint8Array(raw.buffer,raw.byteOffset,raw.byteLength):null;
+ if(!bytes||bytes.length<8)throw new Error("sbe_frame_too_short");
+ var v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),bl=v.getUint16(0,true),tid=v.getUint16(2,true),schema=v.getUint16(4,true),ver=v.getUint16(6,true);
+ if(schema!==1)throw new Error("unsupported_sbe_schema");
+ function i64(o){return Number(v.getBigInt64(o,true))}function u64(o){return Number(v.getBigUint64(o,true))}
+ function text(o){var n=v.getUint8(o);if(o+1+n>bytes.length)throw new Error("sbe_string_truncated");return new TextDecoder().decode(bytes.subarray(o+1,o+1+n))}
+ function scale(x,e){return x*Math.pow(10,e)}
+ var out={header:{blockLength:bl,templateId:tid,schemaId:schema,version:ver}};
+ if(tid===1002){
+  if(bl<56||bytes.length<8+bl+1)throw new Error("sbe_bbo_truncated");
+  var o=8,pe=v.getInt8(o+40),se=v.getInt8(o+41);
+  out.type="books1";out.ts=u64(o);out.bids=[[scale(i64(o+8),pe),scale(i64(o+16),se)]];out.asks=[[scale(i64(o+24),pe),scale(i64(o+32),se)]];out.priceExponent=pe;out.sizeExponent=se;out.seq=u64(o+42);out.sts=bl>=64?u64(o+50):null;out.category=bl>=64?v.getUint8(o+58):null;out.symbol=text(8+bl);return out;
+ }
+ if(tid===1001){
+  var o=8;if(bl<24)throw new Error("sbe_depth_root_invalid");
+  out.type="books50";out.ts=u64(o);out.seq=u64(o+8);out.priceExponent=v.getInt8(o+16);out.sizeExponent=v.getInt8(o+17);
+  var p=o+bl;function group(){if(p+4>bytes.length)throw new Error("sbe_group_truncated");var eb=v.getUint16(p,true),n=v.getUint16(p+2,true);p+=4;if(eb<16||p+eb*n>bytes.length)throw new Error("sbe_entries_truncated");var a=[];for(var i=0;i<n;i++){a.push([scale(i64(p),out.priceExponent),scale(i64(p+8),out.sizeExponent)]);p+=eb;}return a;}
+  out.asks=group();out.bids=group();out.symbol=text(p);
+  if(ver>=5&&bl>=40){out.sts=u64(o+18);out.category=v.getUint8(o+26);out.pseq=u64(o+27);out.depthAction=v.getUint8(o+35);}
+  return out;
+ }
+ if(tid===1003){
+  var o=8;if(bl<8)throw new Error("sbe_trade_root_invalid");out.type="publicTrade";out.priceExponent=v.getInt8(o);out.sizeExponent=v.getInt8(o+1);
+  var p=o+bl;if(p+4>bytes.length)throw new Error("sbe_trade_group_truncated");var eb=v.getUint16(p,true),n=v.getUint16(p+2,true);p+=4;if(eb<33||p+eb*n>bytes.length)throw new Error("sbe_trade_entries_truncated");
+  out.trades=[];for(var i=0;i<n;i++){out.trades.push({ts:u64(p),execId:String(u64(p+8)),price:scale(i64(p+16),out.priceExponent),size:scale(i64(p+24),out.sizeExponent),side:v.getUint8(p+32)===0?"buy":"sell",isRPI:eb>33&&v.getUint8(p+33)===1});p+=eb;}
+  if(bl>=16){out.sts=u64(o+2);out.category=v.getUint8(o+10);}out.symbol=text(p);return out;
+ }
+ throw new Error("unsupported_sbe_template_"+tid);
+}
+function mergeSbeDepth(book,d){
+ var key=String(d.symbol||"unknown"),state=book[key],action=d.depthAction;
+ if(action===undefined||action===null||action===0){
+  state={bids:Object.create(null),asks:Object.create(null),seq:d.seq||0};
+  (d.bids||[]).forEach(function(x){if(x[1]>0)state.bids[String(x[0])]=x[1]});
+  (d.asks||[]).forEach(function(x){if(x[1]>0)state.asks[String(x[0])]=x[1]});
+  book[key]=state;
+ }else{
+  if(!state){return {error:"sbe_snapshot_required",symbol:key,seq:d.seq,pseq:d.pseq};}
+  if(d.seq<=state.seq)return {ignored:true};
+  if(d.pseq!==undefined&&d.pseq!==state.seq){delete book[key];return {error:"sbe_sequence_gap",symbol:key,expectedPrevious:state.seq,receivedPrevious:d.pseq,seq:d.seq};}
+  (d.bids||[]).forEach(function(x){var k=String(x[0]);if(x[1]<=0)delete state.bids[k];else state.bids[k]=x[1]});
+  (d.asks||[]).forEach(function(x){var k=String(x[0]);if(x[1]<=0)delete state.asks[k];else state.asks[k]=x[1]});
+  state.seq=d.seq;
+ }
+ function levels(x,desc){return Object.keys(x).map(function(k){return [Number(k),x[k]]}).sort(function(a,b){return desc?b[0]-a[0]:a[0]-b[0]}).slice(0,50)}
+ return {data:{bids:levels(state.bids,true),asks:levels(state.asks,false),timestamp:d.ts/1000,sequence:state.seq,symbol:key,action:action===1?"update":"snapshot"},error:null};
+}
+function subscribeTransport(opts,handlers){
+ opts=opts||{};handlers=handlers||{};
+ var environment=opts.environment==="demo"?"demo":"production",account=opts.account==="classic"?"classic":"uta",protocol=opts.protocol==="sbe"?"sbe":"json",symbol=String(opts.symbol||"").toUpperCase(),args=transportArgs(opts),url=transportEndpoint(environment,account,protocol);
+ if(protocol==="sbe"&&account!=="uta")throw new Error("SBE is UTA-only");
+ if(protocol==="sbe"){var inst=opts.market==="futures"?String(opts.category||"USDT-FUTURES").toLowerCase():"spot";args=[{instType:inst,topic:"books50",symbol:symbol},{instType:inst,topic:"books1",symbol:symbol},{instType:inst,topic:"publicTrade",symbol:symbol}];}
+ var ws=null,closed=false,retry=0,retryTimer=null,ping=null,watchdog=null,last=0,connected=false,sbeBookState=Object.create(null);
+ function status(s,d){if(handlers.onStatus)handlers.onStatus({state:s,detail:d||"",connected:connected,retry:retry,environment:environment,account:account,protocol:protocol});}
+ function emit(type,data,raw){if(handlers.onMessage)handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null,environment:environment,account:account,protocol:protocol});}
+ function stop(){if(ping)clearInterval(ping);if(watchdog)clearInterval(watchdog);ping=watchdog=null;}
+ function reconnect(reason){if(closed)return;connected=false;stop();status("reconnecting",reason);var wait=Math.min(30000,1000*Math.pow(2,Math.min(retry++,5)));retryTimer=setTimeout(connect,wait);}
+ function connect(){if(closed)return;status("connecting");try{ws=new WebSocket(url);ws.binaryType="arraybuffer";}catch(e){reconnect("websocket_unavailable");return;}var cur=ws;
+  cur.onopen=function(){if(closed||ws!==cur)return;connected=true;retry=0;last=Date.now();status("connected");cur.send(JSON.stringify({op:"subscribe",args:args}));ping=setInterval(function(){if(ws===cur&&cur.readyState===1)try{cur.send("ping")}catch(e){}},30000);watchdog=setInterval(function(){if(ws===cur&&connected&&Date.now()-last>65000)try{cur.close()}catch(e){}},10000);};
+  cur.onmessage=function(ev){if(closed||ws!==cur)return;last=Date.now();if(ev.data==="pong"||ev.data==="ping")return;
+   if(protocol==="sbe"&&typeof ev.data!=="string"){try{var d=decodeSbeFrame(ev.data);if(d.type==="books1")emit("depth",{bids:d.bids,asks:d.asks,timestamp:d.ts/1000,sequence:d.seq,symbol:d.symbol,action:"bbo"},d);else if(d.type==="books50"){var merged=mergeSbeDepth(sbeBookState,d);if(merged.error){emit("error",{code:merged.error,symbol:merged.symbol,expectedPrevious:merged.expectedPrevious,receivedPrevious:merged.receivedPrevious,detail:"SBE depth continuity was lost; reconnecting to obtain a fresh snapshot"},d);try{cur.close()}catch(e){}}else if(!merged.ignored)emit("depth",merged.data,d);}else if(d.type==="publicTrade")emit("trades",d.trades.map(function(t){return {T:t.ts/1000,p:String(t.price),q:String(t.size),m:t.side==="sell",execId:t.execId,isRPI:t.isRPI}}),d);}catch(e){emit("error",{code:"sbe_decode_failed",message:e.message},null);}return;}
+   var m;try{m=JSON.parse(ev.data)}catch(e){emit("raw",ev.data,null);return;}if(m.event==="error"){emit("error",m,m);return;}if(m.event==="subscribe"||m.event==="login")return;
+   var a=m.arg||{},topic=String(a.topic||a.channel||""),rows=Array.isArray(m.data)?m.data:[];
+   if(topic==="ticker"&&rows.length)emit("ticker",parseTicker(rows[0]),m);
+   else if(topic==="books5"&&rows.length){var dep=parseDepth(rows[0]);if(dep.bids.length&&dep.asks.length)emit("depth",dep,m);}
+   else if(topic==="publicTrade"||topic==="trade"){var tr=parseTrades(rows);if(tr.length)emit("trades",tr,m);}
+   else if(topic==="kline"||/^candle/.test(topic)){rows.forEach(function(row){var ca=streamCandle(row);if(ca)emit("candle",ca,m);});}
+   else emit("raw",m,m);
+  };
+  cur.onerror=function(){if(ws===cur)try{cur.close()}catch(e){}};
+  cur.onclose=function(){if(ws===cur&&!closed){ws=null;reconnect("socket_closed")}};
+ }
+ connect();
+ return {close:function(){closed=true;connected=false;if(retryTimer)clearTimeout(retryTimer);stop();if(ws){var cur=ws;ws=null;try{cur.close()}catch(e){}}status("closed");},getState:function(){return {connected:connected,environment:environment,account:account,protocol:protocol,symbol:symbol,url:url,retry:retry}}};
+}
+
+window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs,subscribe:subscribe,subscribePrivate:subscribePrivate,subscribeTransport:subscribeTransport,decodeSbeFrame:decodeSbeFrame};
 })();`;
