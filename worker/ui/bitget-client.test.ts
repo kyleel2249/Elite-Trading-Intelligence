@@ -238,7 +238,7 @@ test("UTA public trades parser accepts compact p/v/S/T field names", () => {
   const sockets: any[] = [], messages: any[] = [];
   class FakeWebSocket {
     readyState = 0; onopen: any; onmessage: any; onclose: any; onerror: any; sent: string[] = [];
-    constructor(public url: string) { sockets.push(this); }
+    url: string; constructor(url: string) { this.url = url; sockets.push(this); }
     send(value: string) { this.sent.push(value); }
     close() { this.readyState = 3; if (this.onclose) this.onclose({}); }
   }

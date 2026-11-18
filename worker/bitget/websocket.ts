@@ -38,6 +38,8 @@ export function handleBitgetPrivateWebSocket(req: Request, env: Record<string, a
   server.accept();
   let upstream: WebSocket | null = null;
   let authenticated = false;
+  let authPending = false;
+  let authTimer: ReturnType<typeof setTimeout> | null = null;
   let loggedIn = false;
   let closed = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -51,22 +53,29 @@ export function handleBitgetPrivateWebSocket(req: Request, env: Record<string, a
     if (closed) return;
     closed = true;
     if (heartbeat) clearInterval(heartbeat);
+    if (authTimer) clearTimeout(authTimer);
     heartbeat = null;
+    authTimer = null;
     try { upstream?.close(code, reason); } catch { /* already closed */ }
     try { server.close(code, reason); } catch { /* already closed */ }
   };
 
+  authTimer = setTimeout(() => { sendClient({ event: "error", code: "authentication_timeout" }); close(4401, "authentication timeout"); }, 10000);
   server.addEventListener("message", async (event: MessageEvent) => {
     if (closed) return;
     const value = typeof event.data === "string" ? event.data : "";
     if (!authenticated) {
+      if (authPending) return;
+      authPending = true;
       let auth: any;
       try { auth = JSON.parse(value); } catch { sendClient({ event: "error", code: "invalid_auth_message" }); close(4401, "authentication required"); return; }
-      const token = auth?.op === "auth" && typeof auth.token === "string" ? auth.token : "";
+      const token = auth?.op === "auth" && typeof auth.token === "string" && auth.token.length <= 512 ? auth.token : "";
       const headers = new Headers();
       if (token) headers.set("authorization", "Bearer " + token);
       const ok = await authorized(new Request("https://eti.internal/api/bitget/ws/private", { headers }), env as any);
       if (!ok) { sendClient({ event: "error", code: "unauthorized" }); close(4401, "unauthorized"); return; }
+      if (authTimer) clearTimeout(authTimer);
+      authTimer = null;
       authenticated = true;
       sendClient({ event: "status", state: "connecting" });
       try {
