@@ -9,6 +9,7 @@
  *   POST /api/agents/brief            bearer-authenticated; advisory LLM review of an analysis (see llm-route.ts)
  */
 import { AllProvidersFailed, INTERVALS, getMarketData, providerOrder } from "../market.ts";
+import { buildOrderFlow, normalizeDepth, normalizeTrades } from "../analysis/orderflow.ts";
 import type { MarketEnv, Ticker } from "../market.ts";
 import { handleExecution } from "../execution.ts";
 import type { ExecutionEnv } from "../execution.ts";
@@ -62,15 +63,28 @@ export const loadMarket: MarketLoader = async (env, symbol, interval, opts) => {
   const name = (e: unknown) => (e instanceof AllProvidersFailed ? "all_providers_failed" : e instanceof Error ? e.message : "unknown");
   const kP = getMarketData("klines", { symbol, interval, limit: 300 }, order);
   const dP = getMarketData("depth", { symbol, interval, limit: 100 }, order).catch((e) => { failures.depth = name(e); return null; });
+  const tP = getMarketData("trades", { symbol, interval, limit: 100 }, order).catch((e) => { failures.trades = name(e); return null; });
   const bP = opts.benchmark ? getMarketData("klines", { symbol: opts.benchmark, interval, limit: 300 }, order).catch((e) => { failures.benchmark = name(e); return null; }) : Promise.resolve(null);
-  const k = await kP, d = await dP, b = await bP;
+  const [k, d, t, b] = await Promise.all([kP, dP, tP, bP]);
   let crossCheck: MarketInput["crossCheck"] = null;
   const other = order.find((p) => p !== k.provider);
   if (other) {
     try { const t = await getMarketData("ticker", { symbol, interval, limit: 1 }, [other]); crossCheck = { provider: t.provider, price: (t.data as Ticker).lastPrice }; }
     catch (e) { failures.cross_check = name(e); }
   }
-  return { symbol, interval, candles: k.data as MarketInput["candles"], depth: d ? (d.data as MarketInput["depth"]) : null, provider: k.provider, fetchedAt: Date.now(), crossCheck, benchmark: b && opts.benchmark ? { symbol: opts.benchmark, candles: b.data as MarketInput["candles"] } : null, failures };
+  let orderFlow: MarketInput["orderFlow"] = null;
+  if (t && d && t.provider === k.provider && d.provider === k.provider) {
+    try {
+      const trades = normalizeTrades(t.data), depth = normalizeDepth(d.data);
+      if (trades && depth) {
+        const analysis = buildOrderFlow({ symbol, venue: k.provider.startsWith("bitget") ? "bitget" : "bybit", market: "spot", provider: k.provider, trades, depth, candles: k.data as MarketInput["candles"], now: Date.now() });
+        orderFlow = { provider: analysis.provider, generatedAt: analysis.generatedAt, tape: analysis.tape, depth: { spreadBps: analysis.depth.spreadBps, imbalance: analysis.depth.imbalance, microprice: analysis.depth.microprice, bidNotional: analysis.depth.bidNotional, askNotional: analysis.depth.askNotional }, dataQuality: { tradeAgeMs: analysis.dataQuality.tradeAgeMs, tradeCount: analysis.dataQuality.tradeCount, notes: analysis.dataQuality.notes } };
+      } else failures.orderflow = "trade_or_depth_validation_failed";
+    } catch (e) { failures.orderflow = name(e); }
+  } else if (!t) failures.orderflow = "trade_tape_unavailable";
+  else if (!d) failures.orderflow = "depth_unavailable";
+  else if (t.provider !== k.provider || d.provider !== k.provider) failures.orderflow = "venue_source_mismatch";
+  return { symbol, interval, candles: k.data as MarketInput["candles"], depth: d ? (d.data as MarketInput["depth"]) : null, orderFlow, provider: k.provider, fetchedAt: Date.now(), crossCheck, benchmark: b && opts.benchmark ? { symbol: opts.benchmark, candles: b.data as MarketInput["candles"] } : null, failures };
 };
 
 function parseAccount(v: unknown): AccountState | undefined {
@@ -79,11 +93,11 @@ function parseAccount(v: unknown): AccountState | undefined {
   for (const k of ["equityUsd", "availableUsd", "positionQuantity", "dailyPnlPct", "drawdownPct", "openRiskPct"] as const) { const n = finite(o[k]); if (n !== undefined) out[k] = n; }
   return out;
 }
-const supplied = (b: Record<string, unknown>): SuppliedData => ({ fundamentals: b.fundamentals, macro: b.macro, news: b.news, onchain: b.onchain });
+const supplied = (b: Record<string, unknown>): SuppliedData => ({ fundamentals: b.fundamentals, macro: b.macro, news: b.news, onchain: b.onchain, orderFlow: b.orderFlow });
 /** Caller-supplied data always wins over provider data, key by key. */
 export function mergeSupplied(provider: SuppliedData, caller: SuppliedData): SuppliedData {
   const out: SuppliedData = {};
-  for (const k of ["fundamentals", "macro", "news", "onchain"] as const) { const v = caller[k] !== undefined && caller[k] !== null ? caller[k] : provider[k]; if (v !== undefined) out[k] = v; }
+  for (const k of ["fundamentals", "macro", "news", "onchain", "orderFlow"] as const) { const v = caller[k] !== undefined && caller[k] !== null ? caller[k] : provider[k]; if (v !== undefined) out[k] = v; }
   return out;
 }
 

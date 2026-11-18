@@ -166,11 +166,24 @@ export function macroIntelligence(ctx: Ctx): AgentReport {
 // ---------------------------------------------------------------- 6. CRYPTO
 export function cryptoIntelligence(ctx: Ctx): AgentReport {
   const book = ctx.market.depth ? bookStats(ctx.market.depth) : null, oc = obj(ctx.supplied.onchain);
-  if (!book && !oc) return noData("crypto", "No order book or on-chain data available.", ["order book", "onchain.exchangeNetflow7dPct, activeAddresses30dChangePct, stablecoinSupply30dChangePct, tvl30dChangePct, top10HolderPct, contractAudit, hasMintAuthority, liquidityLockedPct"], ctx.now);
+  const flow = obj(ctx.supplied.orderFlow) ?? (ctx.market.orderFlow as unknown as Record<string, unknown> | undefined) ?? null;
+  if (!book && !oc && !flow) return noData("crypto", "No order book, trade-flow or on-chain data available.", ["order book", "public trade tape", "onchain metrics"], ctx.now);
   const votes: Vote[] = [], evidence: Evidence[] = [], warnings: string[] = [];
   if (book) {
     evidence.push({ label: "spread_bps", value: book.spreadBps }, { label: "bid_depth_usd_1pct", value: book.bidUsd1pct }, { label: "ask_depth_usd_1pct", value: book.askUsd1pct }, { label: "book_imbalance", value: book.imbalance });
     votes.push({ label: "book_imbalance", vote: clamp(book.imbalance * 1.5, -1, 1), weight: 0.5, note: "Order books can be spoofed; low weight." });
+  }
+  if (flow) {
+    const tape = obj(flow.tape), quality = obj(flow.dataQuality);
+    const deltaPct = finite(tape.deltaPct), ageMs = finite(quality.tradeAgeMs), count = finite(tape.trades);
+    if (deltaPct !== undefined && ageMs !== undefined && ageMs >= 0 && ageMs <= 180_000 && count !== undefined && count >= 5) {
+      evidence.push({ label: "aggressor_delta_pct", value: deltaPct, note: "Observed public trade sample; not full-session CVD." },
+        { label: "aggressor_trade_count", value: count }, { label: "trade_tape_age_ms", value: ageMs });
+      votes.push({ label: "aggressor_delta", vote: clamp(deltaPct / 50, -1, 1), weight: 0.5, note: "Short public tape sample; low weight and freshness-gated." });
+    } else warnings.push("Order-flow trade tape is stale, too small or missing required fields; it was excluded from directional voting.");
+    const flowDepth = obj(flow.depth), spread = finite(flowDepth.spreadBps), imbalance = finite(flowDepth.imbalance);
+    if (spread !== undefined) evidence.push({ label: "flow_spread_bps", value: spread });
+    if (imbalance !== undefined) evidence.push({ label: "flow_depth_imbalance", value: imbalance });
   }
   const v = ctx.market.candles.map((k) => k[5]);
   if (v.length >= 41) evidence.push({ label: "volume_ratio_10_vs_prior_30", value: mean(v.slice(-11, -1)) / mean(v.slice(-41, -11)) });
@@ -187,7 +200,7 @@ export function cryptoIntelligence(ctx: Ctx): AgentReport {
   }
   const sc = score(votes), stance = votes.length ? stanceOf(sc, 0.2) : "neutral";
   let conf = clamp(Math.abs(sc) * 0.7, 0, 0.7); if (!oc) conf = Math.min(conf, 0.25);
-  return makeReport("crypto", { stance, confidence: conf, summary: `Crypto ${stance}: ${oc ? "on-chain + liquidity" : "order-book liquidity only (no on-chain data supplied)"}.`, evidence: [...evidence, ...voteEvidence(votes)], warnings, missingInputs: oc ? [] : ["onchain metrics"] }, ctx.now);
+  return makeReport("crypto", { stance, confidence: conf, summary: `Crypto ${stance}: ${oc ? "on-chain + liquidity" : flow ? "public trade flow + order-book liquidity" : "order-book liquidity only (no on-chain data supplied)"}.`, evidence: [...evidence, ...voteEvidence(votes)], warnings, missingInputs: oc ? [] : ["onchain metrics"] }, ctx.now);
 }
 
 // ----------------------------------------------------------------- 7. NEWS

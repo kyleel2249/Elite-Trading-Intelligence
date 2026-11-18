@@ -60,7 +60,7 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   return {
     schema: "eti.analysis/1", id, symbol: m.symbol, interval: m.interval, generatedAt: new Date(now).toISOString(), decision, deliberation: delib,
     reports: AGENT_IDS.map((a) => reports.get(a)!), risk, security, execution, messages: bus.messages,
-    dataQuality: { provider: m.provider, candles: m.candles.length, lastCandleOpen: m.candles.length ? new Date(m.candles[m.candles.length - 1][0]).toISOString() : null, orderBook: m.depth ? "rest_snapshot" : "unavailable", priceCrossCheck: m.crossCheck ? m.crossCheck.provider : "not_performed", failures: m.failures },
+    dataQuality: { provider: m.provider, candles: m.candles.length, lastCandleOpen: m.candles.length ? new Date(m.candles[m.candles.length - 1][0]).toISOString() : null, orderBook: m.depth ? "rest_snapshot" : "unavailable", orderFlow: m.orderFlow ? { status: "available", provider: m.orderFlow.provider, trades: m.orderFlow.tape.trades, tradeAgeMs: m.orderFlow.dataQuality.tradeAgeMs } : "unavailable", priceCrossCheck: m.crossCheck ? m.crossCheck.provider : "not_performed", failures: m.failures },
     disclosures: ["Agents are deterministic statistical/rule-based modules, not language models.", "Fundamental, macro, news and on-chain agents analyse only provider data or data supplied with the request; absent data is reported as insufficient, never invented.", "Outputs are analytical and are not financial advice. No outcome, return or win rate is guaranteed."],
   };
 }

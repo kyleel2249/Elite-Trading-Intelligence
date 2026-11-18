@@ -4,6 +4,7 @@ import { AGENT_IDS, AGENT_ROSTER, makeReport, noData, validateReport } from "./t
 import type { Depth, Integrity, Kline, MarketInput } from "./types.ts";
 import { buildProposal } from "./analysts.ts";
 import { fundamentalAnalyst } from "./fundamental.ts";
+import { cryptoIntelligence } from "./analysts.ts";
 import { evaluateDecision, prepareTicket, riskManager, securityAnalyst } from "./controls.ts";
 import type { DecisionRecord } from "./controls.ts";
 import { deliberate, finalize } from "./commander.ts";
@@ -162,9 +163,22 @@ test("fundamental agent can form a view from provider tokenomics alone, and abst
   assert.equal(r.status, "ok"); assert.equal(r.stance, "bearish");
 });
 
-test("caller-supplied data wins over provider data", () => {
-  const m = mergeSupplied({ macro: { a: 1 }, news: { items: [] } }, { macro: { b: 2 } });
-  assert.deepEqual(m.macro, { b: 2 }); assert.deepEqual(m.news, { items: [] });
+test("caller-supplied data wins over provider data, including order-flow context", () => {
+  const m = mergeSupplied({ macro: { a: 1 }, news: { items: [] }, orderFlow: { tape: { deltaPct: -10 } } }, { macro: { b: 2 }, orderFlow: { tape: { deltaPct: 25 } } });
+  assert.deepEqual(m.macro, { b: 2 }); assert.deepEqual(m.news, { items: [] }); assert.deepEqual(m.orderFlow, { tape: { deltaPct: 25 } });
+});
+test("crypto agent consumes only fresh, sufficiently sampled aggressor delta as low-weight evidence", () => {
+  const cs = candles(300, 0.001, 0.003);
+  const flow = { provider: "bybit", generatedAt: new Date(NOW).toISOString(), tape: { trades: 50, buyVolume: 80, sellVolume: 20, delta: 60, deltaPct: 60, cumulativeDelta: 60 }, depth: { spreadBps: 1.2, imbalance: 0.2, microprice: 100, bidNotional: 50000, askNotional: 40000 }, dataQuality: { tradeAgeMs: 500, tradeCount: 50 } };
+  const ctx = { market: { ...market(cs), orderFlow: flow }, supplied: {}, now: NOW, integrity };
+  const report = cryptoIntelligence(ctx);
+  assert.equal(report.status, "ok");
+  assert.ok(report.evidence.some(x => x.label === "aggressor_delta_pct" && x.value === 60));
+  assert.ok(report.evidence.some(x => x.label === "flow_spread_bps"));
+  assert.ok(report.evidence.some(x => x.label === "flow_depth_imbalance"));
+  assert.ok(report.evidence.some(x => x.label === "aggressor_delta"));
+  const stale = cryptoIntelligence({ ...ctx, market: { ...ctx.market, orderFlow: { ...flow, dataQuality: { tradeAgeMs: 300000, tradeCount: 50 } } } });
+  assert.ok(stale.warnings.some(x => /stale/.test(x)));
 });
 
 test("routes: dashboard, roster, providers feed agents, auth, and structural veto on execute", async () => {
