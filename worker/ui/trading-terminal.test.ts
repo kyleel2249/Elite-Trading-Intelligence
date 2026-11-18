@@ -78,7 +78,8 @@ test("terminal chart is full-width and institutional intelligence plus recent tr
   assert.ok(institutional > monitor, "institutional intelligence follows the market structure monitor");
   assert.ok(trades > institutional, "recent trades follow institutional intelligence at the bottom");
   assert.ok(TRADING_TERMINAL_CSS.includes(".tt-work{display:grid;grid-template-columns:minmax(0,1fr)"), "chart workspace has one full-width column");
-  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart{height:clamp(560px,72vh,900px);min-height:560px;width:100%}"), "chart has expanded desktop height and full width");
+  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart{height:clamp(520px,58vh,620px);min-height:520px;max-height:620px;width:100%}"), "Pro Terminal chart matches the Live Market Chart height and full width");
+  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-shell{max-width:1920px;margin:auto;padding:12px 24px 34px;"), "Pro Terminal uses the same 1920px desktop workspace width");
   assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart-card{grid-column:1/-1;width:100%;min-width:0}"), "chart card spans the entire workspace");
 });
 
