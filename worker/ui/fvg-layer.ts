@@ -126,7 +126,7 @@ function analyze(chartTf,inputs,o){
  }
  var by={};active.forEach(function(z){var b=by[z.timeframe]||(by[z.timeframe]={active:0,bullish:0,bearish:0});b.active++;if(z.direction==='bullish')b.bullish++;else b.bearish++;});
  function pick(zs){return zs.sort(function(a,b){return b.relevance-a.relevance;})[0]||null;}
- var summary={active:active.length,bullishActive:active.filter(function(z){return z.direction==='bullish';}).length,bearishActive:active.filter(function(z){return z.direction==='bearish';}).length,byTimeframe:by,
+ var summary={active:active.length,unfilledActive:active.filter(function(z){return z.status==="fresh";}).length,partiallyFilledActive:active.filter(function(z){return z.status==="partially_mitigated";}).length,bullishActive:active.filter(function(z){return z.direction==='bullish';}).length,bearishActive:active.filter(function(z){return z.direction==='bearish';}).length,byTimeframe:by,
   nearestSupport:pick(active.filter(function(z){return z.direction==='bullish'&&z.lower<=price;})),nearestResistance:pick(active.filter(function(z){return z.direction==='bearish'&&z.upper>=price;})),
   inside:active.filter(function(z){return price>=z.lower&&price<=z.upper;}),confluentZones:active.filter(function(z){return z.confluence.length>0;}).length};
  return {chartTimeframe:chartTf,price:price,atr:atr,zones:shown,totalDetected:all.length,summary:summary,canTriggerTrade:false,all:all};
@@ -144,7 +144,7 @@ function hexRgba(h,a){var m=/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h
 function curTf(){var e=document.getElementById('interval');return e?e.value:'';}
 function marketKey(){var s=document.getElementById('symbol'),m=(typeof mkt==='function'?mkt():'');return (s?s.value:'')+'|'+m;}
 function higher(tf){var i=ORDER.indexOf(tf);if(allTf)return ORDER.filter(function(t){return t!==tf;});return i<0?[]:ORDER.slice(i+1,i+3);}
-var STATUS={fresh:'fresh',partially_mitigated:'partially mitigated',fully_mitigated:'fully mitigated',invalidated:'invalidated',expired:'expired'};
+var STATUS={fresh:'UNFILLED',partially_mitigated:'PARTIALLY FILLED',fully_mitigated:'FULLY FILLED',invalidated:'INVALIDATED',expired:'EXPIRED'};
 
 function loadHtf(){
  if(!st.on||typeof getJson!=='function')return;
@@ -214,7 +214,7 @@ function paint(){
   texts.forEach(function(t,idx){
    var z=t.z,bull=z.direction==='bullish',lx=Math.max(t.x0+4,4);
    if(t.x1-lx<60||t.h<12||idx>=8)return;
-   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+(z.mitigationPct&&z.active?' '+z.mitigationPct+'%':'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
+   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+' · '+z.mitigationPct+'% FILLED'+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
    x.fillStyle=hexRgba(t.col,1);x.textAlign='left';x.fillText(head,lx,t.y0+8);
    if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText('gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · formed @'+price(z.formationPrice),lx,t.y0+20);}
    if(t.h>=34&&t.x1-lx>240){x.textAlign='right';x.fillStyle=hexRgba(t.col,1);x.fillText(price(z.upper),t.x1-5,t.y0+8);x.fillText(price(z.lower),t.x1-5,t.y0+t.h-7);x.textAlign='left';}
