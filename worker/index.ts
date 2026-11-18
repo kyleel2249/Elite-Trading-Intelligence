@@ -315,6 +315,7 @@ function updateOverlayNote(){const e=$('overlayNote');if(sigValid()&&provider&&s
 
 let etiLiquidityFvg=null,etiLiquidityFvgKey='',etiLiquidityFvgAt=0,etiLiquidityFvgSeq=0,etiLiquidityFvgBusyKey='';let etiLiquidityCanvas=null;
 let liveChart=null,liveCandle=null,liveVolume=null,liveEma20=null,liveEma50=null,liveEma200=null,liveBbUpper=null,liveBbLower=null,liveRibbon=null,liveLine=null,liveArea=null,livePriceLines=[],liveAdvancedKey='',liveSelectionKey='';
+window.ETILiveChart={isAdvanced:()=>!!liveCandle,priceToCoordinate:price=>{const p=Number(price);if(!Number.isFinite(p))return null;if(liveCandle)return liveCandle.priceToCoordinate(p);if(!chartScale||!Number.isFinite(chartScale.lo)||!Number.isFinite(chartScale.hi)||chartScale.hi<=chartScale.lo)return null;return chartScale.bot-(p-chartScale.lo)/(chartScale.hi-chartScale.lo)*(chartScale.bot-chartScale.top);}};
 function livePriceFormat(){return {type:'price',precision:pricePrecision,minMove:Math.pow(10,-pricePrecision)};}
 function liveEma(period){let prev=null,k=2/(period+1);return candles.map(v=>{const close=Number(v[4]);prev=prev===null?close:close*k+prev*(1-k);return {time:Math.floor(Number(v[0])/1000),value:prev};});}
 function initAdvancedLiveChart(){

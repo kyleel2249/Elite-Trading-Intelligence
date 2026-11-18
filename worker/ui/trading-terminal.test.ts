@@ -136,3 +136,5 @@ test("Pro Terminal paints qualified Liquidity-FVG zones and estimated sweep reac
 });
 
 test("Pro Terminal defaults to Bitget and translates UI contract labels into Bitget product types",()=>{assert.match(TRADING_TERMINAL_HTML,/<option value="bitget" selected>Bitget<\/option>/);assert.match(TRADING_TERMINAL_JS,/S=\{venue:"bitget"/);assert.match(TRADING_TERMINAL_JS,/function bitgetProductType\(\)/);assert.match(TRADING_TERMINAL_JS,/category:bitgetProductType\(\)/);});
+
+test("Pro Terminal publishes native price coordinates for shared strategic liquidity overlays",()=>{assert.match(TRADING_TERMINAL_JS,/window\.ETIProTerminalChart=\{priceToCoordinate:/);assert.match(TRADING_TERMINAL_JS,/S\.candle\.priceToCoordinate\(p\)/);});
