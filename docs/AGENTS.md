@@ -28,9 +28,10 @@ Twelve specialised agents exchange schema-validated JSON (`eti.agent.report/1`, 
 ## Endpoints
 
 * `GET /agents` – dashboard. `GET /api/agents` – roster, integration status, latest audit summary.
-* `GET /api/agents/analyze?symbol=BTCUSDT&interval=1h[&benchmark=ETHUSDT]` – read-only analysis.
-* `POST /api/agents/analyze` – body may include `account`, `fundamentals`, `macro`, `news`, `onchain`, `benchmark`; add `record:true` with the bearer token to store the decision.
+* `GET /api/agents/analyze?symbol=BTCUSDT&interval=1h[&benchmark=ETHUSDT]` – read-only analysis; completed analyses are appended to D1 when configured.
+* `POST /api/agents/analyze` – body may include `account`, `fundamentals`, `macro`, `news`, `onchain`, `benchmark`; completed analysis snapshots are automatically persisted when D1 is available.
 * `POST /api/agents/execute` – bearer token required. Body: `symbol`, `interval`, `account`, supplied data, `execution: { broker, clientOrderId, riskConfirmed: true, executionSource? }`.
+* `GET /api/agents/decisions?limit=25[&before=UNIX_MS][&symbol=BTCUSDT]` – bearer token required; returns full immutable D1 snapshots with reports, evidence, message trail, dissent, risk checks and final decisions. Page size is capped at 100; requires `ETI_PORTFOLIO_DB`.
 * `GET /api/agents/audit` – bearer token required. Replays recorded decisions against later candles (stop-first, fees ignored), reports win rate with a Wilson interval and per-agent accuracy. Agents with ≥20 resolved trades and accuracy below 50% have their Commander weight reduced (floor 0.5×).
 * `POST /api/agents/brief` – bearer token required; advisory LLM review (needs `ANTHROPIC_API_KEY`).
 
@@ -44,6 +45,10 @@ Twelve specialised agents exchange schema-validated JSON (`eti.agent.report/1`, 
 
 1% equity risk per trade, 20% max position, -3% daily loss stop, 10% drawdown stop, 6% open-risk budget, 25 bps max spread, 10% max book participation, stop 0.75–4× ATR, ATR ≤ 8% of price, final-target R:R ≥ 2, stale-data and high-impact-event vetoes, kill switch, security severity ≥ high.
 
+## Durable agent audit
+
+Migration `0017_agent_decision_audit.sql` creates an append-only `eti_agent_decisions` table and indexes. The existing `ETI_PORTFOLIO_DB` D1 binding is reused; no new database or external API key is required. Snapshots use `INSERT OR IGNORE` keyed by decision ID, making retries idempotent. Database triggers reject updates and deletes. The existing KV compact decision log remains for compatibility. If both D1 and KV are unavailable, analysis still returns but reports `auditPersistence: "unavailable"`; the service never claims a failed write succeeded.
+
 ## Configuration still required
 
 Account state per request (or Binance testnet credentials so it can be read); broker secrets, `ETI_EXECUTION_TOKEN` and the `ETI_EXECUTION_LOG` KV binding for execution; `FRED_API_KEY` for macro data; `ANTHROPIC_API_KEY` for the advisory review.
@@ -52,4 +57,4 @@ Account state per request (or Binance testnet credentials so it can be read); br
 
 Researcher methodologies are simplified readings of public descriptions, not the traders' systems. News sentiment in the News agent is a lexicon heuristic (the LLM reviewer does not feed it). The Fraud & Security agent is an anomaly screen, not forensics. Auditor outcomes ignore fees and slippage. Binance order filters (lot size, tick, minimum notional) are applied by the agent execute route; Alpaca filters are not.
 
-Not built: LLM-driven agent debate or sentiment, agent memory/learning beyond the Auditor's accuracy weights, background agent jobs (agents run on demand), and integration of the agents with the newer analysis, precision, readiness and Global Alpha engines.
+Limits: specialist reports remain deterministic statistical/rule-based modules; the optional LLM reviewer remains advisory only. Durable D1 snapshots preserve the complete decision evidence and agent message trail. Performance calibration remains governed by the Auditor and its minimum sample-size threshold.
