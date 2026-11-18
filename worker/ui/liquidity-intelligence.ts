@@ -78,12 +78,12 @@ async function poll(force){
   const prev=state.depth;state.previous=prev;state.depth=book;state.trades=result.trades||[];state.derivatives=result.derivatives||null;state.marketMetrics=result.ticker?{turnover24h:result.ticker.quoteVolume,volume24h:result.ticker.volume,priceChange24h:result.ticker.priceChangePercent,high24h:result.ticker.highPrice,low24h:result.ticker.lowPrice}:null;
   const now=Date.now(),last=state.history[state.history.length-1];
   if(force||!last||now-last.t>900){state.history.push({t:now,mid:(book.bids[0][0]+book.asks[0][0])/2,bids:book.bids.slice(0,45),asks:book.asks.slice(0,45)});state.history=state.history.slice(-maxHistory);saveHistory();}
-  await getCandles();
+  await getCandles();if(seq!==state.sequence)return;
   state.structure=buildStructureMap(state.candles);
-  await loadOrderFlow();
+  await loadOrderFlow();if(seq!==state.sequence)return;
   const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,candlesByTimeframe:state.candlesByTimeframe,derivatives:state.derivatives,marketMetrics:state.marketMetrics,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true,maxDailyLossPercent:30}};
   const response=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),cache:"no-store"});
-  const analysis=await response.json().catch(()=>null);if(!response.ok)throw new Error(analysis?.detail||analysis?.error||"Liquidity analysis failed");
+  const analysis=await response.json().catch(()=>null);if(seq!==state.sequence)return;if(!response.ok)throw new Error(analysis?.detail||analysis?.error||"Liquidity analysis failed");
   state.analysis=analysis;setFeed(result.source+" · live snapshot",true);render();drawHeatmap();drawOverlay();
  }catch(e){state.lastError=e?.message||"feed unavailable";setFeed("Feed unavailable · "+state.lastError,false);const note=$("eti-liq-source");if(note)note.textContent="Last successful snapshot retained; "+state.lastError;}
  finally{if(seq===state.sequence)state.busy=false;}
