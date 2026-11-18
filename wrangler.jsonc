@@ -22,6 +22,9 @@
   },
   "vars": {
     "APP_ENV": "production",
+    "BITGET_WS_PRIVATE_URL": "wss://ws.bitget.com/v3/ws/private",
+    "BITGET_WS_PUBLIC_URL": "wss://ws.bitget.com/v3/ws/public",
+    "BITGET_WS_SBE_PUBLIC_URL": "wss://ws.bitget.com/v3/ws/public/sbe",
     "DATABASE_URL": "postgresql+psycopg2://user:pass@host:5432/eti",
     "ETI_EDGE": "native",
     "ETI_EVENT_FEED_URL": "https://finnhub.io/api/v1/calendar/economic",
