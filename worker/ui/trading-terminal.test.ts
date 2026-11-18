@@ -65,3 +65,18 @@ test("institutional chart workspace exposes SMC, multi-timeframe and auction pro
   assert.match(TRADING_TERMINAL_JS, /renderTrades\(trades\)/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /fetch\(["']\/api\/orders/);
 });
+
+test("terminal chart is full-width and institutional intelligence plus recent trades sit below the market structure monitor", () => {
+  const chart = TRADING_TERMINAL_HTML.indexOf('<section class="tt-card tt-chart-card">');
+  const ticket = TRADING_TERMINAL_HTML.indexOf('<aside class="tt-card tt-ticket">');
+  const monitor = TRADING_TERMINAL_HTML.indexOf('<h2>Market structure monitor</h2>');
+  const institutional = TRADING_TERMINAL_HTML.indexOf('<h2>Institutional market intelligence</h2>');
+  const trades = TRADING_TERMINAL_HTML.indexOf('<h2>Recent trades</h2>');
+  assert.ok(chart >= 0 && ticket > chart, "chart is first and ticket follows it");
+  assert.ok(monitor > ticket, "market structure monitor follows the chart and planning ticket");
+  assert.ok(institutional > monitor, "institutional intelligence follows the market structure monitor");
+  assert.ok(trades > institutional, "recent trades follow institutional intelligence at the bottom");
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-work\\{display:grid;grid-template-columns:minmax\\(0,1fr\\)/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\\{height:clamp\\(560px,72vh,900px\\);min-height:560px;width:100%\\}/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart-card\\{grid-column:1\\/-1;width:100%;min-width:0\\}/);
+});
