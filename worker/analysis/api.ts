@@ -19,6 +19,10 @@ import { buildCryptoInput } from "./crypto-pipeline.ts";
 import type { KVLike } from "./tokenomist.ts";
 import { loadInstitutional, type D1Like } from "./institutional.ts";
 import { calibrateTechnical } from "./calibrate.ts";
+import { analyzeSmc } from "./smc-intel.ts";
+import { recordAndLoadDurable } from "./depth-store.ts";
+import type { AgentAuditDb } from "../agents/persistence.ts";
+import { confluence, CONFLUENCE_TIMEFRAMES, type ConfluenceOrderFlow, type ConfluenceTf } from "./confluence.ts";
 import { buildOrderFlow, normalizeDepth, normalizeTrades, recordDepthSnapshot, summarizeDepthHistory } from "./orderflow.ts";
 import { planOf, resolveDetail, type PlanEnv } from "./plan.ts";
 import { loadEvents, relevant, currenciesOf, type EventsEnv, type MarketEvent } from "../readiness/events.ts";
@@ -159,15 +163,15 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: HEADERS });
   if (req.method !== "GET" && req.method !== "POST") return reply({ error: "method_not_allowed", note: "Analytical endpoints only; they cannot place orders." }, 405);
   const limits0 = planOf(env);
-  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
+  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow", "/api/analysis/confluence"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
     plan: { plan: limits0.plan, defaultDetail: limits0.defaultDetail, fullDetailAllowed: limits0.allowFullDetail, maxCandlesPerTimeframe: limits0.maxCandles, calibrationAllowed: limits0.calibrateAllowed, maxNewsItems: limits0.maxNewsItems }, configured: { SENTIMENT_AI: String(env.SENTIMENT_AI ?? "").toLowerCase() === "on" && !!env.AI, TOKENOMIST_API_KEY: !!env.TOKENOMIST_API_KEY, GITHUB_TOKEN: !!env.GITHUB_TOKEN, CRYPTO_PROFILES_JSON: !!env.CRYPTO_PROFILES_JSON, institutionalDb: !!env.ETI_PORTFOLIO_DB, FRED_API_KEY: !!env.FRED_API_KEY, SEC_USER_AGENT: !!env.SEC_USER_AGENT, COINGECKO_API_KEY: !!env.COINGECKO_API_KEY, NEWS_FEEDS_JSON: !!env.NEWS_FEEDS_JSON }, submitsOrder: false });
-  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : path.endsWith("/orderflow") ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : path.endsWith("/confluence") ? 6 : path.endsWith("/orderflow") ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
   if (wait !== null) return reply({ error: "rate_limited", retryAfterSeconds: wait }, 429, { "retry-after": String(wait) });
   const post = req.method === "POST", limits = planOf(env);
   let body: any = {};
   if (post) { const j = await readJson(req); if (j.error) return reply({ error: j.error }, j.error === "body_too_large" ? 413 : 400); body = j.body; }
   const q = (k: string) => (post && body[k] !== undefined ? String(body[k]) : url.searchParams.get(k));
-  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") ? "AAPL" : null));
+  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") || path.endsWith("/confluence") ? "AAPL" : null));
   if (!symbol) return reply({ error: "invalid_symbol", expected: "1-20 characters from A-Z, 0-9, '.', '_' or '-'" }, 400);
   const stratRaw = (q("strategy") ?? "intraday") as MtfStrategy;
   if (!STRATEGIES.includes(stratRaw)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
@@ -220,16 +224,19 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       const bucketSize = Number.isFinite(bucketRaw) && bucketRaw > 0 ? bucketRaw : undefined;
       const analysis = buildOrderFlow({ symbol, venue, market, provider, trades, depth, candles, bucketSize, now });
       const history = await recordDepthSnapshot(env.ETI_EXECUTION_LOG, { symbol, venue, market, depth, now, bucketSize: analysis.bucketSize }).catch(() => null);
-      const liquidityHistory = summarizeDepthHistory(history ?? [], analysis.bucketSize);
+      const durable = await recordAndLoadDurable(env.ETI_PORTFOLIO_DB as unknown as AgentAuditDb | undefined, { venue, market, symbol, depth, now });
+      const useDurable = !!durable && durable.length > (history?.length ?? 0), rowsUsed = useDurable ? durable! : history;
+      const liquidityHistory = summarizeDepthHistory(rowsUsed ?? [], analysis.bucketSize);
       return reply({
         ...analysis,
         liquidityHistory: {
-          status: history ? "recorded" : "unavailable",
-          sampleCount: history?.length ?? 0,
-          windowStartedAt: history?.[0]?.capturedAt ? new Date(history[0].capturedAt).toISOString() : null,
-          windowEndedAt: history?.at(-1)?.capturedAt ? new Date(history.at(-1)!.capturedAt).toISOString() : null,
+          status: rowsUsed ? "recorded" : "unavailable",
+          source: useDurable ? "d1" : history ? "kv" : null,
+          sampleCount: rowsUsed?.length ?? 0,
+          windowStartedAt: rowsUsed?.[0]?.capturedAt ? new Date(rowsUsed[0].capturedAt).toISOString() : null,
+          windowEndedAt: rowsUsed?.at(-1)?.capturedAt ? new Date(rowsUsed.at(-1)!.capturedAt).toISOString() : null,
           persistentLevels: liquidityHistory,
-          note: history ? "Historical persistence is based on timestamped Worker KV depth samples; it is not a full exchange order-book event stream." : "The existing ETI_EXECUTION_LOG KV binding is unavailable or historical depth could not be stored. Current depth remains available, but no historical heatmap is claimed."
+          note: rowsUsed ? `Historical persistence is based on timestamped Worker ${useDurable ? "D1" : "KV"} depth samples taken when this endpoint is called (at most one per 5 seconds); it is not a full exchange order-book event stream and has gaps when nobody polls.` : "Neither ETI_PORTFOLIO_DB (D1) nor ETI_EXECUTION_LOG (KV) could store historical depth. Current depth remains available, but no historical heatmap is claimed."
         },
         canTriggerTrade: false, submitsOrder: false, liveExecutionAllowed: false
       });
@@ -288,6 +295,39 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         dataQuality: { provider, candles: closed.length, lastClosedCandleAt: new Date(closed[closed.length - 1][0]).toISOString() },
         canTriggerTrade: false, submitsOrder: false, liveExecutionAllowed: false,
       });
+    }
+    if (path === "/api/analysis/confluence") {
+      // Read-only multi-timeframe SMC confluence. Closed candles only; order flow is opt-in (?orderflow=1, Bybit server-side) and never estimated.
+      const frames = [...CONFLUENCE_TIMEFRAMES] as ConfluenceTf[];
+      let candles: Partial<Record<MtfTimeframe, Kline[]>> = {}, failures: Record<string, string> = {}, providers: string[] = [], notes: string[] = [];
+      if (post && body.candles) {
+        if (typeof body.candles !== "object" || Array.isArray(body.candles)) return reply({ error: "candles_must_be_an_object_keyed_by_timeframe" }, 400);
+        for (const [tf, v] of Object.entries(body.candles)) { if (!frames.includes(tf as ConfluenceTf)) return reply({ error: "invalid_timeframe", timeframe: tf, timeframes: frames }, 400); const s = sanitizeCandles(v); if (s.error) return reply({ error: "invalid_candles", timeframe: tf, detail: s.error }, 400); candles[tf as MtfTimeframe] = s.rows; }
+        providers = ["supplied"];
+      } else if (cls === "crypto") { const l = await loadCandles(symbol, frames as MtfTimeframe[], env, q("provider")); candles = l.candles; failures = l.failures; providers = l.providers; }
+      else if (cls === "stock" || cls === "fx") { const y = await loadYahooCandles(symbol, cls, frames as MtfTimeframe[], fetchFn); candles = y.candles; failures = y.failures; notes = y.notes; providers = Object.keys(y.candles).length ? ["yahoo-finance"] : []; }
+      else return reply({ error: "market_data_unavailable", detail: `Unknown asset class for ${symbol}: pass ?assetClass= or POST candles` }, 424);
+      if (!Object.keys(candles).length) return reply({ error: "market_data_unavailable", detail: "No candles could be loaded", failures }, 424);
+      const smc: Partial<Record<ConfluenceTf, ReturnType<typeof analyzeSmc>>> = {};
+      for (const tf of frames) { const raw = candles[tf as MtfTimeframe]; if (raw?.length) smc[tf] = analyzeSmc(closedCandles(tf as MtfTimeframe, raw, now), tf); }
+      let orderFlow: ConfluenceOrderFlow | null = null, orderFlowNote = "Not requested (add ?orderflow=1 for Bybit trade-tape delta)";
+      if (!post && q("orderflow") === "1") {
+        if (cls !== "crypto") orderFlowNote = "Order flow is only available for exchange-traded crypto symbols";
+        else try {
+          const market: "spot" | "futures" = q("market") === "futures" ? "futures" : "spot", category = market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot";
+          const params = { symbol, interval: "1m", limit: 500, market, category: category as any }, order = providerOrder(env, "bybit");
+          const [t, d] = await Promise.all([getMarketData("trades", params, order), getMarketData("depth", { ...params, limit: 50 }, order)]), trades = normalizeTrades(t.data), depth = normalizeDepth(d.data);
+          const tapeAge = trades?.length ? now - trades[trades.length - 1].time : Infinity;
+          if (!trades || !depth || trades.length < 50) orderFlowNote = "Trade tape or depth failed validation or was too short; no order-flow evidence used";
+          else if (tapeAge < -60_000 || tapeAge > 180_000) orderFlowNote = "Trade tape is stale; no order-flow evidence used";
+          else { const of = buildOrderFlow({ symbol, venue: "bybit", market, provider: t.provider, trades, depth, bucketSize: undefined, now }); orderFlow = { deltaPct: of.tape.deltaPct, coverage: "exchange_trades", asOf: trades.at(-1)!.time, sampleTrades: trades.length }; orderFlowNote = `Bybit public trade tape, ${trades.length} trades`; }
+        } catch (e) { orderFlowNote = `Trade tape unavailable: ${e instanceof Error ? e.message : "error"}`; }
+      }
+      const entryRaw = q("entry") ?? "15m", entryTimeframe = frames.includes(entryRaw as ConfluenceTf) ? (entryRaw as ConfluenceTf) : undefined;
+      if (q("entry") && !entryTimeframe) return reply({ error: "invalid_entry_timeframe", timeframes: frames }, 400);
+      const result = confluence({ symbol, frames: smc, orderFlow, entryTimeframe, now });
+      const detections = q("include")?.includes("detections") ? Object.fromEntries(Object.entries(smc).map(([tf, a]) => [tf, a!.detections.slice(0, 40)])) : undefined;
+      return reply({ ...result, detections, dataQuality: { providers, failures, notes, orderFlow: orderFlowNote, timeframesRequested: frames }, generatedAt: new Date(now).toISOString() });
     }
     if (path === "/api/analysis/fvg") {
       // Fair Value Gaps for one chart timeframe plus the next two higher timeframes (multi-timeframe confluence). Descriptive only: an FVG is never a trade signal.

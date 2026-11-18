@@ -8,7 +8,7 @@ Method: shallow clone, directory inventory, config and workflow review, targeted
 |---|---|
 | `npm test` (Worker unit tests) | 1321 tests, 1321 pass, 0 fail |
 | `npm run test:security` | 15 tests, 15 pass |
-| `npm run typecheck:analysis` | `worker/analysis` strict check passes; 11 pre-existing type errors outside that folder are ignored by the script |
+| `npm run typecheck:analysis` | `worker/analysis` strict check passes; pre-existing type errors outside that folder are ignored by the script (the count was 11 in the first run and 2 in later runs of the same commit; the cause was not investigated) |
 | `npm run check:worker` (wrangler dry-run bundle) | completes |
 | Python suite (`pytest`), live deployment, CI run status | NOT run in this audit |
 
@@ -40,12 +40,12 @@ The roadmap in `docs/ETI-ADVANCED-IMPLEMENTATION.md` is consistent with these fi
 Portfolio and journal (`pf_*`, `jr_*`), sports, company, treasury, execution locks and idempotency, institutional holdings, profit engine, GainzAlgo (`gainz_*`), `eti_v3_alpha_signals`, `eti_v3_alpha_lifecycle`, `eti_agent_decisions`. Next migration number is 0018. Migrations must stay additive.
 
 ## Findings and risks
-1. `typecheck:analysis` ignores 11 type errors outside `worker/analysis`. New code outside that folder gets a weaker check; these should be triaged before large additions.
+1. `typecheck:analysis` ignores type errors outside `worker/analysis` (2 to 11 reported across runs). New code outside that folder gets a weaker check; these should be triaged before large additions.
 2. Order-flow history is KV-only (bounded, 7-day expiry). The spec's persistent liquidity heatmap and replay need a bounded D1 snapshot table plus a retention policy.
 3. `ETI_AGENT_AUTOPILOT_ENABLED`, `ETI_PAPER_AUTOEXECUTE` and `CHAIN_MAINNET_SEND_ENABLED: "on"` are set in production `wrangler.jsonc`. Autopilot is documented as paper-only, but `CHAIN_MAINNET_SEND_ENABLED` is worth confirming against the live-execution rule in the spec. I did not change it.
 4. `wrangler.jsonc` contains a contact email in `SEC_USER_AGENT` and a placeholder `DATABASE_URL`; no secrets were observed.
 
 ## Recommended next steps (Phase 1 first)
-1. Triage the 11 ignored type errors.
+1. Triage the ignored type errors and find out why their count varies.
 2. Phase 1: add SMC detection metadata (timeframe, confirmation, source candles, invalidation, confidence), a D1 depth-snapshot table (migration 0018) with retention, and a multi-timeframe confluence endpoint and Pro Terminal panel.
 3. Keep every new route read-only and behind the existing auth; add safety tests listed in spec section 13.
