@@ -272,7 +272,7 @@ test("transport adapter selects production V3, demo V3, Classic V2 and SBE endpo
  sockets.forEach(s=>{s.readyState=1;s.onopen()});
  const uta=JSON.parse(sockets[0].sent[0]);assert.ok(uta.args.some((x:any)=>x.topic==="publicTrade"&&x.instType==="usdt-futures"));
  const classic=JSON.parse(sockets[2].sent[0]);assert.ok(classic.args.some((x:any)=>x.channel==="trade"&&x.instType==="USDT-FUTURES"));
- const sbe=JSON.parse(sockets[3].sent[0]);assert.deepEqual(sbe.args.map((x:any)=>x.topic),["books50","books1","publicTrade"]);
+ const sbe=JSON.parse(sockets[3].sent[0]);assert.equal(sbe.args.map((x:any)=>x.topic).join(","),"books50,books1,publicTrade");
 });
 
 test("transport adapter decodes SBE template 1002 and rejects invalid frames",()=>{
