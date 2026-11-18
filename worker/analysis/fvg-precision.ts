@@ -58,7 +58,7 @@ export function analyzeFvgPrecision(
   if (!(atr > 0) || !Number.isFinite(price)) return empty("insufficient_history", price);
   const pivots = findPivots(rows), structure = analyzeStructure(rows, pivots), sr = supportResistance(rows, pivots, 0.65, 20);
   const pd = premiumDiscount(rows, timeframe), sweeps = detectLiquiditySweeps(rows, pivots, 50), displacement = detectDisplacement(rows, 80);
-  const zones = detectFvgZones(rows, { timeframe, minSizeAtr: FVG_PRECISION_RULES.minGapAtr, maxAgeBars: FVG_PRECISION_RULES.maxAgeBars, window: 200 });
+  const zones = detectFvgZones(rows, { timeframe, minSizeAtr: FVG_PRECISION_RULES.minGapAtr, maxAgeBars: FVG_PRECISION_RULES.maxAgeBars, window: 200 });\n  const orderBlocks = detectOrderBlocks(rows, 120), liquidityPools = findLiquidityPools(rows, pivots);
   const result: PrecisionCandidate[] = [];
   const currentIndex = rows.length - 1;
 
@@ -77,7 +77,7 @@ export function analyzeFvgPrecision(
     const zoneMid = (z.lower + z.upper) / 2;
     const level = sr.filter(l => l.kind === (bullish ? "support" : "resistance") && intersects(l.low, l.high, z.lower - atr * FVG_PRECISION_RULES.srToleranceAtr, z.upper + atr * FVG_PRECISION_RULES.srToleranceAtr)).sort((a,b)=>b.strength-a.strength)[0] ?? null;
     if (level) passed.push("Support/resistance overlaps the FVG"); else failed.push("No meaningful support/resistance overlap");
-    const orderBlock = detectOrderBlocks(rows, 120).filter(o => o.kind === z.direction && !o.mitigated && !o.invalidated && intersects(o.low, o.high, z.lower, z.upper)).sort((a,b)=>b.strength-a.strength)[0] ?? null;
+    const orderBlock = orderBlocks.filter(o => o.kind === z.direction && !o.mitigated && !o.invalidated && intersects(o.low, o.high, z.lower, z.upper)).sort((a,b)=>b.strength-a.strength)[0] ?? null;
     if (orderBlock) passed.push("Unmitigated same-direction order block overlaps the FVG");
     const correctHalf = !!pd && (bullish ? pd.zone === "discount" : pd.zone === "premium");
     if (correctHalf) passed.push(bullish ? "FVG is in discount" : "FVG is in premium"); else failed.push(bullish ? "FVG is not in discount" : "FVG is not in premium");
@@ -121,7 +121,7 @@ export function analyzeFvgPrecision(
     const stopLoss = roundPrice(rawStop, precision), risk = Math.abs(entryPrice - stopLoss);
     const targetPivots = pivots.filter(p => bullish ? p.kind === "high" && p.price > entryPrice : p.kind === "low" && p.price < entryPrice)
       .sort((a,b)=>bullish ? a.price-b.price : b.price-a.price);
-    const pools = findLiquidityPools(rows, pivots).filter(p => bullish ? p.side === "buy_side" && p.price > entryPrice : p.side === "sell_side" && p.price < entryPrice)
+    const pools = liquidityPools.filter(p => bullish ? p.side === "buy_side" && p.price > entryPrice : p.side === "sell_side" && p.price < entryPrice)
       .sort((a,b)=>bullish ? a.price-b.price : b.price-a.price);
     const targetPrices = [...new Set([...pools.slice(0,3).map(p=>({price:p.price,source:"external liquidity"})), ...targetPivots.slice(0,5).map(p=>({price:p.price,source:"confirmed swing"}))].map(x=>x.price))];
     const targets = targetPrices.map(t=>({price:roundPrice(t,precision),rewardRisk:round(Math.abs(t-entryPrice)/(risk||Infinity),2),source:pools.some(p=>p.price===t)?"liquidity pool":"confirmed swing"}))
