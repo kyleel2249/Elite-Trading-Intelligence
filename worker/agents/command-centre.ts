@@ -1,5 +1,5 @@
 /** Institutional JARVIS command centre. All operational values are read from ETI APIs. */
-export const JARVIS_COMMAND_CENTRE_HTML = String.raw\`<!doctype html>
+export const JARVIS_COMMAND_CENTRE_HTML = String.raw`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#07111f"><title>JARVIS | ETI Command Centre</title>
 <style>
@@ -67,4 +67,4 @@ $("clearToken").addEventListener("click",function(){token="";$("token").value=""
 var prior=sessionStorage.getItem("eti.jarvis.token");if(prior){token=prior;$("token").value=prior;api("/api/agents/jarvis").then(function(x){if(x._httpStatus===200){statusPill(true,"AUTHENTICATED");loadMemory()}else statusPill(false,"TOKEN REJECTED")})}
 $("clock").textContent="UTC "+new Date().toISOString().slice(11,19);setInterval(function(){$("clock").textContent="UTC "+new Date().toISOString().slice(11,19)},1000);refresh();setInterval(refresh,30000);
 })();
-</script></body></html>\`;
+</script></body></html>`;
