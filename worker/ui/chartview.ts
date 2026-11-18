@@ -1,7 +1,7 @@
 /**
  * Roomier, scrollable market chart. Layered on the dashboard page (like the motion layer) so the chart engine itself is untouched:
  *  - loads 300 candles instead of 120 (the signals API allows a 500-candle window),
- *  - gives every candle a fixed horizontal slot (default 12 px, adjustable 6-30 px for the current visit; nothing is stored in the browser) so candles are never squeezed,
+ *  - gives every candle a fixed horizontal slot (default 18 px, adjustable 6-36 px for the current visit; nothing is stored in the browser) so candles are never squeezed,
  *    and lets the chart and its indicator panes scroll sideways together (stays pinned to the latest candle until you scroll back),
  *  - makes the main chart and the indicator panes taller.
  * Pure presentation: it never changes data, signals, orders or handlers. If the page markup it expects is not found it does nothing.
@@ -23,7 +23,7 @@ export const CHARTVIEW_JS = `<script id="eti-chartview-js">
 (function(){
 try{
 if(typeof drawChart!=='function'||typeof candles==='undefined'||!document.getElementById('stack'))return;
-var stack=document.getElementById('stack'),MIN=6,MAX=30,step=12,PADR=(typeof PAD_R==='number'?PAD_R:116),FUT=(typeof FUTURE==='number'?FUTURE:14),pin=true,lastW=0,lastN=0;
+var stack=document.getElementById('stack'),MIN=6,MAX=36,step=18,PADR=(typeof PAD_R==='number'?PAD_R:116),FUT=(typeof FUTURE==='number'?FUTURE:14),pin=true,lastW=0,lastN=0;
 function want(n){return Math.max(stack.clientWidth,Math.ceil(n*step+PADR+FUT*step));}
 function atEnd(){return stack.scrollLeft+stack.clientWidth>=stack.scrollWidth-24;}
 function size(){var n=candles.length,w=want(n);if(w!==lastW){pin=pin||atEnd();stack.style.setProperty('--stackw',w+'px');lastW=w;return true;}return false;}
