@@ -56,6 +56,15 @@ function depthSignals(book?:DepthBook|null,trades:TradePrint[]=[]){
  let buy=0,sell=0;for(const t of trades){const n=t.price*t.qty;if(t.side==="sell"||t.isBuyerMaker)sell+=n;else buy+=n;}
  const total=buy+sell;return {available:true,imbalance:(bidNotional-askNotional)/(bidNotional+askNotional||1),deltaPct:total?(buy-sell)/total*100:0,spreadBps:(asks[0][0]-bids[0][0])/mid*10000,bidNotional,askNotional};
 }
+function sessionContext(at=Date.now()){
+ const d=new Date(at),minutes=d.getUTCHours()*60+d.getUTCMinutes(),weekend=d.getUTCDay()===0||d.getUTCDay()===6;
+ let name="late_us_and_overnight",window="21:00–00:00 UTC";
+ if(minutes<480){name="asia";window="00:00–08:00 UTC";}
+ else if(minutes<870){name="london";window="08:00–14:30 UTC";}
+ else if(minutes<1020){name="london_new_york_overlap";window="14:30–17:00 UTC";}
+ else if(minutes<1260){name="new_york";window="17:00–21:00 UTC";}
+ return {name,window,weekend,continuousCryptoTrading:true,note:"Crypto perpetuals trade 24/7. Session labels describe typical participation windows, not exchange opening or closing times."};
+}
 export interface HeatZone { price:number; low:number; high:number; strength:number; type:"support"|"resistance"; source:"orderbook"|"volume_profile"|"swing"; touches:number; notional?:number }
 function supportResistance(rows:Candle[],book?:DepthBook|null):HeatZone[]{
  const c=validCandles(rows);if(c.length<10)return [];
@@ -103,6 +112,7 @@ export function analyzeTradingStrategy(input:{symbol:string;venue?:string;market
  const risk={...DEFAULT_ETI_RISK,...input.risk};
  const position=direction!=="WAIT"&&entry>0&&stop>0?calculatePositionPlan({equity:risk.capital,entry,stop,leverage:risk.leverage,riskPercent:risk.riskPercent,maxMarginPercent:risk.maxMarginPercent,compoundProfits:risk.compoundProfits}):null;
  const tfVotes=Object.entries(frames).map(([timeframe,v])=>({timeframe,trend:v.trend,momentum:v.momentum,available:v.available}));
+ const hedgeAssessment=direction==="WAIT"?"NO_HEDGE_SIGNAL":!flow.available?"LIQUIDITY_FEED_REQUIRED":direction==="LONG"&&flow.imbalance< -0.2&&flow.deltaPct< -10?"DEFENSIVE_LONG_REDUCTION":direction==="SHORT"&&flow.imbalance>0.2&&flow.deltaPct>10?"DEFENSIVE_SHORT_COVER":"NO_HEDGE_TRIGGER";
  const warnings:string[]=[];if(rows.length<200)warnings.push("Fewer than 200 candles: EMA200 and long-history context may be unavailable.");if(!flow.available)warnings.push("Order-book feed unavailable: liquidity confirmation is omitted.");if(flow.spreadBps!==null&&flow.spreadBps>15)warnings.push("Spread exceeds 15 bps; execution quality is poor.");if(direction!=="WAIT"&&position&&!position.valid)warnings.push("Signal sizing blocked: stop/liquidation or margin constraints failed.");if(direction!=="WAIT"&&confidence<35)warnings.push("Signal confidence is low.");
- return {schemaVersion:1,generatedAt:Date.now(),symbol:input.symbol.toUpperCase(),venue:input.venue||"bitget",market:input.market||"futures",category:input.category||"USDT-FUTURES",direction,score,confidence,regime:primary.volatility>3?"high_volatility":primary.trend>0.25?"uptrend":primary.trend< -0.25?"downtrend":"range_or_transition",entry,stop,target1,riskReward:atrValue?1.5:null,scoreParts,indicators:primary.indicators,orderFlow:flow,timeframes:tfVotes,supportResistanceHeatmap:zones,positionPlan:position,riskProfile:{...risk,riskBudget:risk.capital*risk.riskPercent/100,maxMargin:risk.capital*risk.maxMarginPercent/100,compounding:"Realized PnL updates the equity base for the next trade; unrealized PnL is excluded."},warnings,execution:"analysis_only",disclaimer:"Signals are analytical outputs, not guaranteed outcomes. Risk and liquidation estimates are conservative planning proxies; exchange liquidation depends on maintenance margin, fees, funding, account mode and position tiers."};
+ return {schemaVersion:1,generatedAt:Date.now(),symbol:input.symbol.toUpperCase(),venue:input.venue||"bitget",market:input.market||"futures",category:input.category||"USDT-FUTURES",direction,score,confidence,regime:primary.volatility>3?"high_volatility":primary.trend>0.25?"uptrend":primary.trend< -0.25?"downtrend":"range_or_transition",entry,stop,target1,riskReward:atrValue?1.5:null,scoreParts,indicators:primary.indicators,orderFlow:flow,timeframes:tfVotes,session:sessionContext(),hedgeAssessment,supportResistanceHeatmap:zones,positionPlan:position,riskProfile:{...risk,riskBudget:risk.capital*risk.riskPercent/100,maxMargin:risk.capital*risk.maxMarginPercent/100,compounding:"Realized PnL updates the equity base for the next trade; unrealized PnL is excluded."},warnings,execution:"analysis_only",disclaimer:"Signals are analytical outputs, not guaranteed outcomes. Risk and liquidation estimates are conservative planning proxies; exchange liquidation depends on maintenance margin, fees, funding, account mode and position tiers."};
 }
