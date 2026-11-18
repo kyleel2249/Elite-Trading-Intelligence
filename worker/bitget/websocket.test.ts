@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bitgetUtaLogin, bitgetUtaPrivateSubscriptions, handleBitgetPrivateWebSocket } from "./websocket.ts";
+import { bitgetUtaLogin, bitgetPrivateLogin, bitgetUtaPrivateSubscriptions, handleBitgetPrivateWebSocket } from "./websocket.ts";
 import { bitgetSign } from "./api.ts";
 
 const ENV = { BITGET_API_KEY: "test-key", BITGET_API_SECRET: "test-secret", BITGET_API_PASSPHRASE: "test-pass" };

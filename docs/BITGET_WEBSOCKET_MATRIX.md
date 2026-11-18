@@ -57,6 +57,7 @@ UTA private topics are account, order, position and fill. Classic private subscr
 
 The SBE client decodes little-endian FIX SBE frames for template IDs 1001 (Depth50), 1002 (BBO) and 1003 (public trades), validates schema ID, frame lengths and group bounds, applies price/size exponents, and surfaces sequence metadata. Binary frames are requested by setting `protocol: "sbe"`. The browser sets `binaryType = "arraybuffer"`.
 
+Depth50 schema v5 exposes `pseq` and `depthAction`; consumers should treat a gap or an incremental update without a valid base snapshot as a reason to rebuild the book from REST. Historical candles/trades must be backfilled through REST because the current V3 stream pushes updates only.
 Depth50 schema v5 exposes `pseq` and `depthAction`. The browser adapter merges incremental levels, ignores duplicate sequence numbers, and reconnects after a missing base snapshot or continuity gap to request a fresh stream snapshot; consumers should still use REST snapshots as the recovery fallback. Historical candles/trades must be backfilled through REST because the current V3 stream pushes updates only. UTA order and fill channels do not send a complete initial order/fill history on subscription; reconcile existing orders and historical fills through REST.
 
 ## Operational boundaries
