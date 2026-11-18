@@ -36,7 +36,7 @@ export const TRADING_TERMINAL_HTML = String.raw`<!doctype html><html lang="en"><
 
 export const TRADING_TERMINAL_JS = String.raw`(function(){
 "use strict";
-function bitgetProductType(){return S.market==="futures"?(S.category==="inverse"?"COIN-FUTURES":"USDT-FUTURES"):"SPOT";}
+function bitgetProductType(){if(S.market!=="futures")return "SPOT";const category=String(S.category||"USDT-FUTURES").toUpperCase();return ["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"].includes(category)?category:"USDT-FUTURES";}
 const $=id=>document.getElementById(id),S={venue:"bitget",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",pricePrecision:2,loadSeq:0,candles:[],chart:null,candle:null,line:null,area:null,volume:null,ema20:null,ema50:null,drawnLevels:[],drawMode:false,overlayCanvas:null,side:"buy",busy:false,signal:null,levelLines:[],institutionalLines:[],smc:null,liquidityFvg:null,lfKey:"",lfAt:0,trades:[],multiCharts:{},multiCandles:{},syncLock:false,orderFlow:null,omni:null,omniKey:"",omniAt:0,overlays:{ema20:true,ema50:true,volume:false}};
 const fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
 function decimalPlaces(v){if(v===null||v===undefined||v==="")return 0;let t=String(v).trim().toLowerCase(),e=0;if(t.includes("e")){const p=t.split("e");t=p[0];e=Number(p[1])||0;}return Math.max(0,Math.min(20,(t.split(".")[1]||"").length-e));}
