@@ -19,7 +19,7 @@ test("terminal keeps order placement inside the existing guarded execution flow"
 test("terminal exposes Bybit venue-specific market data requests", () => {
   assert.match(TRADING_TERMINAL_JS, /venue:"bybit"/);
   assert.match(TRADING_TERMINAL_JS, /\/api\/market\/klines/);
-  assert.match(TRADING_TERMINAL_JS, /\/api\/market\/depth/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /\/api\/market\/depth/);
 });
 
 test("Cloudflare Worker serves the terminal and its assets without a backend", async () => {
@@ -36,10 +36,12 @@ test("Cloudflare Worker serves the terminal and its assets without a backend", a
 });
 
 test("terminal exposes recent trades, chart presentation and manual level tools", () => {
-  assert.match(TRADING_TERMINAL_HTML, /Recent Trades/);
+  assert.match(TRADING_TERMINAL_HTML, /Recent trades/);
+  assert.doesNotMatch(TRADING_TERMINAL_HTML, /Order book|tt-book|tt-spread|tt-bids|tt-asks/);
   assert.match(TRADING_TERMINAL_HTML, /tt-chart-style/);
   assert.match(TRADING_TERMINAL_HTML, /tt-draw-level/);
   assert.match(TRADING_TERMINAL_JS, /renderTrades/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /api\/market\/depth|tt-heatmap/);
   assert.match(TRADING_TERMINAL_JS, /api\/market\/trades/);
   assert.match(TRADING_TERMINAL_JS, /createPriceLine/);
 });
@@ -51,7 +53,7 @@ test("institutional chart workspace exposes SMC, multi-timeframe and auction pro
   assert.match(TRADING_TERMINAL_HTML, /tt-heatmap/);
   assert.match(TRADING_TERMINAL_JS, /api\/analysis\/smc/);
   assert.match(TRADING_TERMINAL_JS, /function calcProfile/);
-  assert.match(TRADING_TERMINAL_JS, /function renderDepthHeat/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /function renderDepthHeat|renderDepth\(/);
   assert.match(TRADING_TERMINAL_JS, /function renderFlow/);
   assert.match(TRADING_TERMINAL_JS, /saveChartPrefs/);
   assert.match(TRADING_TERMINAL_JS, /drawFallbackChart/);
