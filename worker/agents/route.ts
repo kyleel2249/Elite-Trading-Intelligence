@@ -199,11 +199,12 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         const rawLimit = Number(url.searchParams.get("limit") ?? 25);
         const rawBefore = url.searchParams.get("before");
         const before = rawBefore === null ? undefined : Number(rawBefore);
+        const beforeId = url.searchParams.get("beforeId") ?? undefined;
         const symbol = url.searchParams.get("symbol")?.toUpperCase();
-        if (!Number.isFinite(rawLimit) || (before !== undefined && (!Number.isFinite(before) || before <= 0))) return reply({ error: "invalid_pagination" }, 400);
+        if (!Number.isFinite(rawLimit) || (before !== undefined && (!Number.isFinite(before) || before <= 0)) || (beforeId !== undefined && (!beforeId || beforeId.length > 128 || before === undefined))) return reply({ error: "invalid_pagination" }, 400);
         if (symbol && !SYMBOL.test(symbol)) return reply({ error: "invalid_symbol" }, 400);
         try {
-          const page = await listAgentDecisions(env.ETI_PORTFOLIO_DB, { limit: rawLimit, before, symbol });
+          const page = await listAgentDecisions(env.ETI_PORTFOLIO_DB, { limit: rawLimit, before, beforeId, symbol });
           return reply({ schema: "eti.agent.audit.page/1", ...page, durable: true });
         } catch {
           return reply({ error: "durable_audit_unavailable", durable: false }, 503);
