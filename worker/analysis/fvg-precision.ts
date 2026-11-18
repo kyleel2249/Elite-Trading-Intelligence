@@ -22,7 +22,7 @@ export interface PrecisionCandidate {
   orderBlock: { lower: number; upper: number; strength: number } | null;
   dealingRange: { low: number; high: number; positionPct: number; zone: "discount" | "premium" | "equilibrium" } | null;
   liquiditySweep: { direction: "bullish" | "bearish"; time: number; level: number } | null;
-  mitigationPct: number; freshnessBars: number; reaction: { confirmed: boolean; time: number | null; close: number | null; reason: string };
+  mitigationPct: number; freshnessBars: number; reaction: { confirmed: boolean; time: number | null; close: number | null; ageBars: number | null; distanceAtr: number | null; reason: string };
   explanation: string[];
 }
 export interface FvgPrecisionResult {
@@ -35,6 +35,7 @@ export interface FvgPrecisionResult {
 export const FVG_PRECISION_RULES = {
   minCandles: 40, minGapAtr: 0.15, maxAgeBars: 200, bosLookbackBars: 35,
   displacementMinAtr: 0.8, srToleranceAtr: 0.65, entryFraction: 0.5,
+  maxRetestAgeBars: 3, maxEntryDistanceAtr: 1.5,
   atrStopBuffer: 0.2, minRewardRisk: 2, maxCandidates: 20, eliteScore: 80,
 } as const;
 
@@ -103,13 +104,16 @@ export function analyzeFvgPrecision(
     // A first retest may still validate the original fresh setup, but it no longer receives the green unmitigated highlight.
     const freshBeforeFirstRetest = fresh || (firstTouch >= 0 && z.touches === 1 && z.ageBars === currentIndex - confirmIndex);
     const hardPass = freshBeforeFirstRetest && !!bos && !!impulse && !!level && correctHalf && !htfOpposed && higherPriority;
-    let reaction = { confirmed: false, time: null as number | null, close: null as number | null, reason: "Awaiting first retest and a closed reaction candle" };
+    let reaction = { confirmed: false, time: null as number | null, close: null as number | null, ageBars: null as number | null, distanceAtr: null as number | null, reason: "Awaiting first retest and a closed reaction candle" };
     if (firstTouch >= 0) {
       const c = rows[firstTouch], closeValid = bullish ? c[4] >= z.lower : c[4] <= z.upper;
       const directionClose = bullish ? c[4] >= c[1] : c[4] <= c[1];
       const noFarClose = bullish ? c[4] >= z.lower : c[4] <= z.upper;
-      const confirmed = closeValid && directionClose && noFarClose;
-      reaction = { confirmed, time: c[0], close: c[4], reason: confirmed ? "First retest closed inside the FVG or in its directional continuation, with no invalidating close" : "First retest failed the directional candle-close rule" };
+      const ageBars = currentIndex - firstTouch, distanceAtr = Math.abs(price - zoneMid) / atr;
+      const timely = ageBars <= FVG_PRECISION_RULES.maxRetestAgeBars, actionable = distanceAtr <= FVG_PRECISION_RULES.maxEntryDistanceAtr;
+      const confirmed = closeValid && directionClose && noFarClose && timely && actionable;
+      const reason = !closeValid || !directionClose || !noFarClose ? "First retest failed the directional candle-close rule" : !timely ? "First-retest confirmation expired" : !actionable ? "Price moved too far from the entry zone; setup is stale" : "First retest closed directionally and remains actionable";
+      reaction = { confirmed, time: c[0], close: c[4], ageBars, distanceAtr: round(distanceAtr, 3), reason };
       if (confirmed) passed.push("First-retest candle reaction confirmed"); else failed.push("First-retest candle reaction failed");
     }
     const state: PrecisionZoneState = !hardPass ? "rejected" : firstTouch < 0 ? "qualified_fresh" : reaction.confirmed ? "confirmed" : "rejected";
