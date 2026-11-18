@@ -49,9 +49,8 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
   const result = await runAgentAutopilotCycle(env, app, 1_800_000);
   assert.equal(result.submitted, 1);
   assert.equal(calls.length, 6);
-  assert.equal(calls.slice(0, 4).every(x => x.path === "/api/omnisignal"), true, "all four strategy engines must be consulted");
-  assert.equal(calls[4].path, "/api/agents/analyze");
   assert.equal(calls[0].path, "/api/agents/analyze", "the full council must run before strategy gates");
+  assert.equal(calls.slice(1, 5).every(x => x.path === "/api/omnisignal"), true, "all four strategy engines must be consulted");
   assert.equal(calls[0].body.execution, undefined, "preflight must remain read-only");
   assert.equal(calls[0].body.record, true, "automatic council decisions must be durably recorded");
   assert.equal(calls[5].path, "/api/agents/execute");
@@ -63,20 +62,21 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
 test("autopilot runs and records the full council before abstaining on strategy disagreement", async () => {
   const kv = memoryKV();
   const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
-  let calls = 0;
+  const calls: string[] = [];
   const app = { fetch: async (req: Request) => {
-    calls++;
     const path = new URL(req.url).pathname;
+    calls.push(path);
     if (path.endsWith("/analyze")) return Response.json({ decision: { action: "BUY", confidence: 0.82, consensus: { agreement: 0.78 } }, risk: { approved: true }, security: { severity: "none" }, auditPersistence: "d1" });
     const strategy = new URL(req.url).searchParams.get("strategy");
     return Response.json({ decision: strategy === "scalp" || strategy === "intraday" ? "BUY" : "HOLD", tradeable: true, confidence: 80, validation: { hardFailures: [] } });
   } };
   const result = await runAgentAutopilotCycle(env, app, 1_950_000);
   assert.equal(result.submitted, 0);
-  assert.equal(calls, 5);
+  assert.equal(calls.length, 5);
+  assert.equal(calls[0], "/api/agents/analyze");
+  assert.equal(calls.slice(1).every(x => x === "/api/omnisignal"), true);
   assert.equal(result.outcomes[0].reason, "omnisignal_strategy_consensus_not_met");
   assert.equal(result.outcomes[0].council.auditPersistence, "d1");
-  assert.equal(new URL(calls[0].url).pathname, "/api/agents/analyze");
 });
 
 test("autopilot refuses a trade below configured confidence and agreement", async () => {
