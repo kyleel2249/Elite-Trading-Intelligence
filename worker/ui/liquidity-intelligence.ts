@@ -4,7 +4,7 @@ export const LIQUIDITY_JS = String.raw`(function(){
 "use strict";
 if(window.__ETI_LIQUIDITY_BOOTED)return;window.__ETI_LIQUIDITY_BOOTED=true;
 const $=id=>document.getElementById(id),fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
-const state={venue:"bitget",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",depth:null,previous:null,trades:[],candles:[],analysis:null,orderFlow:null,history:[],ws:null,timer:null,candleAt:0,lastOrderFlowAt:0,busy:false,overlay:true,scenarios:true,root:false,lastError:"",sequence:0,equity:74};
+const state={venue:"bitget",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",depth:null,previous:null,trades:[],candles:[],candlesByTimeframe:{},signalAt:0,analysis:null,orderFlow:null,history:[],ws:null,timer:null,candleAt:0,lastOrderFlowAt:0,busy:false,overlay:true,scenarios:true,root:false,lastError:"",sequence:0,equity:74};
 const maxHistory=90;
 function isRoot(){return !!$("symVenue")&&!$("tt-venue");}
 function readContext(){
@@ -44,13 +44,14 @@ function normalizeTrades(rows,venue){
  }).filter(t=>Number.isFinite(t.price)&&t.price>0&&Number.isFinite(t.qty)&&t.qty>0&&["buy","sell"].includes(t.side)).slice(0,300);
 }
 async function getCandles(){
- const now=Date.now();if(state.candles.length&&now-state.candleAt<12000)return;
+ const now=Date.now();if(state.candles.length&&now-state.candleAt<12000&&now-state.signalAt<60000)return;
  let rows;
  if(state.venue==="bitget"){
   const market=state.market==="futures"?"futures":"spot";
-  rows=await window.ETIBitget.candles({symbol:state.symbol,interval:state.interval,limit:100,market,category:state.category});
+  if(window.ETIBitget&&typeof window.ETIBitget.loadSignalInputs==="function"&&now-state.signalAt>=60000){const multi=await window.ETIBitget.loadSignalInputs({symbol:state.symbol,market,category:state.category});state.candlesByTimeframe=multi.candles||{};state.signalAt=now;}
+  rows=state.candlesByTimeframe[state.interval]||await window.ETIBitget.candles({symbol:state.symbol,interval:state.interval,limit:300,market,category:state.category});
  }else rows=await query("/api/market/klines");
- state.candles=(rows||[]).map(r=>Array.isArray(r)?r:[r.time*1000,r.open,r.high,r.low,r.close,r.volume]).filter(r=>Array.isArray(r)&&r.length>=6).slice(-100);
+ state.candles=(rows||[]).map(r=>Array.isArray(r)?r:[r.time*1000,r.open,r.high,r.low,r.close,r.volume]).filter(r=>Array.isArray(r)&&r.length>=6).slice(-300);
  state.candleAt=now;
 }
 async function fetchBook(){
@@ -76,7 +77,7 @@ async function poll(force){
   if(force||!last||now-last.t>900){state.history.push({t:now,mid:(book.bids[0][0]+book.asks[0][0])/2,bids:book.bids.slice(0,45),asks:book.asks.slice(0,45)});state.history=state.history.slice(-maxHistory);saveHistory();}
   await getCandles();
   await loadOrderFlow();
-  const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true,maxDailyLossPercent:30}};
+  const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,candlesByTimeframe:state.candlesByTimeframe,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true,maxDailyLossPercent:30}};
   const response=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),cache:"no-store"});
   const analysis=await response.json().catch(()=>null);if(!response.ok)throw new Error(analysis?.detail||analysis?.error||"Liquidity analysis failed");
   state.analysis=analysis;setFeed(result.source+" · live snapshot",true);render();drawHeatmap();drawOverlay();
