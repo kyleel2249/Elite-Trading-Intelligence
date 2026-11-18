@@ -168,55 +168,13 @@ jobs:
 
           if (payload?.ok !== true || payload?.source !== "DataX" ||
               payload?.integrationVersion !== 1 || !payload?.asOf ||
-              !payload?.accounts || !payload?.bandwidth || !payload?.rewards) {
+              !payload?.accounts || !payload?.bandwidth || !payload?.rewards ||
+              !payload?.reserves || payload?.tradingCapitalEligible !== false) {
             console.error("::error::DataX returned an unexpected aggregate snapshot contract.");
             process.exit(1);
           }
 
           console.log("Signed DataX production integration verified: HMAC authentication, nonce storage and aggregate snapshot succeeded. No member-level data or secret values were logged.");
-          NODE
-
-      - name: Verify authenticated DataX aggregate integration
-        env:
-          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
-          DATAX_API_URL: ${{ vars.DATAX_API_URL }}
-        run: |
-          node --input-type=module <<'NODE'
-          import { createHmac, randomBytes } from "node:crypto";
-          const origin = new URL(process.env.DATAX_API_URL || "");
-          const secret = process.env.DATAX_INTEGRATION_SECRET || "";
-          if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash || secret.length < 32) {
-            throw new Error("DataX integration configuration is invalid");
-          }
-          const pathname = "/api/integrations/eti/summary";
-          const timestamp = String(Math.floor(Date.now() / 1000));
-          const nonce = randomBytes(24).toString("hex");
-          const canonical = [timestamp, nonce, "GET", pathname].join("\\n");
-          const signature = createHmac("sha256", secret).update(canonical).digest("hex");
-          const response = await fetch(new URL(pathname, origin), {
-            method: "GET",
-            redirect: "error",
-            signal: AbortSignal.timeout(10000),
-            headers: {
-              accept: "application/json",
-              "x-datax-timestamp": timestamp,
-              "x-datax-nonce": nonce,
-              "x-datax-signature": signature
-            }
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok || payload.ok !== true || payload.source !== "DataX" || payload.integrationVersion !== 1
-            || !payload.accounts || !payload.bandwidth || !payload.rewards || !payload.reserves
-            || payload.tradingCapitalEligible !== false) {
-            console.error("DataX authenticated aggregate check failed:", JSON.stringify({
-              status: response.status,
-              error: payload.error,
-              integrationVersion: payload.integrationVersion,
-              source: payload.source
-            }));
-            process.exit(1);
-          }
-          console.log("Authenticated DataX aggregate endpoint verified; HMAC, replay protection, production D1 reads and response contract are working. No PII or individual wallet balances were requested.");
           NODE
 
       - name: Verify Bybit routes, Bitget browser adapter and ETI safeguards
