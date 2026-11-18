@@ -1,0 +1,8 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { analyzeTradingStrategy, calculatePositionPlan, compoundEquity } from "./strategy.ts";
+function candles(n=260){const out=[];let p=100;for(let i=0;i<n;i++){const o=p;p+=0.12+(i%7===0?-0.08:0.02);out.push([1700000000000+i*60000,o,p+0.4,o-0.2,p,1000+(i%5)*50]);}return out;}
+test("strategy produces indicator, signal and support/resistance heatmap for any symbol",()=>{const r=analyzeTradingStrategy({symbol:"SOPHUSDT",venue:"bitget",market:"futures",candles:candles(),depth:{bids:[[130,20],[129,10]],asks:[[131,5],[132,4]]},trades:[{price:130,qty:3,side:"buy"}]});assert.equal(r.symbol,"SOPHUSDT");assert.ok(["LONG","SHORT","WAIT"].includes(r.direction));assert.ok(r.indicators.ema20!==null);assert.ok(Array.isArray(r.supportResistanceHeatmap));assert.equal(r.execution,"analysis_only");});
+test("position sizing caps notional to margin allocation and checks liquidation buffer",()=>{const r=calculatePositionPlan({equity:74,entry:100,stop:98,leverage:20,riskPercent:30,maxMarginPercent:30});assert.equal(r.notional,444);assert.equal(r.margin,22.2);assert.equal(r.plannedLoss,8.88);assert.equal(r.valid,true);const unsafe=calculatePositionPlan({equity:74,entry:100,stop:94,leverage:20,riskPercent:30,maxMarginPercent:30});assert.equal(unsafe.valid,false);});
+test("compound profits increases next trade equity and losses reduce it",()=>{assert.equal(compoundEquity(74,5),79);assert.equal(compoundEquity(79,-10),69);assert.equal(compoundEquity(74,5,false),74);});
+test("invalid stop placement is rejected",()=>{const r=calculatePositionPlan({equity:74,entry:100,stop:101,leverage:20,riskPercent:30});assert.equal(r.valid,false);assert.equal(r.reason,"stop_on_wrong_side");});
