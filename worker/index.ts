@@ -382,8 +382,7 @@ async function refreshLiquidityFvg(force){
  if(!force&&etiLiquidityFvgKey===key&&Date.now()-etiLiquidityFvgAt<30000)return;
  if(etiLiquidityFvgKey===key&&Date.now()-etiLiquidityFvgAt<30000)return;
  etiLiquidityFvgKey=key;const seq=++etiLiquidityFvgSeq;
- try{let r;if(info.venue==='bitget'){r=await fetch('/api/analysis/liquidity-fvg?symbol='+encodeURIComponent(sym)+'&timeframe='+encodeURIComponent(tf),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candles:{[tf]:candles.map(v=>v.map(Number))}}),cache:'no-store'});}
- else{const p=new URLSearchParams({symbol:sym,timeframe:tf,assetClass:'crypto',provider:'bybit',market:info.market});r=await fetch('/api/analysis/liquidity-fvg?'+p.toString(),{cache:'no-store'});}
+ try{const r=await fetch('/api/analysis/liquidity-fvg?symbol='+encodeURIComponent(sym)+'&timeframe='+encodeURIComponent(tf)+'&assetClass=crypto',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candles:{[tf]:candles.map(v=>v.map(Number))}}),cache:'no-store'});
  const d=await r.json();if(seq!==etiLiquidityFvgSeq)return;if(!r.ok)throw Error(d.detail||d.error||'HTTP '+r.status);
  if([$('symbol').value,$('interval').value,symVenueOf(),symMkt(),candles.at(-1)&&candles.at(-1)[0]].join('|')!==key)return;
  etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();drawChart();
