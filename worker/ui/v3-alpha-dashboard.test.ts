@@ -15,9 +15,10 @@ test("V3 Alpha dashboard script parses and mounts only on the main trading dashb
 
 test("V3 Alpha dashboard includes live signal evidence, synchronized votes, research gates and D1 history", () => {
   for (const text of ["Signal plan", "Evidence contribution", "Multi-timeframe consensus", "AI agent research gates", "Monte Carlo risk research", "Recorded signal history"]) assert.ok(V3_ALPHA_DASHBOARD_JS.includes(text));
-  assert.match(V3_ALPHA_DASHBOARD_JS, /\/api\/algo\/v3-alpha\/intelligence/);
-  assert.match(V3_ALPHA_DASHBOARD_JS, /\/api\/algo\/v3-alpha\/signals/);
-  assert.match(V3_ALPHA_DASHBOARD_JS, /\/api\/algo\/v3-alpha\/performance/);
+  assert.match(V3_ALPHA_DASHBOARD_JS, /base="\/api\/algo\/v3-alpha\/"/);
+  assert.match(V3_ALPHA_DASHBOARD_JS, /base\+"intelligence"/);
+  assert.match(V3_ALPHA_DASHBOARD_JS, /base\+"signals\?/);
+  assert.match(V3_ALPHA_DASHBOARD_JS, /base\+"performance\?/);
   assert.match(V3_ALPHA_DASHBOARD_JS, /submitsOrder=false/);
 });
 
