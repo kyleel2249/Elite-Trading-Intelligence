@@ -153,16 +153,18 @@ jobs:
             process.exit(1);
           }
 
-          if (!response.ok) {
-            console.error("::error::DataX rejected the signed production request with HTTP " + response.status +
-              ". Check the DataX Pages ETI_INTEGRATION_SECRET, D1 binding and production deployment.");
-            process.exit(1);
-          }
-
           let payload;
           try { payload = await response.json(); }
           catch {
-            console.error("::error::DataX returned an invalid JSON response.");
+            console.error("::error::DataX returned an invalid JSON response (HTTP " + response.status + ").");
+            process.exit(1);
+          }
+
+          if (!response.ok) {
+            console.error("::error::DataX rejected the signed production request:", JSON.stringify({
+              status: response.status,
+              error: payload?.error || "unknown_error"
+            }));
             process.exit(1);
           }
 
