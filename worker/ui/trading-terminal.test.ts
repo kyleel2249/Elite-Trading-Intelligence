@@ -50,11 +50,12 @@ test("institutional chart workspace exposes SMC, multi-timeframe and auction pro
   assert.match(TRADING_TERMINAL_HTML, /Institutional market intelligence/);
   assert.match(TRADING_TERMINAL_HTML, /tt-inst-layout/);
   assert.match(TRADING_TERMINAL_HTML, /tt-vp-poc/);
-  assert.match(TRADING_TERMINAL_HTML, /tt-heatmap/);
+  assert.doesNotMatch(TRADING_TERMINAL_HTML, /tt-heatmap|Liquidity heatmap/);
   assert.match(TRADING_TERMINAL_JS, /api\/analysis\/smc/);
   assert.match(TRADING_TERMINAL_JS, /function calcProfile/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /function renderDepthHeat|renderDepth\(/);
   assert.match(TRADING_TERMINAL_JS, /function renderFlow/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /api\\/market\\/depth|renderDepth/);
   assert.match(TRADING_TERMINAL_JS, /saveChartPrefs/);
   assert.match(TRADING_TERMINAL_JS, /drawFallbackChart/);
   assert.match(TRADING_TERMINAL_JS, /if\(S\.chart&&S\.candle\)/);
