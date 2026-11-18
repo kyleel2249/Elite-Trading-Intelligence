@@ -48,9 +48,9 @@ function harness(n: number, clientWidth: number) {
   return { ctx, stack, styles, listeners, buttons, draws: () => draws };
 }
 
-test("300 candles get a fixed 12 px slot each, far wider than the viewport, and the view starts at the latest candle", () => {
+test("300 candles get a fixed 18 px slot each, far wider than the viewport, and the view starts at the latest candle", () => {
   const h = harness(300, 900);
-  const expected = Math.ceil(300 * 12 + 116 + 14 * 12);
+  const expected = Math.ceil(300 * 18 + 116 + 14 * 18);
   assert.equal(h.styles["--stackw"], expected + "px");
   assert.equal(h.stack.scrollLeft, h.stack.scrollWidth, "pinned to the latest candle");
   assert.ok(expected > 900 * 3);
