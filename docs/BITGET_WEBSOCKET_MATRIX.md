@@ -9,10 +9,9 @@ The browser adapter exposes `window.ETIBitget.subscribeTransport(options, handle
 | Production | UTA V3 JSON | `wss://ws.bitget.com/v3/ws/public` | `wss://ws.bitget.com/v3/ws/private` |
 | Production | UTA V3 SBE | `wss://ws.bitget.com/v3/ws/public/sbe` | Not applicable |
 | Demo | UTA V3 JSON | `wss://wspap.bitget.com/v3/ws/public` | `wss://wspap.bitget.com/v3/ws/private` |
-| Demo | UTA V3 SBE | `wss://wspap.bitget.com/v3/ws/public/sbe` | Not applicable |
 | Production | Classic V2 | `wss://ws.bitget.com/v2/ws/public` | `wss://ws.bitget.com/v2/ws/private` |
 
-Bitget does not document a Demo Classic V2 endpoint in this matrix. The adapter deliberately rejects `environment: "demo", account: "classic"` instead of silently routing it to production. SBE is public UTA market data only.
+Bitget does not document a Demo Classic V2 endpoint in this matrix. The adapter deliberately rejects `environment: "demo", account: "classic"` instead of silently routing it to production. SBE is public UTA market data only and is enabled only on the documented production SBE URL; Bitget does not document a separate Demo SBE URL in its endpoint matrix.
 
 ## Browser usage
 
