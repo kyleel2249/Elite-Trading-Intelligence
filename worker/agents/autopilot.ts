@@ -120,21 +120,17 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
     await env.ETI_EXECUTION_LOG.put(claim, "running", { expirationTtl: 60 * 60 * 24 * 3 });
     try {
       const account = accountBySymbol(symbol);
-      if (!account) { outcomes.push({ symbol, status: "blocked", reason: "paper_account_unavailable" }); continue; }
-      if (activeOrders.some((o: any) => o.symbol === symbol)) { outcomes.push({ symbol, status: "skipped", reason: "active_order_already_exists" }); continue; }
-
       const clientOrderId = ("eti-" + symbol + "-" + slot).slice(0, 36);
-      const body = {
-        symbol, interval, account: {
-          equityUsd: account.equityUsd, availableUsd: account.availableUsd,
-          positionQuantity: account.positionQuantity, dailyPnlPct: account.dailyPnlPct,
-          drawdownPct: account.drawdownPct, openRiskPct: account.openRiskPct,
-        },
+      const body: Record<string, unknown> = { symbol, interval };
+      if (account) body.account = {
+        equityUsd: account.equityUsd, availableUsd: account.availableUsd,
+        positionQuantity: account.positionQuantity, dailyPnlPct: account.dailyPnlPct,
+        drawdownPct: account.drawdownPct, openRiskPct: account.openRiskPct,
       };
       const headers = { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN, "content-type": "application/json" };
-      const expectedAction = account.positionQuantity > 0 ? "SELL" : "BUY";
-      body.account.availableUsd = expectedAction === "SELL" ? account.equityUsd : account.availableUsd;
-      if (expectedAction === "BUY" && account.unknownOpenRisk) { outcomes.push({ symbol, status: "blocked", reason: "existing_position_has_no_protective_stop" }); continue; }
+      const expectedAction = account && account.positionQuantity > 0 ? "SELL" : "BUY";
+      const accountPayload = body.account as Record<string, number> | undefined;
+      if (accountPayload && expectedAction === "SELL" && account) accountPayload.availableUsd = account.equityUsd;
       // Run the complete twelve-agent council first for every scheduled symbol.
       // Authenticated opt-in recording keeps every automatic decision (including NO_TRADE)
       // in the durable D1 archive before any strategy gate can short-circuit the cycle.
@@ -173,6 +169,9 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
         outcomes.push({ symbol, status: "no_trade", action: expectedAction, reason: "omnisignal_strategy_consensus_not_met", council: councilSummary, alignedStrategies: alignedStrategies.length, required: minStrategyAgreement, strategies: strategyResults });
         continue;
       }
+      if (!account) { outcomes.push({ symbol, status: "blocked", reason: "paper_account_unavailable", council: councilSummary, strategies: strategyResults }); continue; }
+      if (activeOrders.some((o: any) => o.symbol === symbol)) { outcomes.push({ symbol, status: "skipped", reason: "active_order_already_exists", council: councilSummary, strategies: strategyResults }); continue; }
+      if (expectedAction === "BUY" && account.unknownOpenRisk) { outcomes.push({ symbol, status: "blocked", reason: "existing_position_has_no_protective_stop", council: councilSummary, strategies: strategyResults }); continue; }
       if (expectedAction === "BUY" && activePositions.length + pendingEntryCount + submitted >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions", council: councilSummary, strategies: strategyResults }); continue; }
       const executeBody = { ...body, execution: {
         broker: "eti_paper", clientOrderId, riskConfirmed: true,
