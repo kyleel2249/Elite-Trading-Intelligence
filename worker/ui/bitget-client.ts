@@ -11,20 +11,35 @@ function millis(v){var n=num(v);return n===null?null:n<1e12?n*1000:n}
 function goodStatus(x){if(x===undefined||x===null||x==="")return true;return ["online","normal","trading","1"].indexOf(String(x).toLowerCase())>=0}
 function truth(v){return v===true||["true","yes","1"].indexOf(String(v==null?"":v).toLowerCase())>=0}
 async function request(pathV3,pathsV2){
- var paths=[];if(pathV3)paths.push({path:pathV3,version:"v3"});(pathsV2||[]).forEach(function(p){paths.push({path:p,version:"v2"})});
- var attempts=[];
- for(var h=0;h<HOSTS.length;h++){
-  for(var i=0;i<paths.length;i++){
-   var full=HOSTS[h]+paths[i].path;
-   try{
-    var res=await fetch(full,{method:"GET",mode:"cors",credentials:"omit",cache:"no-store",headers:{accept:"application/json"},signal:AbortSignal.timeout(10000)});
-    var body=await res.json().catch(function(){return null});
-    attempts.push(full+":"+res.status);
-    if(res.ok&&body&&body.code==="00000"&&body.data!==undefined)return {data:body.data,host:HOSTS[h],version:paths[i].version};
-   }catch(e){attempts.push(full+":"+(e&&e.name?e.name:"network_or_cors_error"))}
-  }
+ // All REST reads go through ETI's same-origin Worker API. Browsers cannot reliably
+ // read Bitget REST responses directly because of CORS; the Worker owns upstream
+ // retries, response validation and the D1 catalogue fallback.
+ if(!pathV3)throw new Error("Bitget REST request requires a V3 route descriptor");
+ var u=new URL(pathV3,window.location.origin),category=u.searchParams.get("category")||"SPOT",symbol=u.searchParams.get("symbol")||"",endpoint=u.pathname.split("/").pop(),market=category==="MARGIN"?"margin":category==="SPOT"?"spot":"futures";
+ var route=endpoint==="candles"?"klines":endpoint==="orderbook"?"depth":endpoint==="fills"?"trades":endpoint==="tickers"?"ticker":endpoint==="instruments"?"symbols":null;
+ if(!route)throw new Error("Unsupported Bitget public REST route: "+endpoint);
+ var params=new URLSearchParams({venue:"bitget"});
+ if(route==="symbols"){
+  params.set("market",market);
+  if(market==="futures")params.set("category",category);
+ }else{
+  params.set("market",market==="margin"?"margin":market);
+  params.set("symbol",symbol);
+  if(route==="klines"){params.set("interval",u.searchParams.get("interval")||"1m");params.set("limit",u.searchParams.get("limit")||"300");}
+  else if(route==="depth"||route==="trades")params.set("limit",u.searchParams.get("limit")||"50");
+  if(market==="futures")params.set("category",category);
  }
- throw new Error("Bitget public REST failed after trying V3/V2 endpoints and both public hosts. Check browser network/CORS restrictions. "+attempts.join(" | "));
+ var res;
+ try{res=await fetch("/api/market/"+route+"?"+params.toString(),{method:"GET",credentials:"same-origin",cache:"no-store",headers:{accept:"application/json"},signal:AbortSignal.timeout(15000)});}
+ catch(e){throw new Error("ETI Bitget proxy network error: "+(e&&e.name||"fetch_failed"));}
+ var body=await res.json().catch(function(){return null});
+ if(!res.ok)throw new Error("ETI Bitget proxy "+res.status+": "+(body&& (body.detail||body.error||body.message)||"invalid response"));
+ if(route==="symbols"){
+  var rows=(body&&body.symbols||[]).map(function(r){return {symbol:r[0],baseCoin:r[1],quoteCoin:r[2],status:"online",type:r[7]||"perpetual",maxCrossedLeverage:r[8],maxIsolatedLeverage:r[9],isIsolatedBaseBorrowable:r[10],isIsolatedQuoteBorrowable:r[11],isCrossBorrowable:r[12]};});
+  return {data:rows,host:"eti-worker",version:"proxy",meta:body};
+ }
+ if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){return {T:t.time,p:String(t.price),q:String(t.qty),m:!!t.isBuyerMaker};});
+ return {data:body,host:"eti-worker",version:"proxy"};
 }
 function parseCandles(data){
  return (Array.isArray(data)?data:[]).map(function(r){
@@ -69,7 +84,7 @@ function firstNumber(){for(var i=0;i<arguments.length;i++){var n=num(arguments[i
 function parseTicker(data){
  var t=Array.isArray(data)?data[0]:(data||{}),last=firstNumber(t.lastPr,t.lastPrice),open=firstNumber(t.openPrice24h,t.open,t.open24h),pct=firstNumber(t.price24hPcnt,t.priceChangePercent,t.change24h);
  if(pct!==null)pct=pct*100;else pct=open&&last!==null?(last-open)/open*100:0;
- return {lastPrice:last,highPrice:firstNumber(t.highPrice24h,t.high24h),lowPrice:firstNumber(t.lowPrice24h,t.low24h),volume:firstNumber(t.baseVolume,t.volume24h,t.baseVol),quoteVolume:firstNumber(t.quoteVolume,t.turnover24h,t.usdtVolume),priceChangePercent:pct,fundingRate:firstNumber(t.fundingRate),openInterest:firstNumber(t.openInterest,t.holdingAmount),markPrice:firstNumber(t.markPrice),indexPrice:firstNumber(t.indexPrice),bidPrice:firstNumber(t.bid1Price,t.bidPr),askPrice:firstNumber(t.ask1Price,t.askPr),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
+ return {lastPrice:last,highPrice:firstNumber(t.highPrice24h,t.high24h,t.highPrice),lowPrice:firstNumber(t.lowPrice24h,t.low24h,t.lowPrice),volume:firstNumber(t.baseVolume,t.volume24h,t.baseVol,t.volume),quoteVolume:firstNumber(t.quoteVolume,t.turnover24h,t.usdtVolume),priceChangePercent:pct,fundingRate:firstNumber(t.fundingRate),openInterest:firstNumber(t.openInterest,t.holdingAmount),markPrice:firstNumber(t.markPrice),indexPrice:firstNumber(t.indexPrice),bidPrice:firstNumber(t.bid1Price,t.bidPr),askPrice:firstNumber(t.ask1Price,t.askPr),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
 }
 async function context(opts){
  var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=market==="futures"?(opts.category||"USDT-FUTURES"):"SPOT",futures=market==="futures",depthLimit=Math.max(5,Math.min(100,Number(opts.depthLimit)||20)),tradeLimit=Math.max(1,Math.min(100,Number(opts.tradeLimit)||50));
