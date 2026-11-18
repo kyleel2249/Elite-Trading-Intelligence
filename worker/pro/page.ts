@@ -300,7 +300,7 @@ async function loadSys(){
  $('by').className='';$('by').innerHTML=h;
 }
 async function refreshAll(){
- SEQ++;SIG=null;AGENT=null;LV=[];
+ SEQ++;SIG=null;AGENT=null;LV=[];ENGINE_LEVELS={};
  [['bs','fs'],['ba','fa'],['bst','fst']].forEach(function(p){$(p[0]).className='mut';$(p[0]).textContent='Loading…';$(p[1]).textContent='';});
  $('frc').textContent='';$('bfv').textContent='';
  await loadMarket();
