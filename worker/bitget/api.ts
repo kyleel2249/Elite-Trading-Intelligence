@@ -2,6 +2,7 @@
 // This module signs only allowlisted GET requests. Explicit live order placement is isolated in trading.ts; no transfer or withdrawal path is exposed.
 import { authorized } from "../execution.ts";
 import { bitgetAwareFetch, listBitgetMarginSymbols } from "../market.ts";
+import { catalogueStatus } from "./catalogue.ts";
 
 export type BitgetMarket = "spot" | "margin-crossed" | "margin-isolated" | "usdt-futures" | "usdc-futures" | "coin-futures";
 export const BITGET_MARKETS: BitgetMarket[] = ["spot", "margin-crossed", "margin-isolated", "usdt-futures", "usdc-futures", "coin-futures"];
@@ -240,6 +241,10 @@ export async function handleBitget(req: Request, env: Record<string, any>, deps:
   if (sub === "/margin-pairs" && req.method === "GET") {   // public data, no credentials
     try { const pairs = await listMarginPairs(deps); return reply({ venue: "bitget", market: "margin", count: pairs.length, pairs }); }
     catch (e) { return reply({ error: e instanceof BitgetError ? e.code : "failed", message: e instanceof BitgetError ? e.message : undefined }, 502); }
+  }
+  if (sub === "/catalogue" && req.method === "GET") {   // public data: pair counts, freshness and listing changes; no credentials
+    const r = await catalogueStatus(env, (deps.now ?? Date.now)());
+    return reply(r.body, r.status);
   }
   if (!(await authorized(req, env as any))) return reply({ error: "unauthorized" }, 401);
   const c = bitgetCreds(env);

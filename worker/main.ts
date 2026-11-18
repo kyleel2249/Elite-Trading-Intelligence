@@ -39,6 +39,7 @@ import { withWallet } from "./wallet/route.ts";
 import { withChainView } from "./chain/routes.ts";
 import { withChainBackend } from "./chain/backend.ts";
 import { runFuturesMonitor } from "./futures-monitor.ts";
+import { runBitgetCatalogueSync } from "./bitget/catalogue.ts";
 import { runGuardedPaperCycle } from "./paper-guard.ts";
 import { runUniverseBatch, UNIVERSE_CRON } from "./algo/universe.ts";
 import { manageAccount } from "./algo/manage.ts";
@@ -132,6 +133,8 @@ export default {
     }
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
+      // Every minute: refresh and persist every Bitget spot, futures (USDT/USDC/coin-margined) and margin pair. Never throws; set ETI_BITGET_CATALOGUE_SYNC=false to disable.
+      if (env.ETI_BITGET_CATALOGUE_SYNC !== "false") ctx.waitUntil(runBitgetCatalogueSync(env).then(() => undefined, e => console.error("bitget catalogue sync failed", e instanceof Error ? e.message : e)));
       ctx.waitUntil(runJournalCycle(env).then(() => undefined, () => undefined)); // journal backfill (throttled inside) and prediction evaluation
       ctx.waitUntil(runProfitCycle(env as any).then(() => undefined, e => console.error("profit cycle failed", e instanceof Error ? e.message : e))); // recognise confirmed simulated results and allocate (throttled inside)
       ctx.waitUntil(runPortfolioCycle(env).then(() => undefined, e => console.error("portfolio cycle failed", e instanceof Error ? e.message : e))); // match resting paper orders and exits on every closed 1m bar; sync testnet fills

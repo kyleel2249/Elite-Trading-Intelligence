@@ -20,7 +20,26 @@ The common market endpoints accept `venue=bitget`:
 - `GET /api/market/trades?venue=bitget&symbol=BTCUSDT`
 - `GET /api/market/ticker?venue=bitget&symbol=BTCUSDT`
 
-Use `market=futures` and an explicit Bitget futures `category` for derivatives. Use `market=margin` for margin-enabled pairs discovered from Bitget's MARGIN instrument catalogue. Bitget exposes margin pairs from its MARGIN instrument catalogue (V3) or Classic V2 `/api/v2/margin/currencies` fallback, including cross/isolated borrowability and leverage limits. The underlying spot candles, order book and ticker use the SPOT market-data category; V3 margin fills use MARGIN, while the V2 fallback uses the public spot fills tape. ETI keeps the margin eligibility catalogue distinct from ordinary spot listings and never substitutes another exchange's data. The symbol catalogue is refreshed on a 60-second cache; public REST calls use short cache windows and strict payload validation. Bitget V3's documented candle intervals are used directly; 2h, 8h, 3d, weekly and monthly chart bars are aggregated from hourly or daily candles rather than sending unsupported interval strings.
+Use `market=futures` and an explicit Bitget futures `category` for derivatives. Use `market=margin` for margin-enabled pairs discovered from Bitget's MARGIN instrument catalogue. Bitget exposes margin pairs from its MARGIN instrument catalogue (V3) or Classic V2 `/api/v2/margin/currencies` fallback, including cross/isolated borrowability and leverage limits. The underlying spot candles, order book and ticker use the SPOT market-data category; V3 margin fills use MARGIN, while the V2 fallback uses the public spot fills tape. ETI keeps the margin eligibility catalogue distinct from ordinary spot listings and never substitutes another exchange's data. The symbol catalogue is refreshed every minute by cron (see "Pair catalogue sync") and cached for 60 seconds per isolate; public REST calls use short cache windows and strict payload validation. Bitget V3's documented candle intervals are used directly; 2h, 8h, 3d, weekly and monthly chart bars are aggregated from hourly or daily candles rather than sending unsupported interval strings.
+
+## Pair catalogue sync (every minute)
+
+All Bitget pairs (spot, USDT-/USDC-/coin-margined futures including delivery contracts, and the margin list) are kept in sync by the existing **every-minute cron** (`* * * * *`), not only when someone opens the dashboard.
+
+| Piece | What it does |
+|---|---|
+| `worker/bitget/catalogue.ts` | Every minute fetches the five categories (`SPOT`, `USDT-FUTURES`, `USDC-FUTURES`, `COIN-FUTURES`, `MARGIN`) bypassing the in-memory and Cloudflare edge caches, and persists them in D1 (migration `0019_bitget_catalogue.sql`, applied automatically by the deploy workflow). |
+| Change tracking | Listings and delistings between two successful refreshes are stored (30-day retention). The first load of a category is the baseline and produces no events. "Listed" means first seen by ETI, not Bitget's own listing time. |
+| Partial-failure safety | Each category is fetched independently. If one fails (for example COIN-FUTURES times out), its last confirmed pairs are **kept** and reported as `carried` with their real age; they are never treated as delisted. A category that never synced and is unreachable is reported `missing` with zero pairs. Nothing is invented. |
+| Write economy | An unchanged list costs a one-row `UPDATE` per category; the full JSON is rewritten only when the content hash changes. |
+| `GET /api/bitget/catalogue` | Public status: `state` (`fresh` = every category confirmed within 150 s and the last run succeeded; `degraded`; `stale`; `never_synced`), per-category pair counts, confirmation age and last error, totals, consecutive failures and the 50 most recent listings/delistings. |
+| Snapshot fallback | `/api/market/symbols?venue=bitget` uses the D1 snapshot, labelled `stale` with host `eti-d1-snapshot`, when Bitget cannot be reached (or fills a failed futures product type from it). Without a snapshot an outage is still an honest 502. |
+| Python origin | `app/market/symbols.py` now lists Bitget spot **and** all three futures products (previously spot only), carries a failed category forward, tracks new and delisted pairs per market (a futures listing is no longer hidden by a spot pair of the same name), includes Bitget in its one-minute background refresh, and starts that refresh at boot (`SYMBOL_SYNC_ENABLED=false` disables it). `GET /api/market/symbols?provider=bitget&market=futures&product_type=COIN-FUTURES` filters; `GET /api/market/symbols/sync-status` reports the last result and recent delistings. |
+| Browser | The pair picker re-reads every 60 s and now keeps a category's last known pairs if that category fails, with a warning, instead of dropping them. |
+
+Set `ETI_BITGET_CATALOGUE_SYNC=false` to switch the Worker cron sync off. If Cloudflare egress is blocked by Bitget, the Worker sync reports the real error class in `/api/bitget/catalogue` (state `stale`/`degraded`) instead of hiding it; the Python origin sync is independent of Cloudflare egress.
+
+Known limits: the browser pair picker still labels every Bitget pair `crypto` (the Worker and Python classifiers are richer), so metals/stock-token filters are only accurate for Worker-served lists.
 
 ## Account, fills and history
 
@@ -60,4 +79,4 @@ The existing private account, fill-history and live-order adapter is retained on
 
 ## Verification status
 
-Automated tests cover request routing, all Bitget public product categories, candle normalization, symbol catalogues, margin catalogue, authentication boundaries and malformed upstream data. Production verification still requires the deployed Worker to reach Bitget from its Cloudflare egress and, for private account routes, valid Bitget credentials and KV configuration.
+Automated tests cover request routing, all Bitget public product categories, candle normalization, symbol catalogues, margin catalogue, authentication boundaries and malformed upstream data. The catalogue sync is tested against real SQLite (the actual migration) and mocked Bitget payloads, not the live exchange. Production verification still requires the deployed Worker to reach Bitget from its Cloudflare egress (check `GET /api/bitget/catalogue` after deploy: `state` should be `fresh`) and, for private account routes, valid Bitget credentials and KV configuration.

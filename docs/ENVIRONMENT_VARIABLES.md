@@ -68,6 +68,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `BITGET_API_KEY` | secret | Bitget API key. Read permission is sufficient for account snapshots; the separate live-order route requires trade permission. Keep withdrawal permission disabled. Also accepted: `BITGET_KEY` and `BITGET_ACCESS_KEY`. |
 | `BITGET_API_SECRET` | secret | Bitget API secret. Also accepted: `BITGET_SECRET_KEY` and `BITGET_SECRET`. |
 | `BITGET_API_PASSPHRASE` | secret | Bitget API passphrase. Also accepted: `BITGET_PASSPHRASE`. |
+| `ETI_BITGET_CATALOGUE_SYNC` | config | Every-minute Bitget pair catalogue sync (spot, USDT/USDC/coin-margined futures, margin) into D1. On by default; set `false` to disable. See docs/BITGET.md. |
 | `ETI_BITGET_BACKFILL_DAYS` | config | First-sync look-back for Bitget fills (1-90, default 7). |
 | `ETI_BITGET_LIVE_ENABLED` | config | `true` enables the separately authenticated Bitget live-order adapter. The master ETI execution token, Bitget trade-enabled credentials, explicit order confirmation, kill-switch check, idempotency and notional/leverage limits remain required. |
 | `ETI_BITGET_EGRESS_VERIFIED` | config | Must be `true` before Bitget live orders are available. Keep unset until private Bitget API connectivity from the Cloudflare Worker is independently verified; public browser-direct market data does not satisfy this gate. |

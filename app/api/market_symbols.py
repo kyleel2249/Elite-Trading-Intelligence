@@ -38,6 +38,8 @@ async def list_symbols(
     q: str = Query("", max_length=32),
     quote: str = Query("", max_length=12),
     exchange: str = Query("", max_length=12, description="Filter by exchange / MIC, e.g. XETR or FOREX"),
+    market: Literal["", "spot", "futures", "linear", "inverse"] = Query("", description="Filter by market: spot or futures (Bitget), spot, linear or inverse (Bybit)"),
+    product_type: Literal["", "USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"] = Query("", description="Bitget futures product type"),
     new_only: bool = False,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0, le=100000),
@@ -46,7 +48,7 @@ async def list_symbols(
 ):
     """Tradable pairs/instruments: Bybit spot and perpetuals (public), US stocks (Alpaca keys), forex/CFDs (OANDA keys),
     non-US stocks and forex pairs (Twelve Data key). Each source reports ok / stale / unavailable / not_configured.
-    The Bybit and other enabled lists re-sync every minute in the background (started on first use) and expire after 60 s on
+    Bybit, Bitget (spot and all futures) and other enabled lists re-sync every minute in the background (started at boot) and expire after 60 s on
     read, so newly listed pairs appear within about a minute. `refresh=true` forces a re-read (rate limited);
     `new_only=true` shows only pairs this server first saw after its first load of that exchange."""
     sym_mod.ensure_sync_started(settings)
@@ -59,6 +61,10 @@ async def list_symbols(
     ex = (exchange or "").strip().upper()
     if ex:
         items = [i for i in items if (i.get("exchange") or "").upper() == ex]
+    if market:
+        items = [i for i in items if i.get("market") == market]
+    if product_type:
+        items = [i for i in items if i.get("product_type") == product_type]
     matched = sym_mod.search(items, q, quote, new_only)
     return {"total": len(matched), "limit": limit, "offset": offset, "items": matched[offset:offset + limit],
             "sources": sources, "sync": sym_mod.sync_status()}
@@ -66,7 +72,7 @@ async def list_symbols(
 
 @router.get("/api/market/symbols/sync-status")
 async def symbols_sync_status(settings: Settings = Depends(get_settings)):
-    """State of the one-minute Bybit pair sync (runs, last run, last error, baseline providers)."""
+    """State of the one-minute pair sync (runs, last run and per-source result, last error, baseline providers, recent delistings)."""
     sym_mod.ensure_sync_started(settings)
     return sym_mod.sync_status()
 

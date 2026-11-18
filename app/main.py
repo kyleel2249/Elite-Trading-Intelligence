@@ -182,10 +182,19 @@ async def lifespan(app: FastAPI):
     if (alpha_job is not None and getattr(settings, "alpha_research_enabled", False)
             and (getattr(settings, "app_env", "") or "").strip().lower() != "test"):
         await _start_component("alpha_research_job", alpha_job.start)
+    if getattr(settings, "symbol_sync_enabled", True) and (getattr(settings, "app_env", "") or "").strip().lower() != "test":
+        # Keep exchange pair lists (Bybit, Bitget spot + futures, Alpaca) synced every minute from boot, not only after the first API call.
+        from app.market import symbols as symbol_catalogue
+        symbol_catalogue.ensure_sync_started(settings)
     try:
         yield
     finally:
         # Keep cleaning up even if one component fails during shutdown.
+        try:
+            from app.market import symbols as symbol_catalogue
+            await symbol_catalogue.stop_sync()
+        except Exception:
+            logger.warning("shutdown: symbol sync did not stop cleanly", exc_info=True)
         stops = [execution_supervisor_job.stop(), paper_job.stop(), investor_monitor_job.stop(),
                  prediction_resolver_job.stop(), reconcile_job.stop(), mtm_job.stop(), stream_hub.stop()]
         if alpha_job is not None:

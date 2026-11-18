@@ -4,8 +4,9 @@
  * or public-market API keys are required. Venue selection is explicit and never cross-substituted.
  */
 
-export interface MarketEnv { MARKET_PROVIDER_ORDER?: string }
+export interface MarketEnv { MARKET_PROVIDER_ORDER?: string; /** D1 binding; when present, the persisted Bitget catalogue is the labelled fallback if Bitget cannot be reached. */ ETI_PORTFOLIO_DB?: unknown }
 
+import { snapshotRows, type CatalogueCategory, type CatalogueDb } from "./bitget/catalogue-store.ts";
 export type ProviderId = "binance" | "bybit" | "okx" | "binance_usdm" | "bitget" | "bitget_mix";
 export type MarketKind = "spot" | "futures";
 /** Where a pair is listed. Binance is the default; Bitget is selected explicitly per request (venue=bitget) and is never silently substituted for Binance data. */
@@ -561,7 +562,7 @@ export interface SymbolRow {
   marginBaseBorrowable?: boolean; marginQuoteBorrowable?: boolean; marginCrossBorrowable?: boolean;
   /** Bitget derivative contract type */ contractType?: "perpetual" | "delivery";
 }
-interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string }
+interface SymbolCacheEntry { at: number; rows: SymbolRow[]; host: string; /** Bitget categories that failed on the refresh that produced this entry; such an entry is never served as a fresh cache hit. */ failed?: string[] }
 const symbolCache: Partial<Record<MarketKind, SymbolCacheEntry>> = {};
 /** The Binance pair list is re-read at most every 10 minutes per isolate; Bitget spot and futures lists use their own 60-second cache. */
 export const SYMBOL_TTL_MS = 10 * 60 * 1000;
@@ -712,9 +713,9 @@ export function bitgetCategory(base: string, quote: string): string {
   }
   return "crypto";
 }
-async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list: any[] | null; status: number | null; errorClass: string | null; host: string }> {
+async function bitgetGet(path: string, fetchImpl: typeof fetch, fresh = false): Promise<{ list: any[] | null; status: number | null; errorClass: string | null; host: string }> {
   try {
-    const res = await bitgetAwareFetch(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bitget.com", referer: "https://www.bitget.com/" }, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 45 } } as RequestInit, fetchImpl);
+    const res = await bitgetAwareFetch(BITGET_BASE + path, { headers: { accept: "application/json", "user-agent": UA, origin: "https://www.bitget.com", referer: "https://www.bitget.com/" }, signal: AbortSignal.timeout(15000), cf: fresh ? { cacheTtl: 0 } : { cacheEverything: true, cacheTtl: 45 } } as RequestInit, fetchImpl);
     const trace = res.headers.get("x-eti-fallback-attempts");
     const host = res.headers.get("x-eti-upstream-host") || (trace ? "api.bitget.com; fallback attempts: " + trace : "api.bitget.com");
     if (!res.ok) return { list: null, status: res.status, errorClass: classifyStatus(res.status), host };
@@ -728,37 +729,47 @@ async function bitgetGet(path: string, fetchImpl: typeof fetch): Promise<{ list:
     return { list, status: res.status, errorClass: null, host };
   } catch (e) { return { list: null, status: null, errorClass: e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error", host: "api.bitget.com" }; }
 }
-/** Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined). Uses an independent 60-second cache and the same stale-list safety policy. */
-export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[] }> {
+/** Bitget category a listed row belongs to: its futures product type, or SPOT. */
+export const bitgetRowCategory = (r: SymbolRow): string => r.pt ?? "SPOT";
+/**
+ * Every pair Bitget lists as tradable: spot, or perpetual futures from all three product types (USDT-, USDC- and coin-margined).
+ * Uses an independent 60-second cache and the same stale-list safety policy.
+ * Each category is fetched on its own. If one fails while others succeed, the failed category's previously known pairs are carried
+ * forward (never dropped) and the category is named in `failed`, so a single timeout cannot make a whole product type disappear.
+ * An entry produced by a partial refresh is never served as a fresh cache hit, so the next call retries immediately.
+ * `fresh: true` skips the in-memory cache and Cloudflare's edge cache (used by the every-minute sync).
+ */
+export async function listBitgetSymbols(market: MarketKind = "spot", fetchImpl: typeof fetch = fetch, now: () => number = Date.now, opts: { fresh?: boolean } = {}): Promise<{ rows: SymbolRow[]; host: string; cached: boolean; stale: boolean; fetchedAt: number; attempts: SymbolAttempt[]; failed: string[] }> {
   const hit = bitgetCache[market];
-  if (hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [] };
-  const attempts: SymbolAttempt[] = [], rows: SymbolRow[] = [];
+  if (!opts.fresh && hit && !hit.failed?.length && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at, attempts: [], failed: [] };
+  const attempts: SymbolAttempt[] = [], rows: SymbolRow[] = [], failed: string[] = [];
   const add = (x: any, pt?: BitgetProductType) => {
     const sym = String(x?.symbol ?? ""), b = String(x?.baseCoin ?? "").toUpperCase(), q = String(x?.quoteCoin ?? "").toUpperCase();
     if (!/^[A-Z0-9]{5,20}$/.test(sym) || !b || !q) return;
     rows.push({ s: sym, b, q, m: market, c: bitgetCategory(b, q), v: "bitget", ...(pt ? { pt } : {}) });
   };
   const categories = market === "spot" ? ["SPOT"] : BITGET_PRODUCT_TYPES;
-  const parts = await Promise.all(categories.map(async (category) => ({ category, r: await bitgetGet("/api/v3/market/instruments?category=" + category, fetchImpl) })));
+  const parts = await Promise.all(categories.map(async (category) => ({ category, r: await bitgetGet("/api/v3/market/instruments?category=" + category, fetchImpl, opts.fresh) })));
   for (const { category, r } of parts) {
     if (r.list) r.list.filter((x) => x && BITGET_OK_STATUS.has(String(x.status ?? "").toLowerCase()) && (category === "SPOT" || !x.type || ["perpetual", "delivery"].includes(String(x.type).toLowerCase()))).forEach((x) => {
       const before = rows.length;
-      add(x, category === "SPOT" ? undefined : category);
+      add(x, category === "SPOT" ? undefined : category as BitgetProductType);
       if (category !== "SPOT" && rows.length > before) rows[rows.length - 1].contractType = String(x.type ?? "perpetual").toLowerCase() === "delivery" ? "delivery" : "perpetual";
     });
-    else attempts.push({ host: r.host + " (" + category + ")", status: r.status, errorClass: r.errorClass });
+    else { failed.push(category); attempts.push({ host: r.host + " (" + category + ")", status: r.status, errorClass: r.errorClass }); }
   }
+  if (failed.length && hit) rows.push(...hit.rows.filter((x) => failed.includes(bitgetRowCategory(x)))); // carry forward, never drop
   rows.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : (a.pt ?? "") < (b.pt ?? "") ? -1 : 1));
   const actualHost = parts.find(part => part.r.list)?.r.host || BITGET_BASE;
-  if (rows.length) { bitgetCache[market] = { at: now(), rows, host: actualHost }; return { rows, host: actualHost, cached: false, stale: false, fetchedAt: now(), attempts }; }
+  if (rows.length) { bitgetCache[market] = { at: now(), rows, host: actualHost, ...(failed.length ? { failed } : {}) }; return { rows, host: actualHost, cached: false, stale: failed.length > 0, fetchedAt: now(), attempts, failed }; }
   if (!attempts.length) attempts.push({ host: BITGET_BASE, status: 200, errorClass: "empty_symbols" });
-  if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at, attempts };
+  if (hit) return { rows: hit.rows, host: hit.host, cached: true, stale: true, fetchedAt: hit.at, attempts, failed: failed.length ? failed : categories };
   throw new AllProvidersFailed(attempts.map((a) => ({ provider: (market === "futures" ? "bitget_mix" : "bitget") as ProviderId, host: a.host, status: a.status, ok: false, errorClass: a.errorClass, latencyMs: 0 })));
 }
-export async function listBitgetMarginSymbols(fetchImpl: typeof fetch = fetch, now: () => number = Date.now) {
+export async function listBitgetMarginSymbols(fetchImpl: typeof fetch = fetch, now: () => number = Date.now, opts: { fresh?: boolean } = {}) {
   const hit = bitgetMarginCache;
-  if (hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at };
-  const r = await bitgetGet("/api/v3/market/instruments?category=MARGIN", fetchImpl);
+  if (!opts.fresh && hit && now() - hit.at < BITGET_SYMBOL_TTL_MS) return { rows: hit.rows, host: hit.host, cached: true, stale: false, fetchedAt: hit.at };
+  const r = await bitgetGet("/api/v3/market/instruments?category=MARGIN", fetchImpl, opts.fresh);
   if (r.list) {
     const flag = (v: unknown) => v === true || ["true", "yes", "1"].includes(String(v ?? "").toLowerCase());
     const rows = r.list.filter(x => x && String(x.status ?? "").toLowerCase() === "online" && /^[A-Z0-9]{5,20}$/.test(String(x.symbol ?? "")))
@@ -831,6 +842,12 @@ export async function listBybitSymbols(market: MarketKind = "spot", fetchImpl: t
   throw new AllProvidersFailed(attempts.map(a => ({ provider: "bybit", host: a.host, status: a.status, ok: false, errorClass: a.errorClass ?? "empty_symbols", latencyMs: 0 })));
 }
 
+/** Stored Bitget pairs for the given categories, or nothing when D1 is unbound or unreadable. Always labelled stale by the caller. */
+async function bitgetSnapshot(env: MarketEnv, categories: CatalogueCategory[]): Promise<{ rows: SymbolRow[]; fetchedAt: number | null }> {
+  const db = env?.ETI_PORTFOLIO_DB as CatalogueDb | undefined;
+  if (!db) return { rows: [], fetchedAt: null };
+  try { return await snapshotRows(db, categories); } catch { return { rows: [], fetchedAt: null }; }
+}
 export async function handleMarket(request: Request, env: MarketEnv): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "access-control-allow-methods": "GET,OPTIONS" } });
@@ -866,16 +883,40 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
         const r = await listBitgetMarginSymbols(marketFetch); rows.push(...r.rows);
         sources.MARGIN = { host: r.host, count: r.rows.length, cached: r.cached, stale: r.stale };
       } catch (e) {
-        warnings.push({ market: "margin", venue: "bitget", error: e instanceof AllProvidersFailed ? "upstream_unavailable" : "catalogue_processing_error" });
+        const snap = await bitgetSnapshot(env, ["MARGIN"]);
+        if (snap.rows.length) {
+          rows.push(...snap.rows);
+          sources.MARGIN = { host: "eti-d1-snapshot", count: snap.rows.length, cached: true, stale: true, fetchedAt: snap.fetchedAt ? new Date(snap.fetchedAt).toISOString() : null };
+          warnings.push({ market: "margin", venue: "bitget", error: "served_from_snapshot" });
+        } else warnings.push({ market: "margin", venue: "bitget", error: e instanceof AllProvidersFailed ? "upstream_unavailable" : "catalogue_processing_error" });
       }
     } else {
       const jobs = want === "all" ? (["spot", "futures"] as MarketKind[]) : [want as MarketKind];
       const settled = await Promise.allSettled(jobs.map(market => listBitgetSymbols(market, marketFetch)));
-      settled.forEach((r, i) => {
-        const market = jobs[i];
-        if (r.status === "fulfilled") { const filtered = categoryQ && market === "futures" ? r.value.rows.filter(x => x.pt === categoryQ) : r.value.rows; rows.push(...filtered); sources[market] = { host: r.value.host.replace("https://", ""), count: filtered.length, fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale }; }
-        else warnings.push({ market, venue: "bitget", error: "unavailable" });
-      });
+      for (let i = 0; i < settled.length; i++) {
+        const r = settled[i], market = jobs[i], cats = (market === "spot" ? ["SPOT"] : BITGET_PRODUCT_TYPES) as CatalogueCategory[];
+        let list: SymbolRow[], meta: Record<string, unknown>;
+        if (r.status === "fulfilled") {
+          list = r.value.rows;
+          meta = { host: r.value.host.replace("https://", ""), fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale };
+          if (r.value.failed.length) {
+            meta.partial = r.value.failed;
+            warnings.push({ market, venue: "bitget", error: "partial_refresh", categories: r.value.failed });
+            const missing = r.value.failed.filter(c => !list.some(x => bitgetRowCategory(x) === c)) as CatalogueCategory[];
+            const snap = missing.length ? await bitgetSnapshot(env, missing) : { rows: [] as SymbolRow[], fetchedAt: null };
+            if (snap.rows.length) { list = [...list, ...snap.rows]; warnings.push({ market, venue: "bitget", error: "served_from_snapshot", categories: missing }); }
+          }
+        } else {
+          const snap = await bitgetSnapshot(env, cats);
+          if (!snap.rows.length) { warnings.push({ market, venue: "bitget", error: "unavailable" }); continue; }
+          list = snap.rows;
+          meta = { host: "eti-d1-snapshot", fetchedAt: snap.fetchedAt ? new Date(snap.fetchedAt).toISOString() : null, cached: true, stale: true };
+          warnings.push({ market, venue: "bitget", error: "served_from_snapshot" });
+        }
+        list = [...list].sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : (a.pt ?? "") < (b.pt ?? "") ? -1 : 1));
+        const filtered = categoryQ && market === "futures" ? list.filter(x => x.pt === categoryQ) : list;
+        rows.push(...filtered); sources[market] = { ...meta, count: filtered.length };
+      }
     }
     if (!rows.length) return jsonResp({ error: "symbols_unavailable", detail: venueQ + " did not return the requested instrument list.", warnings }, 502);
     const categories = venueQ === "bybit" ? (want === "margin" ? ["spot-margin"] : want === "all" ? ["spot", "linear", "inverse"] : [categoryQ || (want === "futures" ? "linear" : "spot")])

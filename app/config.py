@@ -103,6 +103,7 @@ class Settings(BaseSettings):
 
     # --- Global Alpha Intelligence ---
     alpha_research_enabled: bool = True
+    symbol_sync_enabled: bool = True   # one-minute refresh of Bybit / Bitget / Alpaca pair lists, started at boot (never in the test environment)
     alpha_research_interval_seconds: int = 3600
     alpha_crypto_scan_limit: int = 40
     alpha_equity_universe: str = ""  # comma separated tickers to always scan

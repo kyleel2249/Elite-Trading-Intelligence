@@ -38,7 +38,9 @@ def test_bitget_lists_only_online_pairs():
     body = {"code": "00000", "data": [
         {"symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT", "status": "online"},
         {"symbol": "OLDUSDT", "baseCoin": "OLD", "quoteCoin": "USDT", "status": "offline"}]}
-    items = run(sym._fetch_bitget(httpx.MockTransport(lambda r: httpx.Response(200, json=body))))
+    empty = {"code": "00000", "data": []}     # the futures products are separate endpoints; this test is about the spot list
+    items = run(sym._fetch_bitget(httpx.MockTransport(
+        lambda r: httpx.Response(200, json=body if r.url.path == "/api/v2/spot/public/symbols" else empty))))
     assert [i["symbol"] for i in items] == ["BTCUSDT"] and items[0]["exchange"] == "BITGET" and items[0]["quote"] == "USDT"
 
 

@@ -83,3 +83,26 @@ test("Bitget browser adapter normalizes candles, order book, trades and derivati
   assert.equal(snapshot.derivatives.fundingRate, 0.0008);
   assert.equal(snapshot.derivatives.openInterest, 12500);
 });
+
+test("Bitget browser catalogue keeps a category's last known pairs when its refresh fails (no silent disappearance)", async () => {
+  const down = new Set<string>();
+  const sandbox: any = {
+    window: {}, AbortSignal, Response,
+    fetch: async (url: string) => {
+      const u = new URL(url), cat = u.searchParams.get("category") || (u.searchParams.get("productType") || "SPOT");
+      if (down.has(cat)) return new Response("boom", { status: 500 });
+      const body = cat === "SPOT"
+        ? [{ symbol: "BTCUSDT", baseCoin: "BTC", quoteCoin: "USDT", status: "online" }]
+        : [{ symbol: cat === "COIN-FUTURES" ? "BTCUSD" : "BTCUSDT", baseCoin: "BTC", quoteCoin: cat === "COIN-FUTURES" ? "USD" : "USDT", status: "online", type: "perpetual" }];
+      return new Response(JSON.stringify({ code: "00000", data: body }), { status: 200 });
+    },
+  };
+  vm.runInNewContext(BITGET_CLIENT_JS, sandbox);
+  const first = await sandbox.window.ETIBitget.symbols("all");
+  assert.equal(first.data.symbols.length, 4);
+  down.add("COIN-FUTURES");
+  const second = await sandbox.window.ETIBitget.symbols("all");
+  assert.equal(second.data.symbols.length, 4, "the coin-margined pair must still be listed");
+  assert.ok(second.data.symbols.some((r: any[]) => r[6] === "COIN-FUTURES"));
+  assert.ok(second.data.warnings.some((w: string) => /COIN-FUTURES refresh failed/.test(w)));
+});
