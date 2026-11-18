@@ -135,8 +135,19 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const expectedAction = account.positionQuantity > 0 ? "SELL" : "BUY";
       body.account.availableUsd = expectedAction === "SELL" ? account.equityUsd : account.availableUsd;
       if (expectedAction === "BUY" && account.unknownOpenRisk) { outcomes.push({ symbol, status: "blocked", reason: "existing_position_has_no_protective_stop" }); continue; }
-      // Omnisignal runs the existing Swift + GainzAlgo engines, FVG, liquidity, flow,
-      // multi-timeframe and validation stack independently for each configured strategy.
+      // Run the complete twelve-agent council first for every scheduled symbol.
+      // Authenticated opt-in recording keeps every automatic decision (including NO_TRADE)
+      // in the durable D1 archive before any strategy gate can short-circuit the cycle.
+      const preflightBody = { ...body, record: true };
+      const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(preflightBody) }), env);
+      const analysis: any = await preflight.json().catch(() => ({}));
+      const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
+      const councilApproved = preflight.ok && decision?.action === expectedAction
+        && confidence >= minConfidence && agreement >= minAgreement
+        && analysis.risk?.approved === true && !["high", "critical"].includes(analysis.security?.severity);
+
+      // Cross-check all four ETI strategy profiles after the council has run. These are
+      // independent gates: a strategy consensus cannot override a council or Risk veto.
       const strategyResults: any[] = [];
       for (const strategy of strategies) {
         try {
@@ -149,18 +160,20 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
         }
       }
       const alignedStrategies = strategyResults.filter(x => x.httpStatus >= 200 && x.httpStatus < 300 && x.tradeable && x.decision === expectedAction && x.confidence >= minOmniConfidence && x.hardFailures.length === 0);
+      const councilSummary = {
+        action: decision?.action || "NO_TRADE", confidence, agreement,
+        riskApproved: analysis.risk?.approved === true, security: analysis.security?.severity || "unknown",
+        auditPersistence: analysis.auditPersistence || "unknown",
+      };
+      if (!councilApproved) {
+        outcomes.push({ symbol, status: "no_trade", action: councilSummary.action, reason: !preflight.ok ? "agent_analysis_unavailable" : decision?.vetoedBy || "agent_council_or_risk_gate_not_met", council: councilSummary, vetoes: analysis.risk?.vetoes || [], strategies: strategyResults });
+        continue;
+      }
       if (alignedStrategies.length < minStrategyAgreement) {
-        outcomes.push({ symbol, status: "no_trade", action: expectedAction, reason: "omnisignal_strategy_consensus_not_met", alignedStrategies: alignedStrategies.length, required: minStrategyAgreement, strategies: strategyResults });
+        outcomes.push({ symbol, status: "no_trade", action: expectedAction, reason: "omnisignal_strategy_consensus_not_met", council: councilSummary, alignedStrategies: alignedStrategies.length, required: minStrategyAgreement, strategies: strategyResults });
         continue;
       }
-      const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(body) }), env);
-      const analysis: any = await preflight.json().catch(() => ({}));
-      const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
-      if (!preflight.ok || decision?.action !== expectedAction || confidence < minConfidence || agreement < minAgreement || analysis.risk?.approved !== true || ["high", "critical"].includes(analysis.security?.severity)) {
-        outcomes.push({ symbol, status: "no_trade", action: decision?.action || "NO_TRADE", confidence, agreement, reason: !preflight.ok ? "analysis_unavailable" : decision?.vetoedBy || "agent_consensus_or_risk_not_met", vetoes: analysis.risk?.vetoes || [], security: analysis.security?.severity || "unknown", strategies: strategyResults });
-        continue;
-      }
-      if (expectedAction === "BUY" && activePositions.length + pendingEntryCount + submitted >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions" }); continue; }
+      if (expectedAction === "BUY" && activePositions.length + pendingEntryCount + submitted >= maxPositions) { outcomes.push({ symbol, status: "skipped", reason: "max_open_positions", council: councilSummary, strategies: strategyResults }); continue; }
       const executeBody = { ...body, execution: {
         broker: "eti_paper", clientOrderId, riskConfirmed: true,
         executionSource: { actorType: "automation", actorId: "eti-multi-agent-autopilot", sourceName: "ETI Multi-Agent Autopilot", strategyId: "commander-consensus", signalId: clientOrderId, triggerReason: "Scheduled multi-agent consensus; internal paper only" },
