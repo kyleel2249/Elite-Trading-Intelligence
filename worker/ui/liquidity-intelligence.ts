@@ -4,7 +4,7 @@ export const LIQUIDITY_JS = String.raw`(function(){
 "use strict";
 if(window.__ETI_LIQUIDITY_BOOTED)return;window.__ETI_LIQUIDITY_BOOTED=true;
 const $=id=>document.getElementById(id),fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
-const state={venue:"bybit",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",depth:null,previous:null,trades:[],candles:[],analysis:null,history:[],ws:null,timer:null,candleAt:0,busy:false,overlay:true,scenarios:true,root:false,lastError:"",sequence:0};
+const state={venue:"bybit",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",depth:null,previous:null,trades:[],candles:[],analysis:null,orderFlow:null,history:[],ws:null,timer:null,candleAt:0,lastOrderFlowAt:0,busy:false,overlay:true,scenarios:true,root:false,lastError:"",sequence:0};
 const maxHistory=90;
 function isRoot(){return !!$("symVenue")&&!$("tt-venue");}
 function readContext(){
@@ -72,12 +72,23 @@ async function poll(force){
   const now=Date.now(),last=state.history[state.history.length-1];
   if(force||!last||now-last.t>900){state.history.push({t:now,mid:(book.bids[0][0]+book.asks[0][0])/2,bids:book.bids.slice(0,45),asks:book.asks.slice(0,45)});state.history=state.history.slice(-maxHistory);saveHistory();}
   await getCandles();
+  await loadOrderFlow();
   const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles};
   const response=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),cache:"no-store"});
   const analysis=await response.json().catch(()=>null);if(!response.ok)throw new Error(analysis?.detail||analysis?.error||"Liquidity analysis failed");
   state.analysis=analysis;setFeed(result.source+" · live snapshot",true);render();drawHeatmap();drawOverlay();
  }catch(e){state.lastError=e?.message||"feed unavailable";setFeed("Feed unavailable · "+state.lastError,false);const note=$("eti-liq-source");if(note)note.textContent="Last successful snapshot retained; "+state.lastError;}
  finally{state.busy=false;}
+}
+async function loadOrderFlow(){
+ if(!state.depth||!state.trades.length||Date.now()-state.lastOrderFlowAt<5000)return;
+ state.lastOrderFlowAt=Date.now();
+ const q=new URLSearchParams({symbol:state.symbol,venue:state.venue,market:state.market==="futures"?"futures":"spot",category:state.category});
+ const trades=state.trades.map(t=>({time:t.time,price:t.price,qty:t.qty,isBuyerMaker:t.side==="sell"}));
+ try{
+  const r=await fetch("/api/analysis/orderflow?"+q,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({provider:state.venue,depth:state.depth,trades,candles:state.candles}),cache:"no-store"});
+  const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(j?.detail||j?.error||"Order-flow history unavailable");state.orderFlow=j;
+ }catch(e){state.orderFlow={dataQuality:{notes:[e?.message||"Order-flow history unavailable"]},liquidityHistory:{status:"unavailable",persistentLevels:[]}};}
 }
 function render(){
  const a=state.analysis;if(!a)return;
@@ -95,7 +106,7 @@ function render(){
  const wallHtml=(side,rows)=>rows.length?rows.slice(0,5).map(x=>'<div class="eti-liq-row"><span class="'+(side==="bid"?"eti-liq-bid":"eti-liq-ask")+'">'+side.toUpperCase()+' · '+fmt(x.price,6)+'</span><b>'+fmt(x.notional,0)+'</b></div>').join(""):'<div class="eti-liq-row"><span>No large walls detected</span></div>';
  $("eti-liq-walls").innerHTML=wallHtml("bid",a.walls.bids)+wallHtml("ask",a.walls.asks);
  $("eti-liq-events").innerHTML='<div class="eti-liq-row"><span>Persistent levels</span><b>'+a.behaviour.persistent+'</b></div><div class="eti-liq-row"><span>Pulled levels</span><b class="eti-liq-warn">'+a.behaviour.pulled+'</b></div><div class="eti-liq-row"><span>Absorbed levels</span><b>'+a.behaviour.absorbed+'</b></div><div class="eti-liq-row"><span>Replenished levels</span><b>'+a.behaviour.replenished+'</b></div>';
- const p=a.priceAction||{};let conf='<div class="eti-liq-row"><span>Liquidity sweep</span><b>'+(p.sweep?p.sweep.direction.toUpperCase()+' · '+fmt(p.sweep.level,6):'None confirmed')+'</b></div><div class="eti-liq-row"><span>Fair value gap</span><b>'+(p.fvg?p.fvg.direction.toUpperCase()+' · '+fmt(p.fvg.low,6)+'–'+fmt(p.fvg.high,6):'None detected')+'</b></div><div class="eti-liq-row"><span>Order-flow alignment</span><b>'+(a.confluence.buyAligned?'Bullish':a.confluence.bearAligned?'Bearish':'Mixed / weak')+'</b></div><div class="eti-liq-row"><span>Market structure</span><b>'+String(p.structure||'unavailable').toUpperCase()+'</b></div>';
+ const persisted=state.orderFlow?.liquidityHistory?.persistentLevels||[];const of=state.orderFlow?.tape||{};if(Number.isFinite(Number(of.deltaPct)))$("eti-liq-delta-sub").textContent=fmt(of.deltaPct,1)+"% tape delta · CVD "+fmt(of.cumulativeDelta,2);if(persisted.length)$("eti-liq-behaviour-sub").textContent="D1/KV persistent bands "+persisted.length+" · local replenishment "+a.behaviour.replenished;const p=a.priceAction||{};let conf='<div class="eti-liq-row"><span>Liquidity sweep</span><b>'+(p.sweep?p.sweep.direction.toUpperCase()+' · '+fmt(p.sweep.level,6):'None confirmed')+'</b></div><div class="eti-liq-row"><span>Fair value gap</span><b>'+(p.fvg?p.fvg.direction.toUpperCase()+' · '+fmt(p.fvg.low,6)+'–'+fmt(p.fvg.high,6):'None detected')+'</b></div><div class="eti-liq-row"><span>Order-flow alignment</span><b>'+(a.confluence.buyAligned?'Bullish':a.confluence.bearAligned?'Bearish':'Mixed / weak')+'</b></div><div class="eti-liq-row"><span>Market structure</span><b>'+String(p.structure||'unavailable').toUpperCase()+'</b></div>';
  $("eti-liq-confluence").innerHTML=conf;
  renderScenarios();
 }
@@ -143,7 +154,7 @@ function startStream(){
 let analyzeAt=0;
 async function analyzeStreamDepth(){
  if(!state.depth||Date.now()-analyzeAt<900)return;analyzeAt=Date.now();
- try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles})});const a=await r.json();if(r.ok){state.analysis=a;render();drawHeatmap();drawOverlay();}}catch(e){}
+ try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles})});const a=await r.json();if(r.ok){state.analysis=a;await loadOrderFlow();render();drawHeatmap();drawOverlay();}}catch(e){}
 }
 function restart(){
  readContext();stopStream();state.depth=null;state.previous=null;state.trades=[];state.candles=[];state.candleAt=0;state.analysis=null;state.history=[];restoreHistory();mount();createChartOverlay();poll(true);startStream();
