@@ -137,6 +137,7 @@ var FUT=(typeof FUTURE==='number'?FUTURE:14);
 var st={on:true,labels:true,mitigated:false,tf:{},bull:'#21d69a',bear:'#ff637d'};
 var DEF_BULL=st.bull,DEF_BEAR=st.bear,allTf=false;
 var res=null,sigKey='',htf={key:'',rows:{},at:{},busy:{},err:{},ver:0},hits=[],selected=null,barTfs='';
+var precisionState={key:'',at:0,busy:false,ids:Object.create(null),error:''};
 var stack=document.getElementById('stack'),cv=document.getElementById('chart');
 function esc2(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function price(v){return typeof fp==='function'?fp(v):String(rnd(v,4));}
@@ -172,6 +173,18 @@ function compute(){
  var inputs=[{timeframe:tf,rows:candles}];
  higher(tf).forEach(function(h){if(htf.rows[h]&&htf.key===marketKey())inputs.push({timeframe:h,rows:htf.rows[h]});});
  res=analyze(tf,inputs,{now:now,includeInactive:st.mitigated});
+ loadPrecision(tf);
+}
+function loadPrecision(tf){
+ var sym=document.getElementById('symbol'),key=marketKey()+'|'+tf;
+ if(!sym||precisionState.busy||(precisionState.key===key&&Date.now()-precisionState.at<60000))return;
+ precisionState.key=key;precisionState.at=Date.now();precisionState.busy=true;
+ var url='/api/analysis/fvg-precision?symbol='+encodeURIComponent(sym.value)+'&timeframe='+encodeURIComponent(tf);
+ fetch(url,{headers:{'accept':'application/json'}}).then(function(r){if(!r.ok)throw Error('precision analysis HTTP '+r.status);return r.json();}).then(function(data){
+  if(precisionState.key!==key)return;
+  var ids=Object.create(null);(data.candidates||[]).forEach(function(c){if(c.highlight==='green'&&c.state==='qualified_fresh')ids[c.id]=c;});
+  precisionState.ids=ids;precisionState.error='';try{drawChart();}catch(_){}
+ }).catch(function(e){if(precisionState.key===key)precisionState.error=(e&&e.message)||'precision analysis unavailable';}).then(function(){precisionState.busy=false;});
 }
 
 function slotOf(t){var lo=0,hi=candles.length;while(lo<hi){var m=(lo+hi)>>1;if(candles[m][0]<t)lo=m+1;else hi=m;}return lo;}
@@ -197,8 +210,8 @@ function paint(){
   if(x1<=x0)return;
   var yu=py(z.upper),yl=py(z.lower),y0=Math.min(yu,yl),h=Math.abs(yl-yu);
   if(y0+h<s.top-6||y0>s.bot+6)return;
-  var col=z.direction==='bullish'?st.bull:st.bear,own=z.timeframe===tf;
-  var alpha=z.active?(0.12+z.strength/100*0.14):0.06;
+  var qualified=!!precisionState.ids[z.id],col=qualified?'#35e879':(z.direction==='bullish'?st.bull:st.bear),own=z.timeframe===tf;
+  var alpha=qualified?0.25:(z.active?(0.12+z.strength/100*0.14):0.06);
   x.globalCompositeOperation='destination-over';
   x.fillStyle=hexRgba(col,alpha);x.fillRect(x0,y0,x1-x0,Math.max(1,h));
   x.lineWidth=own?1.2:1.6;x.strokeStyle=hexRgba(col,z.active?0.85:0.4);x.setLineDash(own?(z.active?[]:[2,3]):[7,3]);
@@ -214,8 +227,8 @@ function paint(){
   texts.forEach(function(t,idx){
    var z=t.z,bull=z.direction==='bullish',lx=Math.max(t.x0+4,4);
    if(t.x1-lx<60||t.h<12||idx>=8)return;
-   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
-   var badge='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+(z.status==='fresh'?'UNFILLED':z.status==='partially_mitigated'?'PARTIALLY FILLED':STATUS[z.status].toUpperCase())+' · '+z.mitigationPct+'% FILLED';
+   var q=precisionState.ids[z.id],head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+(q?' · ETI QUALIFIED · ENTRY '+price(q.entry.price):'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
+   var badge=(q?'GREEN TRADE-ENTRY FVG · ':'FVG ')+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+(z.status==='fresh'?'UNMITIGATED':z.status==='partially_mitigated'?'PARTIALLY FILLED':STATUS[z.status].toUpperCase())+' · '+z.mitigationPct+'% FILLED';
    x.fillStyle=hexRgba(t.col,1);x.textAlign='left';x.fillText(head,lx,t.y0+8);
    if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText(badge+' · gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · formed @'+price(z.formationPrice),lx,t.y0+20);}
    if(t.h>=34&&t.x1-lx>240){x.textAlign='right';x.fillStyle=hexRgba(t.col,1);x.fillText(price(z.upper),t.x1-5,t.y0+8);x.fillText(price(z.lower),t.x1-5,t.y0+t.h-7);x.textAlign='left';}
