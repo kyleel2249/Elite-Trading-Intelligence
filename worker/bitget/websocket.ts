@@ -36,6 +36,7 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   const environment = (url.searchParams.get("environment") || "production") as BitgetWsEnvironment;
   const account = (url.searchParams.get("account") || "uta") as BitgetWsAccount;
   if (!["production", "demo"].includes(environment) || !["uta", "classic"].includes(account)) return jsonError("invalid_transport_selection", 400);
+  try { bitgetWsEndpoint(environment, account, "private"); } catch { return jsonError("unsupported_environment_account_combination", 400); }
   const creds = bitgetPrivateCredentialSet(env, environment, account);
   if (!creds.key || !creds.secret || !creds.passphrase) return jsonError("credentials_missing_for_selected_environment", 503);
 
