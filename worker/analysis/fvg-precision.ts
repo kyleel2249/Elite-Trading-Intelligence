@@ -58,7 +58,8 @@ export function analyzeFvgPrecision(
   if (!(atr > 0) || !Number.isFinite(price)) return empty("insufficient_history", price);
   const pivots = findPivots(rows), structure = analyzeStructure(rows, pivots), sr = supportResistance(rows, pivots, 0.65, 20);
   const pd = premiumDiscount(rows, timeframe), sweeps = detectLiquiditySweeps(rows, pivots, 50), displacement = detectDisplacement(rows, 80);
-  const zones = detectFvgZones(rows, { timeframe, minSizeAtr: FVG_PRECISION_RULES.minGapAtr, maxAgeBars: FVG_PRECISION_RULES.maxAgeBars, window: 200 });\n  const orderBlocks = detectOrderBlocks(rows, 120), liquidityPools = findLiquidityPools(rows, pivots);
+  const zones = detectFvgZones(rows, { timeframe, minSizeAtr: FVG_PRECISION_RULES.minGapAtr, maxAgeBars: FVG_PRECISION_RULES.maxAgeBars, window: 200 });
+  const orderBlocks = detectOrderBlocks(rows, 120), liquidityPools = findLiquidityPools(rows, pivots);
   const result: PrecisionCandidate[] = [];
   const currentIndex = rows.length - 1;
 
