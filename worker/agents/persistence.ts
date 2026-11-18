@@ -28,13 +28,23 @@ export async function persistAgentDecision(db: AgentAuditDb, snapshot: AgentDeci
     .bind(snapshot.id, createdAt, snapshot.symbol, snapshot.interval, typeof snapshot.dataQuality?.provider === "string" ? snapshot.dataQuality.provider.slice(0, 80) : "unknown", snapshot.decision.action, safeConfidence(snapshot.decision.confidence), executed ? 1 : 0, payload).run();
   return { status: (result.meta?.changes ?? 0) > 0 ? "stored" : "duplicate", id: snapshot.id };
 }
-export async function listAgentDecisions(db: AgentAuditDb, options: { limit?: number; before?: number; symbol?: string } = {}): Promise<{ records: AgentDecisionSnapshot[]; nextBefore: number | null }> {
+export async function listAgentDecisions(db: AgentAuditDb, options: { limit?: number; before?: number; beforeId?: string; symbol?: string } = {}): Promise<{ records: AgentDecisionSnapshot[]; nextBefore: number | null; nextBeforeId: string | null }> {
   const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 25)));
   const before = Number.isFinite(options.before) ? Number(options.before) : null;
+  const beforeId = options.beforeId;
+  if (beforeId !== undefined && (!beforeId || before === null || beforeId.length > 128)) throw new Error("invalid_pagination_cursor");
   const symbol = options.symbol && /^[A-Z0-9]{5,20}$/.test(options.symbol) ? options.symbol : null;
-  const where = [before === null ? null : "created_at < ?", symbol ? "symbol = ?" : null].filter(Boolean).join(" AND ") || "1=1";
-  const values = [before, symbol].filter((x) => x !== null);
-  const result = await db.prepare(`SELECT payload_json, created_at FROM eti_agent_decisions WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT ?`).bind(...values, limit + 1).all();
+  const clauses: string[] = [], values: unknown[] = [];
+  if (before !== null && beforeId !== undefined) {
+    clauses.push("(created_at < ? OR (created_at = ? AND id < ?))");
+    values.push(before, before, beforeId);
+  } else if (before !== null) {
+    clauses.push("created_at < ?");
+    values.push(before);
+  }
+  if (symbol) { clauses.push("symbol = ?"); values.push(symbol); }
+  const where = clauses.join(" AND ") || "1=1";
+  const result = await db.prepare(`SELECT payload_json, created_at, id FROM eti_agent_decisions WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT ?`).bind(...values, limit + 1).all();
   const rows = result.results ?? [], page = rows.slice(0, limit);
   const records = page.flatMap((row) => {
     if (typeof row.payload_json !== "string") return [];
@@ -42,5 +52,10 @@ export async function listAgentDecisions(db: AgentAuditDb, options: { limit?: nu
     catch { return []; }
   });
   const last = page[page.length - 1];
-  return { records, nextBefore: rows.length > limit && typeof last?.created_at === "number" ? last.created_at : null };
+  const hasMore = rows.length > limit;
+  return {
+    records,
+    nextBefore: hasMore && typeof last?.created_at === "number" ? last.created_at : null,
+    nextBeforeId: hasMore && typeof last?.id === "string" ? last.id : null,
+  };
 }
