@@ -91,14 +91,18 @@ export function analyzeLiquidityFvg(
   const upperWick = latest[2]-Math.max(latest[1],latest[4]), lowerWick = Math.min(latest[1],latest[4])-latest[3];
   const wickRatio = Math.max(upperWick,lowerWick)/range;
   if (wickRatio>=0.55 && body/range<=0.4) { manipulationScore += 12; evidence.push("Recent candle has a rejection wick exceeding 55% of its range."); }
+  const priorVolume = rows.slice(-21,-1).reduce((sum,r)=>sum+Math.max(0,r[5]),0)/20;
+  const volumeRatio = priorVolume>0 ? latest[5]/priorVolume : 0;
+  if (volumeRatio>=2) { manipulationScore += 10; evidence.push("Rejection/sweep context has elevated traded volume ("+round(volumeRatio,2)+"× the prior 20-candle mean)."); }
   const recentDisplacement = displacement.some(d=>rows.length-1-d.index<=5 && d.bodyAtr>=1.3);
   if (recentDisplacement) { manipulationScore += 8; evidence.push("Recent ATR-normalized displacement followed the liquidity event."); }
   if (nearPool?.touches>=3) { manipulationScore += 10; evidence.push("Repeated equal-level tests increase stop-cluster risk."); }
   manipulationScore = Math.round(clamp(manipulationScore,0,100));
   const likelySide = lastSweep ? lastSweep.side : nearPool ? nearPool.side : nearestBuy && nearestSell ? "both" : nearestBuy ? "buy_side" : nearestSell ? "sell_side" : "none";
-  const chosenPool = lastSweep ? poolIntel.find(p=>p.side===lastSweep.side) : nearPool;
+  const chosenPool = lastSweep ? poolIntel.find(p=>p.side===lastSweep.side && Math.abs(p.price-lastSweep.level)<=atr*0.25) : nearPool;
   const likelySweepPrice = lastSweep?.level ?? chosenPool?.price ?? null;
-  const estimatedReach = chosenPool?.estimatedSweepBand ?? null;
+  const sweepExtension = lastSweep ? Math.max(0.1,latestSweep!.extensionAtr || 0.2) : 0;
+  const estimatedReach = chosenPool?.estimatedSweepBand ?? (lastSweep ? { low: round(lastSweep.side==="buy_side" ? lastSweep.level+atr*sweepExtension : lastSweep.level-atr*Math.max(sweepExtension,0.35),8), high: round(lastSweep.side==="buy_side" ? lastSweep.level+atr*Math.max(sweepExtension*1.8,sweepExtension+0.15) : lastSweep.level-atr*sweepExtension,8) } : null);
   const manipulation: ManipulationAssessment = {
     score:manipulationScore,level:manipulationScore>=75?"high":manipulationScore>=50?"elevated":manipulationScore>=25?"moderate":"low",
     label:lastSweep?"liquidity_grab_risk":nearPool&&nearPool.distanceAtr<=1.25?"stop_run_risk":"normal",
