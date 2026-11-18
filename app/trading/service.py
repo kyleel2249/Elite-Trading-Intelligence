@@ -205,6 +205,8 @@ class TradingService:
             qty=qty,
             order_type=order_type.lower(),
             limit_price=limit_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
             client_order_id=client_order_id,
             reference_price=reference_price if reference_price is not None else (fill_price_hint if environment in ("paper", "testnet") else None),
             equity=equity,
