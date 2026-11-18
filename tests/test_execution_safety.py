@@ -190,7 +190,7 @@ async def test_ambiguous_submission_retains_reconcilable_intent(db):
     svc.alpaca.submit_order = AsyncMock(side_effect=TimeoutError("mock timeout"))
     result = await svc.place_order(provider="alpaca", environment="paper", symbol="AAPL", side="buy",
                                    qty=1, equity=10000, reference_price=100)
-    assert result["status"] == "submission_unknown"
+    assert result["status"] == "submission_unknown", result
     row = db.query(OrderRecord).one()
     assert row.client_order_id == result["client_order_id"]
     assert row.status == "pending"
