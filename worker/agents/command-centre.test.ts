@@ -5,13 +5,14 @@ import { withAgents } from "./route.ts";
 import { JARVIS_COMMAND_CENTRE_HTML } from "./command-centre.ts";
 
 test("JARVIS command centre is a live ETI workspace, not a simulated trading screen", () => {
-  assert.match(JARVIS_COMMAND_CENTRE_HTML, /api\\/agents\\/jarvis/);
-  assert.match(JARVIS_COMMAND_CENTRE_HTML, /api\\/agents\\/runtime/);
-  assert.match(JARVIS_COMMAND_CENTRE_HTML, /api\\/agents\\/autopilot/);
-  assert.match(JARVIS_COMMAND_CENTRE_HTML, /Commander and Risk Manager/);
-  assert.match(JARVIS_COMMAND_CENTRE_HTML, /sessionStorage/);
-  assert.match(JARVIS_COMMAND_CENTRE_HTML, /READ-ONLY INTELLIGENCE/);
-  assert.doesNotMatch(JARVIS_COMMAND_CENTRE_HTML, /api\\/orders\\/live/);
+  assert.ok(JARVIS_COMMAND_CENTRE_HTML.includes("/api/agents/jarvis"));
+  assert.ok(JARVIS_COMMAND_CENTRE_HTML.includes("/api/agents/runtime"));
+  assert.ok(JARVIS_COMMAND_CENTRE_HTML.includes("/api/agents/autopilot"));
+  assert.ok(JARVIS_COMMAND_CENTRE_HTML.includes("Commander and Risk Manager"));
+  assert.ok(JARVIS_COMMAND_CENTRE_HTML.includes("sessionStorage"));
+  assert.ok(JARVIS_COMMAND_CENTRE_HTML.includes("READ-ONLY INTELLIGENCE"));
+  assert.ok(!JARVIS_COMMAND_CENTRE_HTML.includes("/api/orders/live"));
+  assert.ok(JARVIS_COMMAND_CENTRE_HTML.includes("/api/market/ticker"));
 });
 
 test("JARVIS command centre inline script parses and the route serves the integrated screen", async () => {
@@ -25,5 +26,5 @@ test("JARVIS command centre inline script parses and the route serves the integr
   const response = await app.fetch(new Request("https://eti.test/jarvis"), {} as any);
   assert.equal(response.status, 200);
   assert.ok((response.headers.get("content-type") || "").includes("text/html"));
-  assert.match(await response.text(), /Institutional Trading Command Centre/);
+  assert.ok((await response.text()).includes("Institutional Trading Command Centre"));
 });
