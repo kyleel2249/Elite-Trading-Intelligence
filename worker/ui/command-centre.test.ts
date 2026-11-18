@@ -11,7 +11,7 @@ test("JARVIS command centre exposes live market, intelligence, risk and health w
 });
 
 test("JARVIS dashboard uses live ETI endpoints and never injects API data as HTML", () => {
-  for (const endpoint of ["/api/market/ticker", "/api/market/klines", "/api/market/diag", "/api/signals", "/api/omnisignal/scan", "/api/analysis/technical", "/api/readiness", "/api/execution/status"]) {
+  for (const endpoint of ["/api/market/ticker", "/api/market/klines", "/api/market/diag", "/api/signals", "/api/omnisignal", "/api/analysis/technical", "/api/readiness", "/api/execution/status"]) {
     assert.ok(COMMAND_CENTRE_JS.includes(endpoint), "missing " + endpoint);
   }
   assert.ok(COMMAND_CENTRE_JS.includes("textContent"));
