@@ -44,3 +44,9 @@ test("Institutional Bitget recovery retains streamed candles and maps cached tic
 test("Institutional Bitget WebSocket ticker feeds turnover, price change and derivatives into analysis",()=>{
  for(const token of ['m.type==="ticker"','turnover24h:t.quoteVolume','priceChange24h:t.priceChangePercent','source:"bitget-websocket"'])assert.ok(LIQUIDITY_JS.includes(token),token);
 });
+
+
+test("Institutional Liquidity reads the selected Bitget contract category instead of defaulting all futures to USDT",()=>{
+ assert.ok(LIQUIDITY_JS.includes('$(state.root?"orderBitgetMarket":"tt-category")'));
+ assert.ok(LIQUIDITY_JS.includes('["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"].includes(normalizedCategory)'));
+});
