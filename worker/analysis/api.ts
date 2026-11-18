@@ -180,9 +180,9 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       const venueRaw = q("venue") ?? "bybit";
       if (venueRaw !== "bybit" && venueRaw !== "bitget") return reply({ error: "invalid_venue", allowed: ["bybit", "bitget"] }, 400);
       const venue = venueRaw as "bybit" | "bitget";
-      const market = q("market") === "futures" ? "futures" : "spot";
+      const market: "spot" | "futures" = q("market") === "futures" ? "futures" : "spot";
       const category = q("category") ?? (market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot");
-      let trades: ReturnType<typeof normalizeTrades>, depth: ReturnType<typeof normalizeDepth>, candles: Kline[] = [], provider = venue;
+      let trades: ReturnType<typeof normalizeTrades>, depth: ReturnType<typeof normalizeDepth>, candles: Kline[] = [], provider: string = venue;
       if (post) {
         trades = normalizeTrades(body.trades);
         depth = normalizeDepth(body.depth);
