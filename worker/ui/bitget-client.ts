@@ -97,31 +97,36 @@ function instrumentRows(data,market,productType){
   return row;
  });
 }
-var LAST_GOOD={};
+var LAST_GOOD={},LAST_GOOD_AT={};
 async function symbols(kind){
  var jobs=[];
  if(kind==="all"||kind==="spot")jobs.push({market:"spot",category:"SPOT",v2:"/api/v2/spot/public/symbols"});
  if(kind==="all"||kind==="futures")PRODUCT_TYPES.forEach(function(pt){jobs.push({market:"futures",category:pt,v2:"/api/v2/mix/market/contracts?productType="+encodeURIComponent(pt),pt:pt})});
  if(kind==="margin")jobs.push({market:"margin",category:"MARGIN",v2:"/api/v2/margin/currencies"});
- var settled=await Promise.allSettled(jobs.map(function(j){return request("/api/v3/market/instruments?category="+encodeURIComponent(j.category),[j.v2]).then(function(r){return {job:j,data:r.data}})})),rows=[],warnings=[];
- settled.forEach(function(r,idx){var j=jobs[idx];
-  if(r.status!=="fulfilled"){var kept=LAST_GOOD[j.category];
-   if(kept){rows.push.apply(rows,kept);warnings.push(j.category+" refresh failed; showing the last known list")}
-   else warnings.push(r.reason&&r.reason.message||"catalogue unavailable");
-   return}
-  var data=Array.isArray(r.value.data)?r.value.data:[],jr=[];
+ var settled=await Promise.allSettled(jobs.map(function(j){return request("/api/v3/market/instruments?category="+encodeURIComponent(j.category),[j.v2]).then(function(r){return {job:j,data:r.data,host:r.host,version:r.version}})})),rows=[],warnings=[],sources={},now=Date.now();
+ settled.forEach(function(r,idx){var j=jobs[idx],jr=[];
+  if(r.status!=="fulfilled"){
+   var kept=LAST_GOOD[j.category]||[];
+   if(kept.length){rows.push.apply(rows,kept);warnings.push(j.category+" refresh failed; retained last successful catalogue");sources[j.category]={count:kept.length,fetchedAt:LAST_GOOD_AT[j.category]||null,stale:true,error:r.reason&&r.reason.message||"unavailable"};}
+   else{warnings.push(j.category+" catalogue unavailable: "+(r.reason&&r.reason.message||"upstream error"));sources[j.category]={count:0,fetchedAt:null,stale:true,error:r.reason&&r.reason.message||"unavailable"};}
+   return;
+  }
+  var data=Array.isArray(r.value.data)?r.value.data:[];
   if(j.market==="margin"){
    data.filter(function(x){return x&&goodStatus(x.status||"online")&&/^[A-Z0-9]{5,20}$/.test(String(x.symbol||""))}).forEach(function(x){
     var base=String(x.baseCoin||"").toUpperCase(),quote=String(x.quoteCoin||"").toUpperCase(),cross=x.isCrossBorrowable===undefined?Number(x.maxCrossedLeverage)>0:truth(x.isCrossBorrowable),iso=x.isIsolatedBaseBorrowable===undefined&&x.isIsolatedQuoteBorrowable===undefined?Number(x.maxIsolatedLeverage)>0:truth(x.isIsolatedBaseBorrowable)||truth(x.isIsolatedQuoteBorrowable);
+    if(!base||!quote)return;
     jr.push([String(x.symbol).toUpperCase(),base,quote,"margin",categoryOf(base,quote),"bitget",null,null,cross,iso,Number(x.maxCrossedLeverage)||0,Number(x.maxIsolatedLeverage)||0,truth(x.isIsolatedBaseBorrowable),truth(x.isIsolatedQuoteBorrowable),x.isCrossBorrowable===undefined?cross:truth(x.isCrossBorrowable)]);
    });
   }else jr=instrumentRows(data,j.market,j.pt);
-  LAST_GOOD[j.category]=jr;rows.push.apply(rows,jr);
+  if(!jr.length&&data.length)warnings.push(j.category+" returned instruments but none passed active-contract validation");
+  LAST_GOOD[j.category]=jr;LAST_GOOD_AT[j.category]=now;rows.push.apply(rows,jr);
+  sources[j.category]={count:jr.length,fetchedAt:now,stale:false,host:r.value.host,apiVersion:r.value.version};
  });
- var seen={};rows=rows.filter(function(r){var key=r[0]+"|"+(r[6]||"")+"|"+r[3];if(seen[key])return false;seen[key]=1;return true}).sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0});
+ var seen={};rows=rows.filter(function(r){var key=r[0]+"|"+(r[6]||"")+"|"+r[3];if(seen[key])return false;seen[key]=1;return true}).sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:String(a[6]||"").localeCompare(String(b[6]||""));});
  if(kind==="margin"&&!rows.length)warnings.push("Bitget returned no margin-eligible pairs for the selected account/product region");
  if(!rows.length&&warnings.length)throw new Error("Bitget catalogue unavailable: "+warnings.join("; "));
- return {data:{symbols:rows,warnings:warnings},provider:"bitget-browser",failover:false};
+ return {data:{symbols:rows,warnings:warnings,sources:sources,generatedAt:now,stale:Object.keys(sources).some(function(k){return sources[k].stale}),count:rows.length},provider:"bitget-browser",failover:false};
 }
 async function loadSignalInputs(opts){
  var intervals=["1m","5m","15m","30m","1h","4h","1d","1w"],entries=await Promise.all(intervals.map(async function(iv){return [iv,await candles({symbol:opts.symbol,interval:iv,limit:300,market:opts.market,category:opts.category})]})),candleMap={};
