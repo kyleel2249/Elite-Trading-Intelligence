@@ -111,7 +111,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test "${#DATAX_INTEGRATION_SECRET}" -ge 32
-          printf '%s' "$DATAX_INTEGRATION_SECRET" | npx --yes wrangler@4.148.0 pages secret put ETI_INTEGRATION_SECRET --project-name=datax
+          printf '%s' "$DATAX_INTEGRATION_SECRET" | npx --yes wrangler@4.148.0 pages secret put ETI_INTEGRATION_SECRET --project-name=datax --env production
           deployments="$(curl --silent --show-error --fail \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments?per_page=20")"
