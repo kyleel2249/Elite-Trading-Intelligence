@@ -19,11 +19,12 @@ import { buildCryptoInput } from "./crypto-pipeline.ts";
 import type { KVLike } from "./tokenomist.ts";
 import { loadInstitutional, type D1Like } from "./institutional.ts";
 import { calibrateTechnical } from "./calibrate.ts";
+import { buildOrderFlow, normalizeDepth, normalizeTrades, recordDepthSnapshot, summarizeDepthHistory, type DepthHistoryStore } from "./orderflow.ts";
 import { planOf, resolveDetail, type PlanEnv } from "./plan.ts";
 import { loadEvents, relevant, currenciesOf, type EventsEnv, type MarketEvent } from "../readiness/events.ts";
 import { inferAssetClass, type AssetClass, type EngineReport } from "./types.ts";
 
-export type AnalysisApiEnv = MarketEnv & AnalysisEnv & EventsEnv & PlanEnv & AiEnv & { ETI_EXECUTION_LOG?: KVLike; ETI_PORTFOLIO_DB?: D1Like };
+export type AnalysisApiEnv = MarketEnv & AnalysisEnv & EventsEnv & PlanEnv & AiEnv & { ETI_EXECUTION_LOG?: KVLike; ETI_PORTFOLIO_DB?: D1Like; MARKET_CACHE?: DepthHistoryStore };
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type" };
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...HEADERS, ...extra } });
 export const STRATEGIES: MtfStrategy[] = ["scalp", "intraday", "swing", "position"];
@@ -158,21 +159,74 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: HEADERS });
   if (req.method !== "GET" && req.method !== "POST") return reply({ error: "method_not_allowed", note: "Analytical endpoints only; they cannot place orders." }, 405);
   const limits0 = planOf(env);
-  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
+  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
     plan: { plan: limits0.plan, defaultDetail: limits0.defaultDetail, fullDetailAllowed: limits0.allowFullDetail, maxCandlesPerTimeframe: limits0.maxCandles, calibrationAllowed: limits0.calibrateAllowed, maxNewsItems: limits0.maxNewsItems }, configured: { SENTIMENT_AI: String(env.SENTIMENT_AI ?? "").toLowerCase() === "on" && !!env.AI, TOKENOMIST_API_KEY: !!env.TOKENOMIST_API_KEY, GITHUB_TOKEN: !!env.GITHUB_TOKEN, CRYPTO_PROFILES_JSON: !!env.CRYPTO_PROFILES_JSON, institutionalDb: !!env.ETI_PORTFOLIO_DB, FRED_API_KEY: !!env.FRED_API_KEY, SEC_USER_AGENT: !!env.SEC_USER_AGENT, COINGECKO_API_KEY: !!env.COINGECKO_API_KEY, NEWS_FEEDS_JSON: !!env.NEWS_FEEDS_JSON }, submitsOrder: false });
-  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : path.endsWith("/orderflow") ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
   if (wait !== null) return reply({ error: "rate_limited", retryAfterSeconds: wait }, 429, { "retry-after": String(wait) });
   const post = req.method === "POST", limits = planOf(env);
   let body: any = {};
   if (post) { const j = await readJson(req); if (j.error) return reply({ error: j.error }, j.error === "body_too_large" ? 413 : 400); body = j.body; }
   const q = (k: string) => (post && body[k] !== undefined ? String(body[k]) : url.searchParams.get(k));
-  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") ? "AAPL" : null));
+  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") ? "AAPL" : null));
   if (!symbol) return reply({ error: "invalid_symbol", expected: "1-20 characters from A-Z, 0-9, '.', '_' or '-'" }, 400);
   const stratRaw = (q("strategy") ?? "intraday") as MtfStrategy;
   if (!STRATEGIES.includes(stratRaw)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
   const clsRaw = q("assetClass") ?? q("class"), cls: AssetClass = clsRaw === "crypto" || clsRaw === "fx" || clsRaw === "stock" ? clsRaw : inferAssetClass(symbol);
 
   try {
+    if (path === "/api/analysis/orderflow") {
+      // Read-only trade-footprint and depth intelligence. Bitget's public feed is browser-direct;
+      // POST accepts that browser-fetched data without routing Bitget traffic through Worker egress.
+      const venueRaw = q("venue") ?? "bybit";
+      if (venueRaw !== "bybit" && venueRaw !== "bitget") return reply({ error: "invalid_venue", allowed: ["bybit", "bitget"] }, 400);
+      const venue = venueRaw as "bybit" | "bitget";
+      const market = q("market") === "futures" ? "futures" : "spot";
+      const category = q("category") ?? (market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot");
+      let trades: ReturnType<typeof normalizeTrades>, depth: ReturnType<typeof normalizeDepth>, candles: Kline[] = [], provider = venue;
+      if (post) {
+        trades = normalizeTrades(body.trades);
+        depth = normalizeDepth(body.depth);
+        if (!trades) return reply({ error: "invalid_trades", detail: "Provide 1–1000 validated trades with time, price, qty and isBuyerMaker." }, 400);
+        if (!depth) return reply({ error: "invalid_depth", detail: "Provide non-crossed bid and ask levels with positive prices and quantities." }, 400);
+        if (body.candles !== undefined) {
+          const parsed = sanitizeCandles(body.candles, 500);
+          if (parsed.error) return reply({ error: "invalid_candles", detail: parsed.error }, 400);
+          candles = parsed.rows;
+        }
+        provider = String(body.provider ?? venue).slice(0, 40);
+      } else {
+        if (venue === "bitget") return reply({ error: "browser_feed_required", detail: "Bitget public market data must be fetched from the browser because Bitget blocks Cloudflare Worker egress. POST the browser-fetched trades and depth to this endpoint.", venue, submitsOrder: false }, 424);
+        const order = providerOrder(env, "bybit");
+        const params = { symbol, interval: "1m", limit: 500, market, category: category as any };
+        const [t, d, k] = await Promise.all([
+          getMarketData("trades", params, order),
+          getMarketData("depth", { ...params, limit: 50 }, order),
+          getMarketData("klines", { ...params, limit: 60 }, order).catch(() => null),
+        ]);
+        trades = normalizeTrades(t.data);
+        depth = normalizeDepth(d.data);
+        candles = k ? (k.data as Kline[]) : [];
+        provider = t.provider;
+        if (!trades || !depth) return reply({ error: "market_data_invalid", detail: "The exchange returned data that failed ETI validation." }, 424);
+      }
+      const bucketRaw = Number(q("bucketSize") ?? body.bucketSize);
+      const bucketSize = Number.isFinite(bucketRaw) && bucketRaw > 0 ? bucketRaw : undefined;
+      const analysis = buildOrderFlow({ symbol, venue, market, provider, trades, depth, candles, bucketSize, now });
+      const history = await recordDepthSnapshot(env.MARKET_CACHE, { symbol, venue, market, depth, now, bucketSize: analysis.bucketSize }).catch(() => null);
+      const liquidityHistory = summarizeDepthHistory(history ?? [], analysis.bucketSize);
+      return reply({
+        ...analysis,
+        liquidityHistory: {
+          status: history ? "recorded" : "unavailable",
+          sampleCount: history?.length ?? 0,
+          windowStartedAt: history?.[0]?.capturedAt ? new Date(history[0].capturedAt).toISOString() : null,
+          windowEndedAt: history?.at(-1)?.capturedAt ? new Date(history.at(-1)!.capturedAt).toISOString() : null,
+          persistentLevels: liquidityHistory,
+          note: history ? "Historical persistence is based on timestamped Worker KV depth samples; it is not a full exchange order-book event stream." : "MARKET_CACHE is not bound or historical depth could not be stored. Current depth remains available, but no historical heatmap is claimed."
+        },
+        canTriggerTrade: false, submitsOrder: false, liveExecutionAllowed: false
+      });
+    }
     if (path === "/api/analysis/smc") {
       // Read-only Smart Money Concepts snapshot. Closed candles and confirmed pivots prevent repainting.
       const tf = (q("timeframe") ?? q("interval") ?? "1h") as MtfTimeframe;
