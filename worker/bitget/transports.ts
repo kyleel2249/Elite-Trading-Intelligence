@@ -12,10 +12,35 @@ export const BITGET_WS_ENDPOINTS = {
   }
 } as const;
 
-export function bitgetWsEndpoint(environment: BitgetWsEnvironment, account: BitgetWsAccount, channel: "public" | "private", sbe = false) {
+type BitgetWsChannel = "public" | "private";
+type BitgetWsBindings = Record<string, unknown>;
+
+function configuredEndpoint(env: BitgetWsBindings, name: string, fallback: string, path: string): string {
+  const value = env[name];
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string") throw new Error("invalid_" + name.toLowerCase());
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw new Error("invalid_" + name.toLowerCase()); }
+  // Production UTA endpoints must remain on Bitget's official WebSocket host and exact route.
+  // This prevents a compromised/mistyped Worker variable from redirecting credentials to another host.
+  if (parsed.protocol !== "wss:" || parsed.hostname !== "ws.bitget.com" || parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== path) {
+    throw new Error("invalid_" + name.toLowerCase());
+  }
+  return parsed.toString();
+}
+
+export function bitgetWsEndpoint(
+  environment: BitgetWsEnvironment,
+  account: BitgetWsAccount,
+  channel: BitgetWsChannel,
+  sbe = false,
+  env: BitgetWsBindings = {}
+) {
   if (environment !== "production" || account !== "uta") throw new Error("unsupported_environment_account_combination");
   if (sbe && channel !== "public") throw new Error("sbe_public_uta_only");
-  return sbe ? BITGET_WS_ENDPOINTS.production.uta.sbe : BITGET_WS_ENDPOINTS.production.uta[channel];
+  if (sbe) return configuredEndpoint(env, "BITGET_WS_SBE_PUBLIC_URL", BITGET_WS_ENDPOINTS.production.uta.sbe, "/v3/ws/public/sbe");
+  if (channel === "public") return configuredEndpoint(env, "BITGET_WS_PUBLIC_URL", BITGET_WS_ENDPOINTS.production.uta.public, "/v3/ws/public");
+  return configuredEndpoint(env, "BITGET_WS_PRIVATE_URL", BITGET_WS_ENDPOINTS.production.uta.private, "/v3/ws/private");
 }
 
 export function bitgetUtaPublicArgs(instType: string, symbol: string, interval = "1m") {
@@ -47,8 +72,6 @@ export function decodeBitgetSbe(input: ArrayBuffer | Uint8Array) {
     result.type = "books1"; result.ts = u64(o); result.bids = [[scale(i64(o + 8), pe), scale(i64(o + 16), se)]];
     result.asks = [[scale(i64(o + 24), pe), scale(i64(o + 32), se)]];
     // Canonical offsets from the 56-byte BBO root: ts, bid px/size, ask px/size, exponents, seq, sts, category, padding.
-    result.bids = [[scale(i64(o + 8), pe), scale(i64(o + 16), se)]];
-    result.asks = [[scale(i64(o + 24), pe), scale(i64(o + 32), se)]];
     result.priceExponent = pe; result.sizeExponent = se; result.seq = u64(o + 42); result.sts = header.blockLength >= 64 ? u64(o + 50) : null; result.category = header.blockLength >= 64 ? view.getUint8(o + 58) : null;
     result.symbol = str(8 + header.blockLength);
     return result;
@@ -93,8 +116,9 @@ export function decodeBitgetSbe(input: ArrayBuffer | Uint8Array) {
 }
 
 export function bitgetPrivateCredentialSet(env: Record<string, any>) {
-  const key = env.BITGET_API_KEY || env.BITGET_KEY;
-  const secret = env.BITGET_API_SECRET || env.BITGET_SECRET;
+  // Keep legacy aliases as migration fallbacks, but prefer the canonical Cloudflare Secret names.
+  const key = env.BITGET_API_KEY || env.BITGET_KEY || env.BITGET_ACCESS_KEY;
+  const secret = env.BITGET_API_SECRET || env.BITGET_SECRET_KEY || env.BITGET_SECRET;
   const passphrase = env.BITGET_API_PASSPHRASE || env.BITGET_PASSPHRASE;
   return { key: typeof key === "string" ? key.trim() : "", secret: typeof secret === "string" ? secret.trim() : "", passphrase: typeof passphrase === "string" ? passphrase.trim() : "" };
 }
