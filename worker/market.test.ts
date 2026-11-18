@@ -200,7 +200,7 @@ test("Bitget Worker proxy reports a classified 502 when all hosts fail at the ne
 
 test("Bitget category-scoped catalogue freshness is independent of failures in other futures products", async () => {
   const fetcher: any = async (input: string) => {
-    const u = new URL(input), category = u.searchParams.get("category") || "";
+    const u = new URL(input), category = u.searchParams.get("category") || u.searchParams.get("productType") || "";
     if (category === "COIN-FUTURES") return new Response("temporarily unavailable", { status: 503 });
     const symbol = category === "USDC-FUTURES" ? "BTCUSDC" : "BTCUSDT";
     return new Response(JSON.stringify({ code: "00000", data: [{
