@@ -5,7 +5,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <style>
 :root{--bg:#0e1116;--card:#161b22;--fg:#e6edf3;--mut:#8b949e;--bd:#30363d;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--acc:#58a6ff}
 @media(prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--fg:#1f2328;--mut:#656d76;--bd:#d0d7de;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700;--acc:#0969da}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;padding:12px;max-width:1200px;margin:auto}
+*{box-sizing:border-box}body{margin:0 auto;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;padding:12px 24px;max-width:1920px;width:100%}
 h1{font-size:20px;margin:4px 0}h2{font-size:15px;margin:18px 0 8px}.mut{color:var(--mut)}.row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
 input,select,button{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:8px;font:inherit;min-height:40px}button{cursor:pointer}button:hover{border-color:var(--acc)}
 label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:2px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
@@ -13,9 +13,10 @@ label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:2px
 .bullish,.ok{color:var(--ok);border-color:var(--ok)}.bearish,.error{color:var(--bad);border-color:var(--bad)}.insufficient_data,.no_data{color:var(--warn);border-color:var(--warn)}
 .bar{height:6px;background:var(--bd);border-radius:3px;margin:6px 0}.bar>i{display:block;height:100%;background:var(--acc);border-radius:3px}
 table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid var(--bd);padding:4px;text-align:left;vertical-align:top;word-break:break-word}
-details{margin-top:6px}summary{cursor:pointer;color:var(--acc)}.big{font-size:22px;font-weight:700}ul{margin:4px 0;padding-left:18px}.wrap{overflow-x:auto}
+.eti-nav{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 16px;padding:10px 0;border-bottom:1px solid var(--bd)}.eti-nav a{color:var(--acc);text-decoration:none;border:1px solid var(--bd);border-radius:7px;padding:7px 10px;font-size:12px}.eti-nav a:hover,.eti-nav a[aria-current=page]{border-color:var(--acc);background:var(--card)}@media(max-width:700px){body{padding:10px 14px}.eti-nav{overflow-x:auto;flex-wrap:nowrap}.eti-nav a{white-space:nowrap}}details{margin-top:6px}summary{cursor:pointer;color:var(--acc)}.big{font-size:22px;font-weight:700}ul{margin:4px 0;padding-left:18px}.wrap{overflow-x:auto}
 </style></head><body>
 <h1>ETI Agent Intelligence Center</h1>
+<nav class='eti-nav' aria-label='ETI workspace'><a href='/'>ETI Dashboard</a><a href='/terminal'>Pro Terminal</a><a href='/gainz'>GainzAlgo</a><a href='/alpha'>Global Alpha</a><a href='/journal'>Trade Journal</a><a href='/sports'>Sports Intelligence</a><a href='/pro'>ETI Pro</a><a href='/agents' aria-current='page'>AI Agents</a></nav>
 <div class='mut'>Twelve specialist agents coordinate through the Commander. Scheduled autopilot can submit approved trades to ETI INTERNAL PAPER only; Bitget live orders are never enabled by this agent controller.</div>
 <h2>Controls</h2>
 <div class='row'>

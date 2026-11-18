@@ -9,7 +9,7 @@ export const page = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 :root{color-scheme:dark;--bg:#080d16;--panel:#111b2b;--line:#24334a;--muted:#8fa3bd;--green:#21d69a;--red:#ff637d;--blue:#56a8ff;--amber:#f0c674}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#eaf2ff;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 header{padding:16px 4vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 10px}h3{font-size:13px;margin:12px 0 6px;color:#cfe3ff}
-a{color:var(--blue)}small,.muted{color:var(--muted)}main{padding:16px 4vw 40px;max-width:1600px;margin:auto}
+a{color:var(--blue)}small,.muted{color:var(--muted)}main{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px 40px}
 input,select,button,textarea{background:#0b1422;color:#eaf2ff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}button{cursor:pointer}button:hover{border-color:var(--blue)}button:disabled{opacity:.5;cursor:wait}
 nav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}nav button.on{border-color:var(--green);color:var(--green)}
 .panel{background:linear-gradient(145deg,#121e30,#0d1624);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px;min-width:0}
@@ -24,7 +24,7 @@ tr.click{cursor:pointer}tr.click:hover{background:#0f1a2b}.scroll{max-height:420
 .pill{border:1px solid var(--line);border-radius:8px;padding:2px 8px;font-size:12px;color:var(--muted)}.pill b{color:#eaf2ff}
 .drawer{position:fixed;top:0;right:0;width:min(760px,100vw);height:100vh;background:#0b1422;border-left:1px solid var(--line);padding:16px;overflow:auto;transform:translateX(105%);transition:transform .2s;z-index:20}.drawer.open{transform:none}
 canvas{width:100%;display:block}.chartbox{height:260px}
-@media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+@media(max-width:900px){main{padding:12px 16px 32px}.grid2,.grid3{grid-template-columns:1fr}}
 </style></head><body>
 <header><div><h1>ETI Global Alpha Intelligence Center</h1><small>Discovery, research and decision layers are kept separate: nothing validates itself. Educational research, not financial advice.</small></div>
 <div class="row" style="margin:0"><span class="pill">Live trading <b class="bad">DISABLED</b></span><span class="pill" id="pPersist">persistence …</span><span class="pill" id="pVersion">model …</span><input id="token" type="password" placeholder="Alpha / execution token (kept in memory only)" autocomplete="off" style="min-width:260px"><a href="/">Market dashboard</a></div></header>

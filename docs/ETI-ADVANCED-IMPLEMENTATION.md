@@ -1,50 +1,35 @@
 # ETI Advanced Intelligence Expansion — Implementation Register
 
-This register tracks the staged implementation of the GOD-MODE specification. Existing capabilities are reused rather than duplicated.
+## Verified baseline
+Main branch includes the SMC/FVG and institutional analysis engines, ETIAlgo V3 Alpha, multi-timeframe views, twelve-agent orchestration, risk and execution controls, Bybit/Bitget market adapters, sports paper intelligence, Global Alpha, GainzAlgo V2/V2 Alpha, Pro Terminal, trade journal, D1 and KV persistence.
 
-## Repository audit (2026-11-18)
+## Phase 1 — Order-flow foundation
+- Validated public trade-tape normalization and aggressor-side price-level footprint.
+- Buy/sell volume, delta, delta percentage and sample CVD.
+- Spread, top-ten depth notional imbalance and microprice.
+- Conservative low-confidence absorption candidates with explicit evidence limitations.
+- Optional KV-backed historical depth sampling (72 samples, seven-day expiry) using the existing ETI_EXECUTION_LOG namespace.
+- Persistent bid/ask liquidity summaries; unavailable states when history is not stored.
+- Read-only `/api/analysis/orderflow` endpoint; Bybit server-side and Bitget browser-fed.
+- Pro Terminal footprint, CVD and historical liquidity panels.
 
-The Cloudflare Worker already includes:
-- Smart Money Concepts: displacement, FVG, order blocks, liquidity pools/sweeps, confirmed market structure and volume profile.
-- SMC and FVG chart overlays in the main dashboard.
-- Multi-timeframe analysis across yearly through 1-minute frames, with closed-candle handling.
-- ETIAlgo V3 Alpha, signal ledger, backtesting, expectancy, calibration, replay primitives and regime classification.
-- A 12-agent research system with structured reports, orchestration, decision controls and an execution route guarded by existing risk checks.
-- Portfolio and exchange reconciliation modules, Bybit/Bitget adapters, paper execution, journal and Cloudflare D1/KV infrastructure.
+## Phase 2 — Dedicated AI Agents workspace and consistent page dimensions
+- Dedicated `/agents` workspace with navigation to core ETI tools.
+- Shared 1920px maximum page shell and 24px desktop content gutters, matching the main dashboard.
+- GainzAlgo Intelligence, Global Alpha Center, Trade Journal, Sports Betting Intelligence and ETI Pro/Pro Terminal use the same outer workspace sizing standard.
+- Sidebar layouts retain navigation width; usable main content width is calculated within the 1920px shell.
+- Responsive mobile gutters and single-column breakpoints remain active.
+- Added route-level layout regression coverage for `/agents`, `/gainz`, `/alpha`, `/journal`, `/sports`, `/pro` and `/terminal`.
 
-## Gaps confirmed during audit
-
-- No dedicated exchange-trade footprint endpoint that exposes price-level bid/ask aggression and CVD in a reusable schema.
-- No timestamped historical order-book depth persistence and liquidity persistence summary in the analysis API.
-- Existing order-book snapshots are current-state measurements; they must not be represented as historical liquidity.
-- Some features in the master specification already exist in separate modules and need integration/coverage rather than replacement.
-
-## Phase 1 — Order-flow and depth-history foundation
-
-Implemented in this checkpoint:
-- Validated public trade-tape normalization.
-- Aggressor-side footprint aggregation by price bucket.
-- Buy/sell volume, delta, delta percentage and CVD.
-- Top-of-book spread, depth notional imbalance and microprice.
-- Conservative absorption candidates only when tape pressure and candle-body evidence coexist; the output is explicitly low-confidence.
-- KV-backed, bounded 72-snapshot depth history with seven-day expiry, using a dedicated key prefix inside the existing ETI_EXECUTION_LOG namespace (no new binding required).
-- Persistent bid/ask liquidity summaries with observation counts and persistence percentages.
-- Read-only POST support for browser-fetched Bybit/Bitget data; Bitget is not routed through blocked Worker egress.
-- Bybit server-side GET support.
-- Explicit data-quality notes and no order-submission capability.
-
-## Phase 2 — Signal quality and lifecycle\n\nImplemented in this checkpoint:\n- Closed-candle, confirmed-pivot regular and hidden bullish/bearish price-RSI divergence.\n- Divergence evidence contributes to ETIAlgo V3 Alpha scoring and warns when it opposes the candidate direction.\n- Persistent signal lifecycle states: confirmed, entry reached, TP1/TP2/TP3 reached, invalidated and expired.\n- Conservative stop-first handling when one candle touches both a stop and target.\n- Existing TP1-based historical outcome accounting remains comparable.\n\n## Planned phases
-
-1. Visual Market Intelligence: integrate footprint, CVD and historical liquidity into the chart and Pro Terminal; complete MTF confluence presentation.
-2. ETIAlgo intelligence: regime-aware adaptive scoring, divergence and lifecycle persistence.
-3. Agent network: specialist report evidence, consensus/dissent, conflict resolution and audit persistence.
-4. Portfolio risk: consolidated exposure, correlation, stress tests and protective controls.
-5. Strategy research: realistic backtesting, walk-forward validation and attribution.
-6. Market-wide intelligence: Bybit/Bitget comparison, large-trade alerts, event risk and anomalies.
-7. Execution intelligence: paper/shadow execution, reconciliation and controlled order management.
-8. Workspaces: replay, setup scanner, opportunity radar, strategy conflicts, journal and command centre.
-9. Final release: complete regression, security and deployment verification.
+## Remaining roadmap
+1. Multi-timeframe confluence visualizer with timeframe coverage, conflict and freshness indicators.
+2. Regime-aware ETIAlgo scoring, divergence and signal lifecycle analytics.
+3. Agent collaboration evidence, dissent, strategy conflict resolution and persistent decision audit.
+4. Portfolio exposure, correlation, stress tests, risk-of-ruin and protective controls.
+5. Fee/funding/slippage-aware backtesting, walk-forward validation and attribution.
+6. Bybit/Bitget market comparison, large-trade monitoring, event risk and anomaly detection.
+7. Paper/shadow execution quality, reconciliation and controlled order management.
+8. Market Replay, Setup Scanner, Opportunity Radar, strategy health and unified Command Centre.
 
 ## Safety invariants
-
-All analysis routes are read-only. A single depth snapshot cannot prove spoofing or institutional intent. Historical persistence is only reported when timestamped KV samples exist. All live orders remain subject to the existing central execution gateway, operator permissions, exchange validation, risk limits and kill switch.
+All new analytical routes are read-only. A single order-book snapshot cannot prove spoofing, absorption or institutional intent. Historical liquidity is shown only when timestamped samples exist. Agent proposals and strategies cannot bypass the central execution gateway, risk manager, exchange validation, operator permissions or kill switch. Paper execution is labelled separately from exchange live trading.
