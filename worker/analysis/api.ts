@@ -2,6 +2,7 @@
 import { getMarketData, providerOrder, type Kline, type MarketEnv } from "../market.ts";
 import { runOmnisignal } from "../algo/omnisignal.ts";
 import { analyzeFvgMtf, FVG_RULES } from "./fvg.ts";
+import { analyzeFvgPrecision } from "./fvg-precision.ts";
 import { detectDisplacement, detectLiquiditySweeps, detectOrderBlocks, findLiquidityPools } from "./smc.ts";
 import { analyzeStructure, findPivots } from "./structure.ts";
 import { volumeProfile } from "./volume-profile.ts";
@@ -165,13 +166,13 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
   const limits0 = planOf(env);
   if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow", "/api/analysis/confluence"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
     plan: { plan: limits0.plan, defaultDetail: limits0.defaultDetail, fullDetailAllowed: limits0.allowFullDetail, maxCandlesPerTimeframe: limits0.maxCandles, calibrationAllowed: limits0.calibrateAllowed, maxNewsItems: limits0.maxNewsItems }, configured: { SENTIMENT_AI: String(env.SENTIMENT_AI ?? "").toLowerCase() === "on" && !!env.AI, TOKENOMIST_API_KEY: !!env.TOKENOMIST_API_KEY, GITHUB_TOKEN: !!env.GITHUB_TOKEN, CRYPTO_PROFILES_JSON: !!env.CRYPTO_PROFILES_JSON, institutionalDb: !!env.ETI_PORTFOLIO_DB, FRED_API_KEY: !!env.FRED_API_KEY, SEC_USER_AGENT: !!env.SEC_USER_AGENT, COINGECKO_API_KEY: !!env.COINGECKO_API_KEY, NEWS_FEEDS_JSON: !!env.NEWS_FEEDS_JSON }, submitsOrder: false });
-  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : path.endsWith("/confluence") ? 6 : path.endsWith("/orderflow") ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : (path.endsWith("/confluence") || path.endsWith("/fvg-precision")) ? 6 : path.endsWith("/orderflow") ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
   if (wait !== null) return reply({ error: "rate_limited", retryAfterSeconds: wait }, 429, { "retry-after": String(wait) });
   const post = req.method === "POST", limits = planOf(env);
   let body: any = {};
   if (post) { const j = await readJson(req); if (j.error) return reply({ error: j.error }, j.error === "body_too_large" ? 413 : 400); body = j.body; }
   const q = (k: string) => (post && body[k] !== undefined ? String(body[k]) : url.searchParams.get(k));
-  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") || path.endsWith("/confluence") ? "AAPL" : null));
+  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") || (path.endsWith("/confluence") || path.endsWith("/fvg-precision")) ? "AAPL" : null));
   if (!symbol) return reply({ error: "invalid_symbol", expected: "1-20 characters from A-Z, 0-9, '.', '_' or '-'" }, 400);
   const stratRaw = (q("strategy") ?? "intraday") as MtfStrategy;
   if (!STRATEGIES.includes(stratRaw)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
@@ -328,6 +329,32 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       const result = confluence({ symbol, frames: smc, orderFlow, entryTimeframe, now });
       const detections = q("include")?.includes("detections") ? Object.fromEntries(Object.entries(smc).map(([tf, a]) => [tf, a!.detections.slice(0, 40)])) : undefined;
       return reply({ ...result, detections, dataQuality: { providers, failures, notes, orderFlow: orderFlowNote, timeframesRequested: frames }, generatedAt: new Date(now).toISOString() });
+    }
+    if (path === "/api/analysis/fvg-precision") {
+      // Institutional FVG qualification and precision-entry analysis. Read-only; no trade can be submitted here.
+      const FVG_TFS: MtfTimeframe[] = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"];
+      const tf = (q("timeframe") ?? q("interval") ?? "1h") as MtfTimeframe;
+      if (!FVG_TFS.includes(tf)) return reply({ error: "invalid_timeframe", timeframes: FVG_TFS }, 400);
+      const tfs = FVG_TFS.slice(FVG_TFS.indexOf(tf), FVG_TFS.indexOf(tf) + 3);
+      let by: Partial<Record<MtfTimeframe, Kline[]>> = {}, failures: Record<string, string> = {}, provider = "supplied", notes: string[] = [];
+      if (post && body.candles) {
+        if (typeof body.candles !== "object" || Array.isArray(body.candles)) return reply({ error: "candles_must_be_an_object_keyed_by_timeframe" }, 400);
+        for (const [t, v] of Object.entries(body.candles)) {
+          if (!tfs.includes(t as MtfTimeframe)) return reply({ error: "invalid_timeframe", timeframe: t, timeframes: tfs }, 400);
+          const sc = sanitizeCandles(v); if (sc.error) return reply({ error: "invalid_candles", timeframe: t, detail: sc.error }, 400);
+          by[t as MtfTimeframe] = sc.rows;
+        }
+      } else if (cls === "crypto") {
+        const l = await loadCandles(symbol, tfs, env, q("provider")); by = l.candles; failures = l.failures; provider = l.providers.join("+") || "none";
+      } else if (cls === "stock" || cls === "fx") {
+        const y = await loadYahooCandles(symbol, cls, tfs, fetchFn); by = y.candles as typeof by; failures = y.failures; notes = y.notes; provider = "yahoo-finance";
+      } else return reply({ error: "market_data_unavailable", detail: `Unknown asset class for ${symbol}: pass ?assetClass= or POST candles` }, 424);
+      const chartRows = by[tf] ? closedCandles(tf, by[tf]!, now) : [];
+      if (!chartRows.length) return reply({ error: "market_data_unavailable", detail: failures[tf] ?? `no closed ${tf} candles returned`, failures, notes }, 424);
+      const higherTimeframes: Partial<Record<string, Kline[]>> = {};
+      for (const h of tfs.slice(1)) if (by[h]?.length) higherTimeframes[h] = closedCandles(h, by[h]!, now);
+      const precision = analyzeFvgPrecision(chartRows, tf, { symbol, higherTimeframes });
+      return reply({ ...precision, higherTimeframesLoaded: Object.keys(higherTimeframes), dataQuality: { provider, timeframe: tf, closedCandles: chartRows.length, lastClosedCandleAt: chartRows.length ? new Date(chartRows.at(-1)![0]).toISOString() : null, failures, notes }, submitsOrder: false, liveExecutionAllowed: false });
     }
     if (path === "/api/analysis/fvg") {
       // Fair Value Gaps for one chart timeframe plus the next two higher timeframes (multi-timeframe confluence). Descriptive only: an FVG is never a trade signal.
