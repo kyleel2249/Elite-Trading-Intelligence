@@ -42,20 +42,22 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
   const app = { fetch: async (req: Request) => {
     const path = new URL(req.url).pathname, body = path.endsWith("/execute") || path.endsWith("/analyze") ? await req.json() : {};
     calls.push({ path, body });
+    if (path === "/api/analysis/liquidity-fvg") return Response.json({ autopilotEligible: true, direction: "BUY", score: 91, manipulation: { level: "moderate" }, safety: { submitsOrder: false, bypassesRiskManager: false }, blocks: [] });
     if (path === "/api/omnisignal") return Response.json({ decision: "BUY", tradeable: true, confidence: 82, validation: { hardFailures: [] } });
     if (path.endsWith("/analyze")) return Response.json({ decision: { action: "BUY", confidence: 0.82, consensus: { agreement: 0.78 } }, risk: { approved: true, vetoes: [] }, security: { severity: "none" } });
     return Response.json({ ok: true, decision: { action: "BUY" }, broker: { fill: { price: 100 } } }, { status: 201 });
   } };
   const result = await runAgentAutopilotCycle(env, app, 1_800_000);
   assert.equal(result.submitted, 1);
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 7);
   assert.equal(calls[0].path, "/api/agents/analyze", "the full council must run before strategy gates");
-  assert.equal(calls.slice(1, 5).every(x => x.path === "/api/omnisignal"), true, "all four strategy engines must be consulted");
+  assert.equal(calls[1].path, "/api/analysis/liquidity-fvg", "fusion gate must be evaluated");
+  assert.equal(calls.slice(2, 6).every(x => x.path === "/api/omnisignal"), true, "all four strategy engines must be consulted");
   assert.equal(calls[0].body.execution, undefined, "preflight must remain read-only");
   assert.equal(calls[0].body.record, true, "automatic council decisions must be durably recorded");
-  assert.equal(calls[5].path, "/api/agents/execute");
-  assert.equal(calls[5].body.execution.broker, "eti_paper");
-  assert.equal(calls[5].body.execution.executionSource.actorType, "automation");
+  assert.equal(calls[6].path, "/api/agents/execute");
+  assert.equal(calls[6].body.execution.broker, "eti_paper");
+  assert.equal(calls[6].body.execution.executionSource.actorType, "automation");
   assert.equal(result.liveOrdersAllowed, false);
 });
 
@@ -66,15 +68,17 @@ test("autopilot runs and records the full council before abstaining on strategy 
   const app = { fetch: async (req: Request) => {
     const path = new URL(req.url).pathname;
     calls.push(path);
+    if (path === "/api/analysis/liquidity-fvg") return Response.json({ autopilotEligible: true, direction: "BUY", score: 91, manipulation: { level: "moderate" }, safety: { submitsOrder: false, bypassesRiskManager: false }, blocks: [] });
     if (path.endsWith("/analyze")) return Response.json({ decision: { action: "BUY", confidence: 0.82, consensus: { agreement: 0.78 } }, risk: { approved: true }, security: { severity: "none" }, auditPersistence: "d1" });
     const strategy = new URL(req.url).searchParams.get("strategy");
     return Response.json({ decision: strategy === "scalp" || strategy === "intraday" ? "BUY" : "HOLD", tradeable: true, confidence: 80, validation: { hardFailures: [] } });
   } };
   const result = await runAgentAutopilotCycle(env, app, 1_950_000);
   assert.equal(result.submitted, 0);
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, 6);
   assert.equal(calls[0], "/api/agents/analyze");
-  assert.equal(calls.slice(1).every(x => x === "/api/omnisignal"), true);
+  assert.equal(calls[1], "/api/analysis/liquidity-fvg");
+  assert.equal(calls.slice(2).every(x => x === "/api/omnisignal"), true);
   assert.equal(result.outcomes[0].reason, "omnisignal_strategy_consensus_not_met");
   assert.equal(result.outcomes[0].council.auditPersistence, "d1");
 });
@@ -85,6 +89,7 @@ test("autopilot refuses a trade below configured confidence and agreement", asyn
   const calls: string[] = [];
   const app = { fetch: async (req: Request) => {
     const path = new URL(req.url).pathname; calls.push(path);
+    if (path === "/api/analysis/liquidity-fvg") return Response.json({ autopilotEligible: true, direction: "BUY", score: 91, manipulation: { level: "moderate" }, safety: { submitsOrder: false, bypassesRiskManager: false }, blocks: [] });
     if (path === "/api/omnisignal") return Response.json({ decision: "BUY", tradeable: true, confidence: 82, validation: { hardFailures: [] } });
     return Response.json({ decision: { action: "BUY", confidence: 0.54, consensus: { agreement: 0.9 } }, risk: { approved: true }, security: { severity: "none" }, auditPersistence: "d1" });
   } };
@@ -100,7 +105,7 @@ test("autopilot idempotency claim prevents duplicate symbol-slot runs", async ()
   const kv = memoryKV();
   const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
   let calls = 0;
-  const app = { fetch: async (req: Request) => { calls++; return new URL(req.url).pathname === "/api/omnisignal" ? Response.json({ decision: "HOLD", tradeable: false, confidence: 20, validation: { hardFailures: [] } }) : Response.json({ decision: { action: "NO_TRADE" } }); } };
+  const app = { fetch: async (req: Request) => { calls++; const path = new URL(req.url).pathname; if (path === "/api/analysis/liquidity-fvg") return Response.json({ autopilotEligible: true, direction: "BUY", score: 91, safety: { submitsOrder: false, bypassesRiskManager: false }, blocks: [] }); return path === "/api/omnisignal" ? Response.json({ decision: "HOLD", tradeable: false, confidence: 20, validation: { hardFailures: [] } }) : Response.json({ decision: { action: "NO_TRADE" } }); } };
   const now = 2_400_000;
   await runAgentAutopilotCycle(env, app, now);
   const second = await runAgentAutopilotCycle(env, app, now);
