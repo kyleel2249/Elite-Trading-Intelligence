@@ -311,7 +311,7 @@ function spread(labels,gap,lo,hi){labels.sort((a,b)=>a.y-b.y);for(let i=0;i<labe
 function updateOverlayNote(){const e=$('overlayNote');if(sigValid()&&provider&&sig.provider!==provider){e.style.display='inline-block';e.textContent='Overlays computed on '+sig.provider+' candles; chart candles from '+provider;}else e.style.display='none';}
 
 
-let etiLiquidityFvg=null,etiLiquidityFvgKey='',etiLiquidityFvgAt=0,etiLiquidityFvgSeq=0;
+let etiLiquidityFvg=null,etiLiquidityFvgKey='',etiLiquidityFvgAt=0,etiLiquidityFvgSeq=0,etiLiquidityFvgBusyKey='';
 let liveChart=null,liveCandle=null,liveVolume=null,liveEma20=null,liveEma50=null,liveEma200=null,liveBbUpper=null,liveBbLower=null,liveRibbon=null,liveLine=null,liveArea=null,livePriceLines=[],liveAdvancedKey='',liveSelectionKey='';
 function livePriceFormat(){return {type:'price',precision:pricePrecision,minMove:Math.pow(10,-pricePrecision)};}
 function liveEma(period){let prev=null,k=2/(period+1);return candles.map(v=>{const close=Number(v[4]);prev=prev===null?close:close*k+prev*(1-k);return {time:Math.floor(Number(v[0])/1000),value:prev};});}
@@ -380,14 +380,15 @@ function renderAdvancedLiveChart(){
 
 async function refreshLiquidityFvg(force){
  if(!candles.length)return;const sym=$('symbol').value,tf=$('interval').value,info=symInfo(),tail=candles.at(-1),key=[sym,tf,info.venue,info.market,tail&&tail[0]].join('|');
- if(!force&&etiLiquidityFvgKey===key&&Date.now()-etiLiquidityFvgAt<30000)return;
  if(etiLiquidityFvgKey===key&&Date.now()-etiLiquidityFvgAt<30000)return;
- etiLiquidityFvgKey=key;const seq=++etiLiquidityFvgSeq;
+ if(etiLiquidityFvgBusyKey===key)return;
+ etiLiquidityFvgKey=key;etiLiquidityFvgBusyKey=key;const seq=++etiLiquidityFvgSeq;
  try{const r=await fetch('/api/analysis/liquidity-fvg?symbol='+encodeURIComponent(sym)+'&timeframe='+encodeURIComponent(tf)+'&assetClass=crypto',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candles:{[tf]:candles.map(v=>v.map(Number))}}),cache:'no-store'});
  const d=await r.json();if(seq!==etiLiquidityFvgSeq)return;if(!r.ok)throw Error(d.detail||d.error||'HTTP '+r.status);
  if([$('symbol').value,$('interval').value,symVenueOf(),symMkt(),candles.at(-1)&&candles.at(-1)[0]].join('|')!==key)return;
  etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();const lf=$('imLiquidityFvg');if(lf){const z=d.precision&&d.precision.best,band=d.manipulation&&d.manipulation.estimatedReach;lf.textContent='Combined '+(d.autopilotEligible?d.direction:'WAIT')+' · evidence '+d.score+'/100 · manipulation '+(d.manipulation&&d.manipulation.level||'unknown')+' ('+(d.manipulation&&d.manipulation.score||0)+'/100) · likely '+String(d.manipulation&&d.manipulation.likelySide||'none').replace(/_/g,' ')+' liquidity '+(d.manipulation&&d.manipulation.likelySweepPrice?fp(d.manipulation.likelySweepPrice):'—')+(band?' · estimated reach '+fp(band.low)+'–'+fp(band.high):'')+(z?' · '+z.direction+' FVG '+fp(z.zone.lower)+'–'+fp(z.zone.upper)+' · CE '+fp(z.entry.price):' · no qualified FVG')+' · '+(d.blocks||[]).slice(0,2).join('; ');}renderAdvancedLiveChart();drawChart();
- }catch(e){if(seq!==etiLiquidityFvgSeq)return;etiLiquidityFvg=null;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();}
+ }catch(e){if(seq===etiLiquidityFvgSeq){etiLiquidityFvg=null;etiLiquidityFvgAt=Date.now();renderAdvancedLiveChart();}}
+ finally{if(etiLiquidityFvgBusyKey===key)etiLiquidityFvgBusyKey='';}
 }
 function drawChart(){
  updateOverlayNote();
