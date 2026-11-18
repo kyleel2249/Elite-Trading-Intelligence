@@ -35,7 +35,7 @@ export const COMMAND_CENTRE_HTML = String.raw`<!doctype html>
 
 export const COMMAND_CENTRE_JS = String.raw`(function(){
 "use strict";
-const $=id=>document.getElementById(id),fmt=(v,d=2)=>Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
+const $=id=>document.getElementById(id),fmt=(v,d=2)=>v===null||v===undefined||v===""?"—":Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
 const safeText=(v,max=220)=>{if(v===null||v===undefined)return "No data returned.";if(typeof v==="string")return v.slice(0,max);try{return JSON.stringify(v).slice(0,max)}catch{return "Response received."}};
 async function get(path){const r=await fetch(path,{cache:"no-store",headers:{accept:"application/json"}});const j=await r.json().catch(()=>null);if(!r.ok)throw new Error((j&&(j.detail||j.error||j.message))||("HTTP "+r.status));return j}
 function feed(lines){const box=$("feed");box.textContent="";(lines.length?lines:["No new operational events in this refresh."]).forEach(x=>{const n=document.createElement("div");n.className="feedrow";n.textContent=x;box.appendChild(n)})}
