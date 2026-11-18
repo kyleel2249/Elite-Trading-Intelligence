@@ -19,3 +19,15 @@ test("universal strategy UI defaults to Bitget and compounds closed-trade equity
 test("capital UI uses unique IDs, records closed-trade PnL, and supports undo",()=>{assert.equal((LIQUIDITY_JS.match(/id="eti-risk-equity"/g)||[]).length,1);assert.ok(LIQUIDITY_JS.includes("eti-risk-equity-summary"));for(const token of ["eti-risk-ledger-v1","eti-risk-undo","renderRiskLedger","previousCapital","riskBudget:Number((next*.30).toFixed(8))"])assert.ok(LIQUIDITY_JS.includes(token),token);});
 test("strategic chart zones use native Lightweight Charts price coordinates when available",()=>{assert.ok(LIQUIDITY_JS.includes("window.ETILiveChart"));assert.ok(LIQUIDITY_JS.includes("window.ETIProTerminalChart"));assert.ok(LIQUIDITY_JS.includes("bridge.priceToCoordinate"));assert.ok(LIQUIDITY_JS.includes("document.querySelector(\"#chartAdvanced\")"));});
 test("multi-timeframe confluence is visible in the strategy summary",()=>{assert.ok(LIQUIDITY_JS.includes("multiTimeframeConfluence?.bias"));assert.ok(LIQUIDITY_JS.includes("availableCount"));});
+
+
+test("Institutional heatmaps render horizontal price zones and vertical structure-event bands",()=>{
+ for(const token of ["buildStructureMap","unmitigated","orderBlocks","CHoCH","BOS","timeToCoordinate","priceToCoordinate","data-eti-layer"])assert.ok(LIQUIDITY_JS.includes(token),token);
+ assert.ok(LIQUIDITY_JS.includes('state.layers.fvg'));
+ assert.ok(LIQUIDITY_JS.includes('state.layers.structure'));
+});
+test("Bitget liquidity intelligence can recover from REST depth failure using its live WebSocket book",()=>{
+ assert.ok(LIQUIDITY_JS.includes("Bitget WebSocket recovery"));
+ assert.ok(LIQUIDITY_JS.includes("waiting for WebSocket depth"));
+ assert.ok(LIQUIDITY_JS.includes("state.sequence++;state.busy=false"));
+});
