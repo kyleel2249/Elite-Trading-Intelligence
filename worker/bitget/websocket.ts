@@ -1,7 +1,7 @@
 /**
  * Bitget Unified Trading Account WebSocket gateway.
- * API secrets stay in Worker bindings; browser clients authenticate with the ETI execution token
- * in the first WebSocket message (never in the URL), then receive a fixed allowlist of UTA topics.
+ * API secrets stay in Worker bindings; browser clients authenticate through the existing HttpOnly
+ * operator session cookie. Programmatic clients may use master authorization on the handshake.
  */
 import { authenticate, isOperator, sameOrigin } from "../auth/session.ts";
 import { bitgetCreds, bitgetSign } from "./api.ts";

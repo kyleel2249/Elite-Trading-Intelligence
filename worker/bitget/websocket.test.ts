@@ -26,6 +26,8 @@ test("UTA private websocket subscribes to account, orders, positions and fills o
 test("private websocket relay requires operator authentication, credentials and a WebSocket upgrade", async () => {
   const unauth = await handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private", { headers: { upgrade: "websocket" } }), ENV);
   assert.equal(unauth.status, 401);
+  const wrongOrigin = await handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private", { headers: { upgrade: "websocket", origin: "https://attacker.test", authorization: "Bearer master-token" } }), { ETI_EXECUTION_TOKEN: "master-token", ...ENV });
+  assert.equal(wrongOrigin.status, 403);
   const authorizedEnv = { ETI_EXECUTION_TOKEN: "master-token" };
   const noCredentials = await handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private", {
     headers: { upgrade: "websocket", authorization: "Bearer master-token" }
