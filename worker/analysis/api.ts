@@ -173,7 +173,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
   let body: any = {};
   if (post) { const j = await readJson(req); if (j.error) return reply({ error: j.error }, j.error === "body_too_large" ? 413 : 400); body = j.body; }
   const q = (k: string) => (post && body[k] !== undefined ? String(body[k]) : url.searchParams.get(k));
-  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") || (path.endsWith("/confluence") || path.endsWith("/fvg-precision")) ? "AAPL" : null));
+  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") || (path.endsWith("/confluence") || path.endsWith("/fvg-precision") || path.endsWith("/liquidity-fvg")) ? "AAPL" : null));
   if (!symbol) return reply({ error: "invalid_symbol", expected: "1-20 characters from A-Z, 0-9, '.', '_' or '-'" }, 400);
   const stratRaw = (q("strategy") ?? "intraday") as MtfStrategy;
   if (!STRATEGIES.includes(stratRaw)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
