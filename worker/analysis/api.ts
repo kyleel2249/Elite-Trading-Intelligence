@@ -19,12 +19,12 @@ import { buildCryptoInput } from "./crypto-pipeline.ts";
 import type { KVLike } from "./tokenomist.ts";
 import { loadInstitutional, type D1Like } from "./institutional.ts";
 import { calibrateTechnical } from "./calibrate.ts";
-import { buildOrderFlow, normalizeDepth, normalizeTrades, recordDepthSnapshot, summarizeDepthHistory, type DepthHistoryStore } from "./orderflow.ts";
+import { buildOrderFlow, normalizeDepth, normalizeTrades, recordDepthSnapshot, summarizeDepthHistory } from "./orderflow.ts";
 import { planOf, resolveDetail, type PlanEnv } from "./plan.ts";
 import { loadEvents, relevant, currenciesOf, type EventsEnv, type MarketEvent } from "../readiness/events.ts";
 import { inferAssetClass, type AssetClass, type EngineReport } from "./types.ts";
 
-export type AnalysisApiEnv = MarketEnv & AnalysisEnv & EventsEnv & PlanEnv & AiEnv & { ETI_EXECUTION_LOG?: KVLike; ETI_PORTFOLIO_DB?: D1Like; MARKET_CACHE?: DepthHistoryStore };
+export type AnalysisApiEnv = MarketEnv & AnalysisEnv & EventsEnv & PlanEnv & AiEnv & { ETI_EXECUTION_LOG?: KVLike; ETI_PORTFOLIO_DB?: D1Like };
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type" };
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...HEADERS, ...extra } });
 export const STRATEGIES: MtfStrategy[] = ["scalp", "intraday", "swing", "position"];
@@ -212,7 +212,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       const bucketRaw = Number(q("bucketSize") ?? body.bucketSize);
       const bucketSize = Number.isFinite(bucketRaw) && bucketRaw > 0 ? bucketRaw : undefined;
       const analysis = buildOrderFlow({ symbol, venue, market, provider, trades, depth, candles, bucketSize, now });
-      const history = await recordDepthSnapshot(env.MARKET_CACHE, { symbol, venue, market, depth, now, bucketSize: analysis.bucketSize }).catch(() => null);
+      const history = await recordDepthSnapshot(env.ETI_EXECUTION_LOG, { symbol, venue, market, depth, now, bucketSize: analysis.bucketSize }).catch(() => null);
       const liquidityHistory = summarizeDepthHistory(history ?? [], analysis.bucketSize);
       return reply({
         ...analysis,
@@ -222,7 +222,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
           windowStartedAt: history?.[0]?.capturedAt ? new Date(history[0].capturedAt).toISOString() : null,
           windowEndedAt: history?.at(-1)?.capturedAt ? new Date(history.at(-1)!.capturedAt).toISOString() : null,
           persistentLevels: liquidityHistory,
-          note: history ? "Historical persistence is based on timestamped Worker KV depth samples; it is not a full exchange order-book event stream." : "MARKET_CACHE is not bound or historical depth could not be stored. Current depth remains available, but no historical heatmap is claimed."
+          note: history ? "Historical persistence is based on timestamped Worker KV depth samples; it is not a full exchange order-book event stream." : "The existing ETI_EXECUTION_LOG KV binding is unavailable or historical depth could not be stored. Current depth remains available, but no historical heatmap is claimed."
         },
         canTriggerTrade: false, submitsOrder: false, liveExecutionAllowed: false
       });

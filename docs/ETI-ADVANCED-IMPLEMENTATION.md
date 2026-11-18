@@ -27,7 +27,7 @@ Implemented in this checkpoint:
 - Buy/sell volume, delta, delta percentage and CVD.
 - Top-of-book spread, depth notional imbalance and microprice.
 - Conservative absorption candidates only when tape pressure and candle-body evidence coexist; the output is explicitly low-confidence.
-- Optional KV-backed, bounded 72-snapshot depth history with seven-day expiry.
+- KV-backed, bounded 72-snapshot depth history with seven-day expiry, using a dedicated key prefix inside the existing ETI_EXECUTION_LOG namespace (no new binding required).
 - Persistent bid/ask liquidity summaries with observation counts and persistence percentages.
 - Read-only POST support for browser-fetched Bybit/Bitget data; Bitget is not routed through blocked Worker egress.
 - Bybit server-side GET support.
