@@ -80,3 +80,17 @@ test("terminal chart is full-width and institutional intelligence plus recent tr
   assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart{height:clamp(560px,72vh,900px);min-height:560px;width:100%}"), "chart has expanded desktop height and full width");
   assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart-card{grid-column:1/-1;width:100%;min-width:0}"), "chart card spans the entire workspace");
 });
+
+
+test("advanced terminal chart preserves exchange tick precision for tiny-priced instruments", () => {
+  assert.match(TRADING_TERMINAL_JS, /pricePrecision:2/);
+  assert.match(TRADING_TERMINAL_JS, /function decimalPlaces\(/);
+  assert.match(TRADING_TERMINAL_JS, /function capturePricePrecision\(/);
+  assert.match(TRADING_TERMINAL_JS, /minimumFractionDigits:S\.pricePrecision/);
+  assert.match(TRADING_TERMINAL_JS, /maximumFractionDigits:S\.pricePrecision/);
+  assert.match(TRADING_TERMINAL_JS, /precision:S\.pricePrecision/);
+  assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(\(d\.candles\|\|\[\]\)\.flatMap/);
+  assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(\(results\[0\]\.value\|\|\[\]\)\.flatMap/);
+  assert.match(TRADING_TERMINAL_JS, /v\.toFixed\(S\.pricePrecision\)/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /maximumFractionDigits:8/);
+});
