@@ -141,7 +141,7 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
         command.intent === "audit" ? "performance audit retrieved" :
         command.intent === "deep_review" ? "advisory review requested" : "help displayed";
       const memorySaved = await remember(env, { intent: command.intent, symbol: command.symbol, interval: command.interval, summary });
-      return reply({ schema: "eti.jarvis.response/1", assistant: "JARVIS", command: { intent: command.intent, symbol: command.symbol, interval: command.interval }, result, memory: { saved: memorySaved, entries: memorySaved ? (await readMemory(env)).length : null }, safety: { readOnly: command.intent !== "deep_review" || true, liveExecutionAllowed: false, riskVetoPreserved: true } });
+      return reply({ schema: "eti.jarvis.response/1", assistant: "JARVIS", command: { intent: command.intent, symbol: command.symbol, interval: command.interval }, result, memory: { saved: memorySaved, entries: memorySaved ? (await readMemory(env)).length : null }, safety: { readOnly: true, advisoryOnly: true, liveExecutionAllowed: false, riskVetoPreserved: true } });
     },
   };
 }
