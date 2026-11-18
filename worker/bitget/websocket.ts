@@ -46,6 +46,7 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   server.accept();
   let upstream: WebSocket | null = null, loggedIn = false, closed = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let connectTimeout: ReturnType<typeof setTimeout> | null = null;
   let lastUpstreamMessageAt = Date.now();
 
   const sendClient = (value: unknown) => {
@@ -55,12 +56,15 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
     if (closed) return;
     closed = true;
     if (heartbeat) clearInterval(heartbeat);
+    if (connectTimeout) clearTimeout(connectTimeout);
     heartbeat = null;
+    connectTimeout = null;
     try { upstream?.close(code, reason); } catch { /* already closed */ }
     try { server.close(code, reason); } catch { /* already closed */ }
   };
 
   sendClient({ event: "status", state: "connecting", environment, account });
+  connectTimeout = setTimeout(() => { if (!loggedIn && !closed) { sendClient({ event: "error", code: "upstream_login_timeout" }); close(1011, "upstream login timeout"); } }, 20000);
   try {
     upstream = new Socket(bitgetWsEndpoint(environment, account, "private"));
     upstream.addEventListener("open", async () => {
@@ -82,6 +86,8 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
           close(1011, "Bitget login rejected"); return;
         }
         loggedIn = true;
+        if (connectTimeout) clearTimeout(connectTimeout);
+        connectTimeout = null;
         const args = account === "uta" ? bitgetUtaPrivateSubscriptions() : bitgetClassicPrivateTopics();
         try { upstream?.send(JSON.stringify({ op: "subscribe", args })); }
         catch { close(1011, "subscription failed"); return; }
