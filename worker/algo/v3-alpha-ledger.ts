@@ -53,7 +53,7 @@ export function advanceSignalLifecycle(row:any,candles:Kline[]):SignalLifecycleA
 }
 
 async function trackOpen(db:DB,env:MarketEnv,now:number){
- const q=await db.prepare("SELECT * FROM eti_v3_alpha_signals WHERE outcome IS NULL AND venue='bybit' ORDER BY signal_time ASC LIMIT 100").all();
+ const q=await db.prepare("SELECT s.*,COALESCE(l.status,'confirmed') AS lifecycle_status FROM eti_v3_alpha_signals s LEFT JOIN eti_v3_alpha_lifecycle l ON l.signal_id=s.id WHERE s.outcome IS NULL AND s.venue='bybit' ORDER BY s.signal_time ASC LIMIT 100").all();
  const rows=(q.results??[]) as any[], updates:any[]=[];
  const grouped=new Map<string,any[]>();
  for(const r of rows){const k=r.symbol+"|"+r.timeframe;grouped.set(k,[...(grouped.get(k)??[]),r]);}
@@ -64,8 +64,10 @@ async function trackOpen(db:DB,env:MarketEnv,now:number){
   for(const r of items){
    const o=advanceSignalLifecycle(r,candles),previous=String(r.lifecycle_status??"confirmed");
    if(o.status===previous&&!o.outcome)continue;
-   await db.prepare("UPDATE eti_v3_alpha_signals SET lifecycle_status=?,lifecycle_updated_at=?,lifecycle_note=?,outcome=COALESCE(outcome,?),outcome_r=COALESCE(outcome_r,?),resolved_at=COALESCE(resolved_at,?),last_checked_at=?,bars_observed=? WHERE id=? AND outcome IS NULL")
-    .bind(o.status,now,o.note,o.outcome,o.r,o.at,now,o.bars,r.id).run();
+   await db.prepare("UPDATE eti_v3_alpha_signals SET outcome=COALESCE(outcome,?),outcome_r=COALESCE(outcome_r,?),resolved_at=COALESCE(resolved_at,?),last_checked_at=?,bars_observed=? WHERE id=? AND outcome IS NULL")
+    .bind(o.outcome,o.r,o.at,now,o.bars,r.id).run();
+   await db.prepare("INSERT INTO eti_v3_alpha_lifecycle(signal_id,status,updated_at,note,bars_observed) VALUES(?,?,?,?,?) ON CONFLICT(signal_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,note=excluded.note,bars_observed=excluded.bars_observed")
+    .bind(r.id,o.status,now,o.note,o.bars).run();
    updates.push({id:r.id,lifecycleStatus:o.status,outcome:o.outcome,outcomeR:o.r,barsObserved:o.bars,note:o.note});
   }
  }
@@ -82,7 +84,7 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
   if(!db)return reply({error:"storage_not_configured",message:"Signal history requires the ETI_PORTFOLIO_DB D1 binding."},503);
   const symbol=(url.searchParams.get("symbol")??"").toUpperCase(),limit=Math.max(1,Math.min(100,Number(url.searchParams.get("limit")??50)||50));
   if(symbol&&!validSymbol(symbol))return reply({error:"invalid_symbol"},400);
-  const q=await db.prepare("SELECT id,symbol,strategy,venue,market,category,timeframe,direction,signal_time,received_at,entry,stop_loss,tp1,tp2,tp3,score,threshold,regime,outcome,outcome_r,resolved_at,bars_observed,lifecycle_status,lifecycle_updated_at,lifecycle_note FROM eti_v3_alpha_signals "+(symbol?"WHERE symbol=? ":"")+"ORDER BY signal_time DESC LIMIT ?").bind(...(symbol?[symbol,limit]:[limit])).all();
+  const q=await db.prepare("SELECT s.id,s.symbol,s.strategy,s.venue,s.market,s.category,s.timeframe,s.direction,s.signal_time,s.received_at,s.entry,s.stop_loss,s.tp1,s.tp2,s.tp3,s.score,s.threshold,s.regime,s.outcome,s.outcome_r,s.resolved_at,s.bars_observed,COALESCE(l.status,'confirmed') AS lifecycle_status,l.updated_at AS lifecycle_updated_at,l.note AS lifecycle_note FROM eti_v3_alpha_signals s LEFT JOIN eti_v3_alpha_lifecycle l ON l.signal_id=s.id "+(symbol?"WHERE s.symbol=? ":"")+"ORDER BY s.signal_time DESC LIMIT ?").bind(...(symbol?[symbol,limit]:[limit])).all();
   return reply({signals:q.results??[],submitsOrder:false});
  }
  if(path==="/api/algo/v3-alpha/performance"&&req.method==="GET"){
