@@ -165,3 +165,21 @@ test("Pro Terminal preserves USDT, USDC and Coin-M Bitget futures selections",()
 test("Pro Terminal sends the selected exchange provenance with supplied SMC candles",()=>{
  assert.ok(TRADING_TERMINAL_JS.includes('venue:provider,provider,candles:d.candles'));
 });
+
+
+test("terminal exposes production/demo, UTA/Classic and JSON/SBE public transport selectors",()=>{
+ for(const id of ["tt-bg-env","tt-bg-account","tt-bg-protocol","tt-private-connect","tt-private-status"])assert.match(TRADING_TERMINAL_HTML,new RegExp('id="'+id+'"'));
+ assert.match(TRADING_TERMINAL_JS,/subscribeTransport\(options,handlers\)/);
+ assert.match(TRADING_TERMINAL_JS,/S\.bitgetEnvironment/);
+ assert.match(TRADING_TERMINAL_JS,/S\.bitgetAccount/);
+ assert.match(TRADING_TERMINAL_JS,/S\.bitgetProtocol/);
+ assert.match(TRADING_TERMINAL_JS,/terminalBitgetAuxStream/);
+ assert.match(TRADING_TERMINAL_JS,/subscribePrivate\(\{environment:S\.bitgetEnvironment,account:S\.bitgetAccount,maxRetries:4\}/);
+ assert.match(TRADING_TERMINAL_JS,/toggleTerminalBitgetPrivateStream/);
+});
+
+test("terminal forces unsupported demo Classic and SBE combinations back to supported UTA modes",()=>{
+ assert.match(TRADING_TERMINAL_JS,/if\(env\.value==="demo"\)\{account\.value="uta";protocol\.value="json";\}/);
+ assert.match(TRADING_TERMINAL_JS,/if\(account\.value==="classic"\)\{env\.value="production";protocol\.value="json";\}/);
+ assert.match(TRADING_TERMINAL_JS,/if\(protocol\.value==="sbe"\)\{env\.value="production";account\.value="uta";\}/);
+});
