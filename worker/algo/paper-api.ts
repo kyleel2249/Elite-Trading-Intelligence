@@ -23,11 +23,11 @@ import { raiseAlerts } from "./alerts.ts";
 import { paperCycleAlerts } from "./alert-rules.ts";
 import { ParamRegistry, KVParamStore, degradationStep } from "./optimizer.ts";
 import { fitCalibration, loadCalibration, outcomesFrom, saveCalibration } from "./calibration.ts";
-import { KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
+import { DEFAULT_PAPER_CONFIG, KVPaperStore, PaperEngine, type KVLike, type PaperConfig } from "./paper.ts";
 import { calibration, reportsBy, reportsByEngine, windowedReports } from "./performance.ts";
 import { loadUniverse } from "./universe.ts";
 
-export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string; ETI_ROUND_TRIP_COST_BPS?: string }
+export interface PaperEnv extends ExecutionEnv, MarketEnv { ETI_PAPER_SYMBOLS?: string; ETI_PAPER_STRATEGY?: string; ETI_PAPER_AUTOEXECUTE?: string; ETI_ROUND_TRIP_COST_BPS?: string; ETI_PAPER_RISK_FRACTION?: string; ETI_PAPER_MAX_NOTIONAL_FRACTION?: string; ETI_PAPER_MAX_OPEN_POSITIONS?: string; ETI_PAPER_MAX_DAILY_LOSS_PCT?: string; ETI_PAPER_MAX_CONSECUTIVE_LOSSES?: string }
 export interface PaperDeps { now?: () => number; fetchImpl?: typeof fetch }
 interface KVWithList extends KVLike { list(o: { prefix: string; limit?: number }): Promise<{ keys: { name: string }[] }> }
 
