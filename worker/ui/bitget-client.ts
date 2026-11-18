@@ -129,7 +129,7 @@ async function symbols(kind){
  return {data:{symbols:rows,warnings:warnings,sources:sources,generatedAt:now,stale:Object.keys(sources).some(function(k){return sources[k].stale}),count:rows.length},provider:"bitget-browser",failover:false};
 }
 async function loadSignalInputs(opts){
- var intervals=["1m","5m","15m","30m","1h","4h","1d","1w"],entries=await Promise.all(intervals.map(async function(iv){return [iv,await candles({symbol:opts.symbol,interval:iv,limit:300,market:opts.market,category:opts.category})]})),candleMap={};
+ var intervals=["1m","5m","15m","30m","1h","4h","1d","1w"],entries=await Promise.all(intervals.map(async function(iv){try{return [iv,await candles({symbol:opts.symbol,interval:iv,limit:300,market:opts.market,category:opts.category})]}catch(e){return [iv,[]]}})),candleMap={};
  entries.forEach(function(x){candleMap[x[0]]=x[1]});
  var x=await context(opts);
  return {candles:candleMap,depth:x.depth,derivatives:x.derivatives,provider:"bitget-browser",market:opts.market,category:opts.category,failures:x.failures};
