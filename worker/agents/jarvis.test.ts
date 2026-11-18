@@ -8,7 +8,7 @@ test("JARVIS routes natural-language market requests to the existing council", (
   });
 });
 
-test("JARVIS recognizes status, audit and explicit deep-review intents", () => {
+test("an explicit trading symbol and timeframe are enough to request analysis", () => {\n  assert.equal(parseJarvisCommand("BTCUSDT 15m").intent, "analyze");\n});\n\ntest("JARVIS recognizes status, audit and explicit deep-review intents", () => {
   assert.equal(parseJarvisCommand("Check system health and autopilot").intent, "status");
   assert.equal(parseJarvisCommand("Show performance audit").intent, "audit");
   assert.equal(parseJarvisCommand("Give me a deep review of BTCUSDT 1h").intent, "deep_review");
