@@ -6,7 +6,7 @@ var SPOT_GRAN={"1m":"1min","3m":"3min","5m":"5min","15m":"15min","30m":"30min","
 var MIX_GRAN={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1Dutc","1w":"1Wutc"};
 var PRODUCT_TYPES=["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"];
 function q(obj){var a=[];Object.keys(obj).forEach(function(k){if(obj[k]!==undefined&&obj[k]!==null&&obj[k]!=="")a.push(encodeURIComponent(k)+"="+encodeURIComponent(String(obj[k])))});return a.join("&")}
-function num(v){var n=Number(v);return Number.isFinite(n)?n:null}
+function num(v){if(v===undefined||v===null||v==="")return null;var n=Number(v);return Number.isFinite(n)?n:null}
 function millis(v){var n=num(v);return n===null?null:n<1e12?n*1000:n}
 function goodStatus(x){if(x===undefined||x===null||x==="")return true;return ["online","normal","trading","1"].indexOf(String(x).toLowerCase())>=0}
 function truth(v){return v===true||["true","yes","1"].indexOf(String(v==null?"":v).toLowerCase())>=0}
