@@ -129,7 +129,7 @@ header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;justify
   .chart-workspace>#legend{margin-bottom:8px}
 }
 
-.lower{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.institutional-panel{min-width:0}.im-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}.im-card,.im-subpanel{min-width:0;border:1px solid var(--line);border-radius:10px;padding:12px;background:#0b1422}.im-card small{display:block;color:var(--muted);font-size:11px}.im-card b{display:block;font-size:17px;margin:6px 0;font-variant-numeric:tabular-nums}.im-card span{display:block;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.im-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.im-subpanel h3{font-size:13px;margin:0 0 9px}.im-list{display:grid;gap:7px}.im-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #1d2a3e;font-size:12px}.im-row:last-child{border-bottom:0}.im-row strong{font-variant-numeric:tabular-nums;text-align:right}.im-tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:10px;color:var(--muted);white-space:nowrap}.im-tag.bull{color:#62e6b7;border-color:#1c8d6c}.im-tag.bear{color:#ff8da0;border-color:#a63e58}.im-foot{font-size:11px;color:var(--muted);line-height:1.5;margin-top:10px}.im-empty{color:var(--muted);font-size:12px}@media(max-width:900px){.im-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.im-grid,.im-columns{grid-template-columns:1fr}}.lower{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:8px 5px;text-align:right;border-bottom:1px solid #1d2a3e;font-size:12px}th:first-child,td:first-child{text-align:left}.bid{color:var(--green)}.ask,.sell{color:var(--red)}.buy{color:var(--green)}.status{color:var(--green)}.meta{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);margin:8px 0 14px}.scroll{max-height:360px;overflow:auto}
 @media(max-width:1100px){.lower{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:700px){.grid,.lower{grid-template-columns:1fr}.chart{height:280px}}
@@ -201,6 +201,17 @@ ${PERP_ORDER_HTML}
 <div style="margin-top:12px"><strong>Order preview / response</strong><div id="orderOutput" class="execution-output" style="margin-top:7px">No order prepared.</div></div>
 </aside>
 </div>
+<section class="panel institutional-panel" id="institutionalPanel" style="margin-top:14px">
+ <div class="toolbar" style="justify-content:space-between;align-items:center"><div><h2 style="margin:0">Institutional Market Intelligence</h2><span class="muted" id="imSubtitle">Structure, liquidity and auction context for the selected market</span></div><div style="display:flex;gap:8px;align-items:center"><span class="rdchip" id="imStatus">Waiting for candles</span><button type="button" id="imRefresh">Refresh intelligence</button></div></div>
+ <div class="im-grid" id="imMetrics" aria-live="polite"><div class="im-card"><small>Market structure</small><b>Awaiting analysis</b><span>Selected symbol / timeframe</span></div><div class="im-card"><small>Volume profile</small><b>—</b><span>POC · VAH · VAL</span></div><div class="im-card"><small>Liquidity context</small><b>—</b><span>Equal highs/lows and sweeps</span></div><div class="im-card"><small>Last structure event</small><b>—</b><span>BOS / CHoCH confirmation</span></div></div>
+ <div class="im-columns">
+  <div class="im-subpanel"><h3>Structure &amp; trend</h3><div id="imStructure" class="execution-note">Waiting for confirmed swing analysis…</div></div>
+  <div class="im-subpanel"><h3>Volume profile · 70% value area</h3><div id="imProfile" class="execution-note">Waiting for profile calculation…</div></div>
+  <div class="im-subpanel"><h3>Liquidity pools &amp; sweeps</h3><div id="imLiquidity" class="execution-note">Waiting for liquidity analysis…</div></div>
+  <div class="im-subpanel"><h3>Recent BOS / CHoCH events</h3><div id="imEvents" class="execution-note">Waiting for confirmed events…</div></div>
+ </div>
+ <div class="im-foot" id="imMethod">Analysis uses closed candles and confirmed pivots. Volume profile is an OHLCV approximation, not tick-level exchange volume-at-price. This panel is descriptive and does not submit orders.</div>
+</section>
 <section class="panel" id="calcPanel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Profit &amp; Leverage Calculator</h2><span class="muted" id="calcMeta">Estimates only</span></div>
 <p class="execution-note">For USDT-margined contracts with isolated margin. It never places an order. Leverage magnifies losses as well as profits. Liquidation is an estimate that ignores fees, funding and tiered maintenance margins: confirm with the exchange before relying on it.</p>
