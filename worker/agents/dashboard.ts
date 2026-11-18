@@ -73,7 +73,7 @@ var body={symbol:$('symbol').value.trim().toUpperCase(),interval:$('interval').v
 if(b)body.benchmark=b.toUpperCase();if(isFinite(eq)&&eq>0)body.account={equityUsd:eq};
 return api('/api/agents/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(res){
 if(res.error){showErr('Backend error: '+res.error+(res.detail?' ('+JSON.stringify(res.detail)+')':''));return}
-renderAgents(res.reports);renderDecision(res);renderRisk(res);renderProviders(res);renderMsgs(res);$('last').textContent='last run '+res.generatedAt}).catch(function(e){showErr('Request failed: '+e)}).then(function(){busy=false;setState(timer?'auto-refresh':paused?'paused':'idle')})}
+renderAgents(res.reports);renderDecision(res);renderRisk(res);renderProviders(res);renderMsgs(res);$('last').textContent='last run '+res.generatedAt+' | audit: '+(res.auditPersistence||'unavailable')}).catch(function(e){showErr('Request failed: '+e)}).then(function(){busy=false;setState(timer?'auto-refresh':paused?'paused':'idle')})}
 function stopTimer(){if(timer){clearInterval(timer);timer=null}}
 function startTimer(){stopTimer();timer=setInterval(run,parseInt($('every').value,10)*1000);paused=false;run()}
 $('run').onclick=run;$('start').onclick=startTimer;

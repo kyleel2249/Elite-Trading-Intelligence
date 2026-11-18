@@ -28,8 +28,10 @@ import type { SymbolFilters } from "./filters.ts";
 import { DASHBOARD_HTML } from "./dashboard.ts";
 import { withLlmBrief } from "./llm-route.ts";
 import { readAutopilotConfig } from "./autopilot.ts";
+import { listAgentDecisions, persistAgentDecision } from "./persistence.ts";
+import type { AgentAuditDb, AgentDecisionSnapshot } from "./persistence.ts";
 
-export type AgentsEnv = MarketEnv & ExecutionEnv & ProviderEnv & { ETI_PORTFOLIO_DB?: any; ETI_AGENT_AUTOPILOT_ENABLED?: string; ETI_AGENT_AUTOPILOT_SYMBOLS?: string; ETI_AGENT_AUTOPILOT_INTERVAL?: string; ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE?: string; ETI_AGENT_AUTOPILOT_MIN_AGREEMENT?: string; ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string; ETI_AGENT_AUTOPILOT_CONFIG?: string };
+export type AgentsEnv = MarketEnv & ExecutionEnv & ProviderEnv & { ETI_PORTFOLIO_DB?: AgentAuditDb; ETI_AGENT_AUTOPILOT_ENABLED?: string; ETI_AGENT_AUTOPILOT_SYMBOLS?: string; ETI_AGENT_AUTOPILOT_INTERVAL?: string; ETI_AGENT_AUTOPILOT_MIN_CONFIDENCE?: string; ETI_AGENT_AUTOPILOT_MIN_AGREEMENT?: string; ETI_AGENT_AUTOPILOT_MAX_POSITIONS?: string; ETI_AGENT_AUTOPILOT_CONFIG?: string };
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 export type MarketLoader = (env: AgentsEnv, symbol: string, interval: string, opts: { provider?: string | null; benchmark?: string | null }) => Promise<MarketInput>;
 export type ProviderLoader = (env: AgentsEnv, symbol: string, now: number) => Promise<{ supplied: SuppliedData; status: ProviderStatus[] }>;
@@ -110,10 +112,21 @@ async function readBody(req: Request): Promise<Record<string, unknown> | null> {
 }
 
 async function record(env: AgentsEnv, r: AnalysisResult, executed: boolean) {
-  if (!env.ETI_EXECUTION_LOG) return false;
-  const rec = toDecisionRecord(r, executed), inv = String(9_999_999_999_999 - Date.parse(rec.at)).padStart(13, "0");
-  await env.ETI_EXECUTION_LOG.put(`agentrun:${inv}:${rec.id}`, JSON.stringify(rec), { expirationTtl: TTL });
-  return true;
+  let saved = false;
+  if (env.ETI_PORTFOLIO_DB) {
+    try {
+      await persistAgentDecision(env.ETI_PORTFOLIO_DB, r as unknown as AgentDecisionSnapshot, executed);
+      saved = true;
+    } catch { /* A failed durable write is surfaced as not recorded; never claim success. */ }
+  }
+  if (env.ETI_EXECUTION_LOG) {
+    try {
+      const rec = toDecisionRecord(r, executed), inv = String(9_999_999_999_999 - Date.parse(rec.at)).padStart(13, "0");
+      await env.ETI_EXECUTION_LOG.put(`agentrun:${inv}:${rec.id}`, JSON.stringify(rec), { expirationTtl: TTL });
+      saved = true;
+    } catch { /* Keep analysis available if the optional KV audit sink is degraded. */ }
+  }
+  return saved;
 }
 
 function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
@@ -150,7 +163,7 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
 
       if (path === "/api/agents") {
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
-        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, endpoints: ["GET /agents (dashboard)", "GET|POST /api/agents/analyze", "GET /api/agents/providers", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)", "POST /api/agents/brief (bearer, advisory LLM review)"], integrity, fredConfigured: !!env.FRED_API_KEY, llmConfigured: !!(env as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: await stored() });
+        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, endpoints: ["GET /agents (dashboard)", "GET|POST /api/agents/analyze", "GET /api/agents/providers", "GET /api/agents/decisions (bearer, durable D1 audit)", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)", "POST /api/agents/brief (bearer, advisory LLM review)"], integrity, durableAuditConfigured: !!env.ETI_PORTFOLIO_DB, fredConfigured: !!env.FRED_API_KEY, llmConfigured: !!(env as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: await stored() });
       }
 
       const symbolOf = (v: unknown) => (typeof v === "string" ? v.toUpperCase() : "BTCUSDT");
@@ -162,6 +175,24 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         if (!SYMBOL.test(symbol)) return reply({ error: "invalid_symbol" }, 400);
         try { const p = await loadProv(env, symbol, clock()); return reply({ symbol, providers: p.status, provided: Object.keys(p.supplied) }); }
         catch { return reply({ error: "provider_check_failed" }, 502); }
+      }
+
+      if (path === "/api/agents/decisions") {
+        if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+        if (!(await bearerOk(request, env))) return reply({ error: "unauthorized" }, 401);
+        if (!env.ETI_PORTFOLIO_DB) return reply({ error: "durable_audit_not_configured", fallback: !!env.ETI_EXECUTION_LOG }, 503);
+        const rawLimit = Number(url.searchParams.get("limit") ?? 25);
+        const rawBefore = url.searchParams.get("before");
+        const before = rawBefore === null ? undefined : Number(rawBefore);
+        const symbol = url.searchParams.get("symbol")?.toUpperCase();
+        if (!Number.isFinite(rawLimit) || (before !== undefined && (!Number.isFinite(before) || before <= 0))) return reply({ error: "invalid_pagination" }, 400);
+        if (symbol && !SYMBOL.test(symbol)) return reply({ error: "invalid_symbol" }, 400);
+        try {
+          const page = await listAgentDecisions(env.ETI_PORTFOLIO_DB, { limit: rawLimit, before, symbol });
+          return reply({ schema: "eti.agent.audit.page/1", ...page, durable: true });
+        } catch {
+          return reply({ error: "durable_audit_unavailable", durable: false }, 503);
+        }
       }
 
       if (path === "/api/agents/audit") {
@@ -222,8 +253,9 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
       const result = analyze({ market, supplied: mergeSupplied(pSup, supplied(body)), account, integrity, audit, execution: isExec ? exReq : undefined, maxOrderQuantity: Number.isFinite(maxQty) && maxQty > 0 ? maxQty : undefined, now: clock() });
 
       if (!isExec) {
-        const recorded = authed && body.record === true ? await record(env, result, false).catch(() => false) : false;
-        return reply({ ...result, providers: pStatus, recorded });
+        // Every completed analysis receives an immutable audit snapshot. Storage failure is explicit.
+        const recorded = await record(env, result, false).catch(() => false);
+        return reply({ ...result, providers: pStatus, recorded, auditPersistence: recorded ? "stored" : "unavailable" });
       }
 
       // Execution path: the Risk Manager's veto is structural: no ticket exists unless risk.approved.
