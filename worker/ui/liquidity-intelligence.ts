@@ -49,7 +49,7 @@ async function getCandles(){
  if(state.venue==="bitget"){
   const market=state.market==="futures"?"futures":"spot";
   if(window.ETIBitget&&typeof window.ETIBitget.loadSignalInputs==="function"&&now-state.signalAt>=60000){const multi=await window.ETIBitget.loadSignalInputs({symbol:state.symbol,market,category:state.category});state.candlesByTimeframe=multi.candles||{};state.signalAt=now;}
-  rows=state.candlesByTimeframe[state.interval]||await window.ETIBitget.candles({symbol:state.symbol,interval:state.interval,limit:300,market,category:state.category});
+  rows=state.candlesByTimeframe[state.interval]?.length?state.candlesByTimeframe[state.interval]:await window.ETIBitget.candles({symbol:state.symbol,interval:state.interval,limit:300,market,category:state.category});
  }else rows=await query("/api/market/klines");
  state.candles=(rows||[]).map(r=>Array.isArray(r)?r:[r.time*1000,r.open,r.high,r.low,r.close,r.volume]).filter(r=>Array.isArray(r)&&r.length>=6).slice(-300);
  state.candleAt=now;
