@@ -21,7 +21,9 @@ export interface FvgConfluence {
   available: boolean; stance: "supports" | "opposes" | "neutral"; confidenceDelta: number; score: number; factors: FvgFactor[];
   supporting: FvgZoneBrief[]; opposing: FvgZoneBrief[]; entryOptimization: FvgEntryOptimization | null;
   /** Active (unfilled or partially filled) gaps considered, by direction, and the timeframes they sit on. */
-  unfilled?: { bullish: number; bearish: number; partial: number; timeframes: string[] };\n  /** Full qualification, entry, invalidation and target analysis. Advisory only; never changes the fused order plan. */\n  precision: FvgPrecisionResult | null;
+  unfilled?: { bullish: number; bearish: number; partial: number; timeframes: string[] };
+  /** Full qualification, entry, invalidation and target analysis. Advisory only; never changes the fused order plan. */
+  precision: FvgPrecisionResult | null;
   summary: string; canTriggerTrade: false; advisoryOnly: true;
 }
 export interface FvgZoneBrief { id: string; timeframe: string; direction: "bullish" | "bearish"; upper: number; lower: number; mid: number; sizeAtr: number; strength: number; status: string; mitigationPct: number; confluence: number; distanceAtr: number }
