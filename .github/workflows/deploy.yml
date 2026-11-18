@@ -111,7 +111,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test "${#DATAX_INTEGRATION_SECRET}" -ge 32
-          printf '%s' "$DATAX_INTEGRATION_SECRET" | npx --yes wrangler@4.148.0 pages secret put ETI_INTEGRATION_SECRET --project-name=datax --env production
+          printf '%s' "$DATAX_INTEGRATION_SECRET" | npx --yes wrangler@4.148.0 pages secret put ETI_INTEGRATION_SECRET --project-name=datax
           deployments="$(curl --silent --show-error --fail \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments?per_page=20")"
@@ -129,12 +129,31 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments/$deployment_id/retry")"
-          printf '%s' "$retry" | node --input-type=module -e '
+          retry_id="$(printf '%s' "$retry" | node --input-type=module -e '
             let input="";for await (const chunk of process.stdin) input+=chunk;
             const body=JSON.parse(input);
             if(body.success!==true||!body.result?.id)process.exit(1);
-            console.log("DataX Pages production deployment retried after synchronizing the shared integration secret.");
-          '
+            process.stdout.write(body.result.id);
+          ')"
+          ready=0
+          for attempt in $(seq 1 30); do
+            state="$(curl --silent --show-error --fail \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/datax/deployments/$retry_id" | node --input-type=module -e '
+                let input="";for await (const chunk of process.stdin) input+=chunk;
+                const body=JSON.parse(input);
+                if(body.success!==true)process.exit(2);
+                process.stdout.write(String(body.result?.latest_stage?.status||"unknown"));
+              ')"
+            if [ "$state" = "success" ]; then ready=1; break; fi
+            if [ "$state" = "failure" ] || [ "$state" = "canceled" ]; then
+              echo "::error::DataX Pages production deployment failed while applying the shared integration secret."
+              exit 1
+            fi
+            sleep 4
+          done
+          test "$ready" -eq 1 || { echo "::error::Timed out waiting for the DataX Pages production deployment to finish."; exit 1; }
+          echo "DataX Pages production deployment completed after synchronizing the shared integration secret."
 
       - name: Verify signed DataX production integration
         shell: bash
@@ -165,54 +184,63 @@ jobs:
           }
 
           const pathname = "/api/integrations/eti/summary";
-          const timestamp = String(Math.floor(Date.now() / 1000));
-          const nonce = randomBytes(24).toString("base64url");
-          const canonical = [timestamp, nonce, "GET", pathname].join("\n");
-          const signature = createHmac("sha256", secret).update(canonical).digest("hex");
           const endpoint = new URL(pathname, origin);
+          const deadline = Date.now() + 120000;
+          let lastStatus = 0;
+          let lastError = "not_attempted";
 
-          let response;
-          try {
-            response = await fetch(endpoint, {
-              method: "GET",
-              headers: {
-                accept: "application/json",
-                "x-datax-timestamp": timestamp,
-                "x-datax-nonce": nonce,
-                "x-datax-signature": signature
-              },
-              redirect: "error",
-              signal: AbortSignal.timeout(10000)
-            });
-          } catch (error) {
-            console.error("::error::Could not reach the DataX production integration endpoint:", error.name);
-            process.exit(1);
+          while (Date.now() < deadline) {
+            const timestamp = String(Math.floor(Date.now() / 1000));
+            const nonce = randomBytes(24).toString("base64url");
+            const canonical = [timestamp, nonce, "GET", pathname].join("\n");
+            const signature = createHmac("sha256", secret).update(canonical).digest("hex");
+
+            let response;
+            try {
+              response = await fetch(endpoint, {
+                method: "GET",
+                headers: {
+                  accept: "application/json",
+                  "x-datax-timestamp": timestamp,
+                  "x-datax-nonce": nonce,
+                  "x-datax-signature": signature
+                },
+                redirect: "error",
+                signal: AbortSignal.timeout(10000)
+              });
+            } catch (error) {
+              lastError = error.name || "network_error";
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              continue;
+            }
+
+            let payload;
+            try { payload = await response.json(); }
+            catch {
+              lastStatus = response.status;
+              lastError = "invalid_json";
+              break;
+            }
+
+            if (response.ok && payload?.ok === true && payload?.source === "DataX" &&
+                payload?.integrationVersion === 1 && payload?.asOf &&
+                payload?.accounts && payload?.bandwidth && payload?.rewards &&
+                payload?.reserves && payload?.tradingCapitalEligible === false) {
+              console.log("Signed DataX production integration verified: HMAC authentication, nonce storage and aggregate snapshot succeeded. No member-level data or secret values were logged.");
+              process.exit(0);
+            }
+
+            lastStatus = response.status;
+            lastError = payload?.error || "unexpected_response";
+            if (![401, 409, 502, 503].includes(response.status)) break;
+            await new Promise(resolve => setTimeout(resolve, 5000));
           }
 
-          let payload;
-          try { payload = await response.json(); }
-          catch {
-            console.error("::error::DataX returned an invalid JSON response (HTTP " + response.status + ").");
-            process.exit(1);
-          }
-
-          if (!response.ok) {
-            console.error("::error::DataX rejected the signed production request:", JSON.stringify({
-              status: response.status,
-              error: payload?.error || "unknown_error"
-            }));
-            process.exit(1);
-          }
-
-          if (payload?.ok !== true || payload?.source !== "DataX" ||
-              payload?.integrationVersion !== 1 || !payload?.asOf ||
-              !payload?.accounts || !payload?.bandwidth || !payload?.rewards ||
-              !payload?.reserves || payload?.tradingCapitalEligible !== false) {
-            console.error("::error::DataX returned an unexpected aggregate snapshot contract.");
-            process.exit(1);
-          }
-
-          console.log("Signed DataX production integration verified: HMAC authentication, nonce storage and aggregate snapshot succeeded. No member-level data or secret values were logged.");
+          console.error("::error::Signed DataX production verification failed after deployment propagation retries:", JSON.stringify({
+            status: lastStatus,
+            error: lastError
+          }));
+          process.exit(1);
           NODE
 
       - name: Verify Bybit routes, Bitget browser adapter and ETI safeguards
