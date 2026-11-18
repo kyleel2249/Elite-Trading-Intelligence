@@ -90,6 +90,82 @@ jobs:
             npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file"
           fi
 
+      - name: Verify signed DataX production integration
+        shell: bash
+        env:
+          DATAX_API_URL: ${{ vars.DATAX_API_URL }}
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHmac, randomBytes } from "node:crypto";
+
+          const configured = String(process.env.DATAX_API_URL || "");
+          const secret = String(process.env.DATAX_INTEGRATION_SECRET || "");
+          if (secret.length < 32) {
+            console.error("::error::DATAX_INTEGRATION_SECRET is missing or too short.");
+            process.exit(1);
+          }
+
+          let origin;
+          try {
+            origin = new URL(configured);
+            if (origin.protocol !== "https:" || origin.username || origin.password ||
+                origin.pathname !== "/" || origin.search || origin.hash) {
+              throw new Error("invalid_origin");
+            }
+          } catch {
+            console.error("::error::DATAX_API_URL must be a valid HTTPS origin without a path.");
+            process.exit(1);
+          }
+
+          const pathname = "/api/integrations/eti/summary";
+          const timestamp = String(Math.floor(Date.now() / 1000));
+          const nonce = randomBytes(24).toString("base64url");
+          const canonical = [timestamp, nonce, "GET", pathname].join("\\n");
+          const signature = createHmac("sha256", secret).update(canonical).digest("hex");
+          const endpoint = new URL(pathname, origin);
+
+          let response;
+          try {
+            response = await fetch(endpoint, {
+              method: "GET",
+              headers: {
+                accept: "application/json",
+                "x-datax-timestamp": timestamp,
+                "x-datax-nonce": nonce,
+                "x-datax-signature": signature
+              },
+              redirect: "error",
+              signal: AbortSignal.timeout(10000)
+            });
+          } catch (error) {
+            console.error("::error::Could not reach the DataX production integration endpoint:", error.name);
+            process.exit(1);
+          }
+
+          if (!response.ok) {
+            console.error("::error::DataX rejected the signed production request with HTTP " + response.status +
+              ". Check the DataX Pages ETI_INTEGRATION_SECRET, D1 binding and production deployment.");
+            process.exit(1);
+          }
+
+          let payload;
+          try { payload = await response.json(); }
+          catch {
+            console.error("::error::DataX returned an invalid JSON response.");
+            process.exit(1);
+          }
+
+          if (payload?.ok !== true || payload?.source !== "DataX" ||
+              payload?.integrationVersion !== 1 || !payload?.asOf ||
+              !payload?.accounts || !payload?.bandwidth || !payload?.rewards) {
+            console.error("::error::DataX returned an unexpected aggregate snapshot contract.");
+            process.exit(1);
+          }
+
+          console.log("Signed DataX production integration verified: HMAC authentication, nonce storage and aggregate snapshot succeeded. No member-level data or secret values were logged.");
+          NODE
+
       - name: Verify Bybit routes, Bitget browser adapter and ETI safeguards
         shell: bash
         run: |
