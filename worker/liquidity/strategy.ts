@@ -79,7 +79,7 @@ export function calculatePositionPlan(input:{equity:number;entry:number;stop:num
  const equity=Math.max(0,input.equity),entry=input.entry,stop=input.stop,lev=clamp(input.leverage,1,125),riskPct=clamp(input.riskPercent,0.1,100),marginPct=clamp(input.maxMarginPercent??30,1,100);
  if(![equity,entry,stop].every(finite)||equity<=0||entry<=0||stop<=0||entry===stop)return {valid:false,reason:"invalid_sizing_inputs",equity,riskBudget:0,notional:0,margin:0,quantity:0,plannedLoss:0,actualRiskPercent:0,leverage:lev};
  const distance=Math.abs(entry-stop)/entry,side=stop<entry?"LONG":"SHORT";
- if((side==="LONG"&&stop>=entry)||(side==="SHORT"&&stop<=entry))return {valid:false,reason:"stop_on_wrong_side",equity,riskBudget:0,notional:0,margin:0,quantity:0,plannedLoss:0,actualRiskPercent:0,leverage:lev};
+ 
  const riskBudget=equity*riskPct/100,maxMargin=equity*marginPct/100,maxNotional=maxMargin*lev;
  const targetNotional=riskBudget/distance,notional=Math.min(targetNotional,maxNotional),margin=notional/lev,plannedLoss=notional*distance;
  // Conservative liquidation proximity proxy. Actual exchange liquidation is contract/account-mode specific.
