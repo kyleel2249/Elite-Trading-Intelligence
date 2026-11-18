@@ -627,6 +627,9 @@ test("SMC API returns confirmed structure, liquidity and order-block evidence wi
   assert.ok(Array.isArray(body.liquiditySweeps));
   assert.ok(Array.isArray(body.orderBlocks));
   assert.ok(Array.isArray(body.displacement));
+  assert.ok(body.volumeProfile && Number.isFinite(body.volumeProfile.poc), "SMC response includes a calculated point of control");
+  assert.ok(Number.isFinite(body.volumeProfile.vah) && Number.isFinite(body.volumeProfile.val), "SMC response includes value-area bounds");
+  assert.match(body.volumeProfile.method, /OHLCV approximation/);
   assert.equal(body.canTriggerTrade, false);
   assert.equal(body.submitsOrder, false);
   assert.equal(body.liveExecutionAllowed, false);
