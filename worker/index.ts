@@ -116,6 +116,18 @@ header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;justify
 .chart-workspace:fullscreen{width:100%;height:100%;margin:0;padding:0;background:#080d16;overflow:auto}
 .chart-workspace:fullscreen .chart.big{height:calc(100vh - 180px);min-height:420px}
 @media(max-width:700px){.chart-workspace .chart.big{height:82svh;min-height:480px}.chart-workspace .paneBox{height:76px}}
+/* Desktop layout tuned for a 1920 × 1080 workspace while remaining fluid. */
+@media(min-width:1440px) and (min-height:800px){
+  header{min-height:72px;padding:12px 24px;gap:16px}
+  main{width:100%;max-width:1920px;margin:0 auto;padding:12px 0}
+  .toolbar{gap:8px;margin-bottom:10px}
+  .chart-workspace .chart.big{height:min(72vh,780px);min-height:620px}
+  .chart-workspace .paneBox{height:64px}
+  .chart-workspace>h2{padding-top:10px;margin-bottom:8px}
+  .chart-workspace>.meta{margin-top:4px;margin-bottom:8px}
+  .chart-workspace>#legend{margin-bottom:8px}
+}
+
 .lower{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:8px 5px;text-align:right;border-bottom:1px solid #1d2a3e;font-size:12px}th:first-child,td:first-child{text-align:left}.bid{color:var(--green)}.ask,.sell{color:var(--red)}.buy{color:var(--green)}.status{color:var(--green)}.meta{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);margin:8px 0 14px}.scroll{max-height:360px;overflow:auto}
 @media(max-width:1100px){.lower{grid-template-columns:repeat(2,minmax(0,1fr))}}
