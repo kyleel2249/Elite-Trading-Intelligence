@@ -75,12 +75,6 @@ jobs:
           BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}
           BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
           BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
-          BITGET_DEMO_API_KEY: ${{ secrets.BITGET_DEMO_API_KEY }}
-          BITGET_DEMO_API_SECRET: ${{ secrets.BITGET_DEMO_API_SECRET }}
-          BITGET_DEMO_API_PASSPHRASE: ${{ secrets.BITGET_DEMO_API_PASSPHRASE }}
-          BITGET_CLASSIC_API_KEY: ${{ secrets.BITGET_CLASSIC_API_KEY }}
-          BITGET_CLASSIC_API_SECRET: ${{ secrets.BITGET_CLASSIC_API_SECRET }}
-          BITGET_CLASSIC_API_PASSPHRASE: ${{ secrets.BITGET_CLASSIC_API_PASSPHRASE }}
           BYBIT_API_KEY: ${{ secrets.BYBIT_API_KEY }}
           BYBIT_API_SECRET: ${{ secrets.BYBIT_API_SECRET }}
           DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
@@ -95,8 +89,6 @@ jobs:
             "ODDSPAPI_API_KEY", "ETI_SPORTS_PAPER_TOKEN", "ODDS_API_KEY", "BACKEND_URL",
             "INFURA_API_KEY", "INFURA_API_SECRET", "ETI_GAINZ_WEBHOOK_SECRET", "ETI_GAINZ_ADMIN_TOKEN",
             "BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_API_PASSPHRASE",
-            "BITGET_DEMO_API_KEY", "BITGET_DEMO_API_SECRET", "BITGET_DEMO_API_PASSPHRASE",
-            "BITGET_CLASSIC_API_KEY", "BITGET_CLASSIC_API_SECRET", "BITGET_CLASSIC_API_PASSPHRASE", "BYBIT_API_KEY", "BYBIT_API_SECRET", "DATAX_INTEGRATION_SECRET"
           ];
           const secrets = Object.fromEntries(names.filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
           fs.writeFileSync("/tmp/eti-worker-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
