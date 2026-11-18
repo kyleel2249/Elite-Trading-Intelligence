@@ -27,6 +27,7 @@ import { loadBinanceTestnetAccount } from "./account.ts";
 import { applyFilters, loadBinanceFilters } from "./filters.ts";
 import type { SymbolFilters } from "./filters.ts";
 import { DASHBOARD_HTML } from "./dashboard.ts";
+import { JARVIS_COMMAND_CENTRE_HTML } from "./command-centre.ts";
 import { withLlmBrief } from "./llm-route.ts";
 import { withJarvis } from "./jarvis.ts";
 import { readAutopilotConfig } from "./autopilot.ts";
@@ -138,6 +139,8 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
   return {
     async fetch(request, env) {
       const url = new URL(request.url), path = url.pathname;
+      if ((path === "/jarvis" || path === "/command-centre") && request.method === "GET")
+        return new Response(JARVIS_COMMAND_CENTRE_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
       if ((path === "/agents" || path === "/agents/") && request.method === "GET")
         return new Response(DASHBOARD_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" } });
       if (!path.startsWith("/api/agents")) return base.fetch(request, env);

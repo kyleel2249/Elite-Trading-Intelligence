@@ -16,7 +16,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px
 .eti-nav{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 16px;padding:10px 0;border-bottom:1px solid var(--bd)}.eti-nav a{color:var(--acc);text-decoration:none;border:1px solid var(--bd);border-radius:7px;padding:7px 10px;font-size:12px}.eti-nav a:hover,.eti-nav a[aria-current=page]{border-color:var(--acc);background:var(--card)}@media(max-width:700px){body{padding:10px 14px}.eti-nav{overflow-x:auto;flex-wrap:nowrap}.eti-nav a{white-space:nowrap}}details{margin-top:6px}summary{cursor:pointer;color:var(--acc)}.big{font-size:22px;font-weight:700}ul{margin:4px 0;padding-left:18px}.wrap{overflow-x:auto}
 </style></head><body>
 <h1>ETI Agent Intelligence Center</h1>
-<nav class='eti-nav' aria-label='ETI workspace'><a href='/'>ETI Dashboard</a><a href='/terminal'>Pro Terminal</a><a href='/gainz'>GainzAlgo</a><a href='/alpha'>Global Alpha</a><a href='/journal'>Trade Journal</a><a href='/sports'>Sports Intelligence</a><a href='/pro'>ETI Pro</a><a href='/agents' aria-current='page'>AI Agents</a></nav>
+<nav class='eti-nav' aria-label='ETI workspace'><a href='/'>ETI Dashboard</a><a href='/terminal'>Pro Terminal</a><a href='/gainz'>GainzAlgo</a><a href='/alpha'>Global Alpha</a><a href='/journal'>Trade Journal</a><a href='/sports'>Sports Intelligence</a><a href='/pro'>ETI Pro</a><a href='/jarvis'>JARVIS Command Centre</a><a href='/agents' aria-current='page'>AI Agents</a></nav>
 <div class='mut'>Twelve specialist agents coordinate through the Commander. Scheduled autopilot can submit approved trades to ETI INTERNAL PAPER only; Bitget live orders are never enabled by this agent controller.</div>
 <h2>Controls</h2>
 <div class='row'>

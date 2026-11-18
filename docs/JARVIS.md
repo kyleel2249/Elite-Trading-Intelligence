@@ -2,6 +2,10 @@
 
 JARVIS is the authenticated command and orchestration layer over ETI's existing twelve-agent council. It does not replace agents or make itself a directional voter. It delegates to the existing Commander, analysts, Risk Manager, Security Analyst, Execution Specialist and Performance Auditor.
 
+## Institutional JARVIS Command Centre
+
+Open `/jarvis` for the integrated institutional trading workspace. It uses the existing authenticated JARVIS API and live ETI agent, runtime, autopilot, provider, audit and memory endpoints; it does not create a parallel market-data or execution service. The dashboard includes a natural-language command console, live agent roster, Commander decision and dissent view, Risk Manager and security status, provider health, autopilot readiness, performance audit and bounded operational memory. Its bearer token is held in tab-scoped `sessionStorage` only and is cleared when the tab session ends or the operator clears it. The screen is read-only: it cannot submit, prepare or approve orders.
+
 ## API
 
 All endpoints require the existing ETI execution bearer token. Do not send exchange API keys to JARVIS.
