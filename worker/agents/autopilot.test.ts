@@ -97,7 +97,8 @@ test("autopilot refuses a trade below configured confidence and agreement", asyn
   assert.equal(result.submitted, 0);
   assert.equal(calls.length, 6);
   assert.equal(calls[0], "/api/agents/analyze");
-  assert.equal(calls.slice(1).every(x => x === "/api/omnisignal"), true);
+  assert.equal(calls[1], "/api/analysis/liquidity-fvg");
+  assert.equal(calls.slice(2).every(x => x === "/api/omnisignal"), true);
   assert.equal(result.outcomes[0].status, "no_trade");
 });
 
