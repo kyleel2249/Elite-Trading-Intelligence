@@ -19,7 +19,7 @@ export interface PrecisionCandidate {
   score: number; scoreType: "evidence_quality_not_probability"; passed: string[]; failed: string[];
   bos: { type: "BOS" | "CHoCH"; time: number; level: number } | null;
   displacementAtr: number; supportResistance: { kind: "support" | "resistance"; price: number; strength: number } | null;
-  orderBlock: { lower: number; upper: number; strength: number } | null;
+  orderBlock: { lower: number; upper: number; hasFvg: boolean; breaksStructure: boolean } | null;
   dealingRange: { low: number; high: number; positionPct: number; zone: "discount" | "premium" | "equilibrium" } | null;
   liquiditySweep: { direction: "bullish" | "bearish"; time: number; level: number } | null;
   mitigationPct: number; freshnessBars: number; reaction: { confirmed: boolean; time: number | null; close: number | null; ageBars: number | null; distanceAtr: number | null; reason: string };
@@ -76,7 +76,7 @@ export function analyzeFvgPrecision(
     const fresh = z.status === "fresh" && z.mitigationPct === 0 && z.touches === 0;
     if (fresh) passed.push("Completely unmitigated FVG"); else failed.push("FVG has already been touched or mitigated");
     const zoneMid = (z.lower + z.upper) / 2;
-    const level = sr.filter(l => l.kind === (bullish ? "support" : "resistance") && intersects(l.low, l.high, z.lower - atr * FVG_PRECISION_RULES.srToleranceAtr, z.upper + atr * FVG_PRECISION_RULES.srToleranceAtr)).sort((a,b)=>b.strength-a.strength)[0] ?? null;
+    const level = sr.filter(l => l.kind === (bullish ? "support" : "resistance") && intersects(l.low, l.high, z.lower - atr * FVG_PRECISION_RULES.srToleranceAtr, z.upper + atr * FVG_PRECISION_RULES.srToleranceAtr)).sort((a,b)=>Number(b.hasFVG)-Number(a.hasFVG))[0] ?? null;
     if (level) passed.push("Support/resistance overlaps the FVG"); else failed.push("No meaningful support/resistance overlap");
     const orderBlock = orderBlocks.filter(o => o.kind === z.direction && !o.mitigated && !o.invalidated && intersects(o.low, o.high, z.lower, z.upper)).sort((a,b)=>b.strength-a.strength)[0] ?? null;
     if (orderBlock) passed.push("Unmitigated same-direction order block overlaps the FVG");
@@ -146,7 +146,7 @@ export function analyzeFvgPrecision(
       state:tradableState?"confirmed":(state==="confirmed"?"rejected":state),highlight,
       entry:{price:entryPrice,method:"consequent_encroachment_50",execution:reaction.confirmed?"limit_pending":"confirmation_required"},
       stopLoss,targets,riskReward:rr,score,scoreType:"evidence_quality_not_probability",passed,failed,bos:bos?{type:bos.type,time:bos.time,level:bos.level}:null,
-      displacementAtr:round(displacementAtr,3),supportResistance:level?{kind:level.kind,price:level.price,strength:level.strength}:null,orderBlock:orderBlock?{lower:orderBlock.low,upper:orderBlock.high,strength:orderBlock.strength}:null,
+      displacementAtr:round(displacementAtr,3),supportResistance:level?{kind:level.kind,price:level.price,strength:level.strength}:null,orderBlock:orderBlock?{lower:orderBlock.low,upper:orderBlock.high,hasFvg:orderBlock.hasFVG,breaksStructure:orderBlock.breaksStructure}:null,
       dealingRange:pd?{low:pd.rangeLow,high:pd.rangeHigh,positionPct:pd.positionPct,zone:pd.zone}:null,
       liquiditySweep:sweep?{direction:sweep.direction,time:sweep.time,level:sweep.level}:null,
       mitigationPct:z.mitigationPct,freshnessBars:z.ageBars,reaction,
