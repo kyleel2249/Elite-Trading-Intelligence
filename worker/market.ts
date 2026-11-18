@@ -664,11 +664,22 @@ function bitgetV2FallbackUrl(source: string): string | null {
 }
 export async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestInit, fetchImpl: typeof fetch = fetch): Promise<Response> {
   const source = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-  const primary = await fetchImpl(input, init);
-  if (primary.status !== 403 || !source.startsWith(BITGET_BASE + "/api/v3/")) return primary;
+  // Browser requests are routed through this Worker, so an upstream network error
+  // must trigger the same mirror/V2 recovery as an explicit 403. Previously only
+  // HTTP 403 activated recovery; DNS/TLS/egress failures escaped immediately.
+  let primary: Response | null = null;
+  let primaryError: unknown = null;
+  try { primary = await fetchImpl(input, init); } catch (e) { primaryError = e; }
+  if (!source.startsWith(BITGET_BASE + "/api/v3/")) {
+    if (primary) return primary;
+    throw primaryError instanceof Error ? primaryError : new Error("upstream_fetch_failed");
+  }
+  if (primary && primary.status !== 403) return primary;
   const u = new URL(source), fallbackPath = bitgetV2FallbackUrl(source);
   const attempts: string[] = [];
   let last: Response | null = null;
+  if (primary) attempts.push(BITGET_BASE + u.pathname + u.search + ":" + primary.status);
+  else attempts.push(BITGET_BASE + u.pathname + u.search + ":" + (primaryError instanceof Error ? primaryError.name : "network_error"));
   for (const host of BITGET_V2_HOSTS) {
     const sameOrigin = new URL(host).origin === u.origin;
     const paths = [...(!sameOrigin ? [u.pathname + u.search] : []), ...(fallbackPath ? [fallbackPath] : [])];
@@ -692,9 +703,14 @@ export async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestI
     }
   }
   const failed = last && last.status !== 403 ? last : primary;
-  const headers = new Headers(failed.headers);
-  if (attempts.length) headers.set("x-eti-fallback-attempts", attempts.join(" | "));
-  return new Response(failed.body, { status: failed.status, statusText: failed.statusText, headers });
+  if (failed) {
+    const headers = new Headers(failed.headers);
+    headers.set("x-eti-fallback-attempts", attempts.join(" | "));
+    return new Response(failed.body, { status: failed.status, statusText: failed.statusText, headers });
+  }
+  return new Response(JSON.stringify({ code: "ETI_UPSTREAM_UNAVAILABLE", message: "Bitget public market-data upstreams were unreachable", attempts }), {
+    status: 502, headers: { "content-type": "application/json; charset=utf-8", "x-eti-fallback-attempts": attempts.join(" | ") },
+  });
 }
 /** Category for a Bitget pair, decided by the ETI classifier so the chart, the dropdown and the risk review agree. Catalog-confirmed matches only: an unrecognised ticker stays "crypto" rather than being guessed into a stock. */
 export function bitgetCategory(base: string, quote: string): string {
