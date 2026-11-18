@@ -155,7 +155,7 @@ test("Bitget catalogue reports independent freshness for each futures product ty
   const sandbox: any = {
     window: {}, AbortSignal, Response,
     fetch: async (url: string) => {
-      const u = new URL(url), cat = u.searchParams.get("category") || "SPOT";
+      const u = new URL(url), cat = u.searchParams.get("category") || u.searchParams.get("productType") || "SPOT";
       if (failed.has(cat)) return new Response("unavailable", { status: 503 });
       return new Response(JSON.stringify({ code: "00000", data: [{
         symbol: cat === "COIN-FUTURES" ? "BTCUSD" : cat === "USDC-FUTURES" ? "BTCUSDC" : "BTCUSDT",
