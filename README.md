@@ -62,6 +62,10 @@ pytest -q
 
 Profiles & methods: `GET /api/intelligence/traders`
 
+## JARVIS agent intelligence layer
+
+JARVIS provides authenticated natural-language orchestration over the existing twelve-agent council, system/autopilot awareness, performance-audit retrieval, bounded operational memory and optional advisory deep review. It preserves the Commander and Risk Manager decision path and cannot execute live orders. See [docs/JARVIS.md](docs/JARVIS.md) for API usage, advanced capabilities and safety boundaries.
+
 ## Key APIs
 
 | Area | Endpoints |

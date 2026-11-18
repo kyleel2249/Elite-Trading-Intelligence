@@ -6,7 +6,7 @@
  *   GET|POST /api/agents/analyze      read-only analysis (providers auto-fetched unless providers=0 / providers:false)
  *   POST /api/agents/execute          bearer-authenticated; reaches /api/orders only if Commander AND Risk Manager approve and exchange filters pass
  *   GET  /api/agents/audit            bearer-authenticated; Performance Auditor over recorded decisions
- *   POST /api/agents/brief            bearer-authenticated; advisory LLM review of an analysis (see llm-route.ts)
+ *   POST /api/agents/brief            bearer-authenticated; advisory LLM review of an analysis (see llm-route.ts)\n *   GET|POST /api/agents/jarvis        bearer-authenticated JARVIS command/orchestration layer\n *   GET /api/agents/jarvis/memory     bounded operational memory (bearer-authenticated)
  */
 import { AllProvidersFailed, INTERVALS, getMarketData, providerOrder } from "../market.ts";
 import { buildOrderFlow, normalizeDepth, normalizeTrades } from "../analysis/orderflow.ts";
@@ -28,6 +28,7 @@ import { applyFilters, loadBinanceFilters } from "./filters.ts";
 import type { SymbolFilters } from "./filters.ts";
 import { DASHBOARD_HTML } from "./dashboard.ts";
 import { withLlmBrief } from "./llm-route.ts";
+import { withJarvis } from "./jarvis.ts";
 import { readAutopilotConfig } from "./autopilot.ts";
 import { listAgentDecisions, persistAgentDecision } from "./persistence.ts";
 import type { AgentAuditDb, AgentDecisionSnapshot } from "./persistence.ts";
@@ -308,5 +309,5 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
 
 /** Public entry point. The advisory LLM review route sits in front of the agent routes; everything else is handled by the core above. */
 export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
-  return withLlmBrief(withAgentsCore(base, deps) as App<any>, { loadMarket: deps.loadMarket, loadProviders: deps.loadProviders, now: deps.now }) as App<E>;
+  return withJarvis(withLlmBrief(withAgentsCore(base, deps) as App<any>, { loadMarket: deps.loadMarket, loadProviders: deps.loadProviders, now: deps.now }) as App<any>) as App<E>;
 }
