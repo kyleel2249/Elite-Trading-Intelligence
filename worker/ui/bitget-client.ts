@@ -35,7 +35,7 @@ async function request(pathV3,pathsV2){
   return {data:rows,host:"eti-worker",version:"proxy",meta:body};
  }
  if(body&&body.code==="00000"&&body.data!==undefined)body=body.data;
- if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){return {T:t.time||t.ts,p:String(t.price),q:String(t.qty===undefined?t.size:t.qty),side:(t.isBuyerMaker===undefined?String(t.side||"").toLowerCase()==="sell":!!t.isBuyerMaker)?"sell":"buy"};});
+ if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){if(t&&t.p!==undefined&&t.q!==undefined)return t;return {T:t.time||t.ts,p:String(t.price),q:String(t.qty===undefined?t.size:t.qty),side:(t.isBuyerMaker===undefined?String(t.side||"").toLowerCase()==="sell":!!t.isBuyerMaker)?"sell":"buy"};});
  return {data:body,host:"eti-worker",version:"proxy"};
 }
 function parseCandles(data){
