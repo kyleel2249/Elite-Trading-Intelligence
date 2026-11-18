@@ -914,7 +914,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
         let list: SymbolRow[], meta: Record<string, unknown>;
         if (r.status === "fulfilled") {
           list = r.value.rows;
-          meta = { host: r.value.host.replace("https://", ""), fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale };
+          meta = { host: r.value.host.replace("https://", ""), fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: categoryQ ? r.value.failed.includes(categoryQ) : r.value.stale, ...(categoryQ ? { partial: r.value.failed.includes(categoryQ) ? [categoryQ] : [] } : (r.value.failed.length ? { partial: r.value.failed } : {})) };
           if (r.value.failed.length) {
             meta.partial = r.value.failed;
             warnings.push({ market, venue: "bitget", error: "partial_refresh", categories: r.value.failed });
