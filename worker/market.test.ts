@@ -208,6 +208,7 @@ test("Bitget category-scoped catalogue freshness is independent of failures in o
       status: "normal", type: "perpetual"
     }] }));
   };
+  globalThis.fetch = fetcher;
   const response = await handleMarket(req("/api/market/symbols?venue=bitget&market=futures&category=USDT-FUTURES"), {});
   assert.equal(response.status, 200);
   const body = await response.json() as any;
