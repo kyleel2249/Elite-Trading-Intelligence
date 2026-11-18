@@ -15,24 +15,17 @@ async function request(pathV3,pathsV2){
  // read Bitget REST responses directly because of CORS; the Worker owns upstream
  // retries, response validation and the D1 catalogue fallback.
  if(!pathV3)throw new Error("Bitget REST request requires a V3 route descriptor");
- var origin=window.location&&window.location.origin?window.location.origin:"https://eti.test",u=new URL(pathV3,origin),category=u.searchParams.get("category")||"SPOT",symbol=u.searchParams.get("symbol")||"",endpoint=u.pathname.split("/").pop(),market=category==="MARGIN"?"margin":category==="SPOT"?"spot":"futures";
+ var origin=window.location&&window.location.origin?window.location.origin:"https://eti.test",parts=String(pathV3).split("?"),endpoint=parts[0].split("/").pop(),query={};
+ (parts[1]||"").split("&").forEach(function(pair){if(!pair)return;var p=pair.split("=");query[decodeURIComponent(p[0])]=decodeURIComponent(p.slice(1).join("=")||"")});
+ var category=query.category||"SPOT",symbol=query.symbol||"",market=category==="MARGIN"?"margin":category==="SPOT"?"spot":"futures";
  var route=endpoint==="candles"?"klines":endpoint==="orderbook"?"depth":endpoint==="fills"?"trades":endpoint==="tickers"?"ticker":endpoint==="instruments"?"symbols":null;
  if(!route)throw new Error("Unsupported Bitget public REST route: "+endpoint);
- var params=new URLSearchParams({venue:"bitget"});
- if(route==="symbols"){
-  params.set("market",market);
-  params.set("category",category);
-  if(market==="futures")params.set("category",category);
- }else{
-  params.set("market",market==="margin"?"margin":market);
-  params.set("symbol",symbol);
-  params.set("category",category);
-  if(route==="klines"){params.set("interval",u.searchParams.get("interval")||"1m");params.set("limit",u.searchParams.get("limit")||"300");}
-  else if(route==="depth"||route==="trades")params.set("limit",u.searchParams.get("limit")||"50");
-  if(market==="futures")params.set("category",category);
- }
+ var params={venue:"bitget",market:market,category:category};
+ if(route!=="symbols")params.symbol=symbol;
+ if(route==="klines"){params.interval=query.interval||"1m";params.limit=query.limit||"300";}
+ else if(route==="depth"||route==="trades")params.limit=query.limit||"50";
  var res;
- try{res=await fetch(origin+"/api/market/"+route+"?"+params.toString(),{method:"GET",credentials:"same-origin",cache:"no-store",headers:{accept:"application/json"},signal:AbortSignal.timeout(15000)});}
+ try{res=await fetch(origin+"/api/market/"+route+"?"+q(params),{method:"GET",credentials:"same-origin",cache:"no-store",headers:{accept:"application/json"},signal:AbortSignal.timeout(15000)});}
  catch(e){throw new Error("ETI Bitget proxy network error: "+(e&&e.name||"fetch_failed"));}
  var body=await res.json().catch(function(){return null});
  if(!res.ok)throw new Error("ETI Bitget proxy "+res.status+": "+(body&& (body.detail||body.error||body.message)||"invalid response"));
