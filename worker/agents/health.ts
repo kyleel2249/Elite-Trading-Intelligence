@@ -56,10 +56,11 @@ export function agentRuntimeStatus(env: RuntimeEnv) {
     },
     marketData: {
       workerProviderOrder: marketProviderOrder,
-      bitgetPublicTransport: "browser_direct_uta_v3_websocket",
-      bitgetPrivateWebSocket: "worker_relay_uta_v3",
+      bitgetPublicTransport: "browser_direct_uta_v3_v2_demo_and_sbe_websockets",
+      bitgetPrivateWebSocket: "worker_relay_uta_v3_demo_and_classic_v2",
+      bitgetWebSocketMatrix: { productionUtaV3: true, productionUtaSbePublic: true, demoUtaV3: true, productionClassicV2: true, demoClassicV2: false },
       bitgetServerSideScheduledAnalysis: false,
-      note: "Bitget public market data is browser-direct because Worker egress may be blocked. Scheduled server-side autopilot uses the configured Worker provider order.",
+      note: "Bitget public market data supports production/demo UTA V3 JSON, production UTA SBE and production Classic V2. Private UTA V3 and Classic V2 sessions are relayed through the authenticated Worker. Demo Classic V2 is not documented by Bitget and is rejected. This reports implemented transports, not live account connectivity.",
     },
     autopilot: {
       enabled: autopilotEnabled,
