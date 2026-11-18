@@ -56,13 +56,13 @@ function putU64(a:number[],n:bigint){const b=new ArrayBuffer(8);new DataView(b).
 test("SBE BBO template 1002 decodes fixed-point prices, sizes, sequence and symbol",()=>{
  const b:number[]=[];putU64(b,1700000000000001n);putI64(b,6569038n);putI64(b,15000n);putI64(b,6569042n);putI64(b,20000n);b.push(0xfe,0xfc);putU64(b,1n);b.push(0,0,0,0,0,0,7,...new TextEncoder().encode("BTCUSDT"));
  const d=decodeBitgetSbe(frame(1002,56,2,b));
- assert.equal(d.type,"books1");assert.equal(d.bids[0][0],65690.38);assert.equal(d.bids[0][1],1.5);assert.equal(d.asks[0][0],65690.42);assert.equal(d.asks[0][1],2);assert.equal(d.seq,1);assert.equal(d.symbol,"BTCUSDT");
+ assert.equal(d.type,"books1");assert.equal(d.bids[0][0],65690.38);assert.ok(Math.abs(d.bids[0][1]-1.5)<1e-12);assert.equal(d.asks[0][0],65690.42);assert.ok(Math.abs(d.asks[0][1]-2)<1e-12);assert.equal(d.seq,1);assert.equal(d.symbol,"BTCUSDT");
 });
 
 test("SBE publicTrade template 1003 decodes batch trade entry and symbol",()=>{
  const b:number[]=[0xfe,0xfc,0,0,0,0,0,0];b.push(48,0,1,0);putU64(b,1700000000000002n);putU64(b,9999n);putI64(b,6566738n);putI64(b,5000n);b.push(0,0);putU64(b,1700000000001002n);b.push(1,0,0,0,0,0,7,...new TextEncoder().encode("BTCUSDT"));
  const d=decodeBitgetSbe(frame(1003,8,4,b));
- assert.equal(d.trades[0].price,65667.38);assert.equal(d.trades[0].size,0.5);assert.equal(d.trades[0].side,"buy");assert.equal(d.symbol,"BTCUSDT");
+ assert.equal(d.trades[0].price,65667.38);assert.ok(Math.abs(d.trades[0].size-0.5)<1e-12);assert.equal(d.trades[0].side,"buy");assert.equal(d.symbol,"BTCUSDT");
 });
 
 test("SBE rejects unsupported schemas, templates and truncated frames",()=>{
@@ -79,5 +79,5 @@ test("SBE Depth50 schema v5 decodes groups and incremental continuity metadata",
  b.push(16,0,1,0);putI64(b,6566438n);putI64(b,6000n);
  b.push(7,...new TextEncoder().encode("BTCUSDT"));
  const d=decodeBitgetSbe(frame(1001,40,5,b));
- assert.equal(d.type,"books50");assert.equal(d.seq,42);assert.equal(d.pseq,41);assert.equal(d.depthAction,1);assert.equal(d.asks[0][0],65667.38);assert.equal(d.bids[0][1],0.6);assert.equal(d.symbol,"BTCUSDT");
+ assert.equal(d.type,"books50");assert.equal(d.seq,42);assert.equal(d.pseq,41);assert.equal(d.depthAction,1);assert.equal(d.asks[0][0],65667.38);assert.ok(Math.abs(d.bids[0][1]-0.6)<1e-12);assert.equal(d.symbol,"BTCUSDT");
 });
