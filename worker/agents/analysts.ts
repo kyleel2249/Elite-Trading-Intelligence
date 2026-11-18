@@ -4,6 +4,7 @@
  */
 import { INTERVAL_SECONDS } from "../market.ts";
 import { analyzeFvgPrecision } from "../analysis/fvg-precision.ts";
+import { analyzeLiquidityFvg } from "../analysis/liquidity-fvg.ts";
 import { makeReport, noData } from "./types.ts";
 import type { AgentReport, Ctx, Evidence, Kline, TradeProposal } from "./types.ts";
 import {
@@ -104,12 +105,15 @@ export function technicalAnalyst(ctx: Ctx): AgentReport {
   votes.push({ label: "range_breakout_20", vote: close[L] > hi20 ? 1 : close[L] < lo20 ? -1 : 0, weight: 1 });
   const closedForFvg = cs.filter(k => k[0] + (INTERVAL_SECONDS[ctx.market.interval] ?? 3600) * 1000 <= ctx.now);
   let fvgPrecision: ReturnType<typeof analyzeFvgPrecision> | null = null;
+  let liquidityFvg: ReturnType<typeof analyzeLiquidityFvg> | null = null;
   let fvgFailure: string | null = null;
   try {
     fvgPrecision = analyzeFvgPrecision(closedForFvg, ctx.market.interval, { symbol: ctx.market.symbol });
+    liquidityFvg = analyzeLiquidityFvg(closedForFvg, ctx.market.interval, { symbol: ctx.market.symbol });
     const confirmed = fvgPrecision.best?.state === "confirmed" ? fvgPrecision.best : null;
-    if (confirmed) votes.push({ label: "fvg_precision_first_retest", vote: confirmed.direction === "BUY" ? 1 : -1, weight: 2, note: "Six-filter qualified FVG with a confirmed first-retest reaction; entry " + confirmed.entry.price });
-  } catch (e) { fvgFailure = e instanceof Error ? e.message : "FVG precision analysis failed"; }
+    if (confirmed) votes.push({ label: "fvg_precision_first_retest", vote: confirmed.direction === "BUY" ? 1 : -1, weight: 2, note: "Qualified FVG with a confirmed first-retest reaction; entry " + confirmed.entry.price });
+    if (liquidityFvg.autopilotEligible && liquidityFvg.setup) votes.push({ label: "liquidity_fvg_fusion", vote: liquidityFvg.direction === "BUY" ? 1 : -1, weight: 3, note: "Liquidity sweep + structure + FVG retest confirmed; entry " + liquidityFvg.setup.entry + "; manipulation risk " + liquidityFvg.manipulation.level });
+  } catch (e) { fvgFailure = e instanceof Error ? e.message : "Liquidity/FVG analysis failed"; }
   const sc = score(votes), stance = stanceOf(sc, 0.25);
   let conf = clamp(Math.abs(sc), 0, 0.9); if (!Number.isFinite(e200[L])) conf *= 0.85;
   const sup = lows.map((x) => x.p).filter((p) => p < close[L]), res = highs.map((x) => x.p).filter((p) => p > close[L]);
@@ -121,7 +125,13 @@ export function technicalAnalyst(ctx: Ctx): AgentReport {
     { label: "fvg_precision_status", value: fvgPrecision?.best?.state ?? fvgPrecision?.status ?? "unavailable", note: fvgPrecision?.best?.explanation?.slice(0, 2).join("; ") ?? "No fully qualified FVG entry is active." },
     { label: "fvg_precision_direction", value: fvgPrecision?.best?.direction ?? "WAIT" },
     { label: "fvg_precision_entry", value: fvgPrecision?.best?.entry.price ?? null, note: "50% consequent encroachment reference; execution still requires the existing risk and order gates." },
-    { label: "fvg_precision_green_zones", value: fvgPrecision?.summary.green ?? 0 }];
+    { label: "fvg_precision_green_zones", value: fvgPrecision?.summary.green ?? 0 },
+    { label: "liquidity_fvg_autopilot_eligible", value: liquidityFvg?.autopilotEligible ?? false, note: liquidityFvg?.eligibilityReasons.join("; ") || liquidityFvg?.blocks.slice(0,3).join("; ") || "Fusion engine unavailable." },
+    { label: "liquidity_fvg_direction", value: liquidityFvg?.direction ?? "WAIT" },
+    { label: "liquidity_fvg_score", value: liquidityFvg?.score ?? 0 },
+    { label: "liquidity_manipulation_risk", value: liquidityFvg?.manipulation.level ?? "unavailable", note: liquidityFvg?.manipulation.evidence.slice(0,2).join("; ") ?? "No manipulation assessment." },
+    { label: "liquidity_nearest_sweep_price", value: liquidityFvg?.manipulation.likelySweepPrice ?? null }];
+  if (liquidityFvg?.blocks.length) warnings.push("Liquidity-FVG fusion: " + liquidityFvg.blocks.slice(0,3).join("; "));
   if (fvgFailure) warnings.push("FVG precision sub-analysis unavailable: " + fvgFailure);
   else if (fvgPrecision?.status === "insufficient_history") warnings.push("FVG precision needs at least 40 closed candles.");
   return makeReport("technical", { stance, confidence: conf, summary: `Technical ${stance} (confluence ${sc.toFixed(2)}): ${sNote}; RSI ${rv.toFixed(0)}.`, evidence, warnings }, ctx.now);
