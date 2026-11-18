@@ -12,15 +12,31 @@ test("only Production UTA V3 JSON and SBE endpoints are enabled", () => {
   assert.ok(BITGET_WS_ENDPOINTS.production.uta);
 });
 
+test("WebSocket endpoint bindings are read at runtime and constrained to official production routes", () => {
+  const env = {
+    BITGET_WS_PUBLIC_URL: "wss://ws.bitget.com/v3/ws/public",
+    BITGET_WS_PRIVATE_URL: "wss://ws.bitget.com/v3/ws/private",
+    BITGET_WS_SBE_PUBLIC_URL: "wss://ws.bitget.com/v3/ws/public/sbe"
+  };
+  assert.equal(bitgetWsEndpoint("production", "uta", "public", false, env), env.BITGET_WS_PUBLIC_URL);
+  assert.equal(bitgetWsEndpoint("production", "uta", "private", false, env), env.BITGET_WS_PRIVATE_URL);
+  assert.equal(bitgetWsEndpoint("production", "uta", "public", true, env), env.BITGET_WS_SBE_PUBLIC_URL);
+  assert.throws(() => bitgetWsEndpoint("production", "uta", "private", false, { BITGET_WS_PRIVATE_URL: "ws://ws.bitget.com/v3/ws/private" }), /invalid_bitget_ws_private_url/);
+  assert.throws(() => bitgetWsEndpoint("production", "uta", "private", false, { BITGET_WS_PRIVATE_URL: "wss://attacker.example/v3/ws/private" }), /invalid_bitget_ws_private_url/);
+  assert.throws(() => bitgetWsEndpoint("production", "uta", "private", false, { BITGET_WS_PRIVATE_URL: "wss://ws.bitget.com/v3/ws/public" }), /invalid_bitget_ws_private_url/);
+});
+
 test("UTA public subscriptions use the V3 topic schema", () => {
   const uta=bitgetUtaPublicArgs("usdt-futures","BTCUSDT","1m");
   assert.deepEqual(uta[0],{instType:"usdt-futures",topic:"ticker",symbol:"BTCUSDT"});
   assert.ok(uta.some(x=>x.topic==="kline"&&x.interval==="1m"));
 });
 
-test("private credentials resolve only the production UTA key set",()=>{
+test("private credentials prefer canonical Cloudflare secret names and retain migration aliases",()=>{
   const env={BITGET_API_KEY:"live",BITGET_API_SECRET:"ls",BITGET_API_PASSPHRASE:"lp"};
-  assert.equal(bitgetPrivateCredentialSet(env).key,"live");
+  assert.deepEqual(bitgetPrivateCredentialSet(env),{key:"live",secret:"ls",passphrase:"lp"});
+  assert.deepEqual(bitgetPrivateCredentialSet({BITGET_ACCESS_KEY:"old-key",BITGET_SECRET_KEY:"old-secret",BITGET_PASSPHRASE:"old-pass"}),{key:"old-key",secret:"old-secret",passphrase:"old-pass"});
+  assert.deepEqual(bitgetPrivateCredentialSet({BITGET_API_KEY:"  canonical  ",BITGET_KEY:"legacy"}),{key:"canonical",secret:"",passphrase:""});
 });
 
 function frame(template:number,block:number,version:number,body:number[]) {
@@ -49,7 +65,6 @@ test("SBE rejects unsupported schemas, templates and truncated frames",()=>{
  assert.throws(()=>decodeBitgetSbe(bad),/schema/);
  assert.throws(()=>decodeBitgetSbe(frame(9999,8,1,new Array(8).fill(0))),/template/);
 });
-
 
 test("SBE Depth50 schema v5 decodes groups and incremental continuity metadata",()=>{
  const b:number[]=[];putU64(b,1700000000000000n);putU64(b,42n);b.push(0xfe,0xfc);putU64(b,1700000000001000n);b.push(1);putU64(b,41n);b.push(1,0,0,0,0);
