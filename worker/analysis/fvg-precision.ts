@@ -1,7 +1,7 @@
 // ETI Institutional FVG Precision Engine.
 // Closed-candle analysis only. This module produces advisory setups; it cannot submit or authorize orders.
 import type { Kline } from "../market.ts";
-import { atr14, lastAtr } from "./atr.ts";
+import { lastAtr } from "./atr.ts";
 import { detectFvgZones, type FvgZone } from "./fvg.ts";
 import { detectDisplacement, detectLiquiditySweeps, detectOrderBlocks, findLiquidityPools } from "./smc.ts";
 import { analyzeStructure, findPivots, supportResistance } from "./structure.ts";
@@ -38,7 +38,6 @@ export const FVG_PRECISION_RULES = {
   atrStopBuffer: 0.2, minRewardRisk: 2, maxCandidates: 20, eliteScore: 80,
 } as const;
 
-const dir = (d: PrecisionDirection) => d === "BUY" ? "bullish" : "bearish";
 const intersects = (a: number, b: number, lo: number, hi: number) => Math.min(b, hi) >= Math.max(a, lo);
 const roundPrice = (v: number, precision = 8) => round(v, precision);
 
