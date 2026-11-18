@@ -359,11 +359,10 @@ async def test_trading_service_places_oanda_paper_orders(monkeypatch, isolated_o
 @pytest.mark.asyncio
 async def test_pending_oanda_limit_order_is_not_journaled_as_filled(monkeypatch, isolated_oanda_db):
     _adapter_path(monkeypatch)
-    Base.metadata.create_all(bind=engine)
     import app.trading.service as ts
     fake = FakeOanda(order_response={"orderCreateTransaction": {"id": "9001", "type": "LIMIT_ORDER"}})
     monkeypatch.setattr(ts, "OandaClient", lambda settings, use_practice=True: OandaClient(settings, use_practice=use_practice, transport=fake.transport()))
-    db = SessionLocal()
+    db = isolated_oanda_db
     try:
         out = await TradingService(_risk_settings(), db=db).place_order(
             provider="oanda", environment="paper", symbol="EURUSD", side="buy", qty=1000, order_type="limit", limit_price=1.08,
