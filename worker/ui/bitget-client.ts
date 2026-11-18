@@ -65,10 +65,11 @@ function parseTrades(data){
   return {T:millis(t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.side||"").toLowerCase()==="sell",p:String(t.price||t.fillPrice||""),q:String(t.size||t.baseVolume||t.qty||"")};
  }).filter(function(t){return t.T>0&&Number(t.p)>0&&Number(t.q)>0}).sort(function(a,b){return b.T-a.T}).slice(0,100);
 }
+function firstNumber(){for(var i=0;i<arguments.length;i++){var n=num(arguments[i]);if(n!==null)return n}return null}
 function parseTicker(data){
- var t=Array.isArray(data)?data[0]:(data||{}),last=num(t.lastPr||t.lastPrice),open=num(t.open||t.open24h||t.openPrice24h),pct=num(t.priceChangePercent||t.change24h);
+ var t=Array.isArray(data)?data[0]:(data||{}),last=firstNumber(t.lastPr,t.lastPrice),open=firstNumber(t.openPrice24h,t.open,t.open24h),pct=firstNumber(t.price24hPcnt,t.priceChangePercent,t.change24h);
  if(pct!==null)pct=pct*100;else pct=open&&last!==null?(last-open)/open*100:0;
- return {lastPrice:last,highPrice:num(t.highPrice24h||t.high24h),lowPrice:num(t.lowPrice24h||t.low24h),volume:num(t.baseVolume||t.volume24h||t.baseVol),quoteVolume:num(t.quoteVolume||t.turnover24h||t.usdtVolume),priceChangePercent:pct,fundingRate:num(t.fundingRate),openInterest:num(t.openInterest||t.holdingAmount),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
+ return {lastPrice:last,highPrice:firstNumber(t.highPrice24h,t.high24h),lowPrice:firstNumber(t.lowPrice24h,t.low24h),volume:firstNumber(t.baseVolume,t.volume24h,t.baseVol),quoteVolume:firstNumber(t.quoteVolume,t.turnover24h,t.usdtVolume),priceChangePercent:pct,fundingRate:firstNumber(t.fundingRate),openInterest:firstNumber(t.openInterest,t.holdingAmount),markPrice:firstNumber(t.markPrice),indexPrice:firstNumber(t.indexPrice),bidPrice:firstNumber(t.bid1Price,t.bidPr),askPrice:firstNumber(t.ask1Price,t.askPr),timestamp:millis(t.ts||t.timestamp||t.time)||Date.now()};
 }
 async function context(opts){
  var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=market==="futures"?(opts.category||"USDT-FUTURES"):"SPOT",futures=market==="futures",depthLimit=Math.max(5,Math.min(100,Number(opts.depthLimit)||20)),tradeLimit=Math.max(1,Math.min(100,Number(opts.tradeLimit)||50));
@@ -128,5 +129,41 @@ async function loadSignalInputs(opts){
  var x=await context(opts);
  return {candles:candleMap,depth:x.depth,derivatives:x.derivatives,provider:"bitget-browser",market:opts.market,category:opts.category,failures:x.failures};
 }
-window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs};
+
+var WS_URL="wss://ws.bitget.com/v2/ws/public";
+var WS_INTERVAL={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D"};
+function streamProduct(market,category){if(market!=="futures")return "spot";return String(category||"USDT-FUTURES").toLowerCase();}
+function streamTime(v){var n=num(v);return n===null?Date.now():millis(n)||Date.now();}
+function streamCandle(row){if(Array.isArray(row)){var a=[streamTime(row[0]),num(row[1]),num(row[2]),num(row[3]),num(row[4]),num(row[5])];return a.every(function(x){return x!==null})?a:null;}var x=row||{},a=[streamTime(x.start||x.ts||x.time),num(x.open),num(x.high),num(x.low),num(x.close),num(x.volume)];return a.every(function(v){return v!==null})?a:null;}
+function subscribe(opts,handlers){
+ opts=opts||{};handlers=handlers||{};
+ var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=market==="futures"?(opts.category||"USDT-FUTURES"):"SPOT",interval=String(opts.interval||"1m"),product=streamProduct(market,category);
+ if(!/^[A-Z0-9]{5,20}$/.test(symbol))throw new Error("Invalid Bitget WebSocket symbol");
+ var args=[{instType:product,topic:"ticker",symbol:symbol},{instType:product,topic:"books5",symbol:symbol},{instType:product,topic:"publicTrade",symbol:symbol}];
+ if(WS_INTERVAL[interval])args.push({instType:product,topic:"kline",symbol:symbol,interval:WS_INTERVAL[interval]});
+ var ws=null,closed=false,retry=0,retryTimer=null,pingTimer=null,watchdog=null,lastMessageAt=0,connected=false;
+ function status(state,detail){if(typeof handlers.onStatus==="function")handlers.onStatus({state:state,detail:detail||"",connected:connected,lastMessageAt:lastMessageAt,retry:retry});}
+ function emit(type,data,raw){if(typeof handlers.onMessage==="function")handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null});}
+ function stopTimers(){if(pingTimer)clearInterval(pingTimer);if(watchdog)clearInterval(watchdog);pingTimer=null;watchdog=null;}
+ function scheduleReconnect(reason){if(closed)return;connected=false;stopTimers();status("reconnecting",reason);if(retryTimer)clearTimeout(retryTimer);var wait=Math.min(30000,1000*Math.pow(2,Math.min(retry,5)));retry++;retryTimer=setTimeout(connect,wait);}
+ function connect(){
+  if(closed)return;
+  status("connecting");
+  try{ws=new WebSocket(WS_URL);}catch(e){scheduleReconnect(e&&e.message||"websocket_unavailable");return;}
+  var current=ws;
+  current.onopen=function(){if(closed||ws!==current)return;connected=true;retry=0;lastMessageAt=Date.now();status("connected");current.send(JSON.stringify({op:"subscribe",args:args}));pingTimer=setInterval(function(){if(ws===current&&current.readyState===1)try{current.send("ping")}catch(e){}},25000);watchdog=setInterval(function(){if(ws===current&&connected&&Date.now()-lastMessageAt>60000){try{current.close()}catch(e){}}},10000);};
+  current.onmessage=function(event){if(ws!==current||closed)return;lastMessageAt=Date.now();var raw=event.data;if(raw==="pong"||raw==="ping")return;var msg;try{msg=typeof raw==="string"?JSON.parse(raw):raw}catch(e){return;}if(!msg||msg.event==="subscribe"||msg.event==="unsubscribe")return;if(msg.event==="error"){status("error",String(msg.msg||msg.code||"subscription_error"));return;}var arg=msg.arg||{},rows=Array.isArray(msg.data)?msg.data:[],topic=String(arg.topic||"");
+   if(topic==="ticker"&&rows.length){var ticker=parseTicker(rows[0]);ticker.timestamp=streamTime(msg.ts||rows[0].ts);emit("ticker",ticker,msg);}
+   else if(topic==="kline"&&rows.length){rows.forEach(function(row){var candle=streamCandle(row);if(candle)emit("candle",candle,msg);});}
+   else if(topic==="books5"&&rows.length){var d=rows[0]||{},depth=parseDepth(d);depth.timestamp=streamTime(msg.ts||d.ts);if(depth.bids.length&&depth.asks.length&&depth.bids[0][0]<depth.asks[0][0])emit("depth",depth,msg);}
+   else if(topic==="publicTrade"&&rows.length){var trades=parseTrades(rows);if(trades.length)emit("trades",trades,msg);}
+  };
+  current.onerror=function(){if(ws===current&&!closed)try{current.close()}catch(e){}};
+  current.onclose=function(){if(ws!==current||closed)return;connected=false;ws=null;scheduleReconnect("socket_closed");};
+ }
+ connect();
+ return {close:function(){closed=true;connected=false;if(retryTimer)clearTimeout(retryTimer);stopTimers();if(ws){var current=ws;ws=null;try{current.close()}catch(e){}}status("closed");},getState:function(){return {connected:connected,lastMessageAt:lastMessageAt,retry:retry,symbol:symbol,market:market,category:category,interval:interval,product:product};}};
+}
+
+window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs,subscribe:subscribe};
 })();`;
