@@ -1,28 +1,21 @@
 /**
  * Bitget WebSocket transport matrix and SBE decoder.
- * Keep protocol selection explicit: UTA V3, Classic V2, demo UTA V3 and SBE are not wire-compatible.
+ * Keep protocol selection explicit: Production UTA V3 JSON and SBE are the supported transports.
  */
-export type BitgetWsEnvironment = "production" | "demo";
-export type BitgetWsAccount = "uta" | "classic";
+export type BitgetWsEnvironment = "production";
+export type BitgetWsAccount = "uta";
 export type BitgetWsTransport = "v3-json" | "v3-sbe" | "v2-json";
 
 export const BITGET_WS_ENDPOINTS = {
   production: {
-    uta: { public: "wss://ws.bitget.com/v3/ws/public", private: "wss://ws.bitget.com/v3/ws/private", sbe: "wss://ws.bitget.com/v3/ws/public/sbe" },
-    classic: { public: "wss://ws.bitget.com/v2/ws/public", private: "wss://ws.bitget.com/v2/ws/private" }
-  },
-  demo: {
-    uta: { public: "wss://wspap.bitget.com/v3/ws/public", private: "wss://wspap.bitget.com/v3/ws/private", sbe: "wss://wspap.bitget.com/v3/ws/public/sbe" },
-    classic: null
+    uta: { public: "wss://ws.bitget.com/v3/ws/public", private: "wss://ws.bitget.com/v3/ws/private", sbe: "wss://ws.bitget.com/v3/ws/public/sbe" }
   }
 } as const;
 
 export function bitgetWsEndpoint(environment: BitgetWsEnvironment, account: BitgetWsAccount, channel: "public" | "private", sbe = false) {
-  if (sbe && (account !== "uta" || channel !== "public")) throw new Error("sbe_public_uta_only");
-  if (sbe && environment !== "production") throw new Error("sbe_demo_endpoint_not_documented");
-  const endpoints = BITGET_WS_ENDPOINTS[environment][account] as any;
-  if (!endpoints) throw new Error("unsupported_environment_account_combination");
-  return sbe ? endpoints.sbe : endpoints[channel];
+  if (environment !== "production" || account !== "uta") throw new Error("unsupported_environment_account_combination");
+  if (sbe && channel !== "public") throw new Error("sbe_public_uta_only");
+  return sbe ? BITGET_WS_ENDPOINTS.production.uta.sbe : BITGET_WS_ENDPOINTS.production.uta[channel];
 }
 
 export function bitgetUtaPublicArgs(instType: string, symbol: string, interval = "1m") {
@@ -33,31 +26,6 @@ export function bitgetUtaPublicArgs(instType: string, symbol: string, interval =
   ];
   if (interval) args.push({ instType, topic: "kline", symbol, interval });
   return args;
-}
-
-const V2_CANDLES: Record<string, string> = { "1m":"candle1m", "3m":"candle3m", "5m":"candle5m", "15m":"candle15m", "30m":"candle30m", "1H":"candle1H", "4H":"candle4H", "6H":"candle6H", "12H":"candle12H", "1D":"candle1D", "1W":"candle1W" };
-export function bitgetClassicPublicArgs(instType: string, symbol: string, interval = "1m") {
-  const args: Record<string, string>[] = [
-    { instType, channel: "ticker", instId: symbol },
-    { instType, channel: "books5", instId: symbol },
-    { instType, channel: "trade", instId: symbol }
-  ];
-  const candle = V2_CANDLES[interval] || V2_CANDLES[interval.toUpperCase()];
-  if (candle) args.push({ instType, channel: candle, instId: symbol });
-  return args;
-}
-
-export function bitgetClassicPrivateSubscriptions() {
-  return [
-    { instType: "SPOT", channel: "account", coin: "default" },
-    { instType: "SPOT", channel: "orders", instId: "default" },
-    { instType: "USDT-FUTURES", channel: "orders", instId: "default" },
-    { instType: "USDT-FUTURES", channel: "positions", instId: "default" },
-    { instType: "USDC-FUTURES", channel: "orders", instId: "default" },
-    { instType: "USDC-FUTURES", channel: "positions", instId: "default" },
-    { instType: "COIN-FUTURES", channel: "orders", instId: "default" },
-    { instType: "COIN-FUTURES", channel: "positions", instId: "default" }
-  ];
 }
 
 export type SbeHeader = { blockLength: number; templateId: number; schemaId: number; version: number };
@@ -124,11 +92,9 @@ export function decodeBitgetSbe(input: ArrayBuffer | Uint8Array) {
   throw new Error("unsupported_sbe_template_" + header.templateId);
 }
 
-export function bitgetPrivateCredentialSet(env: Record<string, any>, environment: BitgetWsEnvironment, account: BitgetWsAccount) {
-  const prefix = environment === "demo" ? "BITGET_DEMO_" : "BITGET_";
-  const suffix = account === "classic" ? "CLASSIC_" : "";
-  const key = env[prefix + suffix + "API_KEY"] || env[prefix + suffix + "KEY"];
-  const secret = env[prefix + suffix + "API_SECRET"] || env[prefix + suffix + "SECRET"];
-  const passphrase = env[prefix + suffix + "API_PASSPHRASE"] || env[prefix + suffix + "PASSPHRASE"];
+export function bitgetPrivateCredentialSet(env: Record<string, any>) {
+  const key = env.BITGET_API_KEY || env.BITGET_KEY;
+  const secret = env.BITGET_API_SECRET || env.BITGET_SECRET;
+  const passphrase = env.BITGET_API_PASSPHRASE || env.BITGET_PASSPHRASE;
   return { key: typeof key === "string" ? key.trim() : "", secret: typeof secret === "string" ? secret.trim() : "", passphrase: typeof passphrase === "string" ? passphrase.trim() : "" };
 }
