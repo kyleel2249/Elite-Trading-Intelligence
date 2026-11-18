@@ -160,3 +160,8 @@ test("Pro Terminal starts Bitget streaming before REST and retains recent cached
 test("Pro Terminal preserves USDT, USDC and Coin-M Bitget futures selections",()=>{
  assert.match(TRADING_TERMINAL_JS,/\["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"\]\.includes\(category\)/);
 });
+
+
+test("Pro Terminal sends the selected exchange provenance with supplied SMC candles",()=>{
+ assert.ok(TRADING_TERMINAL_JS.includes('venue:provider,provider,candles:d.candles'));
+});
