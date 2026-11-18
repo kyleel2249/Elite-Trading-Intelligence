@@ -9,6 +9,7 @@ import { findPivots, analyzeStructure } from "../analysis/structure.ts";
 import { detectLiquiditySweeps, detectOrderBlocks } from "../analysis/smc.ts";
 import { atrSeries } from "./indicators.ts";
 import { round } from "../analysis/types.ts";
+import { analyzeFvgPrecision, type FvgPrecisionResult } from "../analysis/fvg-precision.ts";
 
 export const FVG_MAX_CONFIDENCE_DELTA = 8;
 export interface FvgFactor { name: string; points: number; detail: string }
@@ -21,12 +22,14 @@ export interface FvgConfluence {
   supporting: FvgZoneBrief[]; opposing: FvgZoneBrief[]; entryOptimization: FvgEntryOptimization | null;
   /** Active (unfilled or partially filled) gaps considered, by direction, and the timeframes they sit on. */
   unfilled?: { bullish: number; bearish: number; partial: number; timeframes: string[] };
+  /** Full qualification, entry, invalidation and target analysis. Advisory only; never changes the fused order plan. */
+  precision: FvgPrecisionResult | null;
   summary: string; canTriggerTrade: false; advisoryOnly: true;
 }
 export interface FvgZoneBrief { id: string; timeframe: string; direction: "bullish" | "bearish"; upper: number; lower: number; mid: number; sizeAtr: number; strength: number; status: string; mitigationPct: number; confluence: number; distanceAtr: number }
 export interface FvgPlan { entryZone: [number, number] | null; stopLoss: number | null; takeProfits: { price: number; rewardRisk?: number }[] | null }
 
-const EMPTY = (summary: string): FvgConfluence => ({ available: false, stance: "neutral", confidenceDelta: 0, score: 0, factors: [], supporting: [], opposing: [], entryOptimization: null, summary, canTriggerTrade: false, advisoryOnly: true });
+const EMPTY = (summary: string): FvgConfluence => ({ available: false, stance: "neutral", confidenceDelta: 0, score: 0, factors: [], supporting: [], opposing: [], entryOptimization: null, precision: null, summary, canTriggerTrade: false, advisoryOnly: true });
 const brief = (z: FvgZone, price: number, atr: number): FvgZoneBrief => ({ id: z.id, timeframe: z.timeframe, direction: z.direction, upper: z.upper, lower: z.lower, mid: z.mid, sizeAtr: z.sizeAtr, strength: z.strength, status: z.status, mitigationPct: z.mitigationPct, confluence: z.confluence.length, distanceAtr: round((price > z.upper ? price - z.upper : price < z.lower ? z.lower - price : 0) / atr, 2) });
 const overlaps = (aLo: number, aHi: number, bLo: number, bHi: number) => Math.min(aHi, bHi) > Math.max(aLo, bLo);
 
@@ -103,5 +106,16 @@ export function assessFvgConfluence(rowsByTf: Partial<Record<string, Kline[]>>, 
   const label = (z: FvgZone) => `${z.timeframe} ${z.direction} ${z.lower}-${z.upper}`;
   const summary = !active.length ? "No active fair value gaps near price." : `FVG ${stance}${delta ? ` (${delta > 0 ? "+" : ""}${delta} confidence)` : ""}: ${best ? `supported by ${label(best)}` : "no supporting gap nearby"}${worst ? `; opposed by ${label(worst)}` : ""}.`;
   const unfilled = { bullish: active.filter(z => z.direction === "bullish").length, bearish: active.filter(z => z.direction === "bearish").length, partial: active.filter(z => z.status === "partially_mitigated").length, timeframes: [...new Set(active.map(z => z.timeframe))] };
-  return { available: true, stance, confidenceDelta: delta, score: round(raw, 2), factors, supporting: supporting.slice(0, 3).map(z => brief(z, price, atrNow)), opposing: opposing.slice(0, 3).map(z => brief(z, price, atrNow)), entryOptimization, unfilled, summary, canTriggerTrade: false, advisoryOnly: true };
+  const closedByTf: Partial<Record<string, Kline[]>> = {};
+  for (const [tf, data] of Object.entries(rowsByTf)) {
+    if (!data || !FVG_TF_MS[tf]) continue;
+    let end = data.length;
+    while (end > 0 && data[end - 1][0] + FVG_TF_MS[tf] > now) end--;
+    closedByTf[tf] = data.slice(0, end);
+  }
+  const precision = analyzeFvgPrecision(closedByTf[execTf] ?? [], execTf, {
+    higherTimeframes: Object.fromEntries(Object.entries(closedByTf).filter(([tf]) => tf !== execTf)),
+  });
+  const precisionSummary = precision.best ? ` Precision engine: ${precision.best.direction} ${precision.best.state} at ${precision.best.entry.price}.` : " Precision engine: no fully qualified entry; wait.";
+  return { available: true, stance, confidenceDelta: delta, score: round(raw, 2), factors, supporting: supporting.slice(0, 3).map(z => brief(z, price, atrNow)), opposing: opposing.slice(0, 3).map(z => brief(z, price, atrNow)), entryOptimization, precision, unfilled, summary: summary + precisionSummary, canTriggerTrade: false, advisoryOnly: true };
 }

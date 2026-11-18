@@ -137,6 +137,18 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const preflightBody = { ...body, record: true };
       const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(preflightBody) }), env);
       const analysis: any = await preflight.json().catch(() => ({}));
+      // Liquidity-FVG is an additional fail-closed strategy gate. It cannot replace the council,
+      // strategy consensus, risk checks, kill switch, or the internal-paper execution route.
+      let liquidityFvg: any = null, liquidityFvgHttpStatus = 0;
+      try {
+        const lfUrl = "https://eti.internal/api/analysis/liquidity-fvg?symbol=" + encodeURIComponent(symbol) + "&timeframe=" + encodeURIComponent(interval);
+        const lfResponse = await app.fetch(new Request(lfUrl), env);
+        liquidityFvgHttpStatus = lfResponse.status;
+        liquidityFvg = await lfResponse.json().catch(() => null);
+      } catch { liquidityFvg = null; }
+      const liquidityFvgApproved = liquidityFvgHttpStatus >= 200 && liquidityFvgHttpStatus < 300
+        && liquidityFvg?.autopilotEligible === true && liquidityFvg?.direction === expectedAction
+        && liquidityFvg?.safety?.submitsOrder === false && liquidityFvg?.safety?.bypassesRiskManager === false;
       const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
       const councilApproved = preflight.ok && decision?.action === expectedAction
         && confidence >= minConfidence && agreement >= minAgreement
@@ -160,9 +172,14 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
         action: decision?.action || "NO_TRADE", confidence, agreement,
         riskApproved: analysis.risk?.approved === true, security: analysis.security?.severity || "unknown",
         auditPersistence: analysis.auditPersistence || "unknown",
+        liquidityFvg: { eligible: liquidityFvgApproved, direction: liquidityFvg?.direction || "WAIT", score: Number(liquidityFvg?.score || 0), manipulationRisk: liquidityFvg?.manipulation?.level || "unavailable", blocks: liquidityFvg?.blocks || ["Liquidity-FVG analysis unavailable"], httpStatus: liquidityFvgHttpStatus },
       };
       if (!councilApproved) {
         outcomes.push({ symbol, status: "no_trade", action: councilSummary.action, reason: !preflight.ok ? "agent_analysis_unavailable" : decision?.vetoedBy || "agent_council_or_risk_gate_not_met", council: councilSummary, vetoes: analysis.risk?.vetoes || [], strategies: strategyResults });
+        continue;
+      }
+      if (!liquidityFvgApproved) {
+        outcomes.push({ symbol, status: "no_trade", action: "WAIT", reason: "liquidity_fvg_gate_not_met", council: councilSummary, liquidityFvg: liquidityFvg ? { direction: liquidityFvg.direction, score: liquidityFvg.score, manipulation: liquidityFvg.manipulation, blocks: liquidityFvg.blocks } : null, strategies: strategyResults });
         continue;
       }
       if (alignedStrategies.length < minStrategyAgreement) {

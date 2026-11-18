@@ -78,7 +78,7 @@ test("terminal chart is full-width and institutional intelligence plus recent tr
   assert.ok(institutional > monitor, "institutional intelligence follows the market structure monitor");
   assert.ok(trades > institutional, "recent trades follow institutional intelligence at the bottom");
   assert.ok(TRADING_TERMINAL_CSS.includes(".tt-work{display:grid;grid-template-columns:minmax(0,1fr)"), "chart workspace has one full-width column");
-  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart{height:clamp(520px,58vh,620px);min-height:520px;max-height:620px;width:100%}"), "Pro Terminal chart matches the Live Market Chart height and full width");
+  assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart{height:clamp(520px,58vh,620px);min-height:520px;max-height:620px;width:100%;position:relative}"), "Pro Terminal chart matches the Live Market Chart height and full width");
   assert.ok(TRADING_TERMINAL_CSS.includes(".tt-shell{max-width:1920px;margin:auto;padding:12px 24px 34px;"), "Pro Terminal uses the same 1920px desktop workspace width");
   assert.ok(TRADING_TERMINAL_CSS.includes(".tt-chart-card{grid-column:1/-1;width:100%;min-width:0}"), "chart card spans the entire workspace");
 });
@@ -121,4 +121,16 @@ test("advanced order-flow metrics use exchange trades and depth and feed ETIAlgo
   assert.match(TRADING_TERMINAL_JS, /renderDeepOrderFlow/);
   assert.match(TRADING_TERMINAL_JS, /liveExecutionAllowed/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /fetch\(["']\/api\/orders/);
+});
+
+
+test("Pro Terminal paints qualified Liquidity-FVG zones and estimated sweep reach over the live chart", () => {
+  assert.match(TRADING_TERMINAL_HTML, /Liquidity \+ FVG fusion intelligence/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-liq-overlay/);
+  assert.match(TRADING_TERMINAL_JS, /function drawLiquidityOverlay\(/);
+  assert.match(TRADING_TERMINAL_JS, /QUALIFIED /);
+  assert.match(TRADING_TERMINAL_JS, /ESTIMATED SWEEP REACH/);
+  assert.match(TRADING_TERMINAL_JS, /drawLiquidityOverlay\(\)/);
+  assert.match(TRADING_TERMINAL_JS, /S\.liquidityFvg\.manipulation/);
+  assert.match(TRADING_TERMINAL_JS, /S\.liquidityFvg\.precision/);
 });
