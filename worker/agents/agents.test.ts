@@ -197,6 +197,16 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
     assert.equal(await (await app.fetch(new Request("https://e.test/other"), env)).text(), "base"); assert.equal(baseCalls, 1);
     const page = await app.fetch(new Request("https://e.test/agents"), env); assert.equal(page.status, 200); assert.match(await page.text(), /ETI Agent Intelligence Center/);
     const roster: any = await (await app.fetch(new Request("https://e.test/api/agents"), env)).json(); assert.equal(roster.agents.length, 12); assert.equal(roster.liveExecutionAllowed, false);
+    const disabledAuto: any = await (await app.fetch(new Request("https://e.test/api/agents/autopilot"), env)).json();
+    assert.equal(disabledAuto.scheduler.cron, "*/5 * * * *");
+    assert.equal(disabledAuto.liveOrdersAllowed, false);
+    assert.equal(disabledAuto.ready, false);
+    assert.ok(disabledAuto.blockedReasons.includes("autopilot_disabled"));
+    const autoEnv: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_EXECUTION_TOKEN: env.ETI_EXECUTION_TOKEN, ETI_EXECUTION_LOG: { get: async () => null } };
+    const readyAuto: any = await (await app.fetch(new Request("https://e.test/api/agents/autopilot"), autoEnv)).json();
+    assert.equal(readyAuto.ready, true, "the scheduled paper controller should report ready when its gates and storage are configured");
+    assert.equal(readyAuto.councilRunsBeforeStrategyGates, true);
+    assert.equal(readyAuto.recordsNoTradeDecisions, true);
     assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions"), env)).status, 401);
     assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions", { headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN } }), env)).status, 503);
     const a: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&interval=1h"), env)).json();
