@@ -14,6 +14,7 @@ import type { MarketEnv, Ticker } from "../market.ts";
 import { handleExecution } from "../execution.ts";
 import type { ExecutionEnv } from "../execution.ts";
 import { AGENT_ROSTER } from "./types.ts";
+import { agentRuntimeStatus } from "./health.ts";
 import type { AccountState, Integrity, MarketInput, SuppliedData } from "./types.ts";
 import { analyze, toDecisionRecord } from "./orchestrator.ts";
 import type { AnalysisResult } from "./orchestrator.ts";
@@ -176,9 +177,14 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         });
       }
 
+      if (path === "/api/agents/runtime") {
+        if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
+        return reply(agentRuntimeStatus(env));
+      }
+
       if (path === "/api/agents") {
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
-        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, endpoints: ["GET /agents (dashboard)", "GET|POST /api/agents/analyze", "GET /api/agents/providers", "GET /api/agents/decisions (bearer, durable D1 audit)", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)", "POST /api/agents/brief (bearer, advisory LLM review)"], integrity, durableAuditConfigured: !!env.ETI_PORTFOLIO_DB, fredConfigured: !!env.FRED_API_KEY, llmConfigured: !!(env as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: await stored() });
+        return reply({ schema: "eti.agents.roster/1", agents: AGENT_ROSTER, runtime: agentRuntimeStatus(env), endpoints: ["GET /agents (dashboard)", "GET /api/agents/runtime (runtime and integration readiness)", "GET|POST /api/agents/analyze", "GET /api/agents/providers", "GET /api/agents/decisions (bearer, durable D1 audit)", "POST /api/agents/execute (bearer)", "GET /api/agents/audit (bearer)", "POST /api/agents/brief (bearer, advisory LLM review)"], integrity, durableAuditConfigured: !!env.ETI_PORTFOLIO_DB, fredConfigured: !!env.FRED_API_KEY, llmConfigured: !!(env as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY, liveExecutionAllowed: false, riskVeto: "binding", auditSummary: await stored() });
       }
 
       const symbolOf = (v: unknown) => (typeof v === "string" ? v.toUpperCase() : "BTCUSDT");
