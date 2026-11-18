@@ -173,3 +173,27 @@ test("Bitget catalogue reports independent freshness for each futures product ty
   assert.equal(result.data.sources["COIN-FUTURES"].stale, true);
   assert.ok(result.data.symbols.some((r: any[]) => r[6] === "COIN-FUTURES"));
 });
+
+
+test("Bitget catalogue never replaces a populated product list with an empty active response", async () => {
+  const empty = new Set<string>();
+  const sandbox: any = {
+    window: {}, AbortSignal, Response,
+    fetch: async (url: string) => {
+      const u = new URL(url), cat = u.searchParams.get("category") || u.searchParams.get("productType") || "SPOT";
+      if (empty.has(cat)) return new Response(JSON.stringify({ code: "00000", data: [] }));
+      return new Response(JSON.stringify({ code: "00000", data: [{
+        symbol: cat === "COIN-FUTURES" ? "BTCUSD" : cat === "USDC-FUTURES" ? "BTCUSDC" : "BTCUSDT",
+        baseCoin: "BTC", quoteCoin: cat === "COIN-FUTURES" ? "USD" : cat === "USDC-FUTURES" ? "USDC" : "USDT",
+        status: "normal", type: "perpetual"
+      }] }));
+    }
+  };
+  vm.runInNewContext(BITGET_CLIENT_JS, sandbox);
+  const first = await sandbox.window.ETIBitget.symbols("all");
+  assert.ok(first.data.symbols.some((r: any[]) => r[6] === "USDT-FUTURES"));
+  empty.add("USDT-FUTURES");
+  const second = await sandbox.window.ETIBitget.symbols("all");
+  assert.equal(second.data.sources["USDT-FUTURES"].stale, true);
+  assert.ok(second.data.symbols.some((r: any[]) => r[6] === "USDT-FUTURES"));
+});
