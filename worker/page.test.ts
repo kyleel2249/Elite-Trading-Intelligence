@@ -27,12 +27,21 @@ test("portfolio fragments are safe to embed in the dashboard template (no backti
   }
 });
 
-test("dashboard ships the 3D motion layer: reduced-motion safe, no external scripts, tilt skips the order panel", async () => {
+test("dashboard uses a static, edge-to-edge layout with no 3D animation", async () => {
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
-  assert.match(html, /id="eti-motion"/); assert.match(html, /prefers-reduced-motion/); assert.match(html, /execpanel'\)\)return/);
-  assert.match(html, /<script[^>]+src="\/bitget-client\.js"/i, "the same-origin Bitget adapter is loaded");
-  assert.match(html, /lightweight-charts@4\.1\.3\/dist\/lightweight-charts\.standalone\.production\.js/, "the Pro terminal chart library is reused");
-  assert.doesNotMatch(html, /<script[^>]+src="https?:\/\/(?!cdn\.jsdelivr\.net\/npm\/lightweight-charts@4\.1\.3)/i, "only the pinned chart library may load from a CDN");
+  assert.match(html, /main\\{width:100%;max-width:none;margin:0/);
+  assert.match(html, /id="eti-motion"/);
+  assert.doesNotMatch(html, /etiBg|eti-motion-js|eti-in|eti-seen|eti-hot/);
+  assert.doesNotMatch(html, /perspective\\(|rotateX\\(|rotateY\\(|translateZ\\(|transform-style/);
+  assert.match(html, /\.panel\\{[^}]*transform:none!important/);
+  assert.match(html, /button:hover:not\\(:disabled\\),button:active:not\\(:disabled\\)\\{transform:none!important/);
+  assert.match(html, /id="chartAdvanced"/);
+  assert.match(html, /id="paneRsi"/);
+  assert.match(html, /id="paneMacd"/);
+  assert.match(html, /id="paneAdx"/);
+  assert.match(html, /id="paneScore"/);
+  assert.match(html, /<script[^>]+src="\\/bitget-client\\.js"/i);
+  assert.match(html, /lightweight-charts@4\\.1\\.3/);
 });
 
 test("/elite is served, loads no external script, and carries none of the reference image's sample figures", async () => {
