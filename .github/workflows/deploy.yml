@@ -257,7 +257,7 @@ jobs:
               }
               console.log("Bybit Worker REST and Bitget browser-direct public feed are configured; no paid relay or Fly.io is required.");
             }catch(e){console.error("Invalid market transport response:",e.message);process.exit(1);}});' || exit 1
-          symbols_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
+          symbols_response="$(curl --silent --show-error --retry 4 --retry-all-errors --retry-delay 2 --max-time 20 -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
           symbols_status="${symbols_response##*__HTTP_CODE__}"
           symbols="${symbols_response%__HTTP_CODE__*}"
           printf '%s' "$symbols" | HTTP_STATUS="$symbols_status" node -e '
