@@ -18,7 +18,6 @@ import { handlePortfolio } from "./portfolio/routes.ts";
 import { CALC_CSS, CALC_HTML, CALC_JS } from "./calculator/ui.ts";
 import { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML } from "./portfolio/ui.ts";
 import { PERP_CSS, PERP_HTML, PERP_JS, PERP_ORDER_HTML } from "./perp/ui.ts";
-import { VIZ_CSS, VIZ_HTML, VIZ_JS } from "./viz3d/ui.ts";
 import type { ExecutionEnv } from "./execution.ts";
 import { handleMarket } from "./market.ts";
 import { handleSignals } from "./signals.ts";
@@ -151,7 +150,6 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 ${PORTFOLIO_CSS}
 ${CALC_CSS}
 ${PERP_CSS}
-${VIZ_CSS}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><a href="/terminal" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">PRO TRADING TERMINAL →</a><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
@@ -239,8 +237,6 @@ ${CALC_HTML}
 ${PERP_HTML}
 <div class="lower"><section class="panel"><h2>Live Market Trade Tape</h2><div id="trades" class="scroll"></div></section><section class="panel"><h2>Order Book Depth</h2><div class="meta"><span>Bid <b class="bid" id="bid">—</b></span><span>Ask <b class="ask" id="ask">—</b></span><span>Spread <b id="spread">—</b></span></div><div id="book" class="scroll"></div></section><section class="panel"><h2>Cumulative Market Depth</h2><div class="chart" style="height:260px"><canvas id="depth" role="img" aria-label="Cumulative market depth by price with ETI signal levels"></canvas></div><div class="execution-note" id="depthNote" style="margin-top:6px"></div><small>Aggregated visible bid and ask liquidity by price. Not a full exchange order queue.</small></section></div>
 
-
-${VIZ_HTML}
 <section class="panel" id="signalPanel" style="margin-top:14px">
 <h2>ETI AI Signal Engine</h2>
 <div class="meta"><span>Decision <b id="signalAction">ANALYSING…</b></span><span>Score <b id="signalScore">—</b></span><span>Conviction <b id="signalConviction">—</b></span><span>Historical win rate <b id="signalWinRate">Not validated</b></span><span>Provider <b id="signalProvider">—</b></span></div>
@@ -391,7 +387,7 @@ function drawChart(){
  const py=v=>bot-(v-lo)/(hi-lo)*(bot-top);chartScale={top:top,bot:bot,lo:lo,hi:hi,plotW:g.plotW};
  x.font=FONT;x.lineWidth=1;
  for(let i=0;i<=5;i++){const y=top+i*(bot-top)/5;x.strokeStyle=C.grid;x.beginPath();x.moveTo(0,y);x.lineTo(g.plotW,y);x.stroke();x.fillStyle=C.muted;x.fillText(fp(hi-(hi-lo)*i/5),g.plotW+6,y+4);}
- const bw=Math.max(1,Math.min(14,g.step*.62));
+ const bw=Math.max(2,Math.min(18,g.step*.72));
  // engine conviction ribbon: one cell per candle, colour = BUY/SELL lean, opacity = |score|
  if(ok&&layers.ribbon){for(let i=0;i<n;i++){const j=J[i];if(j<0)continue;const s=ch.score[j];x.fillStyle=rgba(ch.direction[j]===1?C.up:C.down,.12+.88*Math.min(1,Math.abs(s)/100));x.fillRect(g.x(i)-g.step/2+.5,3,Math.max(1,g.step-1),8);}x.fillStyle=C.muted;x.font='9px Inter,system-ui,sans-serif';x.fillText('ENGINE LEAN',g.plotW+6,10);x.font=FONT;}
  x.save();x.beginPath();x.rect(0,top-6,g.plotW,bot-top+12);x.clip();
@@ -995,9 +991,7 @@ setInterval(loadSignal,60000);
 ${PORTFOLIO_JS}
 ${CALC_JS}
 pfInit();
-${PERP_JS}
-${VIZ_JS}
-const SYM={all:[],market:'spot',venue:'bybit',quote:'',cat:'',q:'',at:0,warn:''};
+${PERP_JS}const SYM={all:[],market:'spot',venue:'bybit',quote:'',cat:'',q:'',at:0,warn:''};
 function symRows(){let rows=SYM.market==='metals'?SYM.all.filter(r=>r[4]==='metals'):SYM.all.filter(r=>r[3]===SYM.market);if(SYM.venue)rows=rows.filter(r=>symV(r)===SYM.venue);const seen={};return rows.map((r,i)=>[r,(SYM.market==='metals'&&r[3]!=='spot'?2:0)+(symV(r)==='bybit'?0:1),i]).sort((a,b)=>a[1]-b[1]||a[2]-b[2]).map(x=>x[0]).filter(r=>{const k=r[0]+'|'+(r[6]||'');return seen[k]?false:(seen[k]=1);});}
 function symVisible(){const t=SYM.q.trim().toUpperCase();return symRows().filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||r[4]===SYM.cat)&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));}
 function symFill(sel,first,values,label){sel.textContent='';const a=document.createElement('option');a.value='';a.textContent=first;sel.appendChild(a);values.forEach(v=>{const o=document.createElement('option');o.value=v[0];o.textContent=label(v);sel.appendChild(o);});}
