@@ -106,24 +106,25 @@ const html = `<!doctype html>
 header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}h1{font-size:22px;margin:0}small,.muted{color:var(--muted)}main{padding:22px 4vw;max-width:1600px;margin:auto}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}input,select,button{background:#0b1422;color:#eaf2ff;border:1px solid var(--line);border-radius:8px;padding:10px}button{cursor:pointer}button.active{border-color:var(--green);color:var(--green)}
 .grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}.panel{background:linear-gradient(145deg,#121e30,#0d1624);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.panel h2{font-size:15px;margin:0 0 12px}.chart{height:350px;width:100%}.chart.big{height:clamp(560px,72vh,900px);min-height:560px;position:relative;overflow:hidden;border:1px solid #203b59;border-radius:10px;background:#091729}.chart.big #chartAdvanced{position:absolute;inset:0;width:100%;height:100%;z-index:1}.chart.big #chart{position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;z-index:2}.chart.big.legacy #chartAdvanced{display:none}.chart.big.legacy #chart{opacity:1;pointer-events:auto}.chart.big #chartAdvanced canvas{display:block}canvas{width:100%;height:100%}
-/* Full-bleed chart workspace: no dashboard column, max-width or side gutters. */
-.chart-workspace{width:100vw;max-width:none;margin-left:calc(50% - 50vw);padding:0;border-left:0;border-right:0;border-radius:0;overflow:visible}
-.chart-workspace>h2,.chart-workspace>.meta,.chart-workspace>#legend,.chart-workspace>#overlayNote{margin-left:clamp(12px,2vw,32px);margin-right:clamp(12px,2vw,32px)}
-.chart-workspace>h2{padding-top:14px}
-.chart-workspace #stack{width:100%;max-width:none;margin:0}
-.chart-workspace .chart.big{width:100%;height:100svh;min-height:560px;max-height:none;border-left:0;border-right:0;border-radius:0}
-.chart-workspace .paneBox{width:100%;height:clamp(72px,9vh,112px)}
-.chart-workspace:fullscreen{width:100%;height:100%;margin:0;padding:0;background:#080d16;overflow:auto}
-.chart-workspace:fullscreen .chart.big{height:calc(100vh - 180px);min-height:420px}
-@media(max-width:700px){.chart-workspace .chart.big{height:82svh;min-height:480px}.chart-workspace .paneBox{height:76px}}
+/* Contained chart workspace sized for a 1920 × 1080 desktop canvas. */
+.chart-workspace{width:100%;max-width:100%;margin:0;padding:16px;border:1px solid var(--line);border-radius:14px;overflow:hidden;min-width:0}
+.chart-workspace>h2,.chart-workspace>.meta,.chart-workspace>#legend,.chart-workspace>#overlayNote{margin-left:0;margin-right:0}
+.chart-workspace>h2{padding-top:0}
+.chart-workspace #stack{width:100%;max-width:100%;margin:0}
+.chart-workspace .chart.big{width:100%;height:clamp(520px,58vh,620px);min-height:520px;max-height:620px;border:1px solid #203b59;border-radius:10px}
+.chart-workspace .paneBox{width:100%;height:54px}
+.chart-workspace:fullscreen{width:100%;height:100%;max-width:none;margin:0;padding:12px;background:#080d16;border:0;border-radius:0;overflow:auto}
+.chart-workspace:fullscreen .chart.big{height:calc(100vh - 180px);min-height:420px;max-height:none}
+@media(max-width:700px){.chart-workspace{padding:12px}.chart-workspace .chart.big{height:70svh;min-height:420px;max-height:620px}.chart-workspace .paneBox{height:64px}}
 /* Desktop layout tuned for a 1920 × 1080 workspace while remaining fluid. */
 @media(min-width:1440px) and (min-height:800px){
   header{min-height:72px;padding:12px 24px;gap:16px}
-  main{width:100%;max-width:1920px;margin:0 auto;padding:12px 0}
+  main{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px}
   .toolbar{gap:8px;margin-bottom:10px}
-  .chart-workspace .chart.big{height:min(72vh,780px);min-height:620px}
-  .chart-workspace .paneBox{height:64px}
-  .chart-workspace>h2{padding-top:10px;margin-bottom:8px}
+  .chart-workspace{padding:14px}
+  .chart-workspace .chart.big{height:min(58vh,620px);min-height:520px;max-height:620px}
+  .chart-workspace .paneBox{height:54px}
+  .chart-workspace>h2{padding-top:0;margin-bottom:8px}
   .chart-workspace>.meta{margin-top:4px;margin-bottom:8px}
   .chart-workspace>#legend{margin-bottom:8px}
 }
