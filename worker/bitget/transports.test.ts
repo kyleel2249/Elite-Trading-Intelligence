@@ -74,7 +74,7 @@ test("SBE rejects unsupported schemas, templates and truncated frames",()=>{
 
 
 test("SBE Depth50 schema v5 decodes groups and incremental continuity metadata",()=>{
- const b:number[]=[];putU64(b,1700000000000000n);putU64(b,42n);b.push(0xfe,0xfc);putU64(b,1700000000001000n);b.push(1);putU64(b,41n);b.push(1,0,0,0);
+ const b:number[]=[];putU64(b,1700000000000000n);putU64(b,42n);b.push(0xfe,0xfc);putU64(b,1700000000001000n);b.push(1);putU64(b,41n);b.push(1,0,0,0,0);
  b.push(16,0,1,0);putI64(b,6566738n);putI64(b,5000n);
  b.push(16,0,1,0);putI64(b,6566438n);putI64(b,6000n);
  b.push(7,...new TextEncoder().encode("BTCUSDT"));
