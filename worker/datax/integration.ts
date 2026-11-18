@@ -16,7 +16,11 @@ export async function dataXSignature(secret: string, canonical: string): Promise
   return hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(canonical)));
 }
 
-function canViewDataX(auth: Awaited<ReturnType<typeof authenticate>>): boolean {\n  return auth.master || (auth.user?.role === "admin" && auth.user.mfa && !auth.user.limited);\n}\n\nexport async function handleDataX(req: Request, env: any, deps: { fetchImpl?: typeof fetch; now?: () => number } = {}): Promise<Response> {
+function canViewDataX(auth: Awaited<ReturnType<typeof authenticate>>): boolean {
+  return auth.master || (auth.user?.role === "admin" && auth.user.mfa && !auth.user.limited);
+}
+
+export async function handleDataX(req: Request, env: any, deps: { fetchImpl?: typeof fetch; now?: () => number } = {}): Promise<Response> {
   const path = new URL(req.url).pathname.replace(/\/+$/, "");
   if (path !== "/api/datax/summary") return reply({ error: "not_found" }, 404);
   if (req.method !== "GET") return reply({ error: "method_not_allowed", allowed: "GET" }, 405);
