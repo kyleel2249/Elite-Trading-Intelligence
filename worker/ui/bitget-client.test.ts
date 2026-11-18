@@ -280,3 +280,18 @@ test("transport adapter decodes SBE template 1002 and rejects invalid frames",()
  vm.runInNewContext(BITGET_CLIENT_JS,sandbox);
  assert.throws(()=>sandbox.window.ETIBitget.decodeSbeFrame(new Uint8Array([1,2])),/too_short/);
 });
+
+
+test("private browser transport selects demo/Classic relay and normalizes Classic V2 channel names",()=>{
+ const sockets:any[]=[],messages:any[]=[];
+ class FakeWebSocket{readyState=0;onopen:any;onmessage:any;onclose:any;onerror:any;sent:string[]=[];url:string;constructor(url:string){this.url=url;sockets.push(this)}send(v:string){this.sent.push(v)}close(){this.readyState=3;if(this.onclose)this.onclose({})}}
+ const sandbox:any={window:{location:{protocol:"https:",host:"eti.test"}},AbortSignal,Response,WebSocket:FakeWebSocket,Date,Math,JSON,Number,String,Array,Object,Promise,Map,setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,clearTimeout:()=>{},fetch:async()=>new Response("{}")};
+ vm.runInNewContext(BITGET_CLIENT_JS,sandbox);
+ sandbox.window.ETIBitget.subscribePrivate({environment:"demo",account:"uta"},{onMessage:(m:any)=>messages.push(m)});
+ sandbox.window.ETIBitget.subscribePrivate({environment:"production",account:"classic"},{onMessage:(m:any)=>messages.push(m)});
+ assert.equal(sockets[0].url,"wss://eti.test/api/bitget/ws/private?environment=demo&account=uta");
+ assert.equal(sockets[1].url,"wss://eti.test/api/bitget/ws/private?environment=production&account=classic");
+ sockets[1].readyState=1;sockets[1].onopen();
+ sockets[1].onmessage({data:JSON.stringify({arg:{instType:"USDT-FUTURES",channel:"orders"},action:"update",data:[{orderId:"o1"}]})});
+ assert.equal(messages.find((m:any)=>m.type==="order").data.data[0].orderId,"o1");
+});
