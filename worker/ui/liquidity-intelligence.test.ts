@@ -47,7 +47,7 @@ test("Institutional Bitget WebSocket ticker feeds turnover, price change and der
 
 
 test("Institutional Liquidity reads the selected Bitget contract category instead of defaulting all futures to USDT",()=>{
- assert.ok(LIQUIDITY_JS.includes('$(state.root?"orderBitgetMarket":"tt-category")'));
+ assert.ok(LIQUIDITY_JS.includes('state.root&&state.venue==="bitget"?$("orderBitgetMarket")'));
  assert.ok(LIQUIDITY_JS.includes('["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"].includes(normalizedCategory)'));
 });
 
