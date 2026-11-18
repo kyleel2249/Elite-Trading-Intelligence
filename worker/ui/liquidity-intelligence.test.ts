@@ -39,3 +39,8 @@ test("Institutional Bitget recovery retains streamed candles and maps cached tic
  assert.ok(LIQUIDITY_JS.includes("quoteVolume:state.marketMetrics.turnover24h"));
  assert.ok(LIQUIDITY_JS.includes("if(!state.candles.length)throw e;rows=state.candles"));
 });
+
+
+test("Institutional Bitget WebSocket ticker feeds turnover, price change and derivatives into analysis",()=>{
+ for(const token of ['m.type==="ticker"','turnover24h:t.quoteVolume','priceChange24h:t.priceChangePercent','source:"bitget-websocket"'])assert.ok(LIQUIDITY_JS.includes(token),token);
+});
