@@ -305,8 +305,10 @@ function initAdvancedLiveChart(){
 }
 function renderAdvancedLiveChart(){
  if(!liveChart||!liveCandle)return;
- const selection=$('symbol').value+'|'+$('interval').value,tail=candles.length?candles[candles.length-1]:'';
- const key=selection+'|'+pricePrecision+'|'+candles.length+'|'+(tail?tail.join('|'):'')+'|'+(sigSeq||0)+'|'+JSON.stringify(chartLines)+'|'+JSON.stringify(layers)+'|'+$('chartStyle').value;
+ const selection=$('symbol').value+'|'+$('interval').value,tail=candles.length?candles[candles.length-1]:'',portfolio=layers.trades&&typeof pfChartData==='function'?pfChartData():null;
+ if(portfolio){const prices=[];(portfolio.fills||[]).forEach(f=>prices.push(f.price));(portfolio.positions||[]).forEach(p=>prices.push(p.avgEntry,p.levels&&p.levels.stop,...(p.levels&&p.levels.tp||[])));(portfolio.open||[]).forEach(o=>prices.push(o.type==='stop'?o.stopPrice:o.limitPrice));capturePricePrecision(prices);}
+ const portfolioKey=portfolio?JSON.stringify({fills:portfolio.fills,positions:portfolio.positions,open:portfolio.open}):'';
+ const key=selection+'|'+pricePrecision+'|'+candles.length+'|'+(tail?tail.join('|'):'')+'|'+(sigSeq||0)+'|'+JSON.stringify(chartLines)+'|'+JSON.stringify(layers)+'|'+portfolioKey+'|'+$('chartStyle').value;
  if(key===liveAdvancedKey)return;liveAdvancedKey=key;
  liveCandle.applyOptions({priceFormat:livePriceFormat()});[liveEma20,liveEma50,liveEma200,liveBbUpper,liveBbLower,liveLine,liveArea].forEach(x=>x.applyOptions({priceFormat:livePriceFormat()}));
  if(!candles.length){liveCandle.setData([]);liveVolume.setData([]);return;}
@@ -327,10 +329,12 @@ function renderAdvancedLiveChart(){
  if(layers.markers)for(let i=2;i<candles.length;i++){const a=candles[i-2],b=candles[i];if(Number(b[3])>Number(a[2]))marks.push({time:Math.floor(Number(b[0])/1000),position:'belowBar',color:'#21d69a',shape:'arrowUp',text:'Bull FVG'});else if(Number(b[2])<Number(a[3]))marks.push({time:Math.floor(Number(b[0])/1000),position:'aboveBar',color:'#ff637d',shape:'arrowDown',text:'Bear FVG'});}
  if(layers.markers&&ix&&sig.chart.markers)sig.chart.markers.forEach(m=>marks.push({time:Math.floor(Number(m.time)/1000),position:m.label==='BUY'?'belowBar':'aboveBar',color:m.label==='BUY'?'#21d69a':'#ff637d',shape:m.label==='BUY'?'arrowUp':'arrowDown',text:String(m.label||'SIGNAL')+' '+String(m.score==null?'':m.score)}));
  if(layers.replay&&ix&&sig.chart.replay)(sig.chart.replay||[]).forEach(t=>marks.push({time:Math.floor(Number(t.time)/1000),position:t.label==='BUY'?'belowBar':'aboveBar',color:t.outcome==='win'?'#21d69a':t.outcome==='loss'?'#ff637d':'#91a9c4',shape:'circle',text:'Replay '+(t.outcome||'open')}));
+ if(portfolio){(portfolio.fills||[]).forEach(f=>{const i=typeof pfCandleIdx==='function'?pfCandleIdx(f.at):-1;if(i<0||i>=candles.length)return;const buy=f.side==='buy';marks.push({time:Math.floor(Number(candles[i][0])/1000),position:buy?'belowBar':'aboveBar',color:buy?'#21d69a':'#ff637d',shape:buy?'arrowUp':'arrowDown',text:(f.side||'FILL').toUpperCase()+' '+fp(f.price)});});(portfolio.positions||[]).forEach(p=>marks.push({time:Math.floor(Number(candles[candles.length-1][0])/1000),position:p.side==='short'?'aboveBar':'belowBar',color:p.side==='short'?'#ff637d':'#21d69a',shape:'square',text:'OPEN '+String(p.side||'POSITION').toUpperCase()}));}
  marks.sort((a,b)=>a.time-b.time);liveCandle.setMarkers(marks.slice(-100));
  livePriceLines.forEach(p=>{try{liveCandle.removePriceLine(p);}catch(e){}});livePriceLines=[];
  if(sigValid()&&sig.chart&&layers.levels){const L=sig.chart.levels,levels=[['ENTRY',L.entry,C.entry],['STOP',L.stopLoss,C.down]].concat((L.targets||[]).map((p,i)=>['TP'+(i+1),p,C.up]));levels.forEach(v=>{if(Number.isFinite(Number(v[1]))&&Number(v[1])>0)livePriceLines.push(liveCandle.createPriceLine({price:Number(v[1]),color:v[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:v[0]}));});}
  chartLines.forEach(l=>{if(Number(l.price)>0)livePriceLines.push(liveCandle.createPriceLine({price:Number(l.price),color:l.color||'#f0c674',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:l.label||'ETI level'}));});
+ if(portfolio){const addPortfolioLine=(label,price,color)=>{const n=Number(price);if(Number.isFinite(n)&&n>0)livePriceLines.push(liveCandle.createPriceLine({price:n,color:color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:label}));};(portfolio.positions||[]).forEach(p=>{addPortfolioLine('POSITION '+fp(p.avgEntry),p.avgEntry,'#e6edf7');addPortfolioLine('POSITION SL',p.levels&&p.levels.stop,'#ff637d');(p.levels&&p.levels.tp||[]).forEach((v,i)=>addPortfolioLine('POSITION TP'+(i+1),v,'#21d69a'));});(portfolio.open||[]).forEach(o=>addPortfolioLine('OPEN '+String(o.side||'ORDER').toUpperCase(),o.type==='stop'?o.stopPrice:o.limitPrice,'#f0c674'));}
  if(selection!==liveSelectionKey){liveChart.timeScale().fitContent();liveSelectionKey=selection;}
 }
 
