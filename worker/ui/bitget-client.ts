@@ -193,22 +193,16 @@ function subscribePrivate(opts,handlers){
  return {close:function(){closed=true;connected=false;authenticated=false;if(retryTimer)clearTimeout(retryTimer);stopTimers();if(ws){var current=ws;ws=null;try{current.close()}catch(e){}}status("closed");},getState:function(){return {connected:connected,authenticated:authenticated,lastMessageAt:lastMessageAt,retry:retry};}};
 }
 
-function transportEndpoint(environment,account,protocol){
- if(protocol==="sbe"){if(account!=="uta")throw new Error("SBE is only supported for UTA public market data");if(environment!=="production")throw new Error("SBE demo endpoint is not documented");return "wss://ws.bitget.com/v3/ws/public/sbe";}
- if(account==="classic"){if(environment==="demo")throw new Error("Classic V2 demo endpoint is not documented");return "wss://ws.bitget.com/v2/ws/public";}
- return environment==="demo"?"wss://wspap.bitget.com/v3/ws/public":"wss://ws.bitget.com/v3/ws/public";
-}
-function transportArgs(opts){
- var symbol=String(opts.symbol||"").toUpperCase(),account=opts.account==="classic"?"classic":"uta",market=opts.market==="futures"?"futures":"spot",category=opts.category||"USDT-FUTURES",iv=String(opts.interval||"1m");
- if(!/^[A-Z0-9]{5,20}$/.test(symbol))throw new Error("Invalid Bitget WebSocket symbol");
- if(account==="classic"){
-  var inst=market==="futures"?String(category).toUpperCase():"SPOT",v2iv=({"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D","1w":"1W"})[iv]||"1m",candle="candle"+v2iv;
-  return [{instType:inst,channel:"ticker",instId:symbol},{instType:inst,channel:"books5",instId:symbol},{instType:inst,channel:"trade",instId:symbol},{instType:inst,channel:candle,instId:symbol}];
+function transportEndpoint(protocol){
+  return protocol==="sbe"?"wss://ws.bitget.com/v3/ws/public/sbe":"wss://ws.bitget.com/v3/ws/public";
  }
- var product=market==="futures"?String(category).toLowerCase():"spot";
- return [{instType:product,topic:"ticker",symbol:symbol},{instType:product,topic:"books5",symbol:symbol},{instType:product,topic:"publicTrade",symbol:symbol},{instType:product,topic:"kline",symbol:symbol,interval:({"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D","1w":"1W"})[iv]||"1m"}];
-}
-function decodeSbeFrame(raw){
+ function transportArgs(opts){
+  var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=opts.category||"USDT-FUTURES",iv=String(opts.interval||"1m");
+  if(!/^[A-Z0-9]{5,20}$/.test(symbol))throw new Error("Invalid Bitget WebSocket symbol");
+  var product=market==="futures"?String(category).toLowerCase():"spot";
+  return [{instType:product,topic:"ticker",symbol:symbol},{instType:product,topic:"books5",symbol:symbol},{instType:product,topic:"publicTrade",symbol:symbol},{instType:product,topic:"kline",symbol:symbol,interval:({"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D","1w":"1W"})[iv]||"1m"}];
+ }
+ function decodeSbeFrame(raw){
  var bytes=raw instanceof ArrayBuffer?new Uint8Array(raw):ArrayBuffer.isView(raw)?new Uint8Array(raw.buffer,raw.byteOffset,raw.byteLength):null;
  if(!bytes||bytes.length<8)throw new Error("sbe_frame_too_short");
  var v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),bl=v.getUint16(0,true),tid=v.getUint16(2,true),schema=v.getUint16(4,true),ver=v.getUint16(6,true);
