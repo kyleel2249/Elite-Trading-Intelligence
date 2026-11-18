@@ -80,7 +80,7 @@ export function thresholdSensitivity(samples: OutcomeSample[], thresholds = [55,
       return { threshold, train: metrics(train), test: metrics(test),
         status: test.length >= 30 ? "out_of_sample_sample_available" : "insufficient_out_of_sample_sample" };
     }),
-    note: "Threshold sensitivity only. No parameter is auto-selected or deployed; repeated tuning against this dataset can overfit." };
+    note: "Threshold sensitivity only. Parameters are not auto-selected or deployed; repeated tuning against this dataset can overfit." };
 }
 
 function percentile(sorted: number[], p: number) {
