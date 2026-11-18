@@ -72,7 +72,7 @@ export function analyzeLiquidity(input:LiquidityInput){
   const buyAligned=deltaPct>8&&imbalance>0.08,bearAligned=deltaPct< -8&&imbalance< -0.08;
   const sweep=candles.sweep, sweepAligned=!!sweep&&((sweep.direction==="bullish"&&buyAligned)||(sweep.direction==="bearish"&&bearAligned));
   const fvgAligned=!!candles.fvg&&((candles.fvg.direction==="bullish"&&buyAligned)||(candles.fvg.direction==="bearish"&&bearAligned));
-  const score=clamp(Math.round((Math.min(1,Math.abs(imbalance))*20)+(Math.min(1,Math.abs(deltaPct)/40)*20)+(sweepAligned?25:sweep?8:0)+(fvgAligned?15:fvg?5:0)+(Math.min(1,(largeBids.length+largeAsks.length)/5)*10)+(Math.min(1,behaviour.absorbed/3)*10)),0,100);
+  const score=clamp(Math.round((Math.min(1,Math.abs(imbalance))*20)+(Math.min(1,Math.abs(deltaPct)/40)*20)+(sweepAligned?25:sweep?8:0)+(fvgAligned?15:candles.fvg?5:0)+(Math.min(1,(largeBids.length+largeAsks.length)/5)*10)+(Math.min(1,behaviour.absorbed/3)*10)),0,100);
   const direction=sweepAligned?(sweep!.direction==="bullish"?"BUY":"SELL"):fvgAligned?(candles.fvg!.direction==="bullish"?"BUY":"SELL"):"WAIT";
   const freshness=finite(input.depth.timestamp)?Math.max(0,Date.now()-input.depth.timestamp):null;
   const warnings:string[]=[];
