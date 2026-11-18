@@ -112,7 +112,7 @@ test("Bitget WebSocket subscribes to the selected futures product and normalizes
   const sockets: any[] = [], messages: any[] = [], states: any[] = [], timers: any[] = [];
   class FakeWebSocket {
     readyState = 0; onopen: any; onmessage: any; onclose: any; onerror: any; sent: string[] = [];
-    constructor(public url: string) { sockets.push(this); }
+    url: string; constructor(url: string) { this.url = url; sockets.push(this); }
     send(value: string) { this.sent.push(value); }
     close() { this.readyState = 3; if (this.onclose) this.onclose({}); }
   }
