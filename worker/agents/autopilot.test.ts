@@ -104,6 +104,6 @@ test("autopilot idempotency claim prevents duplicate symbol-slot runs", async ()
   const now = 2_400_000;
   await runAgentAutopilotCycle(env, app, now);
   const second = await runAgentAutopilotCycle(env, app, now);
-  assert.equal(calls, 4);
+  assert.equal(calls, 5, "one council analysis and four strategy checks run in the first slot");
   assert.equal(second.outcomes[0].reason, "already_processed_this_slot");
 });
