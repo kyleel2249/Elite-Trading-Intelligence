@@ -674,7 +674,7 @@ export async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestI
     if (primary) return primary;
     throw primaryError instanceof Error ? primaryError : new Error("upstream_fetch_failed");
   }
-  if (primary && primary.status !== 403 && primary.status !== 429 && primary.status < 500) return primary;
+  if (primary && ![400, 403, 404, 429].includes(primary.status) && primary.status < 500) return primary;
   const u = new URL(source), fallbackPath = bitgetV2FallbackUrl(source);
   const attempts: string[] = [];
   let last: Response | null = null;
