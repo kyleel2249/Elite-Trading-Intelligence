@@ -315,7 +315,7 @@ function updateOverlayNote(){const e=$('overlayNote');if(sigValid()&&provider&&s
 
 let etiLiquidityFvg=null,etiLiquidityFvgKey='',etiLiquidityFvgAt=0,etiLiquidityFvgSeq=0,etiLiquidityFvgBusyKey='';let etiLiquidityCanvas=null;
 let liveChart=null,liveCandle=null,liveVolume=null,liveEma20=null,liveEma50=null,liveEma200=null,liveBbUpper=null,liveBbLower=null,liveRibbon=null,liveLine=null,liveArea=null,livePriceLines=[],liveAdvancedKey='',liveSelectionKey='';
-window.ETILiveChart={isAdvanced:()=>!!liveCandle,priceToCoordinate:price=>{const p=Number(price);if(!Number.isFinite(p))return null;if(liveCandle)return liveCandle.priceToCoordinate(p);if(!chartScale||!Number.isFinite(chartScale.lo)||!Number.isFinite(chartScale.hi)||chartScale.hi<=chartScale.lo)return null;return chartScale.bot-(p-chartScale.lo)/(chartScale.hi-chartScale.lo)*(chartScale.bot-chartScale.top);}};
+window.ETILiveChart={isAdvanced:()=>!!liveCandle,priceToCoordinate:price=>{const p=Number(price);if(!Number.isFinite(p))return null;if(liveCandle)return liveCandle.priceToCoordinate(p);if(!chartScale||!Number.isFinite(chartScale.lo)||!Number.isFinite(chartScale.hi)||chartScale.hi<=chartScale.lo)return null;return chartScale.bot-(p-chartScale.lo)/(chartScale.hi-chartScale.lo)*(chartScale.bot-chartScale.top);},timeToCoordinate:time=>{const t=Math.floor(Number(time)/1000);return Number.isFinite(t)&&liveChart?liveChart.timeScale().timeToCoordinate(t):null;}};
 function livePriceFormat(){return {type:'price',precision:pricePrecision,minMove:Math.pow(10,-pricePrecision)};}
 function liveEma(period){let prev=null,k=2/(period+1);return candles.map(v=>{const close=Number(v[4]);prev=prev===null?close:close*k+prev*(1-k);return {time:Math.floor(Number(v[0])/1000),value:prev};});}
 function initAdvancedLiveChart(){
@@ -613,14 +613,14 @@ async function refreshInstitutionalIntel(force){
  if(!force&&key===imKey)return;imKey=key;const seq=++imSeq;
  $('imStatus').textContent='Analysing…';$('imSubtitle').textContent=sym+' · '+tf+' · '+venue+' '+market;
  try{
-  const r=await fetch('/api/analysis/smc',{method:'POST',headers:{'content-type':'application/json'},cache:'no-store',body:JSON.stringify({symbol:sym,timeframe:tf,market,candles:candles.map(v=>v.map(Number))}),signal:AbortSignal.timeout(15000)});
+  const r=await fetch('/api/analysis/smc',{method:'POST',headers:{'content-type':'application/json'},cache:'no-store',body:JSON.stringify({symbol:sym,timeframe:tf,market,venue,provider:venue,candles:candles.map(v=>v.map(Number))}),signal:AbortSignal.timeout(15000)});
   const d=await r.json();if(seq!==imSeq)return;if(!r.ok)throw new Error(d.detail||d.error||'Analysis request failed ('+r.status+')');
   renderInstitutionalIntel(d);
  }catch(e){if(seq!==imSeq)return;$('imStatus').textContent='Unavailable';$('imSubtitle').textContent=e.message||'Institutional analysis could not be loaded';}
 }
 $('imRefresh').addEventListener('click',()=>refreshInstitutionalIntel(true));
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
-function symInfo(){const raw=$('symMarket').value,m=symMkt(),s=$('symbol').value,venue=SYM.venue||'bybit',selected=$('orderBitgetMarket')?$('orderBitgetMarket').value.toUpperCase():'';const c=SYM.all.filter(r=>r[0]===s&&r[3]===(raw==='margin'?'margin':m==='futures'?'futures':'spot'));const row=venue==='bitget'&&m==='futures'?(c.find(r=>symV(r)==='bitget'&&String(r[6]||'').toUpperCase()===selected)||c.find(r=>symV(r)==='bitget'&&SYM.cat&&String(r[6]||'')===SYM.cat)||(c.length===1?c[0]:null)):(c.find(r=>symV(r)===venue)||c[0]||null);return{market:m,row:row,venue:row?symV(row):venue,productType:row&&row[6]||null};}
+function symInfo(){const raw=$('symMarket').value,m=symMkt(),s=$('symbol').value,venue=$('symVenue').value||SYM.venue||'bybit',selected=$('orderBitgetMarket')?$('orderBitgetMarket').value.toUpperCase():'';const c=SYM.all.filter(r=>r[0]===s&&r[3]===(raw==='margin'?'margin':m==='futures'?'futures':'spot')&&symV(r)===venue);const row=venue==='bitget'&&m==='futures'?(c.find(r=>String(r[6]||'').toUpperCase()===selected)||c.find(r=>SYM.cat&&String(r[6]||'').toUpperCase()===String(SYM.cat).toUpperCase())||null):(c[0]||null);return{market:m,row:row,venue:venue,productType:row&&row[6]||null};}
 function symV(r){return r[5]||'bybit';}
 function symVenueOf(){return symInfo().venue;}
 function symMkt(){const e=$('symMarket');if(!e)return 'spot';if(e.value==='margin')return 'spot';if(e.value!=='metals')return e.value;const s=$('symbol').value,sp=SYM.all.filter(r=>r[0]===s&&r[4]==='metals');return sp.some(r=>r[3]==='spot')?'spot':sp.length?'futures':'spot';}
