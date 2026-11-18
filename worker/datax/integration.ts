@@ -16,14 +16,14 @@ export async function dataXSignature(secret: string, canonical: string): Promise
   return hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(canonical)));
 }
 
-export async function handleDataX(req: Request, env: any, deps: { fetchImpl?: typeof fetch; now?: () => number } = {}): Promise<Response> {
+function canViewDataX(auth: Awaited<ReturnType<typeof authenticate>>): boolean {\n  return auth.master || (auth.user?.role === "admin" && auth.user.mfa && !auth.user.limited);\n}\n\nexport async function handleDataX(req: Request, env: any, deps: { fetchImpl?: typeof fetch; now?: () => number } = {}): Promise<Response> {
   const path = new URL(req.url).pathname.replace(/\/+$/, "");
   if (path !== "/api/datax/summary") return reply({ error: "not_found" }, 404);
   if (req.method !== "GET") return reply({ error: "method_not_allowed", allowed: "GET" }, 405);
 
   const now = (deps.now ?? Date.now)();
   const auth = await authenticate(req, env, now);
-  if (!auth.master && auth.scopes.size === 0 && !auth.user) return reply({ error: "unauthorized", message: "Sign in to ETI to view DataX intelligence." }, 401);
+  if (!canViewDataX(auth)) return reply({ error: "forbidden", message: "DataX financial intelligence requires an ETI administrator session with MFA." }, auth.user ? 403 : 401);
 
   const secret = String(env.DATAX_INTEGRATION_SECRET || "");
   const configured = String(env.DATAX_API_URL || "");
@@ -100,7 +100,7 @@ export function withDataX(inner: { fetch(req: Request, env: any, ctx?: any): Pro
     if (path === "/datax") {
       if (req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
       const auth = await authenticate(req, env, Date.now());
-      if (!auth.master && auth.scopes.size === 0 && !auth.user) return reply({ error: "unauthorized", message: "Sign in to ETI to view DataX intelligence." }, 401);
+      if (!canViewDataX(auth)) return reply({ error: "forbidden", message: "DataX financial intelligence requires an ETI administrator session with MFA." }, auth.user ? 403 : 401);
       return new Response(DATAX_PAGE, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     return inner.fetch(req, env, ctx);
