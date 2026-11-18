@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readAutopilotConfig, runAgentAutopilotCycle } from "./autopilot.ts";
+import { readAutopilotConfig, runAgentAutopilotCycle, scheduleAgentAutopilot } from "./autopilot.ts";
 
 function memoryKV() {
   const data = new Map<string, string>();
@@ -22,6 +22,28 @@ test("consolidated autopilot JSON config supplies all strategy and risk settings
     minStrategyAgreement: 2, minOmniConfidence: 68,
   }) } as any);
   assert.deepEqual(config, { symbols: "BTCUSDT,ETHUSDT", interval: "1h", maxPerCycle: 1, minConfidence: 0.7, minAgreement: 0.75, maxPositions: 2, strategies: "intraday,swing", minStrategyAgreement: 2, minOmniConfidence: 68 });
+});
+
+test("five-minute autopilot is scheduled even when the universe scanner uses the same cron", async () => {
+  const kv = memoryKV();
+  const waits: Promise<unknown>[] = [];
+  const ctx = { waitUntil(p: Promise<unknown>) { waits.push(p); } };
+  const scheduled = scheduleAgentAutopilot("*/5 * * * *", {
+    ETI_AGENT_AUTOPILOT_ENABLED: "false", ETI_EXECUTION_LOG: kv as any,
+  } as any, { fetch: () => { throw new Error("disabled autopilot must not call app"); } }, ctx);
+  assert.equal(scheduled, true);
+  assert.equal(waits.length, 1, "shared five-minute cron must enqueue the autopilot");
+  await Promise.all(waits);
+  const last = JSON.parse(kv.data.get("agent-autopilot:last") || "null");
+  assert.equal(last.skipped, "autopilot_disabled");
+  assert.equal(last.submitted, 0);
+});
+
+test("autopilot scheduler ignores unrelated cron expressions", () => {
+  const waits: Promise<unknown>[] = [];
+  const scheduled = scheduleAgentAutopilot("* * * * *", {} as any, { fetch: () => { throw new Error("must not call"); } }, { waitUntil(p: Promise<unknown>) { waits.push(p); } });
+  assert.equal(scheduled, false);
+  assert.equal(waits.length, 0);
 });
 
 test("autopilot is disabled unless explicitly enabled", async () => {

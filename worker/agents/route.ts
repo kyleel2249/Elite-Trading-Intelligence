@@ -154,6 +154,9 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         try { latest = env.ETI_EXECUTION_LOG ? JSON.parse((await env.ETI_EXECUTION_LOG.get("agent-autopilot:last")) || "null") : null; } catch { latest = null; }
         const config = readAutopilotConfig(env);
         const enabled = env.ETI_AGENT_AUTOPILOT_ENABLED === "true";
+        const latestAt = latest && typeof latest === "object" && typeof (latest as any).at === "string" ? Date.parse((latest as any).at) : NaN;
+        const lastCycleAgeMs = Number.isFinite(latestAt) ? Math.max(0, clock() - latestAt) : null;
+        const lastCycleFresh = lastCycleAgeMs !== null && lastCycleAgeMs <= 10 * 60_000;
         const symbols = config.symbols.split(",").map((s) => s.trim().toUpperCase()).filter((s) => SYMBOL.test(s));
         const strategies = config.strategies.split(",").map((s) => s.trim().toLowerCase()).filter((s) => ["scalp", "intraday", "swing", "position"].includes(s));
         const portfolioStorageConfigured = !!(env.ETI_PORTFOLIO_DB || env.ETI_EXECUTION_LOG);
@@ -170,7 +173,15 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         return reply({
           enabled, ready: blockedReasons.length === 0, blockedReasons,
           mode: "internal_paper_only", liveOrdersAllowed: false, killSwitch: integrity.killSwitch,
-          scheduler: { enabled, cron: "*/5 * * * *", cadenceMinutes: 5 },
+          scheduler: {
+            enabled, cron: "*/5 * * * *", cadenceMinutes: 5,
+            sharesCronWithUniverse: true,
+            dispatchOrder: "autopilot_before_universe_early_return",
+            dispatchRegistered: true,
+          },
+          lastCycleAgeMs, lastCycleFresh,
+          lastCycleStatus: latest && typeof latest === "object" ? ((latest as any).skipped || ((latest as any).submitted > 0 ? "paper_orders_submitted" : "completed_without_orders")) : "not_observed",
+          lastCycleError: latest && typeof latest === "object" ? ((latest as any).error || null) : null,
           executionTokenConfigured: integrity.executionTokenConfigured, auditLogConfigured: integrity.auditLogConfigured,
           durableAuditConfigured: !!env.ETI_PORTFOLIO_DB, portfolioStorageConfigured,
           councilRunsBeforeStrategyGates: true, recordsNoTradeDecisions: true,

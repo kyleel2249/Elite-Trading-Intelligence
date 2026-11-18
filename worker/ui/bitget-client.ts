@@ -35,7 +35,7 @@ async function request(pathV3,pathsV2){
   return {data:rows,host:"eti-worker",version:"proxy",meta:body};
  }
  if(body&&body.code==="00000"&&body.data!==undefined)body=body.data;
- if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){return {T:t.time||t.ts,p:String(t.price),q:String(t.qty===undefined?t.size:t.qty),side:(t.isBuyerMaker===undefined?String(t.side||"").toLowerCase()==="sell":!!t.isBuyerMaker)?"sell":"buy"};});
+ if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){if(t&&t.p!==undefined&&t.q!==undefined)return t;return {T:t.time||t.ts,p:String(t.price),q:String(t.qty===undefined?t.size:t.qty),side:(t.isBuyerMaker===undefined?String(t.side||"").toLowerCase()==="sell":!!t.isBuyerMaker)?"sell":"buy"};});
  return {data:body,host:"eti-worker",version:"proxy"};
 }
 function parseCandles(data){
@@ -74,7 +74,7 @@ function parseDepth(data){
 function parseTrades(data){
  return (Array.isArray(data)?data:[]).map(function(t){
   if(Array.isArray(t))return {T:millis(t[0])||0,m:String(t[3]||"").toLowerCase()==="sell",p:String(t[1]||""),q:String(t[2]||"")};
-  return {T:millis(t.T||t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.S||t.side||"").toLowerCase()==="sell",p:String(t.p||t.price||t.fillPrice||""),q:String(t.v||t.size||t.baseVolume||t.qty||"")};
+  return {T:millis(t.T||t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.S||t.side||"").toLowerCase()==="sell",p:String(t.p||t.price||t.fillPrice||""),q:String(t.q||t.v||t.size||t.baseVolume||t.qty||"")};
  }).filter(function(t){return t.T>0&&Number(t.p)>0&&Number(t.q)>0}).sort(function(a,b){return b.T-a.T}).slice(0,100);
 }
 function firstNumber(){for(var i=0;i<arguments.length;i++){var n=num(arguments[i]);if(n!==null)return n}return null}

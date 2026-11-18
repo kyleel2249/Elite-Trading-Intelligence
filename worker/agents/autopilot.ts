@@ -25,6 +25,7 @@ export interface AgentAutopilotEnv extends ExecutionEnv {
   ETI_AGENT_AUTOPILOT_CONFIG?: string;
 }
 type App = { fetch(request: Request, env: any): Promise<Response> | Response };
+export const AGENT_AUTOPILOT_CRON = "*/5 * * * *";
 const ALLOWED_INTERVALS = new Set(["5m", "15m", "30m", "1h", "4h", "1d"]);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const num = (v: unknown, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
@@ -79,26 +80,47 @@ function accountFromLedger(ledger: any, symbol: string, now: number) {
   };
 }
 
+/** Persist early scheduler/preflight outcomes so the dashboard never keeps showing an old successful cycle. */
+async function skippedResult(env: AgentAutopilotEnv, disabled: { enabled: boolean; mode: string; liveOrdersAllowed: boolean }, reason: string, now: number) {
+  const summary = { ...disabled, at: new Date(now).toISOString(), submitted: 0, evaluated: 0, outcomes: [], skipped: reason };
+  if (env.ETI_EXECUTION_LOG) await env.ETI_EXECUTION_LOG.put("agent-autopilot:last", json(summary), { expirationTtl: 60 * 60 * 24 * 30 }).catch(() => undefined);
+  return summary;
+}
+
+/** Schedule the paper-only agent cycle independently of other handlers sharing the same cron expression. */
+export function scheduleAgentAutopilot(cron: string | undefined, env: AgentAutopilotEnv, app: App, ctx: { waitUntil(promise: Promise<unknown>): void }): boolean {
+  if (cron !== AGENT_AUTOPILOT_CRON) return false;
+  ctx.waitUntil(runAgentAutopilotCycle(env, app).then(r => {
+    if ((r as any).submitted) console.log("agent autopilot paper orders", (r as any).submitted, "evaluated", (r as any).evaluated);
+    else console.log("agent autopilot cycle completed without orders", (r as any).skipped || (r as any).evaluated || 0);
+  }).catch(async e => {
+    const failure = { enabled: env.ETI_AGENT_AUTOPILOT_ENABLED === "true", mode: "internal_paper_only", liveOrdersAllowed: false, at: new Date().toISOString(), submitted: 0, evaluated: 0, outcomes: [], skipped: "cycle_error", error: e instanceof Error ? e.message : "unknown_error" };
+    if (env.ETI_EXECUTION_LOG) await env.ETI_EXECUTION_LOG.put("agent-autopilot:last", json(failure), { expirationTtl: 60 * 60 * 24 * 30 }).catch(() => undefined);
+    console.error("agent autopilot cycle failed", failure.error);
+  }));
+  return true;
+}
+
 /** Runs one bounded batch. A run is a no-op unless explicitly enabled in Worker configuration. */
 export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, now = Date.now()) {
   const disabled = { enabled: env.ETI_AGENT_AUTOPILOT_ENABLED === "true", mode: "internal_paper_only", liveOrdersAllowed: false };
-  if (!disabled.enabled) return { ...disabled, skipped: "autopilot_disabled" };
-  if (env.ETI_KILL_SWITCH === "true") return { ...disabled, skipped: "kill_switch_active" };
-  if (!env.ETI_EXECUTION_TOKEN || !env.ETI_EXECUTION_LOG) return { ...disabled, skipped: "execution_token_or_audit_log_missing" };
-  if (!env.ETI_PORTFOLIO_DB && !env.ETI_EXECUTION_LOG) return { ...disabled, skipped: "portfolio_storage_missing" };
+  if (!disabled.enabled) return skippedResult(env, disabled, "autopilot_disabled", now);
+  if (env.ETI_KILL_SWITCH === "true") return skippedResult(env, disabled, "kill_switch_active", now);
+  if (!env.ETI_EXECUTION_TOKEN || !env.ETI_EXECUTION_LOG) return skippedResult(env, disabled, "execution_token_or_audit_log_missing", now);
+  if (!env.ETI_PORTFOLIO_DB && !env.ETI_EXECUTION_LOG) return skippedResult(env, disabled, "portfolio_storage_missing", now);
 
   const config = readAutopilotConfig(env);
   const symbols = [...new Set(config.symbols.split(",").map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9]{5,20}$/.test(s)))].slice(0, 30);
   const interval = config.interval;
-  if (!ALLOWED_INTERVALS.has(interval)) return { ...disabled, skipped: "invalid_interval" };
+  if (!ALLOWED_INTERVALS.has(interval)) return skippedResult(env, disabled, "invalid_interval", now);
   const maxPerCycle = Math.floor(config.maxPerCycle);
   const minConfidence = config.minConfidence, minAgreement = config.minAgreement;
   const maxPositions = Math.floor(config.maxPositions);
   const strategies = [...new Set(config.strategies.split(",").map(s => s.trim().toLowerCase()).filter(s => ["scalp", "intraday", "swing", "position"].includes(s)))];
   const minStrategyAgreement = Math.floor(config.minStrategyAgreement);
   const minOmniConfidence = config.minOmniConfidence;
-  if (!symbols.length) return { ...disabled, skipped: "no_valid_symbols" };
-  if (!strategies.length || minStrategyAgreement > strategies.length) return { ...disabled, skipped: "invalid_strategy_configuration" };
+  if (!symbols.length) return skippedResult(env, disabled, "no_valid_symbols", now);
+  if (!strategies.length || minStrategyAgreement > strategies.length) return skippedResult(env, disabled, "invalid_strategy_configuration", now);
 
   const store = openStore(env as any, "internal_paper");
   if (!store) return { ...disabled, skipped: "portfolio_storage_missing" };

@@ -194,7 +194,7 @@ test("Bitget Worker proxy reports a classified 502 when all hosts fail at the ne
     (async () => { throw new TypeError("fetch failed"); }) as any
   );
   assert.equal(response.status, 502);
-  assert.equal((await response.json() as any).code, "ETI_UPSTREAM_UNAVAILABLE");
+  assert.equal((await response.json() as any).code, "eti_upstream_unavailable");
 });
 
 
