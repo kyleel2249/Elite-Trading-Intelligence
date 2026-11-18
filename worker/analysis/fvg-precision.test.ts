@@ -20,5 +20,6 @@ test("precision engine never authorizes or submits an order",()=>{
 test("FVG candidate entries use exact consequent-encroachment midpoint",()=>{
  const rows=candles(Array.from({length:90},(_,i)=>{if(i===45)return [100,100.2,99.8,100.1,100];if(i===46)return [100.1,102.5,100.0,102.2,240];if(i===47)return [102.2,103.5,101.2,103.1,180];const p=i<45?100+Math.sin(i)*.08:103+(i-48)*.015;return [p,p+.15,p-.15,p+.03,100];}));
  const out=analyzeFvgPrecision(rows,"5m");
- assert.ok(out.candidates.length>0,"synthetic displacement should create at least one FVG");\n for(const c of out.candidates) assert.ok(Math.abs(c.entry.price-(c.zone.lower+c.zone.upper)/2)<1e-8);
+ assert.ok(out.candidates.length>0,"synthetic displacement should create at least one FVG");
+ for(const c of out.candidates) assert.ok(Math.abs(c.entry.price-(c.zone.lower+c.zone.upper)/2)<1e-8);
 });
