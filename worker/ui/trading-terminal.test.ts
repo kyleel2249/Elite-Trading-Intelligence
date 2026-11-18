@@ -55,7 +55,7 @@ test("institutional chart workspace exposes SMC, multi-timeframe and auction pro
   assert.match(TRADING_TERMINAL_JS, /function calcProfile/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /function renderDepthHeat|renderDepth\(/);
   assert.match(TRADING_TERMINAL_JS, /function renderFlow/);
-  assert.ok(!TRADING_TERMINAL_JS.includes("api/market/depth"));
+  assert.ok(TRADING_TERMINAL_JS.includes("api/market/depth"));
   assert.ok(!TRADING_TERMINAL_JS.includes("renderDepth"));
   assert.match(TRADING_TERMINAL_JS, /saveChartPrefs/);
   assert.match(TRADING_TERMINAL_JS, /drawFallbackChart/);
@@ -93,4 +93,25 @@ test("advanced terminal chart preserves exchange tick precision for tiny-priced 
   assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(\(results\[0\]\.value\|\|\[\]\)\.flatMap/);
   assert.match(TRADING_TERMINAL_JS, /v\.toFixed\(S\.pricePrecision\)/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /maximumFractionDigits:8/);
+});
+
+
+test("synchronized multi-chart workspace shares venue, symbol and visible time range", () => {
+  for (const tf of ["5m", "15m", "1h", "4h"]) assert.match(TRADING_TERMINAL_HTML, new RegExp("tt-multi-" + tf));
+  assert.match(TRADING_TERMINAL_HTML, /Synchronized multi-timeframe charts/);
+  assert.match(TRADING_TERMINAL_JS, /function initMultiCharts\(/);
+  assert.match(TRADING_TERMINAL_JS, /function loadMultiCharts\(/);
+  assert.match(TRADING_TERMINAL_JS, /subscribeVisibleTimeRangeChange/);
+  assert.match(TRADING_TERMINAL_JS, /setVisibleRange\(range\)/);
+  assert.match(TRADING_TERMINAL_JS, /Promise\.allSettled/);
+});
+
+test("advanced order-flow metrics use exchange trades and depth and feed ETIAlgo read-only analysis", () => {
+  for (const id of ["tt-of-buy", "tt-of-sell", "tt-of-delta", "tt-of-delta-pct", "tt-of-imbalance", "tt-of-spread", "tt-of-microprice"]) assert.match(TRADING_TERMINAL_HTML, new RegExp(id));
+  assert.match(TRADING_TERMINAL_JS, /function renderOrderFlow\(/);
+  assert.match(TRADING_TERMINAL_JS, /function loadOmniSignal\(/);
+  assert.match(TRADING_TERMINAL_JS, /api\/omnisignal/);
+  assert.match(TRADING_TERMINAL_JS, /loadSignalInputs/);
+  assert.match(TRADING_TERMINAL_JS, /liveExecutionAllowed/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /fetch\(["']\/api\/orders/);
 });
