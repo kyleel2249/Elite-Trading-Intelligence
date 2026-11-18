@@ -242,7 +242,7 @@ function subscribeTransport(opts,handlers){
  opts=opts||{};handlers=handlers||{};
  var environment=opts.environment==="demo"?"demo":"production",account=opts.account==="classic"?"classic":"uta",protocol=opts.protocol==="sbe"?"sbe":"json",symbol=String(opts.symbol||"").toUpperCase(),args=transportArgs(opts),url=transportEndpoint(environment,account,protocol);
  if(protocol==="sbe"&&account!=="uta")throw new Error("SBE is UTA-only");
- if(protocol==="sbe")args=args.filter(function(a){return a.topic==="ticker"||a.topic==="books5"?false:["books50","books1","publicTrade"].indexOf(a.topic)>=0;});
+ if(protocol==="sbe"){var inst=opts.market==="futures"?String(opts.category||"USDT-FUTURES").toLowerCase():"spot";args=[{instType:inst,topic:"books50",symbol:symbol},{instType:inst,topic:"books1",symbol:symbol},{instType:inst,topic:"publicTrade",symbol:symbol}];}
  var ws=null,closed=false,retry=0,retryTimer=null,ping=null,watchdog=null,last=0,connected=false;
  function status(s,d){if(handlers.onStatus)handlers.onStatus({state:s,detail:d||"",connected:connected,retry:retry,environment:environment,account:account,protocol:protocol});}
  function emit(type,data,raw){if(handlers.onMessage)handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null,environment:environment,account:account,protocol:protocol});}
