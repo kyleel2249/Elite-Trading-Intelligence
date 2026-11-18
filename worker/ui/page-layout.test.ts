@@ -12,6 +12,14 @@ const pages = [
   { path: "/terminal", label: "Pro Terminal", expected: ["max-width:1920px", "tt-shell"] }
 ];
 
+test("main dashboard links directly to the dedicated AI Agents workspace", async () => {
+  const response = await app.fetch(new Request("https://eti.test/"), {} as any);
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(html, /href="\\/agents"/);
+  assert.match(html, />AI Agents</);
+});
+
 test("standalone ETI workspaces use the dashboard's 1920px outer layout", async () => {
   for (const page of pages) {
     const response = await app.fetch(new Request("https://eti.test" + page.path), {} as any);
