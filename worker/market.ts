@@ -713,7 +713,7 @@ export async function bitgetAwareFetch(input: RequestInfo | URL, init?: RequestI
     headers.set("x-eti-fallback-attempts", attempts.join(" | "));
     return new Response(failed.body, { status: failed.status, statusText: failed.statusText, headers });
   }
-  return new Response(JSON.stringify({ code: "ETI_UPSTREAM_UNAVAILABLE", message: "Bitget public market-data upstreams were unreachable", attempts }), {
+  return new Response(JSON.stringify({ code: "eti_upstream_unavailable", message: "Bitget public market-data upstreams were unreachable", attempts }), {
     status: 502, headers: { "content-type": "application/json; charset=utf-8", "x-eti-fallback-attempts": attempts.join(" | ") },
   });
 }
@@ -920,10 +920,13 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
         if (r.status === "fulfilled") {
           list = r.value.rows;
           meta = { host: r.value.host.replace("https://", ""), fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: categoryQ ? r.value.failed.includes(categoryQ) : r.value.stale, ...(categoryQ ? { partial: r.value.failed.includes(categoryQ) ? [categoryQ] : [] } : (r.value.failed.length ? { partial: r.value.failed } : {})) };
-          if (r.value.failed.length) {
-            meta.partial = r.value.failed;
-            warnings.push({ market, venue: "bitget", error: "partial_refresh", categories: r.value.failed });
-            const missing = r.value.failed.filter(c => !list.some(x => bitgetRowCategory(x) === c)) as CatalogueCategory[];
+          // When the caller scoped the request to one product type, only that type's refresh outcome is relevant:
+          // a COIN-M outage must not mark a fresh USDT-M answer partial or stale.
+          const relevantFailed = categoryQ ? r.value.failed.filter(c => c === categoryQ) : r.value.failed;
+          if (relevantFailed.length) {
+            meta.partial = relevantFailed;
+            warnings.push({ market, venue: "bitget", error: "partial_refresh", categories: relevantFailed });
+            const missing = relevantFailed.filter(c => !list.some(x => bitgetRowCategory(x) === c)) as CatalogueCategory[];
             const snap = missing.length ? await bitgetSnapshot(env, missing) : { rows: [] as SymbolRow[], fetchedAt: null };
             if (snap.rows.length) { list = [...list, ...snap.rows]; warnings.push({ market, venue: "bitget", error: "served_from_snapshot", categories: missing }); }
           }
