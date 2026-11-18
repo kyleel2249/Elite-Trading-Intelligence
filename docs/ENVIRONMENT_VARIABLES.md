@@ -29,6 +29,8 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `BINANCE_WITHDRAW_SECRET_KEY` | secret | Secret for the Binance withdrawal key. |
 | `BINANCE_SECRET_KEY` | secret | Binance spot testnet secret. |
 | `COINGECKO_API_KEY` | secret | Optional CoinGecko key for fundamentals. |
+| `DATAX_API_URL` | config | HTTPS origin of the independent DataX Pages application. ETI appends the signed read-only summary route; origin only, no path or credentials. |
+| `DATAX_INTEGRATION_SECRET` | secret | HMAC-SHA256 shared secret for server-to-server DataX summary requests. Configure the matching `ETI_INTEGRATION_SECRET` in DataX; never expose it to browser code. |
 | `CRYPTO_PROFILES_JSON` | secret | Operator-curated crypto facts no free API provides (team identity, regulatory status, verified audits, unlocks), keyed by symbol. Only whitelisted, type-checked fields are read; they are labelled as operator assertions. |
 | `ETHERSCAN_API_KEY` | secret | Optional Etherscan key for on-chain data and provider probes. |
 | `ETI_ALERTS_DISABLED` | config | `true` turns alert delivery off. |
