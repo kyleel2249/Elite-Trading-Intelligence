@@ -15,30 +15,34 @@ async function request(pathV3,pathsV2){
  // read Bitget REST responses directly because of CORS; the Worker owns upstream
  // retries, response validation and the D1 catalogue fallback.
  if(!pathV3)throw new Error("Bitget REST request requires a V3 route descriptor");
- var u=new URL(pathV3,window.location.origin),category=u.searchParams.get("category")||"SPOT",symbol=u.searchParams.get("symbol")||"",endpoint=u.pathname.split("/").pop(),market=category==="MARGIN"?"margin":category==="SPOT"?"spot":"futures";
+ var origin=window.location&&window.location.origin?window.location.origin:"https://eti.test",u=new URL(pathV3,origin),category=u.searchParams.get("category")||"SPOT",symbol=u.searchParams.get("symbol")||"",endpoint=u.pathname.split("/").pop(),market=category==="MARGIN"?"margin":category==="SPOT"?"spot":"futures";
  var route=endpoint==="candles"?"klines":endpoint==="orderbook"?"depth":endpoint==="fills"?"trades":endpoint==="tickers"?"ticker":endpoint==="instruments"?"symbols":null;
  if(!route)throw new Error("Unsupported Bitget public REST route: "+endpoint);
  var params=new URLSearchParams({venue:"bitget"});
  if(route==="symbols"){
   params.set("market",market);
+  params.set("category",category);
   if(market==="futures")params.set("category",category);
  }else{
   params.set("market",market==="margin"?"margin":market);
   params.set("symbol",symbol);
+  params.set("category",category);
   if(route==="klines"){params.set("interval",u.searchParams.get("interval")||"1m");params.set("limit",u.searchParams.get("limit")||"300");}
   else if(route==="depth"||route==="trades")params.set("limit",u.searchParams.get("limit")||"50");
   if(market==="futures")params.set("category",category);
  }
  var res;
- try{res=await fetch("/api/market/"+route+"?"+params.toString(),{method:"GET",credentials:"same-origin",cache:"no-store",headers:{accept:"application/json"},signal:AbortSignal.timeout(15000)});}
+ try{res=await fetch(origin+"/api/market/"+route+"?"+params.toString(),{method:"GET",credentials:"same-origin",cache:"no-store",headers:{accept:"application/json"},signal:AbortSignal.timeout(15000)});}
  catch(e){throw new Error("ETI Bitget proxy network error: "+(e&&e.name||"fetch_failed"));}
  var body=await res.json().catch(function(){return null});
  if(!res.ok)throw new Error("ETI Bitget proxy "+res.status+": "+(body&& (body.detail||body.error||body.message)||"invalid response"));
  if(route==="symbols"){
+  if(body&&body.code==="00000"&&Array.isArray(body.data))return {data:body.data,host:"eti-worker",version:"proxy"};
   var rows=(body&&body.symbols||[]).map(function(r){return {symbol:r[0],baseCoin:r[1],quoteCoin:r[2],status:"online",type:r[7]||"perpetual",maxCrossedLeverage:r[8],maxIsolatedLeverage:r[9],isIsolatedBaseBorrowable:r[10],isIsolatedQuoteBorrowable:r[11],isCrossBorrowable:r[12]};});
   return {data:rows,host:"eti-worker",version:"proxy",meta:body};
  }
- if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){return {T:t.time,p:String(t.price),q:String(t.qty),side:t.isBuyerMaker?"sell":"buy"};});
+ if(body&&body.code==="00000"&&body.data!==undefined)body=body.data;
+ if(route==="trades")body=(Array.isArray(body)?body:[]).map(function(t){return {T:t.time||t.ts,p:String(t.price),q:String(t.qty===undefined?t.size:t.qty),side:(t.isBuyerMaker===undefined?String(t.side||"").toLowerCase()==="sell":!!t.isBuyerMaker)?"sell":"buy"};});
  return {data:body,host:"eti-worker",version:"proxy"};
 }
 function parseCandles(data){
