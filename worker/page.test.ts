@@ -120,4 +120,8 @@ test("main dashboard Live Market Chart uses the Pro-style advanced chart and ret
   assert.match(html, /id="paneAdx"/);
   assert.match(html, /id="paneScore"/);
   assert.match(html, /classList.add\('legacy'\)/);
+  assert.match(html, /pfChartData\(\)/, "portfolio fills and positions remain connected to the chart");
+  assert.match(html, /pfCandleIdx\(f\.at\)/, "portfolio fills retain their candle markers");
+  assert.match(html, /POSITION SL/);
+  assert.match(html, /addPortfolioLine\('OPEN /);
 });
