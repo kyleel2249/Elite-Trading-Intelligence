@@ -13,7 +13,7 @@ test("all documented production/demo UTA, SBE and Classic endpoints are explicit
   assert.equal(bitgetWsEndpoint("demo","uta","private"),"wss://wspap.bitget.com/v3/ws/private");
   assert.equal(bitgetWsEndpoint("production","classic","public"),"wss://ws.bitget.com/v2/ws/public");
   assert.equal(bitgetWsEndpoint("production","classic","private"),"wss://ws.bitget.com/v2/ws/private");
-  assert.equal(bitgetWsEndpoint("demo","classic","public"),"wss://ws.bitget.com/v2/ws/public");
+  assert.throws(()=>bitgetWsEndpoint("demo","classic","public"),/unsupported_environment_account_combination/);
   assert.throws(()=>bitgetWsEndpoint("demo","classic","public",true),/sbe_public_uta_only/);
   assert.ok(BITGET_WS_ENDPOINTS);
 });
