@@ -81,7 +81,7 @@ export function decodeBitgetSbe(input: ArrayBuffer | Uint8Array) {
     // Canonical offsets from the 56-byte BBO root: ts, bid px/size, ask px/size, exponents, seq, sts, category, padding.
     result.bids = [[scale(i64(o + 8), pe), scale(i64(o + 16), se)]];
     result.asks = [[scale(i64(o + 24), pe), scale(i64(o + 32), se)]];
-    result.priceExponent = pe; result.sizeExponent = se; result.seq = u64(o + 42); result.sts = null;
+    result.priceExponent = pe; result.sizeExponent = se; result.seq = u64(o + 42); result.sts = header.blockLength >= 64 ? u64(o + 50) : null; result.category = header.blockLength >= 64 ? view.getUint8(o + 58) : null;
     result.symbol = str(8 + header.blockLength);
     return result;
   }
