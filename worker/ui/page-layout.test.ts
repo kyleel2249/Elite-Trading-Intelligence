@@ -16,7 +16,7 @@ test("main dashboard links directly to the dedicated AI Agents workspace", async
   const response = await app.fetch(new Request("https://eti.test/"), {} as any);
   const html = await response.text();
   assert.equal(response.status, 200);
-  assert.match(html, /href="\\/agents"/);
+  assert.ok(html.includes("href=\"/agents\""));
   assert.match(html, />AI Agents</);
 });
 
