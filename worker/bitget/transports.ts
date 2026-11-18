@@ -13,13 +13,14 @@ export const BITGET_WS_ENDPOINTS = {
   },
   demo: {
     uta: { public: "wss://wspap.bitget.com/v3/ws/public", private: "wss://wspap.bitget.com/v3/ws/private", sbe: "wss://wspap.bitget.com/v3/ws/public/sbe" },
-    classic: { public: "wss://ws.bitget.com/v2/ws/public", private: "wss://ws.bitget.com/v2/ws/private" }
+    classic: null
   }
 } as const;
 
 export function bitgetWsEndpoint(environment: BitgetWsEnvironment, account: BitgetWsAccount, channel: "public" | "private", sbe = false) {
   if (sbe && (account !== "uta" || channel !== "public")) throw new Error("sbe_public_uta_only");
   const endpoints = BITGET_WS_ENDPOINTS[environment][account] as any;
+  if (!endpoints) throw new Error("unsupported_environment_account_combination");
   return sbe ? endpoints.sbe : endpoints[channel];
 }
 
