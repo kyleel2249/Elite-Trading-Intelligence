@@ -553,6 +553,33 @@ function renderBook(){const bids=book.bids.slice(0,15),asks=book.asks.slice(0,15
 function renderTrades(){capturePricePrecision(trades.map(t=>t.p));if(liveChart){liveAdvancedKey='';renderAdvancedLiveChart();}$('trades').innerHTML='<table><tr><th>Time</th><th>Side</th><th>Price</th><th>Quantity</th></tr>'+trades.slice(0,50).map(t=>'<tr><td>'+new Date(t.T).toLocaleTimeString()+'</td><td class="'+(t.m?'sell':'buy')+'">'+(t.m?'SELL':'BUY')+'</td><td>'+fp(t.p)+'</td><td>'+fmt(t.q)+'</td></tr>').join('')+'</table>';}
 let provider=null,failCount=0,loadTimer=null,wsRetry=0,wsTimer=null,reqSeq=0,lastGoodAt=null,lastGoodKey='',bitgetSignalBar=0;
 function setConn(t,c){$('connection').textContent=t;$('connection').style.color=c;}
+let imKey='',imSeq=0;
+const imFmt=v=>Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{maximumFractionDigits:pricePrecision,minimumFractionDigits:pricePrecision}):'—';
+const imEsc=v=>String(v===null||v===undefined?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function imRow(label,value){return '<div class="im-row"><span>'+imEsc(label)+'</span><strong>'+imEsc(value)+'</strong></div>';}
+function imTag(value,kind){return '<span class="im-tag '+(kind==='bull'?'bull':kind==='bear'?'bear':'')+'">'+imEsc(value)+'</span>';}
+function renderInstitutionalIntel(d){
+ const st=d.structure||{},vp=d.volumeProfile||null,events=Array.isArray(st.events)?st.events:[],pools=Array.isArray(d.liquidityPools)?d.liquidityPools:[],sweeps=Array.isArray(d.liquiditySweeps)?d.liquiditySweeps:[],lastEvent=events.at(-1),stance=st.stance||'neutral',trend=String(st.trend||'undetermined');
+ $('imStatus').textContent=d.status==='ready'?'Updated · '+new Date(d.generatedAt).toLocaleTimeString():d.status||'Unavailable';
+ $('imSubtitle').textContent=d.symbol+' · '+d.timeframe+' · '+(d.dataQuality&&d.dataQuality.provider||'supplied candles')+' · '+(d.dataQuality&&d.dataQuality.candles||0)+' closed candles';
+ $('imMetrics').innerHTML='<div class="im-card"><small>Market structure</small><b>'+imEsc(trend.replace('_',' ').toUpperCase())+'</b><span>'+imTag(stance.toUpperCase(),stance==='bullish'?'bull':stance==='bearish'?'bear':'')+' · HH '+(st.higherHighs||0)+' / HL '+(st.higherLows||0)+' / LH '+(st.lowerHighs||0)+' / LL '+(st.lowerLows||0)+'</span></div><div class="im-card"><small>Volume profile · 70% VA</small><b>'+(vp?imFmt(vp.poc):'—')+'</b><span>'+(vp?'POC · VAH '+imFmt(vp.vah)+' · VAL '+imFmt(vp.val):'Insufficient profile history')+'</span></div><div class="im-card"><small>Liquidity context</small><b>'+pools.length+' pools · '+sweeps.length+' sweeps</b><span>Equal highs/lows and reclaimed levels</span></div><div class="im-card"><small>Latest structure event</small><b>'+(lastEvent?imEsc(lastEvent.type+' '+lastEvent.direction.toUpperCase()):'No recent event')+'</b><span>'+(lastEvent?imFmt(lastEvent.level)+' · '+new Date(lastEvent.time).toLocaleString():'No confirmed BOS / CHoCH in this sample')+'</span></div>';
+ $('imStructure').innerHTML='<div class="im-list">'+imRow('Trend',trend.replace('_',' '))+imRow('Stance',stance.toUpperCase())+imRow('Last swing high',st.lastSwingHigh?imFmt(st.lastSwingHigh.price):'—')+imRow('Last swing low',st.lastSwingLow?imFmt(st.lastSwingLow.price):'—')+imRow('Trend invalidation',st.invalidationLevel?imFmt(st.invalidationLevel):'Not defined')+'</div>';
+ $('imProfile').innerHTML=vp?'<div class="im-list">'+imRow('Point of control (POC)',imFmt(vp.poc))+imRow('Value area high (VAH)',imFmt(vp.vah))+imRow('Value area low (VAL)',imFmt(vp.val))+imRow('Current location',String(vp.location||'').replace('_',' '))+imRow('Distance from POC',Number(vp.distanceFromPocPct).toFixed(3)+'%')+imRow('Profile range',imFmt(vp.low)+' — '+imFmt(vp.high))+'</div><p class="execution-note">'+imEsc(vp.method||'OHLCV profile estimate')+'</p>':'<span class="im-empty">At least 20 closed candles are required to build a volume profile.</span>';
+ $('imLiquidity').innerHTML='<div class="im-list">'+(pools.length?pools.slice(-6).reverse().map(p=>imRow((p.kind||p.type||'Liquidity')+' · '+(p.side||'pool'),imFmt(p.price||p.level))).join(''):'<span class="im-empty">No qualifying equal-high / equal-low pool in this sample.</span>')+(sweeps.length?sweeps.slice(-4).reverse().map(x=>imRow('Sweep · '+(x.direction||x.side||'level'),imFmt(x.level||x.price))).join(''):'<span class="im-empty">No confirmed sweep/reclaim event in this sample.</span>')+'</div>';
+ $('imEvents').innerHTML=events.length?'<div class="im-list">'+events.slice(-8).reverse().map(e=>'<div class="im-row"><span>'+imTag(e.type+' · '+e.direction,e.direction==='bullish'?'bull':'bear')+'<br><small>'+new Date(e.time).toLocaleString()+'</small><br>'+imEsc(e.note||'Confirmed structure event')+'</span><strong>'+imFmt(e.level)+'</strong></div>').join('')+'</div>':'<span class="im-empty">No confirmed BOS / CHoCH event in the latest closed-candle sample.</span>';
+}
+async function refreshInstitutionalIntel(force){
+ if(!candles.length)return;
+ const sym=$('symbol').value,tf=$('interval').value,market=symMkt(),venue=symVenueOf(),tail=candles.at(-1),key=[sym,tf,market,venue,tail&&tail[0]].join('|');
+ if(!force&&key===imKey)return;imKey=key;const seq=++imSeq;
+ $('imStatus').textContent='Analysing…';$('imSubtitle').textContent=sym+' · '+tf+' · '+venue+' '+market;
+ try{
+  const r=await fetch('/api/analysis/smc',{method:'POST',headers:{'content-type':'application/json'},cache:'no-store',body:JSON.stringify({symbol:sym,timeframe:tf,market,candles:candles.map(v=>v.map(Number))}),signal:AbortSignal.timeout(15000)});
+  const d=await r.json();if(seq!==imSeq)return;if(!r.ok)throw new Error(d.detail||d.error||'Analysis request failed ('+r.status+')');
+  renderInstitutionalIntel(d);
+ }catch(e){if(seq!==imSeq)return;$('imStatus').textContent='Unavailable';$('imSubtitle').textContent=e.message||'Institutional analysis could not be loaded';}
+}
+$('imRefresh').addEventListener('click',()=>refreshInstitutionalIntel(true));
 function setStale(msg){const e=$('stale');e.style.display=msg?'inline-block':'none';e.textContent=msg||'';}
 function symInfo(){const raw=$('symMarket').value,m=symMkt(),s=$('symbol').value,c=SYM.all.filter(r=>r[0]===s&&r[3]===(raw==='margin'?'margin':m==='futures'?'futures':'spot')),row=(SYM.venue&&c.find(r=>symV(r)===SYM.venue&&(!(m==='futures')||!r[6]||String(r[6]).toLowerCase()===$('orderBitgetMarket').value)))||c.find(r=>symV(r)===SYM.venue)||c[0]||null;return{market:m,row:row,venue:row?symV(row):SYM.venue||'bybit'};}
 function symV(r){return r[5]||'bybit';}
@@ -574,7 +601,7 @@ async function load(){
    candles=direct.candles;book=direct.depth||{bids:[],asks:[]};trades=direct.trades||[];provider='bitget-browser';lastGoodAt=Date.now();lastGoodKey=key;
    const problems=Object.keys(direct.failures||{}).map(k=>k+': '+direct.failures[k]);
    const ticker=direct.ticker||{},feedLabel=SYM.market==='margin'?'MARGIN (spot book)':' '+category;$('volume').textContent=fmt(ticker.volume);const change=Number(ticker.priceChangePercent||0);$('change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';$('change').style.color=change>=0?'#21d69a':'#ff637d';
-   drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());
+   drawChart();renderBook();renderTrades();v3Push(book,$('symbol').value+'|'+symMkt());refreshInstitutionalIntel(false);
    $('last').textContent=fp(candles.at(-1)[4]);$('provider').textContent='Bitget browser-direct ('+feedLabel.trim()+')';
    failCount=0;setStale(problems.length?'Partial Bitget context — '+problems[0].slice(0,140):'');
    const signalBar=Number(candles.at(-1)[0]);if(!sig||sig.provider!=='bitget-browser'||bitgetSignalBar!==signalBar){bitgetSignalBar=signalBar;loadSignal();}
