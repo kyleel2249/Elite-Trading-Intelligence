@@ -124,11 +124,11 @@ function renderScenarios(){
 function renderStrategy(){
  const s=state.analysis?.strategy;if(!s)return;
  const dir=$("eti-strategy-direction");if(dir){dir.textContent=s.direction+" · "+s.confidence+"%";dir.style.color=s.direction==="LONG"?"#61d9c2":s.direction==="SHORT"?"#ff899d":"#ffc77d";}
- $("eti-strategy-score").textContent="Composite score "+s.score+"/100 · "+s.regime;
+ $("eti-strategy-score").textContent="Composite score "+s.score+"/100 · "+s.regime+" · "+(s.session?.name||"session pending");
  $("eti-strategy-rsi").textContent="RSI "+(s.indicators.rsi14===null?"—":fmt(s.indicators.rsi14,1));
  $("eti-strategy-ema").textContent=s.indicators.ema20&&s.indicators.ema50?(s.indicators.ema20>s.indicators.ema50?"EMA20 > EMA50":"EMA20 < EMA50"):"EMA stack pending";
  $("eti-strategy-entry").textContent=s.entry?fmt(s.entry,8):"—";$("eti-strategy-stop").textContent="Stop "+(s.stop?fmt(s.stop,8):"—");
- $("eti-strategy-target").textContent=s.target1?fmt(s.target1,8):"—";$("eti-strategy-rr").textContent="Target model "+(s.riskReward||"—")+"R";
+ $("eti-strategy-target").textContent=s.target1?fmt(s.target1,8):"—";$("eti-strategy-rr").textContent="Target model "+(s.riskReward||"—")+"R · Hedge: "+(s.hedgeAssessment||"pending");
  $("eti-risk-equity").textContent="$"+fmt(state.equity,2);
  const p=s.positionPlan,plan=$("eti-risk-plan");
  plan.textContent=p?["Sizing: "+(p.valid?"VALID":"BLOCKED"),"Requested risk budget: $"+fmt(p.riskBudget,2),"Actual planned loss: $"+fmt(p.plannedLoss,2)+" ("+fmt(p.actualRiskPercent,2)+"%)","Notional / margin: $"+fmt(p.notional,2)+" / $"+fmt(p.margin,2),"Quantity: "+fmt(p.quantity,4),"Stop / estimated liquidation buffer: "+fmt(p.stopDistancePct,2)+"% / "+fmt(p.estimatedLiquidationBufferPct,2)+"%",p.reason].join("\n"):"No directional setup; no position sizing.";
@@ -181,10 +181,10 @@ function startStream(){
 let analyzeAt=0;
 async function analyzeStreamDepth(){
  if(!state.depth||Date.now()-analyzeAt<900)return;analyzeAt=Date.now();
- try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles})});const a=await r.json();if(r.ok){state.analysis=a;await loadOrderFlow();render();drawHeatmap();drawOverlay();}}catch(e){}
+ try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,candlesByTimeframe:state.candlesByTimeframe,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true}})});const a=await r.json();if(r.ok){state.analysis=a;await loadOrderFlow();render();drawHeatmap();drawOverlay();}}catch(e){}
 }
 function restart(){
- readContext();stopStream();state.depth=null;state.previous=null;state.trades=[];state.candles=[];state.candleAt=0;state.analysis=null;state.history=[];restoreHistory();mount();createChartOverlay();poll(true);startStream();
+ readContext();stopStream();state.depth=null;state.previous=null;state.trades=[];state.candles=[];state.candleAt=0;state.analysis=null;state.candlesByTimeframe={};state.signalAt=0;state.history=[];restoreHistory();mount();createChartOverlay();poll(true);startStream();
 }
 function watchControls(){
  const ids=isRoot()?["symVenue","symMarket","symCat","symbol","interval"]:["tt-venue","tt-market","tt-category","tt-symbol","tt-interval"];
