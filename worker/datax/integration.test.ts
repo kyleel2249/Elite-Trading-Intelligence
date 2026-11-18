@@ -25,3 +25,12 @@ test("DataX integration is a separate read-only route and does not touch trading
   assert.match(source, /ETI trading and portfolio services remain independent/);
   assert.doesNotMatch(source, /INSERT INTO (wallet_accounts|portfolio|journal)/i);
 });
+
+test("deployment workflow forwards the DataX secret and non-secret API origin", async () => {
+  const fs = await import("node:fs");
+  const workflow = fs.readFileSync(new URL("../../.github/workflows/deploy.yml", import.meta.url), "utf8");
+  assert.match(workflow, /DATAX_INTEGRATION_SECRET:\s*\$\{\{\s*secrets\.DATAX_INTEGRATION_SECRET\s*\}\}/);
+  assert.match(workflow, /DATAX_API_URL:\s*\$\{\{\s*vars\.DATAX_API_URL\s*\}\}/);
+  assert.match(workflow, /--var "DATAX_API_URL:\$\{DATAX_API_URL\}"/);
+  assert.match(workflow, /"DATAX_INTEGRATION_SECRET"/);
+});
