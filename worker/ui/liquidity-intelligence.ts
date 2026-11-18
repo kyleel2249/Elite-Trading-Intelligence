@@ -124,9 +124,9 @@ function renderScenarios(){
 function renderStrategy(){
  const s=state.analysis?.strategy;if(!s)return;
  const dir=$("eti-strategy-direction");if(dir){dir.textContent=s.direction+" · "+s.confidence+"%";dir.style.color=s.direction==="LONG"?"#61d9c2":s.direction==="SHORT"?"#ff899d":"#ffc77d";}
- $("eti-strategy-score").textContent="Composite score "+s.score+"/100 · "+s.regime+" · "+(s.session?.name||"session pending");
+ $("eti-strategy-score").textContent="Composite score "+s.score+"/100 · "+s.regime+" · "+(s.session?.name||"session pending")+" · "+(s.sentiment?.fundingCrowding||"funding unavailable");
  $("eti-strategy-rsi").textContent="RSI "+(s.indicators.rsi14===null?"—":fmt(s.indicators.rsi14,1));
- $("eti-strategy-ema").textContent=s.indicators.ema20&&s.indicators.ema50?(s.indicators.ema20>s.indicators.ema50?"EMA20 > EMA50":"EMA20 < EMA50"):"EMA stack pending";
+ $("eti-strategy-ema").textContent=(s.indicators.ema20&&s.indicators.ema50?(s.indicators.ema20>s.indicators.ema50?"EMA20 > EMA50":"EMA20 < EMA50"):"EMA stack pending")+" · MACD "+(s.indicators.macd?fmt(s.indicators.macd.histogram,6):"—")+" · 24h turnover $"+fmt(s.sentiment?.turnover24h,0);
  $("eti-strategy-entry").textContent=s.entry?fmt(s.entry,8):"—";$("eti-strategy-stop").textContent="Stop "+(s.stop?fmt(s.stop,8):"—");
  $("eti-strategy-target").textContent=s.target1?fmt(s.target1,8):"—";$("eti-strategy-rr").textContent="Target model "+(s.riskReward||"—")+"R · Hedge: "+(s.hedgeAssessment||"pending");
  $("eti-risk-equity").textContent="$"+fmt(state.equity,2);
