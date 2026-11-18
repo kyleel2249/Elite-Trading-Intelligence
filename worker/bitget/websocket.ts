@@ -8,6 +8,10 @@ import { bitgetClassicPrivateSubscriptions, bitgetPrivateCredentialSet, bitgetWs
 
 const UTA_TOPICS = ["account", "order", "position", "fill"] as const;
 export function bitgetUtaPrivateSubscriptions() { return UTA_TOPICS.map((topic) => ({ instType: "UTA", topic })); }
+
+export async function bitgetUtaLogin(env: Record<string, any>, now: () => number = Date.now) {
+  return bitgetPrivateLogin(env, "production", "uta", now);
+}
 export function bitgetClassicPrivateTopics() { return bitgetClassicPrivateSubscriptions(); }
 
 export async function bitgetPrivateLogin(env: Record<string, any>, environment: BitgetWsEnvironment = "production", account: BitgetWsAccount = "uta", now: () => number = Date.now) {
