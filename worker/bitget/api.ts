@@ -270,7 +270,7 @@ export async function handleBitget(req: Request, env: Record<string, any>, deps:
   if (sub === "/status" && req.method === "GET") {
     return reply({ venue: "bitget", credentials: { complete: c.complete, found: c.found, missing: c.missing }, markets: BITGET_MARKETS, storage: !!env.ETI_EXECUTION_LOG,
       readOnly: false, liveTradingEnabled: env.ETI_BITGET_LIVE_ENABLED === "true", note: "Account and history reads use allowlisted GET endpoints. Live orders are accepted only through the master-authenticated /api/orders/live route; transfers and withdrawals are not exposed.",
-      marginSymbolDiscovery: "automatic_all_eligible_pairs", marginSymbols: null });
+       marginSymbolDiscovery: "automatic_all_eligible_pairs", marginSymbols: null, websocket: { public: "uta_v3_browser_direct", private: "uta_v3_worker_relay", privateTopics: ["account", "order", "position", "fill"] } });
   }
   if (sub === "/verify" && req.method === "GET") {
     if (!c.complete) return reply({ error: "credentials_missing", missing: c.missing, hint: "Set these Worker secrets; names only are reported." }, 503);

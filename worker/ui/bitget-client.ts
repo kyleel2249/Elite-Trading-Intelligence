@@ -62,7 +62,7 @@ function parseDepth(data){
 function parseTrades(data){
  return (Array.isArray(data)?data:[]).map(function(t){
   if(Array.isArray(t))return {T:millis(t[0])||0,m:String(t[3]||"").toLowerCase()==="sell",p:String(t[1]||""),q:String(t[2]||"")};
-  return {T:millis(t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.side||"").toLowerCase()==="sell",p:String(t.price||t.fillPrice||""),q:String(t.size||t.baseVolume||t.qty||"")};
+  return {T:millis(t.T||t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.S||t.side||"").toLowerCase()==="sell",p:String(t.p||t.price||t.fillPrice||""),q:String(t.v||t.size||t.baseVolume||t.qty||"")};
  }).filter(function(t){return t.T>0&&Number(t.p)>0&&Number(t.q)>0}).sort(function(a,b){return b.T-a.T}).slice(0,100);
 }
 function firstNumber(){for(var i=0;i<arguments.length;i++){var n=num(arguments[i]);if(n!==null)return n}return null}
@@ -135,11 +135,11 @@ async function loadSignalInputs(opts){
  return {candles:candleMap,depth:x.depth,derivatives:x.derivatives,provider:"bitget-browser",market:opts.market,category:opts.category,failures:x.failures};
 }
 
-var WS_URL="wss://ws.bitget.com/v2/ws/public";
+var WS_URL="wss://ws.bitget.com/v3/ws/public";
 var WS_INTERVAL={"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D"};
 function streamProduct(market,category){if(market!=="futures")return "spot";return String(category||"USDT-FUTURES").toLowerCase();}
 function streamTime(v){var n=num(v);return n===null?Date.now():millis(n)||Date.now();}
-function streamCandle(row){if(Array.isArray(row)){var a=[streamTime(row[0]),num(row[1]),num(row[2]),num(row[3]),num(row[4]),num(row[5])];return a.every(function(x){return x!==null})?a:null;}var x=row||{},a=[streamTime(x.start||x.ts||x.time),num(x.open),num(x.high),num(x.low),num(x.close),num(x.volume)];return a.every(function(v){return v!==null})?a:null;}
+function streamCandle(row){if(Array.isArray(row)){var a=[streamTime(row[0]),num(row[1]),num(row[2]),num(row[3]),num(row[4]),num(row[5])];return a.every(function(x){return x!==null})?a:null;}var x=row||{},a=[streamTime(x.start||x.startTime||x.ts||x.time),num(x.open||x.o),num(x.high||x.h),num(x.low||x.l),num(x.close||x.c),num(x.volume||x.baseVolume||x.v)];return a.every(function(v){return v!==null})?a:null;}
 function subscribe(opts,handlers){
  opts=opts||{};handlers=handlers||{};
  var symbol=String(opts.symbol||"").toUpperCase(),market=opts.market==="futures"?"futures":"spot",category=market==="futures"?(opts.category||"USDT-FUTURES"):"SPOT",interval=String(opts.interval||"1m"),product=streamProduct(market,category);
@@ -170,5 +170,27 @@ function subscribe(opts,handlers){
  return {close:function(){closed=true;connected=false;if(retryTimer)clearTimeout(retryTimer);stopTimers();if(ws){var current=ws;ws=null;try{current.close()}catch(e){}}status("closed");},getState:function(){return {connected:connected,lastMessageAt:lastMessageAt,retry:retry,symbol:symbol,market:market,category:category,interval:interval,product:product};}};
 }
 
-window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs,subscribe:subscribe};
+
+function subscribePrivate(opts,handlers){
+ opts=opts||{};handlers=handlers||{};
+ var token=String(opts.token||"");if(!token)throw new Error("ETI execution token is required for private Bitget streams");
+ var ws=null,closed=false,retry=0,retryTimer=null,pingTimer=null,watchdog=null,lastMessageAt=0,connected=false,authenticated=false;
+ var url=opts.url||((window.location&&window.location.protocol==="https:"?"wss:":"ws:")+"//"+(window.location&&window.location.host||"")+"/api/bitget/ws/private");
+ function status(state,detail){if(typeof handlers.onStatus==="function")handlers.onStatus({state:state,detail:detail||"",connected:connected,authenticated:authenticated,lastMessageAt:lastMessageAt,retry:retry});}
+ function emit(type,data,raw){if(typeof handlers.onMessage==="function")handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null});}
+ function stopTimers(){if(pingTimer)clearInterval(pingTimer);if(watchdog)clearInterval(watchdog);pingTimer=null;watchdog=null;}
+ function scheduleReconnect(reason){if(closed)return;connected=false;authenticated=false;stopTimers();status("reconnecting",reason);if(retryTimer)clearTimeout(retryTimer);var wait=Math.min(30000,1000*Math.pow(2,Math.min(retry,5)));retry++;retryTimer=setTimeout(connect,wait);}
+ function connect(){
+  if(closed)return;status("connecting");
+  try{ws=new WebSocket(url);}catch(e){scheduleReconnect(e&&e.message||"websocket_unavailable");return;}
+  var current=ws;
+  current.onopen=function(){if(closed||ws!==current)return;connected=true;lastMessageAt=Date.now();current.send(JSON.stringify({op:"auth",token:token}));status("authenticating");pingTimer=setInterval(function(){if(ws===current&&current.readyState===1)try{current.send("ping")}catch(e){}},30000);watchdog=setInterval(function(){if(ws===current&&connected&&Date.now()-lastMessageAt>65000){try{current.close()}catch(e){}}},10000);};
+  current.onmessage=function(event){if(ws!==current||closed)return;lastMessageAt=Date.now();var raw=event.data;if(raw==="pong"||raw==="ping")return;var msg;try{msg=typeof raw==="string"?JSON.parse(raw):raw}catch(e){emit("raw",raw,null);return;}if(!msg)return;if(msg.event==="status"){authenticated=msg.state==="authenticated";status(msg.state);emit("status",msg,null);return;}if(msg.event==="error"){emit("error",msg,msg);if(msg.code==="unauthorized"||msg.code==="bitget_login_rejected")try{current.close()}catch(e){}return;}var topic=String((msg.arg||{}).topic||"");if(topic==="account"||topic==="order"||topic==="position"||topic==="fill")emit(topic,{action:msg.action||null,ts:streamTime(msg.ts),data:Array.isArray(msg.data)?msg.data:[]},msg);else emit("raw",msg,msg);};
+  current.onerror=function(){if(ws===current&&!closed)try{current.close()}catch(e){}};
+  current.onclose=function(){if(ws!==current||closed)return;connected=false;ws=null;scheduleReconnect("socket_closed");};
+ }
+ connect();
+ return {close:function(){closed=true;connected=false;authenticated=false;if(retryTimer)clearTimeout(retryTimer);stopTimers();if(ws){var current=ws;ws=null;try{current.close()}catch(e){}}status("closed");},getState:function(){return {connected:connected,authenticated:authenticated,lastMessageAt:lastMessageAt,retry:retry};}};
+}
+window.ETIBitget={request:request,candles:candles,context:context,marketData:marketData,symbols:symbols,loadSignalInputs:loadSignalInputs,subscribe:subscribe,subscribePrivate:subscribePrivate};
 })();`;

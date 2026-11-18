@@ -44,9 +44,15 @@ Bitget live orders use `POST /api/orders/live` and require the master ETI execut
 
 Live execution stays disabled by default. Never set `ETI_BITGET_EGRESS_VERIFIED=true` until the deployed `/api/bitget/verify` route succeeds from the Cloudflare Worker and the API key's account mode and permissions have been confirmed. An ambiguous order response remains reserved; check Bitget order history before retrying. No withdrawal, transfer or funding route is exposed.
 
-## WebSocket status
+## Unified Trading Account WebSockets
 
-Public market-data WebSockets are separate from private account activity. The authenticated account sync currently uses signed REST polling. Private WebSocket account/order streaming, automatic position-ledger folding, and automatic agent-council live dispatch are not enabled by this change.
+The browser public-market adapter uses Bitget UTA V3 `wss://ws.bitget.com/v3/ws/public` and subscribes to ticker, `books5`, `publicTrade`, and `kline` for Spot or USDT-M Futures. Public subscriptions are unauthenticated. The adapter sends a 30-second ping, reconnects with bounded exponential backoff, and normalizes UTA compact public-trade fields (`p/v/S/T`).
+
+Private UTA streams use the Worker relay `wss://<ETI_HOST>/api/bitget/ws/private`. The browser must send `{"op":"auth","token":"<ETI_EXECUTION_TOKEN>"}` as its first WebSocket message. The token is sent in a WebSocket frame, never in the URL. The Worker validates it, signs Bitget's UTA login with the API secret held only in Worker secrets, then subscribes to `account`, `order`, `position`, and `fill` using `instType: "UTA"`. Only these four private topics are allowed; the relay does not accept arbitrary exchange commands. The browser helper is `window.ETIBitget.subscribePrivate({token}, handlers)`.
+
+Bitget's UTA V3 public/private domains and channel schemas differ from Classic V2. This implementation uses the V3 UTA WebSocket domains, Unix-second login timestamp and HMAC-SHA256 prehash `timestamp + GET + /user/verify`. A successful socket login is not proof of REST order permission or account readiness. REST polling remains the recovery/backfill path; after reconnect, run the existing account/fill sync before downstream systems rely on a complete ledger.
+
+The WebSocket feeds are transport integrations, not authorization to trade. Private account events are streamed only to a client presenting the master ETI execution token. Live order execution remains separately gated by `ETI_BITGET_LIVE_ENABLED`, `ETI_BITGET_EGRESS_VERIFIED`, risk confirmation, audit logging and the kill switch. Automatic Agent Council live dispatch and automatic position-ledger folding are not enabled by this change.
 
 ## Verification limits
 

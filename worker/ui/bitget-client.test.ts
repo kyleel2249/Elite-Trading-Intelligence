@@ -129,7 +129,7 @@ test("Bitget WebSocket subscribes to the selected futures product and normalizes
     symbol: "BTCUSDT", market: "futures", category: "USDT-FUTURES", interval: "1m"
   }, { onMessage: (m: any) => messages.push(m), onStatus: (s: any) => states.push(s) });
   assert.equal(sockets.length, 1);
-  assert.equal(sockets[0].url, "wss://ws.bitget.com/v2/ws/public");
+  assert.equal(sockets[0].url, "wss://ws.bitget.com/v3/ws/public");
   sockets[0].readyState = 1;
   sockets[0].onopen();
   const sub = JSON.parse(sockets[0].sent[0]);
@@ -203,4 +203,53 @@ test("Bitget futures WebSocket uses the documented lowercase product type and V3
  assert.ok(BITGET_CLIENT_JS.includes('function streamProduct(market,category){if(market!=="futures")return "spot";'));
  assert.ok(BITGET_CLIENT_JS.includes('return String(category||"USDT-FUTURES").toLowerCase()'));
  assert.ok(BITGET_CLIENT_JS.includes('interval:v3iv'));
+});
+
+
+test("UTA private browser adapter authenticates through ETI proxy and normalizes account/order/position/fill events", () => {
+  const sockets: any[] = [], messages: any[] = [], states: any[] = [], timers: any[] = [];
+  class FakeWebSocket {
+    readyState = 0; onopen: any; onmessage: any; onclose: any; onerror: any; sent: string[] = [];
+    url: string; constructor(url: string) { this.url = url; sockets.push(this); }
+    send(value: string) { this.sent.push(value); }
+    close() { this.readyState = 3; if (this.onclose) this.onclose({}); }
+  }
+  const sandbox: any = {
+    window: { location: { protocol: "https:", host: "eti.test" } }, AbortSignal, Response, WebSocket: FakeWebSocket,
+    Date, Math, JSON, Number, String, Array, Object, Promise, Map,
+    setInterval: (fn: any, ms: number) => { timers.push({ fn, ms }); return timers.length; }, clearInterval: () => {},
+    setTimeout: (fn: any, ms: number) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {},
+    fetch: async () => new Response(JSON.stringify({ code: "00000", data: [] })),
+  };
+  vm.runInNewContext(BITGET_CLIENT_JS, sandbox);
+  sandbox.window.ETIBitget.subscribePrivate({ token: "master-token" }, {
+    onMessage: (m: any) => messages.push(m), onStatus: (s: any) => states.push(s)
+  });
+  assert.equal(sockets[0].url, "wss://eti.test/api/bitget/ws/private");
+  sockets[0].readyState = 1; sockets[0].onopen();
+  assert.deepEqual(JSON.parse(sockets[0].sent[0]), { op: "auth", token: "master-token" });
+  sockets[0].onmessage({ data: JSON.stringify({ event: "status", state: "authenticated", topics: ["account","order","position","fill"] }) });
+  sockets[0].onmessage({ data: JSON.stringify({ arg: { instType: "UTA", topic: "fill" }, action: "update", ts: Date.now(), data: [{ execId: "f1", execPrice: "10", execQty: "2" }] }) });
+  assert.equal(messages.find((m: any) => m.type === "fill").data.data[0].execId, "f1");
+  assert.ok(states.some((s: any) => s.authenticated === true));
+});
+
+test("UTA public trades parser accepts compact p/v/S/T field names", () => {
+  const sockets: any[] = [], messages: any[] = [];
+  class FakeWebSocket {
+    readyState = 0; onopen: any; onmessage: any; onclose: any; onerror: any; sent: string[] = [];
+    constructor(public url: string) { sockets.push(this); }
+    send(value: string) { this.sent.push(value); }
+    close() { this.readyState = 3; if (this.onclose) this.onclose({}); }
+  }
+  const sandbox: any = { window: {}, AbortSignal, Response, WebSocket: FakeWebSocket, Date, Math, JSON, Number, String, Array, Object, Promise, Map,
+    setInterval: () => 1, clearInterval: () => {}, setTimeout: () => 1, clearTimeout: () => {}, fetch: async () => new Response("{}") };
+  vm.runInNewContext(BITGET_CLIENT_JS, sandbox);
+  sandbox.window.ETIBitget.subscribe({ symbol: "BTCUSDT", market: "spot" }, { onMessage: (m: any) => messages.push(m) });
+  sockets[0].readyState = 1; sockets[0].onopen();
+  sockets[0].onmessage({ data: JSON.stringify({ arg: { instType: "spot", topic: "publicTrade", symbol: "BTCUSDT" }, data: [{ p: "100", v: "0.25", S: "sell", T: String(Date.now()) }] }) });
+  assert.equal(messages[0].type, "trades");
+  assert.equal(messages[0].data[0].p, "100");
+  assert.equal(messages[0].data[0].q, "0.25");
+  assert.equal(messages[0].data[0].m, true);
 });

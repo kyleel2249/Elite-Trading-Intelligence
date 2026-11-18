@@ -56,7 +56,8 @@ export function agentRuntimeStatus(env: RuntimeEnv) {
     },
     marketData: {
       workerProviderOrder: marketProviderOrder,
-      bitgetPublicTransport: "browser_direct",
+      bitgetPublicTransport: "browser_direct_uta_v3_websocket",
+      bitgetPrivateWebSocket: "worker_relay_uta_v3",
       bitgetServerSideScheduledAnalysis: false,
       note: "Bitget public market data is browser-direct because Worker egress may be blocked. Scheduled server-side autopilot uses the configured Worker provider order.",
     },
