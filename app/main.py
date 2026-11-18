@@ -232,7 +232,8 @@ for _module_path, _label in (
     ("app.api.command_centre", "command_centre"),
     ("app.api.futures_paper", "futures_paper"),
     ("app.api.futures_calc", "futures_calc"),
-    ("app.api.chain", "chain"),
+    # app.api.chain is hosted by app.api.command_centre (mounted once there; mounting it here as well
+    # registered every /api/chain route twice and produced duplicate OpenAPI operation IDs).
     ("app.api.intel", "intel"),
     ("app.api.market_symbols", "market_symbols"),
     ("app.api.valuation", "valuation"),
