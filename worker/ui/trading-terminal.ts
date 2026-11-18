@@ -37,7 +37,7 @@ export const TRADING_TERMINAL_HTML = String.raw`<!doctype html><html lang="en"><
 export const TRADING_TERMINAL_JS = String.raw`(function(){
 "use strict";
 function bitgetProductType(){if(S.market!=="futures")return "SPOT";const category=String(S.category||"USDT-FUTURES").toUpperCase();return ["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"].includes(category)?category:"USDT-FUTURES";}
-const $=id=>document.getElementById(id),S={venue:"bitget",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",pricePrecision:2,loadSeq:0,candles:[],chart:null,candle:null,line:null,area:null,volume:null,ema20:null,ema50:null,drawnLevels:[],drawMode:false,overlayCanvas:null,side:"buy",busy:false,signal:null,levelLines:[],institutionalLines:[],smc:null,liquidityFvg:null,lfKey:"",lfAt:0,trades:[],multiCharts:{},multiCandles:{},syncLock:false,orderFlow:null,omni:null,omniKey:"",omniAt:0,overlays:{ema20:true,ema50:true,volume:false}};
+const $=id=>document.getElementById(id),S={venue:"bitget",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",bitgetEnvironment:"production",bitgetAccount:"uta",bitgetProtocol:"json",privateCounts:{account:0,order:0,position:0,fill:0},pricePrecision:2,loadSeq:0,candles:[],chart:null,candle:null,line:null,area:null,volume:null,ema20:null,ema50:null,drawnLevels:[],drawMode:false,overlayCanvas:null,side:"buy",busy:false,signal:null,levelLines:[],institutionalLines:[],smc:null,liquidityFvg:null,lfKey:"",lfAt:0,trades:[],multiCharts:{},multiCandles:{},syncLock:false,orderFlow:null,omni:null,omniKey:"",omniAt:0,overlays:{ema20:true,ema50:true,volume:false}};
 const fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
 function decimalPlaces(v){if(v===null||v===undefined||v==="")return 0;let t=String(v).trim().toLowerCase(),e=0;if(t.includes("e")){const p=t.split("e");t=p[0];e=Number(p[1])||0;}return Math.max(0,Math.min(20,(t.split(".")[1]||"").length-e));}
 function capturePricePrecision(values){(values||[]).forEach(v=>{const n=Number(v);if(Number.isFinite(n)&&n>0)S.pricePrecision=Math.max(S.pricePrecision,decimalPlaces(v));});S.pricePrecision=Math.min(20,S.pricePrecision);}
@@ -136,23 +136,64 @@ async function loadTerminalBitgetSymbols(){
   $("tt-status").textContent="Bitget "+S.category+" catalogue · "+rows.length+" contracts"+(stale.length?" · stale: "+stale.join(", "):" · refreshed");
  }catch(e){$("tt-status").textContent="Bitget contract catalogue unavailable · "+(e.message||"REST fallback required");}
 }
-let terminalBitgetStream=null,terminalBitgetStreamKey="";
-function closeTerminalBitgetStream(){if(terminalBitgetStream){try{terminalBitgetStream.close()}catch(e){}terminalBitgetStream=null;}terminalBitgetStreamKey="";}
+let terminalBitgetStream=null,terminalBitgetAuxStream=null,terminalBitgetStreamKey="",terminalBitgetPrivateStream=null;
+function closeTerminalBitgetStream(){if(terminalBitgetStream){try{terminalBitgetStream.close()}catch(e){}terminalBitgetStream=null;}if(terminalBitgetAuxStream){try{terminalBitgetAuxStream.close()}catch(e){}terminalBitgetAuxStream=null;}terminalBitgetStreamKey="";}
+function handleTerminalBitgetMessage(ev){
+ if(!ev)return;
+ const d=ev.data;
+ if(ev.type==="error"){const message=d&&((d.message||d.code)||JSON.stringify(d));status("Bitget WebSocket error · "+(message||"stream error"),true);return;}
+ if(!d)return;
+ if(ev.type==="ticker"){renderTicker(d);S.derivatives={fundingRate:d.fundingRate,openInterest:d.openInterest,markPrice:d.markPrice,indexPrice:d.indexPrice,timestamp:d.timestamp};$("tt-funding").textContent=d.fundingRate==null?"—":fmt(Number(d.fundingRate)*100,5)+"%";$("tt-oi").textContent=d.openInterest==null?"—":fmt(d.openInterest,2);}
+ else if(ev.type==="candle"){const x={time:Math.floor(Number(d[0])/1000),open:Number(d[1]),high:Number(d[2]),low:Number(d[3]),close:Number(d[4]),volume:Number(d[5])};if(!Number.isFinite(x.time)||!(x.close>0))return;const last=S.candles.at(-1);if(last&&last.time===x.time)S.candles[S.candles.length-1]=x;else S.candles.push(x);if(S.candles.length>500)S.candles=S.candles.slice(-500);if(S.candle){if(S.candles.length===1)S.candle.setData(S.candles.map(v=>({time:v.time,open:v.open,high:v.high,low:v.low,close:v.close})));else S.candle.update(x);}if(S.volume)S.volume.update({time:x.time,value:x.volume||0});if(S.line)S.line.update({time:x.time,value:x.close});if(S.area)S.area.update({time:x.time,value:x.close});saveMarketCache();}
+ else if(ev.type==="depth"){S.depth=d;renderFlow();renderOrderFlow(S.depth,S.trades);}
+ else if(ev.type==="trades"){const old=S.trades||[],all=(ev.data||[]).concat(old),seen={};S.trades=all.filter(t=>{const k=String(t.T||t.time)+"|"+String(t.p||t.price)+"|"+String(t.q||t.qty);if(seen[k])return false;seen[k]=1;return true;}).sort((a,b)=>Number(b.T||b.time)-Number(a.T||a.time)).slice(0,500);renderTrades(S.trades);renderFlow();renderOrderFlow(S.depth,S.trades);}
+ if(ev.type==="candle"){$("tt-price").textContent=px(d[4]);$("tt-pair").textContent=S.symbol;}
+ status("BITGET · "+S.market+" · "+S.category+" · "+S.bitgetEnvironment+" "+S.bitgetAccount+" "+S.bitgetProtocol+" · live WebSocket · "+new Date(ev.timestamp||Date.now()).toLocaleTimeString());
+}
 function ensureTerminalBitgetStream(){
- if(!window.ETIBitget||!window.ETIBitget.subscribe)return;
- const key=[S.symbol,S.market,S.category,S.interval].join("|");
+ if(!window.ETIBitget||!window.ETIBitget.subscribeTransport)return;
+ const key=[S.symbol,S.market,S.category,S.interval,S.bitgetEnvironment,S.bitgetAccount,S.bitgetProtocol].join("|");
  if(terminalBitgetStream&&terminalBitgetStreamKey===key)return;
  closeTerminalBitgetStream();terminalBitgetStreamKey=key;
- terminalBitgetStream=window.ETIBitget.subscribe({symbol:S.symbol,market:S.market,category:bitgetProductType(),interval:S.interval},{
-  onStatus:function(s){if(s.state==="connected")status("Bitget WebSocket live · "+S.category);else if(s.state==="reconnecting"||s.state==="connecting")status("Bitget stream "+s.state+" · REST snapshots active",true);},
-  onMessage:function(ev){if(!ev||!ev.data)return;const d=ev.data;
-   if(ev.type==="ticker"){renderTicker(d);S.derivatives={fundingRate:d.fundingRate,openInterest:d.openInterest,markPrice:d.markPrice,indexPrice:d.indexPrice,timestamp:d.timestamp};$("tt-funding").textContent=d.fundingRate==null?"—":fmt(Number(d.fundingRate)*100,5)+"%";$("tt-oi").textContent=d.openInterest==null?"—":fmt(d.openInterest,2);}
-   else if(ev.type==="candle"){const x={time:Math.floor(Number(d[0])/1000),open:Number(d[1]),high:Number(d[2]),low:Number(d[3]),close:Number(d[4]),volume:Number(d[5])};if(!Number.isFinite(x.time)||!(x.close>0))return;const last=S.candles.at(-1);if(last&&last.time===x.time)S.candles[S.candles.length-1]=x;else S.candles.push(x);if(S.candles.length>500)S.candles=S.candles.slice(-500);if(S.candle){if(S.candles.length===1)S.candle.setData(S.candles.map(v=>({time:v.time,open:v.open,high:v.high,low:v.low,close:v.close})));else S.candle.update(x);}if(S.volume)S.volume.update({time:x.time,value:x.volume||0});if(S.line)S.line.update({time:x.time,value:x.close});if(S.area)S.area.update({time:x.time,value:x.close});saveMarketCache();}
-   else if(ev.type==="depth"){S.depth=d;renderFlow();renderOrderFlow(S.depth,S.trades);}
-   else if(ev.type==="trades"){const old=S.trades||[],all=(ev.data||[]).concat(old),seen={};S.trades=all.filter(t=>{const k=String(t.T||t.time)+"|"+String(t.p||t.price)+"|"+String(t.q||t.qty);if(seen[k])return false;seen[k]=1;return true;}).sort((a,b)=>Number(b.T||b.time)-Number(a.T||a.time)).slice(0,500);renderTrades(S.trades);renderFlow();renderOrderFlow(S.depth,S.trades);}
-   if(ev.type==="candle"){$("tt-price").textContent=px(d[4]);$("tt-pair").textContent=S.symbol;}status("BITGET · "+S.market+" · "+S.category+" · live WebSocket · "+new Date(ev.timestamp||Date.now()).toLocaleTimeString());
-  }
+ const options={symbol:S.symbol,market:S.market,category:bitgetProductType(),interval:S.interval,environment:S.bitgetEnvironment,account:S.bitgetAccount,protocol:S.bitgetProtocol};
+ const handlers={onStatus:function(x){if(x.state==="connected")status("Bitget "+S.bitgetEnvironment+" "+S.bitgetAccount+" "+S.bitgetProtocol+" WebSocket live · "+S.category);else if(x.state==="reconnecting"||x.state==="connecting")status("Bitget stream "+x.state+" · REST snapshots active",true);},onMessage:handleTerminalBitgetMessage};
+ terminalBitgetStream=window.ETIBitget.subscribeTransport(options,handlers);
+ if(S.bitgetProtocol==="sbe"){
+  // SBE carries BBO, Depth50 and trades. Keep a separate UTA JSON stream for ticker and candles.
+  terminalBitgetAuxStream=window.ETIBitget.subscribeTransport({symbol:S.symbol,market:S.market,category:bitgetProductType(),interval:S.interval,environment:"production",account:"uta",protocol:"json"},{onStatus:function(){},onMessage:function(ev){if(ev.type==="ticker"||ev.type==="candle")handleTerminalBitgetMessage(ev);}});
+ }
+}
+function closeTerminalBitgetPrivateStream(){
+ if(terminalBitgetPrivateStream){try{terminalBitgetPrivateStream.close()}catch(e){}terminalBitgetPrivateStream=null;}
+ const button=$("tt-private-connect"),label=$("tt-private-status");
+ if(button)button.textContent="Connect private feed";
+ if(label)label.textContent="Private feed disconnected · operator session required";
+}
+function toggleTerminalBitgetPrivateStream(){
+ if(terminalBitgetPrivateStream){closeTerminalBitgetPrivateStream();return;}
+ if(S.venue!=="bitget"||!window.ETIBitget||!window.ETIBitget.subscribePrivate){$("tt-private-status").textContent="Private Bitget adapter unavailable";return;}
+ S.privateCounts={account:0,order:0,position:0,fill:0};
+ $("tt-private-connect").textContent="Disconnect private feed";
+ $("tt-private-status").textContent="Connecting · "+S.bitgetEnvironment+" "+S.bitgetAccount+" · operator session required";
+ terminalBitgetPrivateStream=window.ETIBitget.subscribePrivate({environment:S.bitgetEnvironment,account:S.bitgetAccount,maxRetries:4},{
+  onStatus:function(x){if(x.state==="authenticated")$("tt-private-status").textContent="Authenticated · "+S.bitgetEnvironment+" "+S.bitgetAccount+" private stream live";else if(x.state==="failed"){$("tt-private-status").textContent="Private stream unavailable · "+(x.detail||"check operator session and credentials");terminalBitgetPrivateStream=null;$("tt-private-connect").textContent="Connect private feed";}else if(x.state==="reconnecting"||x.state==="connecting")$("tt-private-status").textContent="Private stream "+x.state+" · "+(x.detail||"waiting for Bitget");else if(x.state==="closed")$("tt-private-status").textContent="Private feed disconnected";},
+  onMessage:function(ev){if(!ev)return;if(ev.type==="error"){$("tt-private-status").textContent="Private stream error · "+String(ev.data&& (ev.data.code||ev.data.message)||"upstream error");return;}if(["account","order","position","fill"].includes(ev.type)){S.privateCounts[ev.type]=(S.privateCounts[ev.type]||0)+(Array.isArray(ev.data&&ev.data.data)?ev.data.data.length:0);$("tt-private-status").textContent="Private live · account "+S.privateCounts.account+" · orders "+S.privateCounts.order+" · positions "+S.privateCounts.position+" · fills "+S.privateCounts.fill;}}
  });
+}
+function syncBitgetTransportControls(){
+ const env=$("tt-bg-env"),account=$("tt-bg-account"),protocol=$("tt-bg-protocol"),enabled=$("tt-venue").value==="bitget";
+ if(env.value==="demo"){account.value="uta";protocol.value="json";}
+ if(account.value==="classic"){env.value="production";protocol.value="json";}
+ if(protocol.value==="sbe"){env.value="production";account.value="uta";}
+ env.querySelector('option[value="demo"]').disabled=account.value==="classic"||protocol.value==="sbe";
+ account.querySelector('option[value="classic"]').disabled=env.value==="demo"||protocol.value==="sbe";
+ protocol.querySelector('option[value="sbe"]').disabled=env.value==="demo"||account.value==="classic";
+ env.disabled=!enabled;account.disabled=!enabled;protocol.disabled=!enabled;
+ S.bitgetEnvironment=env.value;S.bitgetAccount=account.value;S.bitgetProtocol=protocol.value;
+}
+function onBitgetTransportChanged(){
+ syncBitgetTransportControls();closeTerminalBitgetStream();closeTerminalBitgetPrivateStream();
+ if(S.venue==="bitget"){S.loadSeq++;S.busy=false;load();}
 }
 
 async function load(){if(S.busy)return;const loadSeq=++S.loadSeq;S.busy=true;S.venue=$("tt-venue").value;S.market=$("tt-market").value;S.category=$("tt-category").value;S.symbol=$("tt-symbol").value.trim().toUpperCase();S.interval=$("tt-interval").value;if(!/^[A-Z0-9]{5,20}$/.test(S.symbol)){status("Enter a valid symbol",true);S.busy=false;return;}status("Loading "+S.venue.toUpperCase()+" market…");if(S.venue==="bitget"&&restoreMarketCache())status("Bitget · showing recent cached candles while live feed connects");try{let candles=[],ticker={},trades=[],derivatives=null,depth=null,issues=[];if(S.venue==="bitget"){if(!window.ETIBitget)throw new Error("Bitget browser connector did not load");ensureTerminalBitgetStream();const d=await window.ETIBitget.marketData({symbol:S.symbol,interval:S.interval,limit:300,market:S.market,category:bitgetProductType()});if(loadSeq!==S.loadSeq)return;S.pricePrecision=2;capturePricePrecision((d.candles||[]).flatMap(x=>x.slice(1,5)));ticker=d.ticker||{};capturePricePrecision([ticker.lastPrice,ticker.bidPrice,ticker.askPrice,ticker.highPrice,ticker.lowPrice]);candles=(d.candles||[]).map(x=>({time:Math.floor(x[0]/1000),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])}));trades=d.trades||[];depth=d.depth&&d.depth.bids&&d.depth.asks&&d.depth.bids.length&&d.depth.asks.length?{bids:d.depth.bids,asks:d.depth.asks,timestamp:d.depth.timestamp||Date.now()}:null;derivatives=d.derivatives;if(d.failures)issues=Object.keys(d.failures).map(k=>k+": "+d.failures[k]);}else{closeTerminalBitgetStream();const p=new URLSearchParams({venue:"bybit",market:S.market,category:S.category,symbol:S.symbol,interval:S.interval,limit:"300"});const results=await Promise.allSettled([get("/api/market/klines?"+p),get("/api/market/ticker?"+p),get("/api/market/trades?"+p+"&limit=50"),get("/api/market/depth?"+p+"&limit=50")]);if(loadSeq!==S.loadSeq)return;if(results[0].status==="rejected")throw new Error("Bybit candle feed unavailable: "+results[0].reason.message);S.pricePrecision=2;capturePricePrecision((results[0].value||[]).flatMap(x=>x.slice(1,5)));if(results[1].status==="fulfilled"){ticker=results[1].value||{};capturePricePrecision([ticker.lastPrice,ticker.bidPrice,ticker.askPrice,ticker.highPrice,ticker.lowPrice]);}else issues.push("ticker: "+results[1].reason.message);candles=(results[0].value||[]).map(x=>({time:Math.floor(Number(x[0])/1000),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])}));if(results[2].status==="fulfilled")trades=results[2].value||[];else issues.push("recent trades: "+results[2].reason.message);if(results[3].status==="fulfilled")depth={bids:results[3].value.bids||[],asks:results[3].value.asks||[],timestamp:Date.now()};else issues.push("order book: "+results[3].reason.message);derivatives={fundingRate:ticker.fundingRate,openInterest:ticker.openInterest};}if(!candles.length)throw new Error("The selected exchange returned no candles");capturePricePrecision((trades||[]).map(t=>t.price||t.p));if(!ticker.lastPrice)ticker.lastPrice=candles[candles.length-1].close;S.candles=candles;saveMarketCache();S.signal=null;restoreChartPrefs();render();renderTicker(ticker);renderTrades(trades);S.trades=trades;S.depth=depth;renderFlow();renderOrderFlow(depth,trades);renderProfile();await Promise.allSettled([loadSignal(candles.map(x=>[x.time*1000,x.open,x.high,x.low,x.close,x.volume])),loadLiquidityFvg(),loadInstitutional(),loadMultiCharts(),loadOmniSignal(),loadDeepOrderFlow()]);if(loadSeq!==S.loadSeq)return;$("tt-entry").placeholder="Chart last: "+px(candles[candles.length-1].close);if(derivatives){$("tt-d-funding").textContent=derivatives.fundingRate==null?"—":fmt(Number(derivatives.fundingRate)*100,5)+"%";$("tt-oi").textContent=derivatives.openInterest==null?"—":fmt(derivatives.openInterest,2);}$("tt-source").textContent=S.venue+" native market feed";status(S.venue.toUpperCase()+" · "+S.market+" · "+candles.length+" candles"+(issues.length?" · partial data: "+issues.join("; "):" · all market feeds updated"),issues.length>0);}catch(e){if(loadSeq===S.loadSeq){if(S.venue==="bitget"&&S.candles.length)status("Bitget REST unavailable · cached candles retained; WebSocket live recovery active · "+e.message,true);else status(e.message,true);}}finally{if(loadSeq===S.loadSeq)S.busy=false;}}
