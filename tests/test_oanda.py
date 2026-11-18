@@ -287,7 +287,8 @@ def _prop(**kw):
 
 
 def _risk_settings(**kw):
-    return Settings(**{**dict(live_trading_enabled=True, oanda_api_token="tok-SECRET-123", oanda_account_id=ACCT), **kw})
+    return Settings(**{**dict(live_trading_enabled=True, oanda_api_token="tok-SECRET-123", oanda_account_id=ACCT,
+                          paper_starting_equity=100000.0), **kw})
 
 
 def test_risk_engine_oanda_rules():

@@ -23,7 +23,8 @@ def db():
 
 def settings(**kw):
     args = dict(_env_file=None, alpaca_api_key=None, alpaca_secret_key=None,
-                binance_api_key=None, binance_secret_key=None, live_trading_enabled=False)
+                binance_api_key=None, binance_secret_key=None, live_trading_enabled=False,
+                cps_session_restrictions_enabled=False, paper_starting_equity=10000.0)
     args.update(kw)
     return Settings(**args)
 
