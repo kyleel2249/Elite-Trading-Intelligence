@@ -12,6 +12,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy.yml"
+      - ".github/workflows/eti-diagnostics.yml"
 
 concurrency:
   group: eti-cloudflare-deploy
