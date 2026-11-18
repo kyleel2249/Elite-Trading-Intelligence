@@ -15,8 +15,9 @@ function readContext(){
  state.market=$(state.root?"symMarket":"tt-market")?.value||"futures";
  state.symbol=($(state.root?"symbol":"tt-symbol")?.value||"BTCUSDT").trim().toUpperCase();
  state.interval=$(state.root?"interval":"tt-interval")?.value||"1h";
- const cat=$(state.root?"symCat":"tt-category")?.value||"";
- state.category=state.venue==="bitget"?(state.market==="futures"?(cat==="inverse"?"COIN-FUTURES":"USDT-FUTURES"):"SPOT"):(state.market==="futures"?(cat==="inverse"?"inverse":"linear"):"spot");
+ const cat=$(state.root?"orderBitgetMarket":"tt-category")?.value||$(state.root?"symCat":"tt-category")?.value||"";
+ const normalizedCategory=String(cat).toUpperCase();
+ state.category=state.venue==="bitget"?(state.market==="futures"?(["USDT-FUTURES","USDC-FUTURES","COIN-FUTURES"].includes(normalizedCategory)?normalizedCategory:normalizedCategory==="INVERSE"?"COIN-FUTURES":"USDT-FUTURES"):"SPOT"):(state.market==="futures"?(cat==="inverse"?"inverse":"linear"):"spot");
  if(state.venue==="bitget"&&state.market!=="futures")state.category="SPOT";
 }
 function historyKey(){return "eti-liquidity-depth-v1:"+[state.venue,state.market,state.category,state.symbol].join(":");}
