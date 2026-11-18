@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleMarket, providerOrder, listBitgetSymbols, listBitgetMarginSymbols, _resetSymbolCache } from "./market.ts";
+import { handleMarket, providerOrder, listBitgetSymbols, listBitgetMarginSymbols, bitgetAwareFetch, _resetSymbolCache } from "./market.ts";
 
 const now = Date.now();
 const req = (path: string) => new Request("https://eti.test" + path);
@@ -163,8 +163,36 @@ test("free Cloudflare-only market routing does not require Fly.io or a fixed egr
   const response = await handleMarket(req("/api/market/region"), {});
   assert.equal(response.status, 200);
   const body = await response.json() as any;
-  assert.equal(body.transport, "bybit-worker-rest+bitget-browser-direct");
+  assert.equal(body.transport, "bybit-worker-rest+bitget-worker-proxy-with-browser-websocket");
   assert.equal(body.fixedEgressIp, false);
   assert.equal(body.accountResidencyIsNotChanged, true);
   assert.equal(body.placementHint, "cloudflare:global");
+});
+
+
+test("Bitget Worker proxy retries CAPI V3 after a primary-host network failure", async () => {
+  const urls: string[] = [];
+  const fetcher: any = async (input: any) => {
+    const url = new URL(String(input)); urls.push(url.toString());
+    if (url.hostname === "api.bitget.com") throw new TypeError("fetch failed");
+    return new Response(JSON.stringify(bitgetKline), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const response = await bitgetAwareFetch(
+    "https://api.bitget.com/api/v3/market/candles?category=SPOT&symbol=BTCUSDT&interval=1m&limit=10",
+    { method: "GET" }, fetcher
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-eti-upstream-host"), "capi.bitget.com");
+  assert.ok(urls.length >= 2);
+  assert.equal((await response.json() as any).code, "00000");
+});
+
+test("Bitget Worker proxy reports a classified 502 when all hosts fail at the network layer", async () => {
+  const response = await bitgetAwareFetch(
+    "https://api.bitget.com/api/v3/market/candles?category=SPOT&symbol=BTCUSDT&interval=1m&limit=10",
+    { method: "GET" },
+    (async () => { throw new TypeError("fetch failed"); }) as any
+  );
+  assert.equal(response.status, 502);
+  assert.equal((await response.json() as any).code, "ETI_UPSTREAM_UNAVAILABLE");
 });
