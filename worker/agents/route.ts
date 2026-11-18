@@ -148,14 +148,30 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
         let latest: unknown = null;
         try { latest = env.ETI_EXECUTION_LOG ? JSON.parse((await env.ETI_EXECUTION_LOG.get("agent-autopilot:last")) || "null") : null; } catch { latest = null; }
         const config = readAutopilotConfig(env);
+        const enabled = env.ETI_AGENT_AUTOPILOT_ENABLED === "true";
+        const symbols = config.symbols.split(",").map((s) => s.trim().toUpperCase()).filter((s) => SYMBOL.test(s));
+        const strategies = config.strategies.split(",").map((s) => s.trim().toLowerCase()).filter((s) => ["scalp", "intraday", "swing", "position"].includes(s));
+        const portfolioStorageConfigured = !!(env.ETI_PORTFOLIO_DB || env.ETI_EXECUTION_LOG);
+        const blockedReasons = [
+          ...(!enabled ? ["autopilot_disabled"] : []),
+          ...(integrity.killSwitch ? ["kill_switch_active"] : []),
+          ...(!integrity.executionTokenConfigured ? ["execution_token_missing"] : []),
+          ...(!integrity.auditLogConfigured ? ["execution_audit_log_missing"] : []),
+          ...(!portfolioStorageConfigured ? ["paper_portfolio_storage_missing"] : []),
+          ...(!symbols.length ? ["no_valid_symbols"] : []),
+          ...(!INTERVALS.includes(config.interval) ? ["invalid_interval"] : []),
+          ...(!strategies.length || config.minStrategyAgreement > strategies.length ? ["invalid_strategy_configuration"] : []),
+        ];
         return reply({
-          enabled: env.ETI_AGENT_AUTOPILOT_ENABLED === "true", mode: "internal_paper_only",
-          liveOrdersAllowed: false, killSwitch: integrity.killSwitch,
+          enabled, ready: blockedReasons.length === 0, blockedReasons,
+          mode: "internal_paper_only", liveOrdersAllowed: false, killSwitch: integrity.killSwitch,
+          scheduler: { enabled, cron: "*/5 * * * *", cadenceMinutes: 5 },
           executionTokenConfigured: integrity.executionTokenConfigured, auditLogConfigured: integrity.auditLogConfigured,
-          symbols: config.symbols.split(",").map((s) => s.trim()).filter(Boolean),
-          interval: config.interval, maxPerCycle: config.maxPerCycle,
+          durableAuditConfigured: !!env.ETI_PORTFOLIO_DB, portfolioStorageConfigured,
+          councilRunsBeforeStrategyGates: true, recordsNoTradeDecisions: true,
+          symbols, interval: config.interval, maxPerCycle: config.maxPerCycle,
           minConfidence: config.minConfidence, minAgreement: config.minAgreement,
-          maxPositions: config.maxPositions, strategies: config.strategies.split(",").map((s) => s.trim()).filter(Boolean),
+          maxPositions: config.maxPositions, strategies,
           minStrategyAgreement: config.minStrategyAgreement, minOmniConfidence: config.minOmniConfidence, latest,
         });
       }
