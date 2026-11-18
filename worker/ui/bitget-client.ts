@@ -173,7 +173,7 @@ function subscribe(opts,handlers){
 
 function subscribePrivate(opts,handlers){
  opts=opts||{};handlers=handlers||{};
- var token=String(opts.token||"");if(!token)throw new Error("ETI execution token is required for private Bitget streams");
+
  var ws=null,closed=false,retry=0,retryTimer=null,pingTimer=null,watchdog=null,lastMessageAt=0,connected=false,authenticated=false;
  var url=opts.url||((window.location&&window.location.protocol==="https:"?"wss:":"ws:")+"//"+(window.location&&window.location.host||"")+"/api/bitget/ws/private");
  function status(state,detail){if(typeof handlers.onStatus==="function")handlers.onStatus({state:state,detail:detail||"",connected:connected,authenticated:authenticated,lastMessageAt:lastMessageAt,retry:retry});}
@@ -184,7 +184,7 @@ function subscribePrivate(opts,handlers){
   if(closed)return;status("connecting");
   try{ws=new WebSocket(url);}catch(e){scheduleReconnect(e&&e.message||"websocket_unavailable");return;}
   var current=ws;
-  current.onopen=function(){if(closed||ws!==current)return;connected=true;lastMessageAt=Date.now();current.send(JSON.stringify({op:"auth",token:token}));status("authenticating");pingTimer=setInterval(function(){if(ws===current&&current.readyState===1)try{current.send("ping")}catch(e){}},30000);watchdog=setInterval(function(){if(ws===current&&connected&&Date.now()-lastMessageAt>65000){try{current.close()}catch(e){}}},10000);};
+  current.onopen=function(){if(closed||ws!==current)return;connected=true;lastMessageAt=Date.now();status("connecting");pingTimer=setInterval(function(){if(ws===current&&current.readyState===1)try{current.send("ping")}catch(e){}},30000);watchdog=setInterval(function(){if(ws===current&&connected&&Date.now()-lastMessageAt>65000){try{current.close()}catch(e){}}},10000);};
   current.onmessage=function(event){if(ws!==current||closed)return;lastMessageAt=Date.now();var raw=event.data;if(raw==="pong"||raw==="ping")return;var msg;try{msg=typeof raw==="string"?JSON.parse(raw):raw}catch(e){emit("raw",raw,null);return;}if(!msg)return;if(msg.event==="status"){authenticated=msg.state==="authenticated";status(msg.state);emit("status",msg,null);return;}if(msg.event==="error"){emit("error",msg,msg);if(msg.code==="unauthorized"||msg.code==="bitget_login_rejected")try{current.close()}catch(e){}return;}var topic=String((msg.arg||{}).topic||"");if(topic==="account"||topic==="order"||topic==="position"||topic==="fill")emit(topic,{action:msg.action||null,ts:streamTime(msg.ts),data:Array.isArray(msg.data)?msg.data:[]},msg);else emit("raw",msg,msg);};
   current.onerror=function(){if(ws===current&&!closed)try{current.close()}catch(e){}};
   current.onclose=function(){if(ws!==current||closed)return;connected=false;ws=null;scheduleReconnect("socket_closed");};

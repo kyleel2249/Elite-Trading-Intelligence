@@ -23,9 +23,16 @@ test("UTA private websocket subscribes to account, orders, positions and fills o
   ]);
 });
 
-test("private websocket relay refuses missing credentials and non-upgrade HTTP requests", () => {
-  const missing = handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private", { headers: { upgrade: "websocket" } }), {});
-  assert.equal(missing.status, 503);
-  const badUpgrade = handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private"), ENV);
+test("private websocket relay requires operator authentication, credentials and a WebSocket upgrade", async () => {
+  const unauth = await handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private", { headers: { upgrade: "websocket" } }), ENV);
+  assert.equal(unauth.status, 401);
+  const authorizedEnv = { ETI_EXECUTION_TOKEN: "master-token" };
+  const noCredentials = await handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private", {
+    headers: { upgrade: "websocket", authorization: "Bearer master-token" }
+  }), authorizedEnv);
+  assert.equal(noCredentials.status, 503);
+  const badUpgrade = await handleBitgetPrivateWebSocket(new Request("https://eti.test/api/bitget/ws/private", {
+    headers: { authorization: "Bearer master-token" }
+  }), { ...ENV, ...authorizedEnv });
   assert.equal(badUpgrade.status, 426);
 });

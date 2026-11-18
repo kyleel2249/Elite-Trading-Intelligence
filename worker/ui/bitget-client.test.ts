@@ -222,12 +222,12 @@ test("UTA private browser adapter authenticates through ETI proxy and normalizes
     fetch: async () => new Response(JSON.stringify({ code: "00000", data: [] })),
   };
   vm.runInNewContext(BITGET_CLIENT_JS, sandbox);
-  sandbox.window.ETIBitget.subscribePrivate({ token: "master-token" }, {
+  sandbox.window.ETIBitget.subscribePrivate({}, {
     onMessage: (m: any) => messages.push(m), onStatus: (s: any) => states.push(s)
   });
   assert.equal(sockets[0].url, "wss://eti.test/api/bitget/ws/private");
   sockets[0].readyState = 1; sockets[0].onopen();
-  assert.deepEqual(JSON.parse(sockets[0].sent[0]), { op: "auth", token: "master-token" });
+  assert.equal(sockets[0].sent.length, 0, "browser must not send a master token or Bitget API secret");
   sockets[0].onmessage({ data: JSON.stringify({ event: "status", state: "authenticated", topics: ["account","order","position","fill"] }) });
   sockets[0].onmessage({ data: JSON.stringify({ arg: { instType: "UTA", topic: "fill" }, action: "update", ts: Date.now(), data: [{ execId: "f1", execPrice: "10", execQty: "2" }] }) });
   assert.equal(messages.find((m: any) => m.type === "fill").data.data[0].execId, "f1");
@@ -238,7 +238,7 @@ test("UTA public trades parser accepts compact p/v/S/T field names", () => {
   const sockets: any[] = [], messages: any[] = [];
   class FakeWebSocket {
     readyState = 0; onopen: any; onmessage: any; onclose: any; onerror: any; sent: string[] = [];
-    url: string; constructor(url: string) { this.url = url; sockets.push(this); }
+    constructor(public url: string) { sockets.push(this); }
     send(value: string) { this.sent.push(value); }
     close() { this.readyState = 3; if (this.onclose) this.onclose({}); }
   }
