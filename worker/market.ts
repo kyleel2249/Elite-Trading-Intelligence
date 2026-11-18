@@ -525,7 +525,7 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string, 
       const a: Attempt = { provider: id, host: host.replace("https://", ""), status: raw.status, ok: !errorClass, errorClass, latencyMs: raw.latencyMs };
       record(a);
       return {
-        host: a.host, upstreamStatus: raw.status, ok: a.ok, errorClass, latencyMs: raw.latencyMs,
+        host: raw.headers?.get("x-eti-upstream-host") || a.host, upstreamStatus: raw.status, ok: a.ok, errorClass, latencyMs: raw.latencyMs, fallbackAttempts: raw.headers?.get("x-eti-fallback-attempts") ?? null,
         bodySnippet: errorClass ? snippet(raw.text) || null : null,
         cfRay: raw.headers?.get("cf-ray") ?? null, server: raw.headers?.get("server") ?? null,
         candles, lastCandleOpen: lastOpen ? new Date(lastOpen).toISOString() : null, dataAgeSeconds: ageSeconds,
