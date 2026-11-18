@@ -92,15 +92,15 @@ export function analyzeFvgPrecision(
     if (higherPriority) passed.push(bullish ? "Highest-priority lower bullish FVG" : "Highest-priority upper bearish FVG");
     else failed.push("A more favourably positioned fresh FVG exists");
 
-    // A zone remains green only while fresh and all hard pre-entry filters pass.
-    const freshBeforeFirstRetest = fresh || (firstTouch >= 0 && z.touches === 1 && z.ageBars === currentIndex - confirmIndex);
-    const hardPass = freshBeforeFirstRetest && !!bos && !!impulse && !!level && correctHalf && !htfOpposed && higherPriority;
-    let reaction = { confirmed: false, time: null as number | null, close: null as number | null, reason: "Awaiting first retest and a closed reaction candle" };
     let firstTouch = -1;
     for (let i = confirmIndex + 1; i <= currentIndex; i++) {
       const c = rows[i], touched = bullish ? c[3] <= z.upper : c[2] >= z.lower;
       if (touched) { firstTouch = i; break; }
     }
+    // A first retest may still validate the original fresh setup, but it no longer receives the green unmitigated highlight.
+    const freshBeforeFirstRetest = fresh || (firstTouch >= 0 && z.touches === 1 && z.ageBars === currentIndex - confirmIndex);
+    const hardPass = freshBeforeFirstRetest && !!bos && !!impulse && !!level && correctHalf && !htfOpposed && higherPriority;
+    let reaction = { confirmed: false, time: null as number | null, close: null as number | null, reason: "Awaiting first retest and a closed reaction candle" };
     if (firstTouch >= 0) {
       const c = rows[firstTouch], closeValid = bullish ? c[4] >= z.lower : c[4] <= z.upper;
       const directionClose = bullish ? c[4] >= c[1] : c[4] <= c[1];
