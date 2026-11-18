@@ -30,7 +30,7 @@ ID = r"^[A-Za-z0-9_.-]{1,64}$"
 # Feature routers hosted by this module so main.py (edited by several sessions) does not need to change.
 # Each is isolated: a defect in one is logged and cannot take the command centres down.
 for _mod_name, _label in (("app.api.chain", "chain wallet"), ("app.api.chain_broker", "chain broker wallet"),
-                          ("app.api.executive", "executive command centre")):
+                          ("app.api.executive", "executive command centre"), ("app.api.trading_terminal", "trading terminal")):
     try:
         _mod = __import__(_mod_name, fromlist=["router"])
         router.include_router(_mod.router)
