@@ -24,7 +24,7 @@ import base from "./index.ts";
 import { withAlgo } from "./algo/route.ts";
 import { runV3AlphaTrackingCycle } from "./algo/v3-alpha-ledger.ts";
 import { withAgents } from "./agents/route.ts";
-import { runAgentAutopilotCycle } from "./agents/autopilot.ts";
+import { scheduleAgentAutopilot } from "./agents/autopilot.ts";
 import { withFutures } from "./agents/futures-route.ts";
 import { withCommand } from "./command/route.ts";
 import { withSports } from "./sports/route.ts";
@@ -99,7 +99,7 @@ const outerLayers: Array<(next: any) => any> = [withBitget, withPerp, withWallet
 const app: any = outerLayers.reduce((next: any, layer) => layer(next), core);
 const inner: any = base;
 const MONITOR_CRON = "* * * * *";
-const AGENT_AUTOPILOT_CRON = "*/5 * * * *";
+
 
 export default {
   fetch: (request: Request, env: any) => app.fetch(request, env),
@@ -119,6 +119,9 @@ export default {
       })().catch(e => console.error("sports autonomous cycle failed", e instanceof Error ? e.message : e)));
     }
 
+    // The autopilot and universe scanner intentionally share the five-minute cron.
+    // Schedule autopilot BEFORE the universe branch, whose early return handles that tick.
+    scheduleAgentAutopilot(event.cron, env, app, ctx);
     if (event.cron === UNIVERSE_CRON) {
       // Position monitoring for the accounts listed in ETI_MANAGE_ACCOUNTS (comma separated). Closing needs ETI_MANAGE_AUTOCLOSE=true; otherwise report only.
       const accounts = String(env.ETI_MANAGE_ACCOUNTS ?? "").split(",").map((x: string) => x.trim()).filter((x: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(x)).slice(0, 3);
@@ -126,13 +129,6 @@ export default {
       const alertAccounts = String(env.ETI_ALERT_ACCOUNTS ?? env.ETI_MANAGE_ACCOUNTS ?? "").split(",").map((x: string) => x.trim()).filter((x: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(x)).slice(0, 3);
       for (const id of alertAccounts) ctx.waitUntil(pollExecutionAlerts(env as any, id).then(() => undefined, () => undefined));
       if (env.ETI_UNIVERSE_ENABLED === "true" && env.ETI_EXECUTION_LOG) ctx.waitUntil(runUniverseBatch(env, env.ETI_EXECUTION_LOG, Date.now(), (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday")).then(async b => { const strat = (["scalp", "intraday", "swing", "position"].includes(env.ETI_UNIVERSE_STRATEGY) ? env.ETI_UNIVERSE_STRATEGY : "intraday"); const ev = signalAlerts(b.previous, b.newRows ?? [], strat); if (b.universeError) ev.push({ type: "market_data_failure", severity: "warning", title: "Universe refresh failed", detail: b.universeError, dedupeKey: `universe:${new Date().toISOString().slice(0, 13)}` }); await raiseAlerts(env as any, ev); }, e => console.error("universe batch failed", e instanceof Error ? e.message : e))); return; }
-    if (event.cron === AGENT_AUTOPILOT_CRON) {
-      // Autonomous multi-agent entries are restricted to ETI INTERNAL PAPER. The execution
-      // gateway, Commander, Risk Manager, confidence threshold and idempotency claim remain mandatory.
-      ctx.waitUntil(runAgentAutopilotCycle(env, app).then(r => {
-        if ((r as any).submitted) console.log("agent autopilot paper orders", (r as any).submitted, "evaluated", (r as any).evaluated);
-      }).catch(e => console.error("agent autopilot cycle failed", e instanceof Error ? e.message : e)));
-    }
     if (event.cron === MONITOR_CRON) {
       ctx.waitUntil(runFuturesMonitor(env).catch(() => undefined));
       // Every minute: refresh and persist every Bitget spot, futures (USDT/USDC/coin-margined) and margin pair. Never throws; set ETI_BITGET_CATALOGUE_SYNC=false to disable.
