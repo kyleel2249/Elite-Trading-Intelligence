@@ -144,7 +144,7 @@ function hexRgba(h,a){var m=/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h
 function curTf(){var e=document.getElementById('interval');return e?e.value:'';}
 function marketKey(){var s=document.getElementById('symbol'),m=(typeof mkt==='function'?mkt():'');return (s?s.value:'')+'|'+m;}
 function higher(tf){var i=ORDER.indexOf(tf);if(allTf)return ORDER.filter(function(t){return t!==tf;});return i<0?[]:ORDER.slice(i+1,i+3);}
-var STATUS={fresh:'UNFILLED',partially_mitigated:'PARTIALLY FILLED',fully_mitigated:'FULLY FILLED',invalidated:'INVALIDATED',expired:'EXPIRED'};
+var STATUS={fresh:'fresh',partially_mitigated:'partially mitigated',fully_mitigated:'fully mitigated',invalidated:'invalidated',expired:'expired'};
 
 function loadHtf(){
  if(!st.on||typeof getJson!=='function')return;
@@ -214,9 +214,10 @@ function paint(){
   texts.forEach(function(t,idx){
    var z=t.z,bull=z.direction==='bullish',lx=Math.max(t.x0+4,4);
    if(t.x1-lx<60||t.h<12||idx>=8)return;
-   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+' · '+z.mitigationPct+'% FILLED'+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
+   var head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
+   var badge='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+(z.status==='fresh'?'UNFILLED':z.status==='partially_mitigated'?'PARTIALLY FILLED':STATUS[z.status].toUpperCase())+' · '+z.mitigationPct+'% FILLED';
    x.fillStyle=hexRgba(t.col,1);x.textAlign='left';x.fillText(head,lx,t.y0+8);
-   if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText('gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · formed @'+price(z.formationPrice),lx,t.y0+20);}
+   if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText(badge+' · gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · formed @'+price(z.formationPrice),lx,t.y0+20);}
    if(t.h>=34&&t.x1-lx>240){x.textAlign='right';x.fillStyle=hexRgba(t.col,1);x.fillText(price(z.upper),t.x1-5,t.y0+8);x.fillText(price(z.lower),t.x1-5,t.y0+t.h-7);x.textAlign='left';}
   });
   x.textBaseline='alphabetic';x.textAlign='left';
