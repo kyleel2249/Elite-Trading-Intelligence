@@ -41,7 +41,6 @@ import { handleAuth } from "./auth/routes.ts";
 
 export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
   ETI_EDGE?: string;
-  MARKET_CACHE?: KVNamespace;
   BACKEND_URL?: string;
 }
 
