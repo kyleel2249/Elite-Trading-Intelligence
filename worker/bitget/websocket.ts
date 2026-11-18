@@ -1,21 +1,19 @@
 /**
- * Secure Bitget private WebSocket relay for production/demo UTA and Classic accounts.
+ * Secure Bitget private WebSocket relay for the production UTA account.
  * Bitget credentials never leave Worker bindings; browser clients require an operator session.
  */
 import { authenticate, isOperator, sameOrigin } from "../auth/session.ts";
 import { bitgetSign } from "./api.ts";
-import { bitgetClassicPrivateSubscriptions, bitgetPrivateCredentialSet, bitgetWsEndpoint, type BitgetWsAccount, type BitgetWsEnvironment } from "./transports.ts";
+import { bitgetPrivateCredentialSet, bitgetWsEndpoint } from "./transports.ts";
 
 const UTA_TOPICS = ["account", "order", "position", "fill"] as const;
 export function bitgetUtaPrivateSubscriptions() { return UTA_TOPICS.map((topic) => ({ instType: "UTA", topic })); }
 
 export async function bitgetUtaLogin(env: Record<string, any>, now: () => number = Date.now) {
-  return bitgetPrivateLogin(env, "production", "uta", now);
+  return bitgetPrivateLogin(env, now);
 }
-export function bitgetClassicPrivateTopics() { return bitgetClassicPrivateSubscriptions(); }
-
-export async function bitgetPrivateLogin(env: Record<string, any>, environment: BitgetWsEnvironment = "production", account: BitgetWsAccount = "uta", now: () => number = Date.now) {
-  const c = bitgetPrivateCredentialSet(env, environment, account);
+export async function bitgetPrivateLogin(env: Record<string, any>, now: () => number = Date.now) {
+  const c = bitgetPrivateCredentialSet(env);
   if (!c.key || !c.secret || !c.passphrase) throw new Error("credentials_missing");
   const timestamp = String(Math.floor(now() / 1000));
   const sign = await bitgetSign(c.secret, timestamp, "GET", "/user/verify", "");
@@ -33,12 +31,10 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   if (!isOperator(auth)) return jsonError("operator_auth_required", 401);
 
   const url = new URL(req.url);
-  const environment = (url.searchParams.get("environment") || "production") as BitgetWsEnvironment;
-  const account = (url.searchParams.get("account") || "uta") as BitgetWsAccount;
-  if (!["production", "demo"].includes(environment) || !["uta", "classic"].includes(account)) return jsonError("invalid_transport_selection", 400);
-  try { bitgetWsEndpoint(environment, account, "private"); } catch { return jsonError("unsupported_environment_account_combination", 400); }
-  const creds = bitgetPrivateCredentialSet(env, environment, account);
-  if (!creds.key || !creds.secret || !creds.passphrase) return jsonError("credentials_missing_for_selected_environment", 503);
+  const environment = "production", account = "uta";
+  try { bitgetWsEndpoint("production", "uta", "private"); } catch { return jsonError("unsupported_transport", 400); }
+  const creds = bitgetPrivateCredentialSet(env);
+  if (!creds.key || !creds.secret || !creds.passphrase) return jsonError("credentials_missing", 503);
 
   const Pair = (globalThis as any).WebSocketPair, Socket = (globalThis as any).WebSocket;
   if (!Pair || !Socket) return jsonError("websocket_runtime_unavailable", 501);
@@ -69,7 +65,7 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
     upstream = new Socket(bitgetWsEndpoint(environment, account, "private"));
     upstream.addEventListener("open", async () => {
       if (closed || !upstream) return;
-      try { upstream.send(JSON.stringify(await bitgetPrivateLogin(env, environment, account))); }
+      try { upstream.send(JSON.stringify(await bitgetPrivateLogin(env))); }
       catch { sendClient({ event: "error", code: "login_signing_failed" }); close(1011, "login signing failed"); }
     });
     upstream.addEventListener("message", (event: MessageEvent) => {
@@ -88,7 +84,7 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
         loggedIn = true;
         if (connectTimeout) clearTimeout(connectTimeout);
         connectTimeout = null;
-        const args = account === "uta" ? bitgetUtaPrivateSubscriptions() : bitgetClassicPrivateTopics();
+        const args = bitgetUtaPrivateSubscriptions();
         try { upstream?.send(JSON.stringify({ op: "subscribe", args })); }
         catch { close(1011, "subscription failed"); return; }
         sendClient({ event: "status", state: "authenticated", environment, account, topics: args });
