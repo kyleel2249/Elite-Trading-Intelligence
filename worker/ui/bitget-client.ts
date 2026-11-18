@@ -97,12 +97,12 @@ async function context(opts){
  var now=Date.now();
  if(depth&&(now-depth.timestamp>180000||depth.timestamp-now>60000)){depth=null;failures.depth="stale order-book snapshot"}
  if(ticker&&(now-ticker.timestamp>180000||ticker.timestamp-now>60000)){ticker=null;failures.ticker="stale ticker snapshot"}
- return {depth:depth,trades:trades,ticker:ticker,derivatives:futures&&ticker?{fundingRate:ticker.fundingRate,openInterest:ticker.openInterest,timestamp:ticker.timestamp,source:"bitget-browser"}:null,failures:failures};
+ return {depth:depth,trades:trades,ticker:ticker,derivatives:futures&&ticker?{fundingRate:ticker.fundingRate,openInterest:ticker.openInterest,timestamp:ticker.timestamp,source:"bitget-worker-proxy"}:null,failures:failures};
 }
 async function marketData(opts){
  var c=await candles(opts),x=await context(opts);
  if(!c.length)throw new Error("Bitget returned no candles");
- return {candles:c,depth:x.depth||{bids:[],asks:[]},trades:x.trades,ticker:x.ticker||{lastPrice:c[c.length-1][4],volume:c[c.length-1][5],priceChangePercent:0},derivatives:x.derivatives,failures:x.failures,provider:"bitget-browser"};
+ return {candles:c,depth:x.depth||{bids:[],asks:[]},trades:x.trades,ticker:x.ticker||{lastPrice:c[c.length-1][4],volume:c[c.length-1][5],priceChangePercent:0},derivatives:x.derivatives,failures:x.failures,provider:"bitget-worker-proxy"};
 }
 function categoryOf(base,quote){return "crypto"}
 function instrumentRows(data,market,productType){
