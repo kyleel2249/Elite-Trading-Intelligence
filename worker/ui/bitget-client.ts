@@ -119,7 +119,7 @@ async function symbols(kind){
     jr.push([String(x.symbol).toUpperCase(),base,quote,"margin",categoryOf(base,quote),"bitget",null,null,cross,iso,Number(x.maxCrossedLeverage)||0,Number(x.maxIsolatedLeverage)||0,truth(x.isIsolatedBaseBorrowable),truth(x.isIsolatedQuoteBorrowable),x.isCrossBorrowable===undefined?cross:truth(x.isCrossBorrowable)]);
    });
   }else jr=instrumentRows(data,j.market,j.pt);
-  if(!jr.length&&data.length)warnings.push(j.category+" returned instruments but none passed active-contract validation");
+  if(!jr.length){var previous=LAST_GOOD[j.category]||[];if(previous.length){rows.push.apply(rows,previous);warnings.push(j.category+" returned an empty active catalogue; retained last successful catalogue");sources[j.category]={count:previous.length,fetchedAt:LAST_GOOD_AT[j.category]||null,stale:true,error:"empty_active_catalogue",host:r.value.host,apiVersion:r.value.version};return;}if(j.market!=="margin"){warnings.push(j.category+" returned no active contracts");sources[j.category]={count:0,fetchedAt:now,stale:true,error:"empty_active_catalogue",host:r.value.host,apiVersion:r.value.version};return;}}
   LAST_GOOD[j.category]=jr;LAST_GOOD_AT[j.category]=now;rows.push.apply(rows,jr);
   sources[j.category]={count:jr.length,fetchedAt:now,stale:false,host:r.value.host,apiVersion:r.value.version};
  });
