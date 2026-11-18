@@ -195,7 +195,7 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
   const realFetch = globalThis.fetch; globalThis.fetch = (async () => { brokerCalls++; return new Response("{}"); }) as any;
   try {
     assert.equal(await (await app.fetch(new Request("https://e.test/other"), env)).text(), "base"); assert.equal(baseCalls, 1);
-    const page = await app.fetch(new Request("https://e.test/agents"), env); assert.equal(page.status, 200); assert.match(await page.text(), /ETI Agent Intelligence Center/);
+    const page = await app.fetch(new Request("https://e.test/agents"), env); assert.equal(page.status, 200); const pageHtml = await page.text(); assert.match(pageHtml, /ETI Agent Intelligence Center/); assert.match(pageHtml, /Load D1 history/); assert.match(pageHtml, /beforeId/);
     const roster: any = await (await app.fetch(new Request("https://e.test/api/agents"), env)).json(); assert.equal(roster.agents.length, 12); assert.equal(roster.liveExecutionAllowed, false);
     const disabledAuto: any = await (await app.fetch(new Request("https://e.test/api/agents/autopilot"), env)).json();
     assert.equal(disabledAuto.scheduler.cron, "*/5 * * * *");
