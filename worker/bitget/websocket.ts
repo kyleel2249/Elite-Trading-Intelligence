@@ -1,21 +1,19 @@
 /**
- * Secure Bitget private WebSocket relay for production/demo UTA and Classic accounts.
+ * Secure Bitget private WebSocket relay for the production UTA account.
  * Bitget credentials never leave Worker bindings; browser clients require an operator session.
  */
 import { authenticate, isOperator, sameOrigin } from "../auth/session.ts";
 import { bitgetSign } from "./api.ts";
-import { bitgetClassicPrivateSubscriptions, bitgetPrivateCredentialSet, bitgetWsEndpoint, type BitgetWsAccount, type BitgetWsEnvironment } from "./transports.ts";
+import { bitgetPrivateCredentialSet, bitgetWsEndpoint } from "./transports.ts";
 
 const UTA_TOPICS = ["account", "order", "position", "fill"] as const;
 export function bitgetUtaPrivateSubscriptions() { return UTA_TOPICS.map((topic) => ({ instType: "UTA", topic })); }
 
 export async function bitgetUtaLogin(env: Record<string, any>, now: () => number = Date.now) {
-  return bitgetPrivateLogin(env, "production", "uta", now);
+  return bitgetPrivateLogin(env, now);
 }
-export function bitgetClassicPrivateTopics() { return bitgetClassicPrivateSubscriptions(); }
-
-export async function bitgetPrivateLogin(env: Record<string, any>, environment: BitgetWsEnvironment = "production", account: BitgetWsAccount = "uta", now: () => number = Date.now) {
-  const c = bitgetPrivateCredentialSet(env, environment, account);
+export async function bitgetPrivateLogin(env: Record<string, any>, now: () => number = Date.now) {
+  const c = bitgetPrivateCredentialSet(env);
   if (!c.key || !c.secret || !c.passphrase) throw new Error("credentials_missing");
   const timestamp = String(Math.floor(now() / 1000));
   const sign = await bitgetSign(c.secret, timestamp, "GET", "/user/verify", "");
@@ -33,12 +31,10 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   if (!isOperator(auth)) return jsonError("operator_auth_required", 401);
 
   const url = new URL(req.url);
-  const environment = (url.searchParams.get("environment") || "production") as BitgetWsEnvironment;
-  const account = (url.searchParams.get("account") || "uta") as BitgetWsAccount;
-  if (!["production", "demo"].includes(environment) || !["uta", "classic"].includes(account)) return jsonError("invalid_transport_selection", 400);
-  try { bitgetWsEndpoint(environment, account, "private"); } catch { return jsonError("unsupported_environment_account_combination", 400); }
-  const creds = bitgetPrivateCredentialSet(env, environment, account);
-  if (!creds.key || !creds.secret || !creds.passphrase) return jsonError("credentials_missing_for_selected_environment", 503);
+  const environment = "production", account = "uta";
+  try { bitgetWsEndpoint("production", "uta", "private"); } catch { return jsonError("unsupported_transport", 400); }
+  const creds = bitgetPrivateCredentialSet(env);
+  if (!creds.key || !creds.secret || !creds.passphrase) return jsonError("credentials_missing", 503);
 
   const Pair = (globalThis as any).WebSocketPair, Socket = (globalThis as any).WebSocket;
   if (!Pair || !Socket) return jsonError("websocket_runtime_unavailable", 501);
@@ -46,6 +42,8 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   server.accept();
   let upstream: WebSocket | null = null, loggedIn = false, closed = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let connectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let lastUpstreamMessageAt = Date.now();
 
   const sendClient = (value: unknown) => {
     if (!closed && server.readyState === 1) try { server.send(typeof value === "string" ? value : JSON.stringify(value)); } catch { /* closing */ }
@@ -54,22 +52,28 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
     if (closed) return;
     closed = true;
     if (heartbeat) clearInterval(heartbeat);
+    if (connectTimeout) clearTimeout(connectTimeout);
     heartbeat = null;
+    connectTimeout = null;
     try { upstream?.close(code, reason); } catch { /* already closed */ }
     try { server.close(code, reason); } catch { /* already closed */ }
   };
 
   sendClient({ event: "status", state: "connecting", environment, account });
+  connectTimeout = setTimeout(() => { if (!loggedIn && !closed) { sendClient({ event: "error", code: "upstream_login_timeout" }); close(1011, "upstream login timeout"); } }, 20000);
   try {
     upstream = new Socket(bitgetWsEndpoint(environment, account, "private"));
     upstream.addEventListener("open", async () => {
       if (closed || !upstream) return;
-      try { upstream.send(JSON.stringify(await bitgetPrivateLogin(env, environment, account))); }
+      try { upstream.send(JSON.stringify(await bitgetPrivateLogin(env))); }
       catch { sendClient({ event: "error", code: "login_signing_failed" }); close(1011, "login signing failed"); }
     });
     upstream.addEventListener("message", (event: MessageEvent) => {
       if (closed) return;
       const raw = typeof event.data === "string" ? event.data : "";
+      lastUpstreamMessageAt = Date.now();
+      if (raw === "pong") { sendClient("pong"); return; }
+      if (raw === "ping") { try { upstream?.send("pong"); } catch { close(1011, "upstream ping response failed"); } return; }
       let message: any;
       try { message = JSON.parse(raw); } catch { sendClient(raw); return; }
       if (message?.event === "login") {
@@ -78,7 +82,9 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
           close(1011, "Bitget login rejected"); return;
         }
         loggedIn = true;
-        const args = account === "uta" ? bitgetUtaPrivateSubscriptions() : bitgetClassicPrivateTopics();
+        if (connectTimeout) clearTimeout(connectTimeout);
+        connectTimeout = null;
+        const args = bitgetUtaPrivateSubscriptions();
         try { upstream?.send(JSON.stringify({ op: "subscribe", args })); }
         catch { close(1011, "subscription failed"); return; }
         sendClient({ event: "status", state: "authenticated", environment, account, topics: args });
@@ -98,7 +104,10 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   server.addEventListener("close", () => close());
   server.addEventListener("error", () => close(1011, "client socket error"));
   heartbeat = setInterval(() => {
-    if (!closed && loggedIn && upstream?.readyState === 1) try { upstream.send("ping"); } catch { close(1011, "heartbeat failed"); }
+    if (!closed && loggedIn && upstream?.readyState === 1) {
+      if (Date.now() - lastUpstreamMessageAt > 65000) { close(1011, "upstream heartbeat timeout"); return; }
+      try { upstream.send("ping"); } catch { close(1011, "heartbeat failed"); }
+    }
   }, 30000);
   return new Response(null, { status: 101, webSocket: client } as any);
 }

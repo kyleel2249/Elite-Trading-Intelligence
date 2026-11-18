@@ -165,3 +165,13 @@ test("Pro Terminal preserves USDT, USDC and Coin-M Bitget futures selections",()
 test("Pro Terminal sends the selected exchange provenance with supplied SMC candles",()=>{
  assert.ok(TRADING_TERMINAL_JS.includes('venue:provider,provider,candles:d.candles'));
 });
+
+
+test("terminal exposes Production UTA V3 JSON/SBE and private-feed controls",()=>{
+ for(const id of ["tt-bg-protocol","tt-private-connect","tt-private-status"])assert.match(TRADING_TERMINAL_HTML,new RegExp("id=\""+id+"\""));
+ assert.match(TRADING_TERMINAL_JS,/subscribeTransport\(options,handlers\)/);
+ assert.match(TRADING_TERMINAL_JS,/bitgetProtocol/);
+ assert.match(TRADING_TERMINAL_JS,/subscribePrivate\(\{maxRetries:4\}/);
+ assert.match(TRADING_TERMINAL_JS,/toggleTerminalBitgetPrivateStream/);
+});
+

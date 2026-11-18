@@ -238,7 +238,7 @@ test("UTA public trades parser accepts compact p/v/S/T field names", () => {
   const sockets: any[] = [], messages: any[] = [];
   class FakeWebSocket {
     readyState = 0; onopen: any; onmessage: any; onclose: any; onerror: any; sent: string[] = [];
-    constructor(public url: string) { sockets.push(this); }
+    url: string; constructor(url: string) { this.url = url; sockets.push(this); }
     send(value: string) { this.sent.push(value); }
     close() { this.readyState = 3; if (this.onclose) this.onclose({}); }
   }
@@ -255,26 +255,6 @@ test("UTA public trades parser accepts compact p/v/S/T field names", () => {
 });
 
 
-test("transport adapter selects production V3, demo V3, Classic V2 and SBE endpoints with correct subscriptions",()=>{
- const sockets:any[]=[];
- class FakeWebSocket{readyState=0;onopen:any;onmessage:any;onclose:any;onerror:any;sent:string[]=[];binaryType="";url:string;constructor(url:string){this.url=url;sockets.push(this)}send(v:string){this.sent.push(v)}close(){this.readyState=3;if(this.onclose)this.onclose({})}}
- const sandbox:any={window:{},AbortSignal,Response,WebSocket:FakeWebSocket,Date,Math,JSON,Number,String,Array,Object,Promise,Map,TextDecoder,DataView,ArrayBuffer,Uint8Array,BigInt,setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,clearTimeout:()=>{},fetch:async()=>new Response("{}")};
- vm.runInNewContext(BITGET_CLIENT_JS,sandbox);
- const api=sandbox.window.ETIBitget;
- api.subscribeTransport({symbol:"BTCUSDT",market:"futures",category:"USDT-FUTURES",environment:"production",account:"uta"});
- api.subscribeTransport({symbol:"BTCUSDT",market:"spot",environment:"demo",account:"uta"});
- api.subscribeTransport({symbol:"BTCUSDT",market:"futures",category:"USDT-FUTURES",environment:"production",account:"classic"});
- api.subscribeTransport({symbol:"BTCUSDT",market:"futures",category:"USDT-FUTURES",environment:"production",account:"uta",protocol:"sbe"});
- assert.equal(sockets[0].url,"wss://ws.bitget.com/v3/ws/public");
- assert.equal(sockets[1].url,"wss://wspap.bitget.com/v3/ws/public");
- assert.equal(sockets[2].url,"wss://ws.bitget.com/v2/ws/public");
- assert.equal(sockets[3].url,"wss://ws.bitget.com/v3/ws/public/sbe");
- sockets.forEach(s=>{s.readyState=1;s.onopen()});
- const uta=JSON.parse(sockets[0].sent[0]);assert.ok(uta.args.some((x:any)=>x.topic==="publicTrade"&&x.instType==="usdt-futures"));
- const classic=JSON.parse(sockets[2].sent[0]);assert.ok(classic.args.some((x:any)=>x.channel==="trade"&&x.instType==="USDT-FUTURES"));
- const sbe=JSON.parse(sockets[3].sent[0]);assert.deepEqual(sbe.args.map((x:any)=>x.topic),["books50","books1","publicTrade"]);
-});
-
 test("transport adapter decodes SBE template 1002 and rejects invalid frames",()=>{
  const sandbox:any={window:{},AbortSignal,Response,Date,Math,JSON,Number,String,Array,Object,Promise,Map,TextDecoder,DataView,ArrayBuffer,Uint8Array,BigInt,setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,clearTimeout:()=>{},fetch:async()=>new Response("{}")};
  vm.runInNewContext(BITGET_CLIENT_JS,sandbox);
@@ -282,16 +262,3 @@ test("transport adapter decodes SBE template 1002 and rejects invalid frames",()
 });
 
 
-test("private browser transport selects demo/Classic relay and normalizes Classic V2 channel names",()=>{
- const sockets:any[]=[],messages:any[]=[];
- class FakeWebSocket{readyState=0;onopen:any;onmessage:any;onclose:any;onerror:any;sent:string[]=[];url:string;constructor(url:string){this.url=url;sockets.push(this)}send(v:string){this.sent.push(v)}close(){this.readyState=3;if(this.onclose)this.onclose({})}}
- const sandbox:any={window:{location:{protocol:"https:",host:"eti.test"}},AbortSignal,Response,WebSocket:FakeWebSocket,Date,Math,JSON,Number,String,Array,Object,Promise,Map,setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,clearTimeout:()=>{},fetch:async()=>new Response("{}")};
- vm.runInNewContext(BITGET_CLIENT_JS,sandbox);
- sandbox.window.ETIBitget.subscribePrivate({environment:"demo",account:"uta"},{onMessage:(m:any)=>messages.push(m)});
- sandbox.window.ETIBitget.subscribePrivate({environment:"production",account:"classic"},{onMessage:(m:any)=>messages.push(m)});
- assert.equal(sockets[0].url,"wss://eti.test/api/bitget/ws/private?environment=demo&account=uta");
- assert.equal(sockets[1].url,"wss://eti.test/api/bitget/ws/private?environment=production&account=classic");
- sockets[1].readyState=1;sockets[1].onopen();
- sockets[1].onmessage({data:JSON.stringify({arg:{instType:"USDT-FUTURES",channel:"orders"},action:"update",data:[{orderId:"o1"}]})});
- assert.equal(messages.find((m:any)=>m.type==="order").data.data[0].orderId,"o1");
-});
