@@ -76,7 +76,7 @@ function supportResistance(rows:Candle[],book?:DepthBook|null):HeatZone[]{
  return merged.sort((a,b)=>b.strength-a.strength).slice(0,24);
 }
 export function calculatePositionPlan(input:{equity:number;entry:number;stop:number;leverage:number;riskPercent:number;maxMarginPercent?:number;compoundProfits?:boolean}){
- const equity=Math.max(0,input.equity),entry=input.entry,stop=input.stop,lev=clamp(input.leverage,1,125),riskPct=clamp(input.riskPercent,0.1,100),marginPct=clamp(input.maxMarginPercent??30,1,100);
+ const equity=finite(input.equity)?Math.max(0,input.equity):0,entry=input.entry,stop=input.stop,lev=clamp(finite(input.leverage)?input.leverage:20,1,125),riskPct=clamp(finite(input.riskPercent)?input.riskPercent:30,0.1,100),marginPct=clamp(finite(input.maxMarginPercent??30)?(input.maxMarginPercent??30):30,1,100);
  if(![equity,entry,stop].every(finite)||equity<=0||entry<=0||stop<=0||entry===stop)return {valid:false,reason:"invalid_sizing_inputs",equity,riskBudget:0,notional:0,margin:0,quantity:0,plannedLoss:0,actualRiskPercent:0,leverage:lev};
  const distance=Math.abs(entry-stop)/entry,side=stop<entry?"LONG":"SHORT";
  
@@ -85,7 +85,7 @@ export function calculatePositionPlan(input:{equity:number;entry:number;stop:num
  // Conservative liquidation proximity proxy. Actual exchange liquidation is contract/account-mode specific.
  const liqBufferPct=100/lev*0.75,stopDistancePct=distance*100;
  const liquidationSafe=stopDistancePct<liqBufferPct;
- return {valid:liquidationSafe&&notional>0,reason:!liquidationSafe?"stop_too_close_to_estimated_liquidation":targetNotional>maxNotional?"risk_target_capped_by_margin_limit":"sized",equity,riskBudget,notional,margin,quantity:notional/entry,plannedLoss,actualRiskPercent:plannedLoss/equity*100,leverage:lev,marginPercent:margin/equity*100,stopDistancePct,estimatedLiquidationBufferPct:liqBufferPct,liquidationSafe,side,compoundProfits:input.compoundProfits!==false};
+ return {valid:liquidationSafe&&notional>0,reason:!liquidationSafe?"stop_too_close_to_estimated_liquidation":targetNotional>maxNotional?"risk_target_capped_by_margin_limit":"sized",equity,riskBudget,targetNotional,maxNotional,notional,margin,quantity:notional/entry,plannedLoss,actualRiskPercent:plannedLoss/equity*100,leverage:lev,marginPercent:margin/equity*100,stopDistancePct,estimatedLiquidationBufferPct:liqBufferPct,liquidationSafe,riskTargetCapped:targetNotional>maxNotional,side,compoundProfits:input.compoundProfits!==false};
 }
 export function compoundEquity(currentEquity:number,realizedPnl:number,compoundProfits=true){const base=Math.max(0,currentEquity);return round(Math.max(0,base+(compoundProfits?realizedPnl:Math.min(0,realizedPnl))),8);}
 export function analyzeTradingStrategy(input:{symbol:string;venue?:string;market?:string;category?:string;candles:Candle[];candlesByTimeframe?:Record<string,Candle[]>;depth?:DepthBook|null;trades?:TradePrint[];risk?:Partial<StrategyRiskConfig>}){
