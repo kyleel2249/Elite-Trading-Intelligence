@@ -118,7 +118,11 @@ export async function recordDepthSnapshot(store: DepthHistoryStore | undefined, 
     const raw = await store.get(key);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) rows = parsed.filter((x): x is DepthSnapshot => x && finite(x.capturedAt) && Array.isArray(x.bids) && Array.isArray(x.asks)).slice(-71);
+      const validLevels = (levels: unknown) => Array.isArray(levels) && levels.length <= 20 && levels.every((level: unknown) =>
+        Array.isArray(level) && level.length >= 2 && finite(level[0]) && level[0] > 0 && finite(level[1]) && level[1] > 0);
+      if (Array.isArray(parsed)) rows = parsed.filter((x): x is DepthSnapshot =>
+        x && finite(x.capturedAt) && x.capturedAt > 0 && validLevels(x.bids) && validLevels(x.asks)
+      ).slice(-71);
     }
     const last = rows.at(-1);
     if (!last || input.now - last.capturedAt >= 5000) {

@@ -209,6 +209,13 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         provider = t.provider;
         if (!trades || !depth) return reply({ error: "market_data_invalid", detail: "The exchange returned data that failed ETI validation." }, 424);
       }
+      const newestTradeAt = trades.at(-1)!.time;
+      const tradeAgeMs = now - newestTradeAt;
+      if (tradeAgeMs < -60_000 || tradeAgeMs > 180_000) return reply({ error: "stale_trade_tape", tradeAgeMs, maximumAgeMs: 180_000, submitsOrder: false }, 424);
+      if (post && body.depth?.timestamp !== undefined) {
+        const depthAt = Number(body.depth.timestamp);
+        if (!Number.isFinite(depthAt) || Math.abs(now - depthAt) > 180_000) return reply({ error: "stale_depth_snapshot", submitsOrder: false }, 424);
+      }
       const bucketRaw = Number(q("bucketSize") ?? body.bucketSize);
       const bucketSize = Number.isFinite(bucketRaw) && bucketRaw > 0 ? bucketRaw : undefined;
       const analysis = buildOrderFlow({ symbol, venue, market, provider, trades, depth, candles, bucketSize, now });

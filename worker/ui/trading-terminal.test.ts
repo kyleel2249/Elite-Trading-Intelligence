@@ -115,7 +115,7 @@ test("advanced order-flow metrics use exchange trades and depth and feed ETIAlgo
   assert.match(TRADING_TERMINAL_JS, /api\/omnisignal/);
   assert.match(TRADING_TERMINAL_JS, /loadSignalInputs/);
   assert.match(TRADING_TERMINAL_HTML, /tt-footprint/);
-  assert.match(TRADING_TERMINAL_HTML, /Historical liquidity persistence/);
+  assert.match(TRADING_TERMINAL_HTML, /Historical liquidity persistence/i);
   assert.match(TRADING_TERMINAL_JS, /function loadDeepOrderFlow\(/);
   assert.match(TRADING_TERMINAL_JS, /api\/analysis\/orderflow/);
   assert.match(TRADING_TERMINAL_JS, /renderDeepOrderFlow/);
