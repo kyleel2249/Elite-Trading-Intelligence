@@ -194,8 +194,8 @@ function subscribePrivate(opts,handlers){
 }
 
 function transportEndpoint(environment,account,protocol){
- if(protocol==="sbe"){if(account!=="uta")throw new Error("SBE is only supported for UTA public market data");return environment==="demo"?"wss://wspap.bitget.com/v3/ws/public/sbe":"wss://ws.bitget.com/v3/ws/public/sbe";}
- if(account==="classic")return "wss://ws.bitget.com/v2/ws/public";
+ if(protocol==="sbe"){if(account!=="uta")throw new Error("SBE is only supported for UTA public market data");if(environment!=="production")throw new Error("SBE demo endpoint is not documented");return "wss://ws.bitget.com/v3/ws/public/sbe";}
+ if(account==="classic"){if(environment==="demo")throw new Error("Classic V2 demo endpoint is not documented");return "wss://ws.bitget.com/v2/ws/public";}
  return environment==="demo"?"wss://wspap.bitget.com/v3/ws/public":"wss://ws.bitget.com/v3/ws/public";
 }
 function transportArgs(opts){
