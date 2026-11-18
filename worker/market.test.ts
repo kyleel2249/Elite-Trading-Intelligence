@@ -196,3 +196,22 @@ test("Bitget Worker proxy reports a classified 502 when all hosts fail at the ne
   assert.equal(response.status, 502);
   assert.equal((await response.json() as any).code, "ETI_UPSTREAM_UNAVAILABLE");
 });
+
+
+test("Bitget category-scoped catalogue freshness is independent of failures in other futures products", async () => {
+  const fetcher: any = async (input: string) => {
+    const u = new URL(input), category = u.searchParams.get("category") || "";
+    if (category === "COIN-FUTURES") return new Response("temporarily unavailable", { status: 503 });
+    const symbol = category === "USDC-FUTURES" ? "BTCUSDC" : "BTCUSDT";
+    return new Response(JSON.stringify({ code: "00000", data: [{
+      symbol, baseCoin: "BTC", quoteCoin: category === "USDC-FUTURES" ? "USDC" : "USDT",
+      status: "normal", type: "perpetual"
+    }] }));
+  };
+  const response = await handleMarket(req("/api/market/symbols?venue=bitget&market=futures&category=USDT-FUTURES"), {});
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.sources.futures.stale, false, "fresh USDT contracts must not inherit the COIN-M outage");
+  assert.deepEqual(body.sources.futures.partial, []);
+  assert.ok(body.symbols.some((r: any[]) => r[6] === "USDT-FUTURES"));
+});
