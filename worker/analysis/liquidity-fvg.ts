@@ -72,8 +72,8 @@ export function analyzeLiquidityFvg(
     const minExt = Math.max(0.1, ext || 0.2), maxExt = Math.max(minExt + 0.15, Math.min(2, ext ? ext*1.8 : 0.65));
     const lo = p.side === "buy_side" ? p.price + atr*minExt : p.price - atr*maxExt;
     const hi = p.side === "buy_side" ? p.price + atr*maxExt : p.price - atr*minExt;
-    return { id: p.side+":"+i+":"+round(p.price,8), side:p.side, price:p.price, touches:p.touches, distanceAtr:round(dist,2), distancePct:round(Math.abs(p.price-price)/price*100,3), freshness:dist<=1.25?"near":dist<=3?"watch":"distant", sweepRisk,
-      estimatedSweepBand:{low:round(Math.min(lo,hi),8),high:round(Math.max(lo,hi),8)}, status:recentSweep?"swept_and_reclaimed":"intact" };
+    return { id: p.side+":"+i+":"+round(p.price,8), side:p.side, price:p.price, touches:p.touches, distanceAtr:round(dist,2), distancePct:round(Math.abs(p.price-price)/price*100,3), freshness:(dist<=1.25?"near":dist<=3?"watch":"distant") as LiquidityPoolIntel["freshness"], sweepRisk,
+      estimatedSweepBand:{low:round(Math.min(lo,hi),8),high:round(Math.max(lo,hi),8)}, status:(recentSweep?"swept_and_reclaimed":"intact") as LiquidityPoolIntel["status"] };
   }).sort((a,b)=>b.sweepRisk-a.sweepRisk || a.distanceAtr-b.distanceAtr).slice(0,16);
   const nearestBuy = poolIntel.filter(p=>p.side==="buy_side"&&p.price>price).sort((a,b)=>a.distanceAtr-b.distanceAtr)[0];
   const nearestSell = poolIntel.filter(p=>p.side==="sell_side"&&p.price<price).sort((a,b)=>a.distanceAtr-b.distanceAtr)[0];
