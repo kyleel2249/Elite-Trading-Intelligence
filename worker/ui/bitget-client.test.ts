@@ -199,7 +199,7 @@ test("Bitget catalogue never replaces a populated product list with an empty act
 });
 
 
-test("Bitget futures WebSocket uses the exchange-native uppercase product type and V3 candle granularity",()=>{
+test("Bitget futures WebSocket uses the documented lowercase product type and V3 candle interval",()=>{
  assert.ok(BITGET_CLIENT_JS.includes('function streamProduct(market,category){if(market!=="futures")return "spot";'));
  assert.ok(BITGET_CLIENT_JS.includes('return String(category||"USDT-FUTURES").toLowerCase()'));
  assert.ok(BITGET_CLIENT_JS.includes('interval:v3iv'));
