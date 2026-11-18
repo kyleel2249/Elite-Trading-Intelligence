@@ -95,7 +95,7 @@ test("autopilot refuses a trade below configured confidence and agreement", asyn
   } };
   const result = await runAgentAutopilotCycle(env, app, 2_100_000);
   assert.equal(result.submitted, 0);
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, 6);
   assert.equal(calls[0], "/api/agents/analyze");
   assert.equal(calls.slice(1).every(x => x === "/api/omnisignal"), true);
   assert.equal(result.outcomes[0].status, "no_trade");
@@ -109,6 +109,6 @@ test("autopilot idempotency claim prevents duplicate symbol-slot runs", async ()
   const now = 2_400_000;
   await runAgentAutopilotCycle(env, app, now);
   const second = await runAgentAutopilotCycle(env, app, now);
-  assert.equal(calls, 5, "one council analysis and four strategy checks run in the first slot");
+  assert.equal(calls, 6, "one council analysis, one liquidity-FVG gate and four strategy checks run in the first slot");
   assert.equal(second.outcomes[0].reason, "already_processed_this_slot");
 });
