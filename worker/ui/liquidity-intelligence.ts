@@ -32,7 +32,7 @@ function mount(){
  createChartOverlay();
 }
 function setFeed(text,good){const el=$("eti-liq-feed");if(!el)return;el.textContent=text;el.className="eti-liq-pill"+(good===true?" good":good===false?" bad":"");}
-function query(path){const p=new URLSearchParams({venue:state.venue,market:state.market==="futures"?"futures":"spot",symbol:state.symbol,limit:"100"});if(state.venue==="bybit")p.set("category",state.category);return fetch(path+"?"+p,{cache:"no-store"}).then(async r=>{const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(j?.detail||j?.error||"HTTP "+r.status);return j;});}
+function query(path){const p=new URLSearchParams({venue:state.venue,market:state.market==="futures"?"futures":"spot",symbol:state.symbol,limit:"100"});if(path.indexOf("klines")>=0)p.set("interval",state.interval);if(state.venue==="bybit")p.set("category",state.category);return fetch(path+"?"+p,{cache:"no-store"}).then(async r=>{const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(j?.detail||j?.error||"HTTP "+r.status);return j;});}
 function normalizeTrades(rows,venue){
  return (rows||[]).map(t=>{
   if(Array.isArray(t))return {time:Number(t[0]),price:Number(t[1]),qty:Number(t[2]),side:String(t[3]||"").toLowerCase()};
