@@ -178,7 +178,7 @@ function compute(){
 function loadPrecision(tf){
  var sym=document.getElementById('symbol'),key=marketKey()+'|'+tf;
  if(!sym||precisionState.busy||(precisionState.key===key&&Date.now()-precisionState.at<60000))return;
- precisionState.key=key;precisionState.at=Date.now();precisionState.busy=true;
+ if(precisionState.key!==key)precisionState.ids=Object.create(null);precisionState.key=key;precisionState.at=Date.now();precisionState.busy=true;
  var url='/api/analysis/fvg-precision?symbol='+encodeURIComponent(sym.value)+'&timeframe='+encodeURIComponent(tf);
  fetch(url,{headers:{'accept':'application/json'}}).then(function(r){if(!r.ok)throw Error('precision analysis HTTP '+r.status);return r.json();}).then(function(data){
   if(precisionState.key!==key)return;
