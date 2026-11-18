@@ -4,7 +4,7 @@ export const LIQUIDITY_JS = String.raw`(function(){
 "use strict";
 if(window.__ETI_LIQUIDITY_BOOTED)return;window.__ETI_LIQUIDITY_BOOTED=true;
 const $=id=>document.getElementById(id),fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString(undefined,{maximumFractionDigits:d}):"—";
-const state={venue:"bitget",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",depth:null,previous:null,trades:[],candles:[],candlesByTimeframe:{},signalAt:0,analysis:null,orderFlow:null,history:[],ws:null,timer:null,candleAt:0,lastOrderFlowAt:0,busy:false,overlay:true,scenarios:true,root:false,lastError:"",sequence:0,equity:74};
+const state={venue:"bitget",market:"futures",category:"linear",symbol:"BTCUSDT",interval:"1h",depth:null,previous:null,trades:[],candles:[],candlesByTimeframe:{},signalAt:0,derivatives:null,marketMetrics:null,analysis:null,orderFlow:null,history:[],ws:null,timer:null,candleAt:0,lastOrderFlowAt:0,busy:false,overlay:true,scenarios:true,root:false,lastError:"",sequence:0,equity:74};
 const maxHistory=90;
 function isRoot(){return !!$("symVenue")&&!$("tt-venue");}
 function readContext(){
@@ -60,7 +60,7 @@ async function fetchBook(){
   const m=state.market==="futures"?"futures":"spot";
   const r=await window.ETIBitget.context({symbol:state.symbol,market:m,category:state.category,depthLimit:100,tradeLimit:100});
   if(!r.depth)throw new Error(r.failures?.depth||"Bitget order book unavailable");
-  return {depth:r.depth,trades:normalizeTrades(r.trades,"bitget"),ticker:r.ticker,source:"Bitget browser REST"};
+  return {depth:r.depth,trades:normalizeTrades(r.trades,"bitget"),ticker:r.ticker,derivatives:r.derivatives,source:"Bitget browser REST"};
  }
  const [depth,trades]=await Promise.all([query("/api/market/depth"),query("/api/market/trades")]);
  return {depth,trades:normalizeTrades(trades,"bybit"),source:"Bybit REST"};
@@ -72,12 +72,12 @@ async function poll(force){
   const result=await fetchBook();if(seq!==state.sequence)return;
   const book={bids:result.depth.bids,asks:result.depth.asks,timestamp:Number(result.depth.timestamp)||Date.now()};
   if(!book.bids.length||!book.asks.length)throw new Error("Exchange returned empty order-book sides");
-  const prev=state.depth;state.previous=prev;state.depth=book;state.trades=result.trades||[];
+  const prev=state.depth;state.previous=prev;state.depth=book;state.trades=result.trades||[];state.derivatives=result.derivatives||null;state.marketMetrics=result.ticker?{turnover24h:result.ticker.quoteVolume,volume24h:result.ticker.volume,priceChange24h:result.ticker.priceChangePercent,high24h:result.ticker.highPrice,low24h:result.ticker.lowPrice}:null;
   const now=Date.now(),last=state.history[state.history.length-1];
   if(force||!last||now-last.t>900){state.history.push({t:now,mid:(book.bids[0][0]+book.asks[0][0])/2,bids:book.bids.slice(0,45),asks:book.asks.slice(0,45)});state.history=state.history.slice(-maxHistory);saveHistory();}
   await getCandles();
   await loadOrderFlow();
-  const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,candlesByTimeframe:state.candlesByTimeframe,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true,maxDailyLossPercent:30}};
+  const payload={symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:book,previousDepth:prev,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,candlesByTimeframe:state.candlesByTimeframe,derivatives:state.derivatives,marketMetrics:state.marketMetrics,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true,maxDailyLossPercent:30}};
   const response=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),cache:"no-store"});
   const analysis=await response.json().catch(()=>null);if(!response.ok)throw new Error(analysis?.detail||analysis?.error||"Liquidity analysis failed");
   state.analysis=analysis;setFeed(result.source+" · live snapshot",true);render();drawHeatmap();drawOverlay();
@@ -181,10 +181,10 @@ function startStream(){
 let analyzeAt=0;
 async function analyzeStreamDepth(){
  if(!state.depth||Date.now()-analyzeAt<900)return;analyzeAt=Date.now();
- try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,candlesByTimeframe:state.candlesByTimeframe,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true}})});const a=await r.json();if(r.ok){state.analysis=a;await loadOrderFlow();render();drawHeatmap();drawOverlay();}}catch(e){}
+ try{const r=await fetch("/api/liquidity/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:state.symbol,venue:state.venue,market:state.market,category:state.category,depth:state.depth,previousDepth:state.previous,history:state.history.slice(-45).map(s=>({timestamp:s.t,bids:s.bids,asks:s.asks})),trades:state.trades,candles:state.candles,candlesByTimeframe:state.candlesByTimeframe,derivatives:state.derivatives,marketMetrics:state.marketMetrics,risk:{capital:state.equity,leverage:20,riskPercent:30,maxMarginPercent:30,compoundProfits:true}})});const a=await r.json();if(r.ok){state.analysis=a;await loadOrderFlow();render();drawHeatmap();drawOverlay();}}catch(e){}
 }
 function restart(){
- readContext();stopStream();state.depth=null;state.previous=null;state.trades=[];state.candles=[];state.candleAt=0;state.analysis=null;state.candlesByTimeframe={};state.signalAt=0;state.history=[];restoreHistory();mount();createChartOverlay();poll(true);startStream();
+ readContext();stopStream();state.depth=null;state.previous=null;state.trades=[];state.candles=[];state.candleAt=0;state.analysis=null;state.candlesByTimeframe={};state.signalAt=0;state.derivatives=null;state.marketMetrics=null;state.history=[];restoreHistory();mount();createChartOverlay();poll(true);startStream();
 }
 function watchControls(){
  const ids=isRoot()?["symVenue","symMarket","symCat","symbol","interval"]:["tt-venue","tt-market","tt-category","tt-symbol","tt-interval"];
