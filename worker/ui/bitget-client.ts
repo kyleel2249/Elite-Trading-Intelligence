@@ -238,12 +238,30 @@ function decodeSbeFrame(raw){
  }
  throw new Error("unsupported_sbe_template_"+tid);
 }
+function mergeSbeDepth(book,d){
+ var key=String(d.symbol||"unknown"),state=book[key],action=d.depthAction;
+ if(action===undefined||action===null||action===0){
+  state={bids:Object.create(null),asks:Object.create(null),seq:d.seq||0};
+  (d.bids||[]).forEach(function(x){if(x[1]>0)state.bids[String(x[0])]=x[1]});
+  (d.asks||[]).forEach(function(x){if(x[1]>0)state.asks[String(x[0])]=x[1]});
+  book[key]=state;
+ }else{
+  if(!state){return {error:"sbe_snapshot_required",symbol:key,seq:d.seq,pseq:d.pseq};}
+  if(d.pseq!==undefined&&d.pseq!==state.seq){delete book[key];return {error:"sbe_sequence_gap",symbol:key,expectedPrevious:state.seq,receivedPrevious:d.pseq,seq:d.seq};}
+  if(d.seq<=state.seq)return {ignored:true};
+  (d.bids||[]).forEach(function(x){var k=String(x[0]);if(x[1]<=0)delete state.bids[k];else state.bids[k]=x[1]});
+  (d.asks||[]).forEach(function(x){var k=String(x[0]);if(x[1]<=0)delete state.asks[k];else state.asks[k]=x[1]});
+  state.seq=d.seq;
+ }
+ function levels(x,desc){return Object.keys(x).map(function(k){return [Number(k),x[k]]}).sort(function(a,b){return desc?b[0]-a[0]:a[0]-b[0]}).slice(0,50)}
+ return {data:{bids:levels(state.bids,true),asks:levels(state.asks,false),timestamp:d.ts/1000,sequence:state.seq,symbol:key,action:action===1?"update":"snapshot"},error:null};
+}
 function subscribeTransport(opts,handlers){
  opts=opts||{};handlers=handlers||{};
  var environment=opts.environment==="demo"?"demo":"production",account=opts.account==="classic"?"classic":"uta",protocol=opts.protocol==="sbe"?"sbe":"json",symbol=String(opts.symbol||"").toUpperCase(),args=transportArgs(opts),url=transportEndpoint(environment,account,protocol);
  if(protocol==="sbe"&&account!=="uta")throw new Error("SBE is UTA-only");
  if(protocol==="sbe"){var inst=opts.market==="futures"?String(opts.category||"USDT-FUTURES").toLowerCase():"spot";args=[{instType:inst,topic:"books50",symbol:symbol},{instType:inst,topic:"books1",symbol:symbol},{instType:inst,topic:"publicTrade",symbol:symbol}];}
- var ws=null,closed=false,retry=0,retryTimer=null,ping=null,watchdog=null,last=0,connected=false;
+ var ws=null,closed=false,retry=0,retryTimer=null,ping=null,watchdog=null,last=0,connected=false,sbeBookState=Object.create(null);
  function status(s,d){if(handlers.onStatus)handlers.onStatus({state:s,detail:d||"",connected:connected,retry:retry,environment:environment,account:account,protocol:protocol});}
  function emit(type,data,raw){if(handlers.onMessage)handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null,environment:environment,account:account,protocol:protocol});}
  function stop(){if(ping)clearInterval(ping);if(watchdog)clearInterval(watchdog);ping=watchdog=null;}
@@ -251,7 +269,7 @@ function subscribeTransport(opts,handlers){
  function connect(){if(closed)return;status("connecting");try{ws=new WebSocket(url);ws.binaryType="arraybuffer";}catch(e){reconnect("websocket_unavailable");return;}var cur=ws;
   cur.onopen=function(){if(closed||ws!==cur)return;connected=true;retry=0;last=Date.now();status("connected");cur.send(JSON.stringify({op:"subscribe",args:args}));ping=setInterval(function(){if(ws===cur&&cur.readyState===1)try{cur.send("ping")}catch(e){}},30000);watchdog=setInterval(function(){if(ws===cur&&connected&&Date.now()-last>65000)try{cur.close()}catch(e){}},10000);};
   cur.onmessage=function(ev){if(closed||ws!==cur)return;last=Date.now();if(ev.data==="pong"||ev.data==="ping")return;
-   if(protocol==="sbe"&&typeof ev.data!=="string"){try{var d=decodeSbeFrame(ev.data);if(d.type==="books1"||d.type==="books50")emit("depth",{bids:d.bids,asks:d.asks,timestamp:d.ts/1000,sequence:d.seq,pseq:d.pseq,action:d.depthAction===0?"snapshot":d.depthAction===1?"update":null,symbol:d.symbol},d);else if(d.type==="publicTrade")emit("trades",d.trades.map(function(t){return {T:t.ts/1000,p:String(t.price),q:String(t.size),m:t.side==="sell",execId:t.execId,isRPI:t.isRPI}}),d);}catch(e){emit("error",{code:"sbe_decode_failed",message:e.message},null);}return;}
+   if(protocol==="sbe"&&typeof ev.data!=="string"){try{var d=decodeSbeFrame(ev.data);if(d.type==="books1")emit("depth",{bids:d.bids,asks:d.asks,timestamp:d.ts/1000,sequence:d.seq,symbol:d.symbol,action:"bbo"},d);else if(d.type==="books50"){var merged=mergeSbeDepth(sbeBookState,d);if(merged.error)emit("error",{code:merged.error,symbol:merged.symbol,expectedPrevious:merged.expectedPrevious,receivedPrevious:merged.receivedPrevious,detail:"Fetch a fresh REST order-book snapshot before applying further deltas"},d);else if(!merged.ignored)emit("depth",merged.data,d);}else if(d.type==="publicTrade")emit("trades",d.trades.map(function(t){return {T:t.ts/1000,p:String(t.price),q:String(t.size),m:t.side==="sell",execId:t.execId,isRPI:t.isRPI}}),d);}catch(e){emit("error",{code:"sbe_decode_failed",message:e.message},null);}return;}
    var m;try{m=JSON.parse(ev.data)}catch(e){emit("raw",ev.data,null);return;}if(m.event==="error"){emit("error",m,m);return;}if(m.event==="subscribe"||m.event==="login")return;
    var a=m.arg||{},topic=String(a.topic||a.channel||""),rows=Array.isArray(m.data)?m.data:[];
    if(topic==="ticker"&&rows.length)emit("ticker",parseTicker(rows[0]),m);
