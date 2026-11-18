@@ -47,6 +47,16 @@ test("dashboard uses a static, contained 1920x1080 chart layout with no 3D anima
   assert.match(html, /id="paneMacd"/);
   assert.match(html, /id="paneAdx"/);
   assert.match(html, /id="paneScore"/);
+  assert.match(html, /id="institutionalPanel"/, "institutional intelligence is embedded in the main dashboard");
+  assert.match(html, /Institutional Market Intelligence/);
+  assert.match(html, /id="imMetrics"/);
+  assert.match(html, /id="imStructure"/);
+  assert.match(html, /id="imProfile"/);
+  assert.match(html, /id="imLiquidity"/);
+  assert.match(html, /id="imEvents"/);
+  assert.match(html, /refreshInstitutionalIntel/);
+  assert.match(html, /\/api\/analysis\/smc/);
+  assert.match(html, /volumeProfile/);
   assert.match(html, /<script[^>]+src="\\/bitget-client\\.js"/i);
   assert.match(html, /lightweight-charts@4\\.1\\.3/);
 });
