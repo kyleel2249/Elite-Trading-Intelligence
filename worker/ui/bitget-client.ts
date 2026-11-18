@@ -220,7 +220,7 @@ function decodeSbeFrame(raw){
  if(tid===1002){
   if(bl<56||bytes.length<8+bl+1)throw new Error("sbe_bbo_truncated");
   var o=8,pe=v.getInt8(o+40),se=v.getInt8(o+41);
-  out.type="books1";out.ts=u64(o);out.bids=[[scale(i64(o+8),pe),scale(i64(o+16),se)]];out.asks=[[scale(i64(o+24),pe),scale(i64(o+32),se)]];out.priceExponent=pe;out.sizeExponent=se;out.seq=u64(o+42);out.symbol=text(8+bl);return out;
+  out.type="books1";out.ts=u64(o);out.bids=[[scale(i64(o+8),pe),scale(i64(o+16),se)]];out.asks=[[scale(i64(o+24),pe),scale(i64(o+32),se)]];out.priceExponent=pe;out.sizeExponent=se;out.seq=u64(o+42);out.sts=bl>=64?u64(o+50):null;out.category=bl>=64?v.getUint8(o+58):null;out.symbol=text(8+bl);return out;
  }
  if(tid===1001){
   var o=8;if(bl<24)throw new Error("sbe_depth_root_invalid");
