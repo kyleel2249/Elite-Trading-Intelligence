@@ -4,6 +4,7 @@ import { runOmnisignal } from "../algo/omnisignal.ts";
 import { analyzeFvgMtf, FVG_RULES } from "./fvg.ts";
 import { detectDisplacement, detectLiquiditySweeps, detectOrderBlocks, findLiquidityPools } from "./smc.ts";
 import { analyzeStructure, findPivots } from "./structure.ts";
+import { volumeProfile } from "./volume-profile.ts";
 import { TIMEFRAMES as ALGO_TFS, type Timeframe as AlgoTf } from "../algo/timeframes.ts";
 import { fetchCurrencyMacro, fetchDollarTrend, fetchStockFundamentals, SourceError, type AnalysisEnv, type FetchFn } from "./fundamental-sources.ts";
 import { cryptoFundamentals, fundamentalUnavailable, fxFundamentals, stockFundamentals } from "./fundamental.ts";
@@ -201,6 +202,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         canTriggerTrade: false, submitsOrder: false, liveExecutionAllowed: false,
       });
       const pivots = findPivots(closed), structure = analyzeStructure(closed, pivots);
+      const profile = volumeProfile(closed);
       const liquidityPools = findLiquidityPools(closed, pivots);
       const liquiditySweeps = detectLiquiditySweeps(closed, pivots, 40);
       const orderBlocks = detectOrderBlocks(closed, 120);
@@ -214,7 +216,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
           lastSwingHigh: structure.lastSwingHigh, lastSwingLow: structure.lastSwingLow,
           invalidationLevel: structure.invalidationLevel, events: structure.events,
         },
-        pivots: pivots.slice(-40), liquidityPools, liquiditySweeps, orderBlocks, displacement,
+        pivots: pivots.slice(-40), liquidityPools, liquiditySweeps, orderBlocks, displacement, volumeProfile: profile,
         methodology: {
           bos: "A confirmed close beyond the latest confirmed swing; a break against the current direction is labelled CHoCH.",
           liquidity: "Equal highs/lows within 0.15 ATR form pools. A sweep requires a wick through a pool or confirmed swing and a reclaim within two bars.",
