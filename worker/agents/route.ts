@@ -28,6 +28,7 @@ import { applyFilters, loadBinanceFilters } from "./filters.ts";
 import type { SymbolFilters } from "./filters.ts";
 import { DASHBOARD_HTML } from "./dashboard.ts";
 import { withLlmBrief } from "./llm-route.ts";
+import { withJarvis } from "./jarvis.ts";
 import { readAutopilotConfig } from "./autopilot.ts";
 import { listAgentDecisions, persistAgentDecision } from "./persistence.ts";
 import type { AgentAuditDb, AgentDecisionSnapshot } from "./persistence.ts";
@@ -308,5 +309,5 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
 
 /** Public entry point. The advisory LLM review route sits in front of the agent routes; everything else is handled by the core above. */
 export function withAgents<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}): App<E> {
-  return withLlmBrief(withAgentsCore(base, deps) as App<any>, { loadMarket: deps.loadMarket, loadProviders: deps.loadProviders, now: deps.now }) as App<E>;
+  return withJarvis(withLlmBrief(withAgentsCore(base, deps) as App<any>, { loadMarket: deps.loadMarket, loadProviders: deps.loadProviders, now: deps.now }) as App<any>) as App<E>;
 }
