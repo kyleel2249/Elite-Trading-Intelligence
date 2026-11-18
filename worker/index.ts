@@ -1088,7 +1088,7 @@ function symRebuild(want){
  if(!hasCur){const o=document.createElement('option');o.value=cur;o.textContent=cur+' (current)';sel.appendChild(o);}
  sel.appendChild(frag);sel.value=cur;
  const refreshLabel='Exchange catalogues refresh every minute';const upd=SYM.at?' · list updated '+new Date(SYM.at).toTimeString().slice(0,5)+', '+refreshLabel:'';
- $('symCount').textContent=rows.length+' of '+all.length+' '+(SYM.venue==='bitget'?'Bitget':'Bybit')+' '+(SYM.market==='futures'?'perpetual futures':SYM.market==='margin'?'margin':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'')+(SYM.venue==='bitget'?' · Bitget chart, margin and futures data are selected directly.':'');
+ $('symCount').textContent=rows.length+' of '+all.length+' '+(SYM.venue==='bitget'?'Bitget':'Bybit')+' '+(SYM.market==='futures'?'perpetual futures':SYM.market==='margin'?'margin':SYM.market==='metals'?'metals (gold, silver, copper, gold tokens)':'spot')+' pairs'+upd+(SYM.warn?' · '+SYM.warn:'')+(SYM.venue==='bitget'?' · Bitget REST via ETI proxy · live WebSocket direct.':'');
  const dl=$('symbolList');if(dl&&dl.dataset.n!==String(SYM.at)){dl.textContent='';SYM.all.filter(r=>r[3]==='spot').forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});dl.dataset.n=String(SYM.at);}
 }
 async function loadSymbols(){
@@ -1101,7 +1101,7 @@ async function loadSymbols(){
   ]);
   const prevAll=SYM.all||[];SYM.all=[];
   const warnings=[];
-  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0||i===3?'Bybit':'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{const src=j.sources[k]||{};if(src.stale){const age=src.fetchedAt?Math.max(0,Math.round((Date.now()-Number(src.fetchedAt))/1000)):null;warnings.push('Bitget '+k+' catalogue is stale'+(age!==null?' · last success '+age+'s ago':' · no successful refresh recorded'));}});}else{const venue=(i===0||i===3?'bybit':'bitget'),isMargin=(i===2||i===3),kept=prevAll.filter(x=>symV(x)===venue&&(x[3]==='margin')===isMargin);SYM.all.push(...kept);warnings.push((venue==='bybit'?'Bybit':'Bitget')+(kept.length?' refresh failed; keeping the last known list':' catalogue unavailable'));}});
+  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0||i===3?'Bybit':'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{const src=j.sources[k]||{};if(src.stale){const stamp=typeof src.fetchedAt==="number"?src.fetchedAt:Date.parse(String(src.fetchedAt));const age=Number.isFinite(stamp)?Math.max(0,Math.round((Date.now()-stamp)/1000)):null;warnings.push('Bitget '+k+' catalogue is stale'+(age!==null?' · last success '+age+'s ago':' · no successful refresh recorded'));}});}else{const venue=(i===0||i===3?'bybit':'bitget'),isMargin=(i===2||i===3),kept=prevAll.filter(x=>symV(x)===venue&&(x[3]==='margin')===isMargin);SYM.all.push(...kept);warnings.push((venue==='bybit'?'Bybit':'Bitget')+(kept.length?' refresh failed; keeping the last known list':' catalogue unavailable'));}});
   SYM.at=Date.now();
   SYM.warn=warnings.join('; ');
   if(!SYM.all.some(r=>symV(r)==='bybit'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bybit pairs unavailable.';
