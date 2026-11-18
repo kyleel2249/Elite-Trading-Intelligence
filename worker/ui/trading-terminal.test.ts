@@ -41,7 +41,8 @@ test("terminal exposes recent trades, chart presentation and manual level tools"
   assert.match(TRADING_TERMINAL_HTML, /tt-chart-style/);
   assert.match(TRADING_TERMINAL_HTML, /tt-draw-level/);
   assert.match(TRADING_TERMINAL_JS, /renderTrades/);
-  assert.doesNotMatch(TRADING_TERMINAL_JS, /api\/market\/depth|tt-heatmap/);
+  assert.match(TRADING_TERMINAL_JS, /api\\/market\\/depth/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /tt-heatmap/);
   assert.match(TRADING_TERMINAL_JS, /api\/market\/trades/);
   assert.match(TRADING_TERMINAL_JS, /createPriceLine/);
 });
