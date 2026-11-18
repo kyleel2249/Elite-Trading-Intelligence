@@ -14,8 +14,8 @@ test("calculates valid spread, depth imbalance, walls and confluence metadata",(
  assert.ok(r.confluence.score>=0&&r.confluence.score<=100);assert.equal(r.orderFlow.tradeCount,2);
 });
 test("classifies pulled, absorbed and replenished displayed liquidity using prior snapshots",()=>{
- const prev={bids:[[99.9,40],[99.8,2]],asks:[[100.1,2],[100.2,30]]};
- const curr={bids:[[99.9,5],[99.8,2]],asks:[[100.1,2],[100.2,45]]};
+ const prev={bids:[[99.9,40],[99.8,2],[99.7,20]],asks:[[100.1,2],[100.2,30]]};
+ const curr={bids:[[99.9,5],[99.8,2],[99.7,1]],asks:[[100.1,2],[100.2,45]]};
  const r=analyzeLiquidity({symbol:"BTCUSDT",venue:"bitget",market:"futures",depth:{...curr,timestamp:now},previousDepth:prev,trades:[{price:99.9,qty:20,side:"sell"}],candles});
  assert.ok(r.behaviour.pulled>=1);assert.ok(r.behaviour.replenished>=1);assert.ok(r.behaviour.absorbed>=1);
 });
