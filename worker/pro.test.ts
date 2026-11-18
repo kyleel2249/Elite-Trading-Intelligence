@@ -29,6 +29,7 @@ test("the Pro page is wired to the existing exchange, SMC, agent and account ser
   const html = proPage();
   for (const p of ["venue=bybit&market=", "provider=bybit&market=", "bitget-browser", "ETIBitget.marketData", "ETIBitget.candles", "/api/analysis/smc", "/api/agents/analyze", "/api/agents/autopilot", "/api/bybit/account", "/bitget-client.js"]) assert.ok(html.includes(p), p);
   assert.match(html, /id="ven"/);
+  assert.match(html, /Full ETI Dashboard/);
   assert.match(html, /id="mkt"/);
   // Bitget signal, SMC and chart share the same candle set: the signal is rejected if candles belong to another selection.
   assert.match(html, /Bitget candles for this selection are not loaded/);
