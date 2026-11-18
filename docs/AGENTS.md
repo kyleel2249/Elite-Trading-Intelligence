@@ -31,7 +31,7 @@ Twelve specialised agents exchange schema-validated JSON (`eti.agent.report/1`, 
 * `GET /api/agents/analyze?symbol=BTCUSDT&interval=1h[&benchmark=ETHUSDT]` – read-only analysis; analysis is read-only by default.
 * `POST /api/agents/analyze` – body may include `account`, `fundamentals`, `macro`, `news`, `onchain`, `benchmark`; include `record:true` and the existing bearer token to persist the full snapshot to D1; without authenticated opt-in, analysis remains read-only.
 * `POST /api/agents/execute` – bearer token required. Body: `symbol`, `interval`, `account`, supplied data, `execution: { broker, clientOrderId, riskConfirmed: true, executionSource? }`.
-* `GET /api/agents/decisions?limit=25[&before=UNIX_MS][&symbol=BTCUSDT]` – bearer token required; returns full immutable D1 snapshots with reports, evidence, message trail, dissent, risk checks and final decisions. Page size is capped at 100; requires `ETI_PORTFOLIO_DB`.
+* `GET /api/agents/decisions?limit=25[&before=UNIX_MS&beforeId=DECISION_ID][&symbol=BTCUSDT]` – bearer token required; returns full immutable D1 snapshots with reports, evidence, message trail, dissent, risk checks and final decisions. Page size is capped at 100; use the returned `nextBefore` and `nextBeforeId` together for stable pagination when several decisions share the same timestamp; requires `ETI_PORTFOLIO_DB`.
 * `GET /api/agents/audit` – bearer token required. Replays recorded decisions against later candles (stop-first, fees ignored), reports win rate with a Wilson interval and per-agent accuracy. Agents with ≥20 resolved trades and accuracy below 50% have their Commander weight reduced (floor 0.5×).
 * `POST /api/agents/brief` – bearer token required; advisory LLM review (needs `ANTHROPIC_API_KEY`).
 
