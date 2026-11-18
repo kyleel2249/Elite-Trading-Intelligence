@@ -202,7 +202,7 @@ function transportArgs(opts){
  var symbol=String(opts.symbol||"").toUpperCase(),account=opts.account==="classic"?"classic":"uta",market=opts.market==="futures"?"futures":"spot",category=opts.category||"USDT-FUTURES",iv=String(opts.interval||"1m");
  if(!/^[A-Z0-9]{5,20}$/.test(symbol))throw new Error("Invalid Bitget WebSocket symbol");
  if(account==="classic"){
-  var inst=market==="futures"?String(category).toUpperCase():"SPOT",candle="candle"+iv;
+  var inst=market==="futures"?String(category).toUpperCase():"SPOT",v2iv=({"1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1H","4h":"4H","6h":"6H","12h":"12H","1d":"1D","1w":"1W"})[iv]||"1m",candle="candle"+v2iv;
   return [{instType:inst,channel:"ticker",instId:symbol},{instType:inst,channel:"books5",instId:symbol},{instType:inst,channel:"trade",instId:symbol},{instType:inst,channel:candle,instId:symbol}];
  }
  var product=market==="futures"?String(category).toLowerCase():"spot";
