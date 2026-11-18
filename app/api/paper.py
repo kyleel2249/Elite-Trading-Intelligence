@@ -37,6 +37,11 @@ class PaperOrderIn(BaseModel):
     expire_seconds: Optional[float] = Field(default=None, gt=0, le=7 * 86400, allow_inf_nan=False)
     strategy: str = Field(default="manual", max_length=40)
     thesis: Optional[str] = Field(default=None, max_length=2000)
+    # Capital Protection inputs (validated, never trusted): a stop-loss is mandatory on entries.
+    stop_loss: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    take_profit: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    strategy_id: Optional[str] = Field(default=None, max_length=128)
+    atr_pct: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
 
     def engine_kwargs(self) -> dict:
         return {"symbol": self.symbol, "side": self.side, "qty": self.qty, "order_type": self.type, "limit_price": self.limit_price,
@@ -124,15 +129,62 @@ async def preview(body: PaperOrderIn):
     return {"execution_mode": "INTERNAL_PAPER", "mode_label": _LABEL, **await get_exchange().preview(**kw)}
 
 
+async def _protection_gate(symbol: str, side: str, qty: float, price: Optional[float], stop_loss: Optional[float],
+                           take_profit: Optional[float], strategy_id: Optional[str], atr_pct: Optional[float]):
+    """ETI CAPITAL PROTECTION SYSTEM check for the internal paper engine. Returns (service, verdict)."""
+    from app.config import get_settings
+    from app.database import SessionLocal
+    from app.risk.protection import OrderIntent
+    from app.risk.protection_service import CapitalProtectionService
+    from app.trading.service import TradingService
+
+    settings = get_settings()
+    db = SessionLocal()
+    try:
+        if price is None:
+            snap = await get_exchange()._snap(symbol)
+            price = float(snap.mid) if snap is not None else None
+        intent = OrderIntent(provider="binance", environment="paper", symbol=symbol.upper(), side=side, qty=qty, price=price,
+                             stop_loss=stop_loss, take_profit=take_profit, strategy_id=strategy_id, atr_pct=atr_pct,
+                             order_type="limit", source="paper_api")
+        protection = CapitalProtectionService(db, settings)
+        verdict = await TradingService(settings, db=db).internal_paper_verdict(protection, intent)
+        if not verdict.approved:
+            protection._finish(intent, verdict)
+        return verdict
+    finally:
+        db.close()
+
+
+def _protection_refusal(verdict) -> dict:
+    reasons = [f"[Capital Protection] {r}" for r in verdict.reasons]
+    return {"status": "rejected", "accepted": False, "duplicate": False, "reasons": reasons, "execution_mode": "INTERNAL_PAPER",
+            "mode_label": _LABEL, "order": {}, "fills": [], "capital_protection": verdict.to_dict()}
+
+
 @router.post("/orders")
 async def submit(body: PaperOrderIn, request: Request, response: Response):
     principal = await authorize(request, response, ENV_PAPER)
     execution_gate(principal, ENV_PAPER, {**body.engine_kwargs(), "op": "submit"})
+    ref = body.limit_price or body.trigger_price
+    verdict = await _protection_gate(body.symbol, body.side, body.qty, ref, body.stop_loss, body.take_profit, body.strategy_id, body.atr_pct)
+    if not verdict.approved:
+        return _protection_refusal(verdict)
     try:
         res = await get_exchange().submit(**body.engine_kwargs())
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
-    return shape_result(res, _LABEL)
+    out = shape_result(res, _LABEL)
+    out["capital_protection"] = verdict.to_dict()
+    # Stop-loss enforcement: a filled long entry gets a resting protective stop.
+    if out.get("accepted") and body.side == "buy" and body.stop_loss and not verdict.reduces_exposure and res.get("fills"):
+        filled = sum(float(f.get("qty", 0.0)) for f in res["fills"])
+        if filled > 0:
+            sl = await get_exchange().submit(symbol=body.symbol, side="sell", qty=filled, order_type="stop",
+                                             trigger_price=body.stop_loss, client_order_id=f"{(body.client_order_id or 'cps')[:40]}-sl",
+                                             thesis="capital protection: protective stop")
+            out["protective_stop"] = {"accepted": bool(sl.get("accepted")), "trigger_price": body.stop_loss, "reasons": sl.get("reasons", [])}
+    return out
 
 
 @router.post("/orders/oco")

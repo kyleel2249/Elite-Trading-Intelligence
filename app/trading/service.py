@@ -19,8 +19,12 @@ from app.integrations.binance import BinanceClient
 from app.integrations.oanda import OandaClient, OandaError
 from app.paper import mode as paper_modes
 from app.risk.engine import RiskEngine, OrderProposal, RiskDecision
+from app.risk.protection import AccountSnapshot, OpenPosition, OrderIntent
+from app.risk.protection_service import CapitalProtectionService
 from app.trading.executions import normalize_execution
 from app.trading.portfolio import PortfolioService
+
+PROTECTION_OFFICER = "ETI CAPITAL PROTECTION SYSTEM"
 
 
 class TradingService:
@@ -57,6 +61,81 @@ class TradingService:
                                                limit_price=limit_price, thesis=thesis, client_order_id=client_order_id,
                                                mode_info=res.to_dict())
 
+    async def _paper_snapshot(self, protection: CapitalProtectionService, environment: str, provider: str) -> AccountSnapshot:
+        """Account state of the internal paper exchange (its own equity/positions), with drawdown, halt and loss-streak
+        state from the protection store. Daily/weekly P&L are not tracked by the simulator and are reported as 0."""
+        try:
+            from app.paper.runtime import get_exchange
+
+            acct = await get_exchange().account(tick=False)
+        except Exception:
+            return AccountSnapshot(equity=0.0, peak_equity=0.0, source="unavailable")
+        positions = tuple(
+            OpenPosition(provider=provider.lower(), symbol=p["symbol"], side="long", qty=float(p["qty"]),
+                         price=float(p["mark_price"] or p["avg_cost"] or 0.0), avg_entry=float(p["avg_cost"] or 0.0))
+            for p in acct.get("positions", []) if p.get("open")
+        )
+        return protection.external_snapshot(
+            "paper_internal", equity=float(acct["equity"]), start_equity=float(acct["starting_cash"]),
+            positions=positions, source="database", halt_environment=environment.lower(),
+        )
+
+    async def internal_paper_verdict(self, protection: CapitalProtectionService, intent: OrderIntent):
+        """Capital-protection verdict for an order bound for the internal paper engine (also used by /api/paper/orders)."""
+        return protection.check_with_account(intent, await self._paper_snapshot(protection, intent.environment, intent.provider))
+
+    async def _place_internal_paper_protected(self, *, res, protection: CapitalProtectionService, intent: OrderIntent,
+                                              client_order_id: str, symbol: str, side: str, qty: float, order_type: str,
+                                              limit_price: Optional[float], thesis: Optional[str], strategy_id: Optional[str],
+                                              stop_loss: Optional[float], price_for_risk: Optional[float]) -> dict[str, Any]:
+        verdict = await self.internal_paper_verdict(protection, intent)
+        if not verdict.approved:
+            reasons = [f"[Capital Protection] {r}" for r in verdict.reasons]
+            protection.log_attempt(
+                strategy_id=strategy_id, environment=intent.environment, provider=intent.provider, symbol=symbol,
+                side=side.lower(), qty=qty, reference_price=price_for_risk, fill_price=None,
+                outcome="risk_refused", client_order_id=client_order_id,
+            )
+            return {
+                "status": "rejected", "accepted": False, "client_order_id": client_order_id,
+                "execution_mode": "INTERNAL_PAPER", "mode_resolution": res.to_dict(), "reasons": reasons,
+                "risk": {"decision": "REJECTED", "reasons": reasons, "notes": "; ".join(reasons), "officer": PROTECTION_OFFICER},
+                "capital_protection": {"officer": PROTECTION_OFFICER, **verdict.to_dict()},
+                "provider_response": None,
+            }
+        if verdict.reduces_exposure:
+            # An exit must not be blocked by this system's own protective stop reserving the held quantity.
+            try:
+                from app.paper.runtime import get_exchange
+
+                await get_exchange().cancel_all(symbol.upper())
+            except Exception:
+                pass
+        out = await self._place_internal_paper(res=res, client_order_id=client_order_id, symbol=symbol, side=side,
+                                               qty=qty, order_type=order_type, limit_price=limit_price, thesis=thesis)
+        out["capital_protection"] = {"officer": PROTECTION_OFFICER, **verdict.to_dict()}
+        protection.log_attempt(
+            strategy_id=strategy_id, environment=intent.environment, provider=intent.provider, symbol=symbol,
+            side=side.lower(), qty=qty, reference_price=price_for_risk,
+            fill_price=((out.get("fills") or [{}])[-1].get("price") if out.get("fills") else None),
+            outcome="filled" if out.get("accepted") else "risk_refused", client_order_id=client_order_id,
+        )
+        # Stop-loss enforcement: a long entry that filled gets a resting protective stop in the paper engine.
+        if out.get("accepted") and not verdict.reduces_exposure and side.lower() == "buy" and stop_loss and out.get("fills"):
+            try:
+                from app.paper.runtime import get_exchange
+
+                filled = sum(float(f.get("qty", 0.0)) for f in out["fills"])
+                if filled > 0:
+                    sl = await get_exchange().submit(symbol=symbol.upper(), side="sell", qty=filled, order_type="stop",
+                                                     trigger_price=float(stop_loss), client_order_id=f"{client_order_id}-sl",
+                                                     thesis="capital protection: protective stop")
+                    out["protective_stop"] = {"accepted": bool(sl.get("accepted")), "trigger_price": float(stop_loss),
+                                              "reasons": sl.get("reasons", [])}
+            except Exception:
+                out["protective_stop"] = {"accepted": False, "reasons": ["protective_stop_failed"]}
+        return out
+
     async def place_order(
         self,
         *,
@@ -78,15 +157,45 @@ class TradingService:
         reference_price: Optional[float] = None,
         thesis: Optional[str] = None,
         council_action: Optional[str] = None,
+        strategy_id: Optional[str] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        atr_pct: Optional[float] = None,
+        system_exit: bool = False,
     ) -> dict[str, Any]:
+        """Every order passes BOTH the ETI Capital Protection System and the RiskEngine.
+
+        Neither gate can be skipped, and nothing in the arguments can relax them: strategy_id, stop_loss,
+        take_profit and atr_pct are inputs the protection system validates, not overrides.
+        ``system_exit`` is only honoured when the protection system itself verifies (from server-side
+        positions) that the order strictly reduces an existing position.
+        """
         provider, environment = provider.strip().lower(), environment.strip().lower()
         side, order_type, symbol = side.strip().lower(), order_type.strip().lower(), symbol.strip().upper()
         client_order_id = self._client_order_id()
+        protection = CapitalProtectionService(self.db, self.settings)
+        price_for_risk = limit_price or reference_price or fill_price_hint
+        intent = OrderIntent(
+            provider=provider.lower(), environment=environment.lower(), symbol=symbol.upper(), side=side.lower(),
+            qty=qty, price=price_for_risk, stop_loss=stop_loss, take_profit=take_profit, strategy_id=strategy_id,
+            atr_pct=atr_pct, order_type=order_type.lower(), source="system_exit" if system_exit else "api",
+        )
 
+        # ETI's internal paper engine is a separate simulator, but it is NOT exempt from capital protection:
+        # the protection verdict is computed against that engine's own account before anything is submitted.
         paper_res = self._paper_resolution(provider, environment)
         if paper_res is not None:
-            return await self._place_internal_paper(res=paper_res, client_order_id=client_order_id, symbol=symbol, side=side,
-                                                    qty=qty, order_type=order_type, limit_price=limit_price, thesis=thesis)
+            return await self._place_internal_paper_protected(
+                res=paper_res, protection=protection, intent=intent, client_order_id=client_order_id, symbol=symbol,
+                side=side, qty=qty, order_type=order_type, limit_price=limit_price, thesis=thesis,
+                strategy_id=strategy_id, stop_loss=stop_loss, price_for_risk=price_for_risk,
+            )
+
+        fallback = AccountSnapshot(
+            equity=equity, peak_equity=equity, daily_pnl_pct=daily_realized_pnl_pct,
+            drawdown_pct=current_drawdown_pct, source="caller",
+        )
+        verdict = protection.check_order(intent, fallback=fallback)
 
         proposal = OrderProposal(
             provider=provider.lower(),
@@ -105,19 +214,33 @@ class TradingService:
             estimated_risk_amount=estimated_risk_amount,
             data_age_seconds=data_age_seconds,
             data_status=data_status,
+            reduces_exposure=bool(verdict.approved and verdict.reduces_exposure),
+            meta=(
+                {"live_confirmed": True, "ref_price": price_for_risk}
+                if (system_exit and verdict.approved and verdict.reduces_exposure) else {}
+            ),
         )
 
         decision: RiskDecision = self.risk.evaluate(proposal)
-        if not decision.approved:
+        if not (decision.approved and verdict.approved):
+            reasons = ([] if verdict.approved else [f"[Capital Protection] {r}" for r in verdict.reasons]) + (
+                [] if decision.approved else list(decision.reasons)
+            )
+            protection.log_attempt(
+                strategy_id=strategy_id, environment=environment.lower(), provider=provider.lower(), symbol=symbol,
+                side=side.lower(), qty=qty, reference_price=price_for_risk, fill_price=None,
+                outcome="risk_refused", client_order_id=client_order_id,
+            )
             result = {
                 "status": "rejected",
                 "client_order_id": client_order_id,
                 "risk": {
-                    "decision": decision.decision.value,
-                    "reasons": decision.reasons,
-                    "notes": decision.notes,
+                    "decision": "REJECTED",
+                    "reasons": reasons,
+                    "notes": "; ".join(reasons),
                     "officer": "Helena Frost",
                 },
+                "capital_protection": {"officer": PROTECTION_OFFICER, **verdict.to_dict()},
                 "provider_response": None,
             }
             if self.db is not None and math.isfinite(qty) and qty > 0:
@@ -130,7 +253,7 @@ class TradingService:
                     qty=qty,
                     status="rejected",
                     risk_approved=False,
-                    risk_notes=decision.notes,
+                    risk_notes="; ".join(reasons),
                     thesis=thesis,
                     council_action=council_action,
                 )
@@ -233,6 +356,7 @@ class TradingService:
                     "officer": "Helena Frost",
                 },
                 "provider_response": resp,
+                "capital_protection": {"officer": PROTECTION_OFFICER, **verdict.to_dict()},
                 "submitted_at": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -254,8 +378,17 @@ class TradingService:
                     thesis=thesis,
                     council_action=council_action,
                     provider_order_id=str(resp.get("orderId") or resp.get("id") or "") or None,
+                    position_meta=(
+                        None if verdict.reduces_exposure else
+                        {"stop_loss": stop_loss, "take_profit": take_profit, "strategy_id": strategy_id}
+                    ),
                 )
 
+            protection.log_attempt(
+                strategy_id=strategy_id, environment=environment.lower(), provider=provider.lower(), symbol=symbol,
+                side=side.lower(), qty=qty, reference_price=price_for_risk, fill_price=execution.get("fill_price"),
+                outcome="filled" if execution.get("fill_price") is not None else "submitted", client_order_id=client_order_id,
+            )
             return result
         except Exception as e:
             if self.db is not None:
@@ -272,6 +405,11 @@ class TradingService:
                     )
                 except Exception:
                     self.db.rollback()
+            protection.log_attempt(
+                strategy_id=strategy_id, environment=environment.lower(), provider=provider.lower(), symbol=symbol,
+                side=side.lower(), qty=qty, reference_price=price_for_risk, fill_price=None,
+                outcome="provider_error", client_order_id=client_order_id,
+            )
             return {
                 "status": "error" if definite else "submission_unknown",
                 "client_order_id": client_order_id,

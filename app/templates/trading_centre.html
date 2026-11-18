@@ -8,7 +8,7 @@
 <div class="kpis" id="kpis" aria-live="polite"></div>
 
 <div class="grid">
-  <section id="markets" class="panel s8" aria-labelledby="h-markets">
+  <section id="markets" class="panel s12" aria-labelledby="h-markets">
     <h2 id="h-markets">Market overview <span class="chip" id="mk-status">loading…</span></h2>
     <div class="tabs" id="cat-tabs" role="group" aria-label="Market category"></div>
     <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
@@ -21,7 +21,7 @@
     <div class="row" id="readout" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px"></div>
   </section>
 
-  <section id="signals" class="panel green s4" aria-labelledby="h-sig">
+  <section id="signals" class="panel green s12" aria-labelledby="h-sig">
     <h2 id="h-sig">ETI trade signal</h2>
     <div class="row" style="display:flex;gap:8px;margin-bottom:8px"><select id="sig-symbol" aria-label="Signal asset"></select><button class="btn primary sm" id="sig-run" type="button">Analyse</button></div>
     <div id="sig-body"><div class="empty">Choose an asset and press Analyse. The signal comes from the multi-specialist council plus the volatility-scaled forecast; confidence is a model heuristic, not a probability of success.</div></div>
@@ -86,8 +86,8 @@
       ['Realized P&L (' + p.range + ')', fmt.signed(p.net_realized_pnl), fmt.cls(p.net_realized_pnl), 'Fee-inclusive, closed (sell) fills in the period'],
       ['Unrealized P&L', fmt.signed(s.unrealized_pnl), fmt.cls(s.unrealized_pnl), 'Open positions vs average cost'],
       ['Net profit (all-time)', fmt.signed(s.total_pnl) + ' (' + fmt.pct(s.return_pct) + ')', fmt.cls(s.total_pnl), 'Equity minus starting cash'],
-      ['Win rate', p.win_rate == null ? '\u2014' : fmt.pct(p.win_rate * 100) + ' (' + p.wins + '/' + p.trades + ')', '', 'Winning closed trades / closed trades in the period'],
-      ['Profit factor', p.profit_factor == null ? '\u2014' : p.profit_factor.toFixed(2), '', p.profit_factor_note || 'Gross profit / gross loss'],
+      ['Win rate', p.win_rate == null ? '—' : fmt.pct(p.win_rate * 100) + ' (' + p.wins + '/' + p.trades + ')', '', 'Winning closed trades / closed trades in the period'],
+      ['Profit factor', p.profit_factor == null ? '—' : p.profit_factor.toFixed(2), '', p.profit_factor_note || 'Gross profit / gross loss'],
       ['Max drawdown', fmt.pct(p.max_drawdown_pct), p.max_drawdown_pct > 0 ? 'neg' : '', 'Peak-to-trough on the realized equity curve'],
       ['Total trading volume', fmt.usd(p.volume), '', 'Sum of fill notional in the period'],
       ['Active positions', String(s.positions.length), '', ''],
@@ -108,7 +108,7 @@
         el('dt', { text: 'Risk level' }), el('dd', { class: h.risk_level === 'High' ? 'neg' : h.risk_level === 'Low' ? 'pos' : 'warn', text: h.risk_level || 'not evaluated' }),
         el('dt', { text: 'Readiness' }), el('dd', { text: h.readiness }),
         el('dt', { text: 'Account balance' }), el('dd', { text: fmt.usd(d.summary.equity) }),
-        el('dt', { text: 'Exposure' }), el('dd', { text: d.summary.equity > 0 ? fmt.pct(d.summary.market_value / d.summary.equity * 100) : '\u2014' }),
+        el('dt', { text: 'Exposure' }), el('dd', { text: d.summary.equity > 0 ? fmt.pct(d.summary.market_value / d.summary.equity * 100) : '—' }),
         el('dt', { text: 'Criteria measured' }), el('dd', { text: Math.round(h.coverage * 100) + '% of weight' })),
       el('details', {}, el('summary', { class: 'sub', text: 'How the score is calculated' }), table([{ k: 'name', label: 'Criterion' }, { k: 'weight', label: 'Wt' }, { k: 'score', label: 'Score', fmt: (v) => (v == null ? 'not evaluated' : (v * 100).toFixed(0) + '%') }, { k: 'rule', label: 'Rule', wrap: true }], h.components)));
     const reco = $('#reco-body'); const hs = h.components.filter((c) => c.score != null);
@@ -120,7 +120,7 @@
     else if (h.risk_level === 'Moderate') { head = 'Trade with caution: moderate risk indicators.'; cls = 'warn'; }
     else { head = 'No blocking risk conditions detected. This is not a trade signal.'; cls = 'pos'; }
     reco.replaceChildren(el('p', { class: 'signal ' + cls, style: 'font-size:16px', text: head }),
-      el('ul', { class: 'list' }, h.components.map((c) => el('li', {}, el('span', { text: c.name.replace('_', ' ') }), el('span', { class: c.score == null ? 'muted' : '', text: c.score == null ? 'not evaluated' : (c.score * 100).toFixed(0) + '% \u2014 ' + c.rule })))),
+      el('ul', { class: 'list' }, h.components.map((c) => el('li', {}, el('span', { text: c.name.replace('_', ' ') }), el('span', { class: c.score == null ? 'muted' : '', text: c.score == null ? 'not evaluated' : (c.score * 100).toFixed(0) + '% — ' + c.rule })))),
       el('p', { class: 'sub', text: 'Based on measured account, stream and agent state only. Market direction, economic events and sentiment are not inputs here; see the signal panel and Markets & Readiness.' }));
     void hs;
   }
@@ -130,8 +130,8 @@
     $('#perf-chart').replaceChildren(area(p.equity_curve.map((x) => x.equity), { label: 'Realized equity curve' }));
     $('#perf-stats').replaceChildren(el('dl', { class: 'kv', style: 'margin-top:8px' },
       ...[['Total trades', p.trades], ['Wins / losses', p.wins + ' / ' + p.losses], ['Average win', fmt.signed(p.avg_win)], ['Average loss', fmt.signed(p.avg_loss)],
-        ['Expectancy', fmt.signed(p.expectancy)], ['Avg holding time', fmt.dur(p.avg_holding_seconds)], ['Recovery factor', p.recovery_factor == null ? '\u2014' : p.recovery_factor.toFixed(2)],
-        ['Sharpe / Sortino', p.sharpe == null ? 'not computed' : p.sharpe.toFixed(2) + ' / ' + (p.sortino == null ? '\u2014' : p.sortino.toFixed(2))], ['Fees paid', fmt.usd(p.fees_paid)]]
+        ['Expectancy', fmt.signed(p.expectancy)], ['Avg holding time', fmt.dur(p.avg_holding_seconds)], ['Recovery factor', p.recovery_factor == null ? '—' : p.recovery_factor.toFixed(2)],
+        ['Sharpe / Sortino', p.sharpe == null ? 'not computed' : p.sharpe.toFixed(2) + ' / ' + (p.sortino == null ? '—' : p.sortino.toFixed(2))], ['Fees paid', fmt.usd(p.fees_paid)]]
         .flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { text: String(v) })])),
       p.ratio_note ? el('p', { class: 'sub', text: p.ratio_note }) : null);
   }
@@ -147,11 +147,11 @@
     $('#trades-body').replaceChildren(fills.status === 'fulfilled' ? table([
       { k: 'symbol', label: 'Asset' }, { k: 'side', label: 'Action', cls: (v) => (v === 'buy' ? 'pos' : 'neg') }, { k: 'qty', label: 'Qty', fmt: (v) => fmt.num(v, 6) },
       { k: 'price', label: 'Price', fmt: (v) => fmt.usd(v) }, { k: 'fee', label: 'Fees', fmt: (v) => fmt.usd(v, 4) },
-      { k: 'realized_pnl', label: 'Realized P&L', fmt: (v, r) => (r.side === 'sell' ? fmt.signed(v) : '\u2014'), cls: (v, r) => (r.side === 'sell' ? fmt.cls(v) : '') },
+      { k: 'realized_pnl', label: 'Realized P&L', fmt: (v, r) => (r.side === 'sell' ? fmt.signed(v) : '—'), cls: (v, r) => (r.side === 'sell' ? fmt.cls(v) : '') },
       { k: 'ts', label: 'Time', fmt: fmt.time }], fills.value.fills, 'No paper fills yet. Place a paper order to start the record.') : unavailable(fills.reason.message, 'Fills'));
     $('#journal-body').replaceChildren(events.status === 'fulfilled' ? table([
       { k: 'ts', label: 'Time', fmt: fmt.time }, { k: 'event', label: 'Event' }, { k: 'order_id', label: 'Order' },
-      { k: (r) => Object.entries(r.details || {}).filter(([, v]) => ['string', 'number', 'boolean'].includes(typeof v)).slice(0, 5).map(([k, v]) => k + '=' + (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v)).join(' \u00b7 '), label: 'Details', wrap: true }],
+      { k: (r) => Object.entries(r.details || {}).filter(([, v]) => ['string', 'number', 'boolean'].includes(typeof v)).slice(0, 5).map(([k, v]) => k + '=' + (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v)).join(' · '), label: 'Details', wrap: true }],
       events.value.events, 'No journal entries yet.') : unavailable(events.reason.message, 'Journal'));
     const s = S.d && S.d.summary;
     const open = orders.status === 'fulfilled' ? orders.value.orders : [];
@@ -200,7 +200,7 @@
       note.append(unavailable(cat.why, cat.label + ' data')); return;
     }
     if (!ensureChart()) { status.textContent = 'chart library unavailable'; note.append(unavailable('The charting library could not be loaded (network or CDN blocked). Prices are still available through the API.', 'Chart')); return; }
-    status.textContent = 'loading\u2026';
+    status.textContent = 'loading…';
     let rows;
     try { rows = await api(`/api/market/history?provider=${cat.provider}&symbol=${enc(S.symbol)}&interval=${S.tf}&limit=500`); }
     catch (e) { status.textContent = 'disconnected'; note.append(unavailable(e.message, 'Market data')); return; }
@@ -214,11 +214,11 @@
     lines.sma20.setData(ld(c, sma(closes, 20))); lines.sma50.setData(ld(c, sma(closes, 50)));
     lines.bbU.setData(ld(c, bb.map((b) => b && b[2]))); lines.bbL.setData(ld(c, bb.map((b) => b && b[0]))); lines.vwap.setData(ld(c, vwap(c)));
     applyOverlays(); chart.timeScale().fitContent();
-    status.textContent = 'live data \u00b7 ' + fmt.time(new Date().toISOString());
+    status.textContent = 'live data · ' + fmt.time(new Date().toISOString());
     const r = rsi(closes), a = atr(c), m = macd(closes), last = closes[closes.length - 1];
     const chip = (l, v) => el('span', { class: 'chip' }, l + ': ', el('b', { text: v }));
     $('#readout').replaceChildren(chip('Last', fmt.num(last, 6)), chip('RSI 14', r == null ? 'n/a' : r.toFixed(1)), chip('ATR 14', a == null ? 'n/a' : fmt.num(a, 6) + ' (' + fmt.pct(a / last * 100, 2) + ')'),
-      chip('MACD hist', m ? fmt.num(m.hist, 6) : 'n/a'), chip('Regime', '\u2026'));
+      chip('MACD hist', m ? fmt.num(m.hist, 6) : 'n/a'), chip('Regime', '…'));
     api(`/api/analytics/regime?symbol=${enc(S.symbol)}&provider=${cat.provider}&interval=${S.tf}&limit=300`).then((g) => {
       const label = g.regime || g.primary_regime || g.label || g.trend || 'unclassified';
       $('#readout').lastChild.replaceChildren('Regime: ', el('b', { text: typeof label === 'object' ? JSON.stringify(label) : String(label) }));
@@ -236,7 +236,7 @@
 
   // ---------------------------------------------------------------- signals
   async function analyse(sym, persist) {
-    $('#sig-body').replaceChildren(el('div', { class: 'empty', text: 'Analysing ' + sym + ' (council + forecast)\u2026' }));
+    $('#sig-body').replaceChildren(el('div', { class: 'empty', text: 'Analysing ' + sym + ' (council + forecast)…' }));
     const [c, f] = await Promise.allSettled([api(`/api/intelligence/council?symbol=${enc(sym)}&persist=${persist}`, { timeout: 90000 }), api(`/api/intelligence/forecast?symbol=${enc(sym)}&persist=${persist}`)]);
     S.sig = { symbol: sym, council: c.status === 'fulfilled' ? c.value : null, forecast: f.status === 'fulfilled' ? f.value : null, errors: [c, f].filter((x) => x.status === 'rejected').map((x) => x.reason.message) };
     renderSignal(); return S.sig;
@@ -255,13 +255,13 @@
     const d = derive(sig), c = sig.council || {};
     const cls = d.act.includes('BUY') ? 'pos' : d.act.includes('SELL') ? 'neg' : 'warn';
     const horizon = sig.forecast && sig.forecast.horizon;
-    const rows = [['Asset', sig.symbol], ['Reference price', fmt.num(d.last, 6)], ['Stop-loss (forecast bear/bull scenario)', d.stop == null ? '\u2014' : fmt.num(d.stop, 6)], ['Take-profit (forecast scenario)', d.target == null ? '\u2014' : fmt.num(d.target, 6)],
-      ['Risk / reward', d.rr == null ? '\u2014' : d.rr.toFixed(2)], ['Confidence (model heuristic)', d.conf == null ? '\u2014' : d.conf.toFixed(0) + '%'], ['Expected value', 'not computed (needs a validated win rate)'],
-      ['Strategy', 'ETI council (multi-specialist) + volatility forecast'], ['Data quality', c.data_quality == null ? '\u2014' : typeof c.data_quality === 'object' ? JSON.stringify(c.data_quality) : String(c.data_quality)],
-      ['Generated', fmt.time(c.timestamp || (S.d && S.d.generated_at))], ['Valid for', horizon ? horizon + ' model horizon' : '\u2014']];
+    const rows = [['Asset', sig.symbol], ['Reference price', fmt.num(d.last, 6)], ['Stop-loss (forecast bear/bull scenario)', d.stop == null ? '—' : fmt.num(d.stop, 6)], ['Take-profit (forecast scenario)', d.target == null ? '—' : fmt.num(d.target, 6)],
+      ['Risk / reward', d.rr == null ? '—' : d.rr.toFixed(2)], ['Confidence (model heuristic)', d.conf == null ? '—' : d.conf.toFixed(0) + '%'], ['Expected value', 'not computed (needs a validated win rate)'],
+      ['Strategy', 'ETI council (multi-specialist) + volatility forecast'], ['Data quality', c.data_quality == null ? '—' : typeof c.data_quality === 'object' ? JSON.stringify(c.data_quality) : String(c.data_quality)],
+      ['Generated', fmt.time(c.timestamp || (S.d && S.d.generated_at))], ['Valid for', horizon ? horizon + ' model horizon' : '—']];
     body.replaceChildren(
       el('div', { class: 'signal ' + cls, text: d.act || 'NO ACTION' }),
-      c.risk_veto ? el('div', { class: 'badge bad', text: 'RISK VETO \u2014 do not execute' }) : null,
+      c.risk_veto ? el('div', { class: 'badge bad', text: 'RISK VETO — do not execute' }) : null,
       el('dl', { class: 'kv', style: 'margin-top:8px' }, rows.flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { text: String(v) })])),
       c.summary ? el('p', { class: 'sub', text: c.summary }) : null,
       sig.errors.length ? el('p', { class: 'warn', text: 'Partial result: ' + sig.errors.join(' | ') }) : null);
@@ -276,7 +276,7 @@
   function viewAnalysis() {
     const c = (S.sig && S.sig.council) || {}; const f = S.sig && S.sig.forecast;
     modal('Analysis: ' + S.sig.symbol, el('div', {}, c.summary ? el('p', { text: c.summary }) : null,
-      table([{ k: 'trader_name', label: 'Specialist' }, { k: 'role', label: 'Role' }, { k: 'bias', label: 'Bias' }, { k: 'confidence', label: 'Conf', fmt: (v) => (v == null ? '\u2014' : String(v)) }, { k: 'analysis', label: 'Analysis', wrap: true }], c.specialists || [], 'No specialist reports.'),
+      table([{ k: 'trader_name', label: 'Specialist' }, { k: 'role', label: 'Role' }, { k: 'bias', label: 'Bias' }, { k: 'confidence', label: 'Conf', fmt: (v) => (v == null ? '—' : String(v)) }, { k: 'analysis', label: 'Analysis', wrap: true }], c.specialists || [], 'No specialist reports.'),
       c.risk_notes && c.risk_notes.length ? el('div', {}, el('h3', { class: 'sub', text: 'Risk officer notes' }), el('ul', {}, c.risk_notes.map((n) => el('li', { text: String(n) })))) : null,
       c.contradictory_signals && c.contradictory_signals.length ? el('div', {}, el('h3', { class: 'sub', text: 'Contradictory signals' }), el('ul', {}, c.contradictory_signals.map((n) => el('li', { text: String(n) })))) : null,
       f ? el('div', {}, el('h3', { class: 'sub', text: 'Forecast assumptions' }), el('ul', {}, (f.assumptions || []).map((n) => el('li', { text: String(n) })))) : null,
@@ -285,7 +285,7 @@
   function renderWatch() {
     const a = wl.get(); const box = $('#watchlist');
     box.replaceChildren(a.length ? el('span', { class: 'muted', text: 'Watchlist:' }) : el('span', { class: 'muted', text: 'Watchlist is empty (stored in this browser).' }),
-      ...a.map((s) => el('span', { class: 'chip' }, el('a', { href: '#signals', onclick: (e) => { e.preventDefault(); $('#sig-symbol').value = s; busy($('#sig-run'), () => analyse(s, false)); } }, s), el('button', { class: 'btn sm', type: 'button', 'aria-label': 'Remove ' + s, onclick: () => { wl.set(wl.get().filter((x) => x !== s)); renderWatch(); } }, '\u00d7'))));
+      ...a.map((s) => el('span', { class: 'chip' }, el('a', { href: '#signals', onclick: (e) => { e.preventDefault(); $('#sig-symbol').value = s; busy($('#sig-run'), () => analyse(s, false)); } }, s), el('button', { class: 'btn sm', type: 'button', 'aria-label': 'Remove ' + s, onclick: () => { wl.set(wl.get().filter((x) => x !== s)); renderWatch(); } }, '×'))));
   }
 
   // ---------------------------------------------------------------- paper + live tickets
@@ -345,7 +345,7 @@
     ['SCAN ALL MARKETS', '', async () => { const r = await scan(); await modal('Market scan', el('div', {}, autoTable(r.ranked), r.failed && Object.keys(r.failed).length ? el('p', { class: 'warn', text: 'Failed: ' + Object.keys(r.failed).join(', ') }) : null, el('p', { class: 'sub', text: (r.notes || []).join(' ') }))); }],
     ['ANALYSE ASSET', '', async () => { const s = await prompt('Analyse asset', 'Symbol', S.symbol); if (!s) return; $('#sig-symbol').value = s.toUpperCase(); location.hash = '#signals'; await analyse(s.toUpperCase(), false); }],
     ['FIND BEST OPPORTUNITIES', 'primary', async () => { const r = await scan(); const w = r.watchlist || []; const v = await modal('Best opportunities (ranked, not validated)', el('div', {}, autoTable(r.ranked), el('p', { class: 'sub', text: 'Scores rank where to look first. They are not probabilities and not signals.' })), [{ label: 'Close', value: 'x' }, { label: 'Add watchlist to this browser', value: 'wl', kind: 'ok' }]); if (v === 'wl') { const a = wl.get(); w.forEach((x) => { const s = typeof x === 'string' ? x : x.symbol; if (s && !a.includes(s)) a.push(s); }); wl.set(a); renderWatch(); toast('Watchlist updated', 'good'); } }],
-    ['GENERATE SIGNALS', 'primary', async () => { const list = wl.get().length ? wl.get().slice(0, 5) : CATS.crypto.symbols.slice(0, 3); const rows = []; for (const s of list) { const r = await analyse(s, true); const d = derive(r); rows.push({ symbol: s, action: d.act || '\u2014', confidence: d.conf == null ? '\u2014' : d.conf.toFixed(0) + '%', veto: r.council ? String(!!r.council.risk_veto) : '\u2014', ledger: r.forecast && r.forecast.ledger && r.forecast.ledger.prediction_uid ? 'recorded' : '\u2014' }); } await modal('Generated signals (forecasts written to the prediction ledger)', autoTable(rows)); }],
+    ['GENERATE SIGNALS', 'primary', async () => { const list = wl.get().length ? wl.get().slice(0, 5) : CATS.crypto.symbols.slice(0, 3); const rows = []; for (const s of list) { const r = await analyse(s, true); const d = derive(r); rows.push({ symbol: s, action: d.act || '—', confidence: d.conf == null ? '—' : d.conf.toFixed(0) + '%', veto: r.council ? String(!!r.council.risk_veto) : '—', ledger: r.forecast && r.forecast.ledger && r.forecast.ledger.prediction_uid ? 'recorded' : '—' }); } await modal('Generated signals (forecasts written to the prediction ledger)', autoTable(rows)); }],
     ['MARKET READINESS', '', async () => { const r = await api('/api/markets/assess?symbol=' + enc(S.symbol)); await modal('Market readiness: ' + S.symbol, kv(r)); }],
     ['START PAPER TRADING', 'ok', async () => { const a = await api('/api/paper/account?account_id=default'); toast('Paper account ready: equity ' + fmt.usd(a.equity), 'good'); location.hash = '#paper'; await refresh(); }],
     ['START LIVE TRADING', 'danger', async () => { const L = await renderLive(); await modal('Live trading readiness', liveView(L)); }],
