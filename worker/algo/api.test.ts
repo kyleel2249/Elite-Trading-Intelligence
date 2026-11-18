@@ -104,7 +104,7 @@ test("Omnisignal accepts validated Bitget browser snapshots without Worker-to-Bi
   }), {});
   assert.equal(res.status, 200);
   const s = await res.json() as any;
-  assert.equal(s.dataQuality.provider, "bitget-browser");
+  assert.equal(s.dataQuality.provider, "bitget-browser-supplied");
   assert.equal(s.dataQuality.market, "futures");
   assert.equal(s.dataQuality.derivatives, "ticker_snapshot");
   assert.equal(s.derivatives.fundingRate, 0.0008);
@@ -113,13 +113,17 @@ test("Omnisignal accepts validated Bitget browser snapshots without Worker-to-Bi
   assert.equal(s.liveExecutionAllowed, false);
 });
 
-test("Omnisignal requires browser-supplied data for Bitget rather than retrying blocked Worker egress", async () => {
+test("Omnisignal without a browser snapshot reads Bitget through the Worker proxy and reports DATA_UNRELIABLE (503) when every Bitget route is unreachable", async () => {
+  globalThis.fetch = (async () => { throw new TypeError("fetch failed"); }) as typeof fetch;
   const res = await handleOmnisignal(new Request("https://eti.test/api/omnisignal", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ symbol: "BTCUSDT", strategy: "intraday", venue: "bitget", market: "futures", category: "USDT-FUTURES" })
   }), {});
-  assert.equal(res.status, 400);
-  assert.equal((await res.json() as any).error, "bitget_browser_market_data_required");
+  assert.equal(res.status, 503);
+  const body = await res.json() as any;
+  assert.equal(body.decision, "DATA_UNRELIABLE");
+  assert.equal(body.submitsOrder, false);
+  assert.equal(body.liveExecutionAllowed, false);
 });
 
 test("Omnisignal POST rejects unsafe or incomplete sizing inputs", async () => {
