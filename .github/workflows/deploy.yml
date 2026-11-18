@@ -41,6 +41,16 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "::error::Set CLOUDFLARE_ACCOUNT_ID in GitHub Actions secrets"; exit 1)
           npx wrangler d1 migrations apply eti-portfolio-db --remote
 
+      - name: Validate DataX integration configuration
+        env:
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+          DATAX_API_URL: ${{ vars.DATAX_API_URL }}
+        run: |
+          test -n "$DATAX_INTEGRATION_SECRET" || (echo "::error::Set DATAX_INTEGRATION_SECRET in GitHub Actions secrets"; exit 1)
+          test "${#DATAX_INTEGRATION_SECRET}" -ge 32 || (echo "::error::DATAX_INTEGRATION_SECRET must contain at least 32 characters"; exit 1)
+          test -n "$DATAX_API_URL" || (echo "::error::Set DATAX_API_URL in GitHub Actions variables"; exit 1)
+          node --input-type=module -e 'const u=new URL(process.env.DATAX_API_URL);if(u.protocol!=="https:"||u.username||u.password||u.pathname!=="/"||u.search||u.hash)process.exit(1);'
+
       - name: Validate required GainzAlgo secrets
         env:
           ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
@@ -164,6 +174,49 @@ jobs:
           }
 
           console.log("Signed DataX production integration verified: HMAC authentication, nonce storage and aggregate snapshot succeeded. No member-level data or secret values were logged.");
+          NODE
+
+      - name: Verify authenticated DataX aggregate integration
+        env:
+          DATAX_INTEGRATION_SECRET: ${{ secrets.DATAX_INTEGRATION_SECRET }}
+          DATAX_API_URL: ${{ vars.DATAX_API_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHmac, randomBytes } from "node:crypto";
+          const origin = new URL(process.env.DATAX_API_URL || "");
+          const secret = process.env.DATAX_INTEGRATION_SECRET || "";
+          if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash || secret.length < 32) {
+            throw new Error("DataX integration configuration is invalid");
+          }
+          const pathname = "/api/integrations/eti/summary";
+          const timestamp = String(Math.floor(Date.now() / 1000));
+          const nonce = randomBytes(24).toString("hex");
+          const canonical = [timestamp, nonce, "GET", pathname].join("\\n");
+          const signature = createHmac("sha256", secret).update(canonical).digest("hex");
+          const response = await fetch(new URL(pathname, origin), {
+            method: "GET",
+            redirect: "error",
+            signal: AbortSignal.timeout(10000),
+            headers: {
+              accept: "application/json",
+              "x-datax-timestamp": timestamp,
+              "x-datax-nonce": nonce,
+              "x-datax-signature": signature
+            }
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload.ok !== true || payload.source !== "DataX" || payload.integrationVersion !== 1
+            || !payload.accounts || !payload.bandwidth || !payload.rewards || !payload.reserves
+            || payload.tradingCapitalEligible !== false) {
+            console.error("DataX authenticated aggregate check failed:", JSON.stringify({
+              status: response.status,
+              error: payload.error,
+              integrationVersion: payload.integrationVersion,
+              source: payload.source
+            }));
+            process.exit(1);
+          }
+          console.log("Authenticated DataX aggregate endpoint verified; HMAC, replay protection, production D1 reads and response contract are working. No PII or individual wallet balances were requested.");
           NODE
 
       - name: Verify Bybit routes, Bitget browser adapter and ETI safeguards
