@@ -35,6 +35,10 @@ test("dashboard uses a static, edge-to-edge layout with no 3D animation", async 
   assert.doesNotMatch(html, /perspective\\(|rotateX\\(|rotateY\\(|translateZ\\(|transform-style/);
   assert.match(html, /\.panel\\{[^}]*transform:none!important/);
   assert.match(html, /button:hover:not\\(:disabled\\),button:active:not\\(:disabled\\)\\{transform:none!important/);
+  assert.match(html, /class="panel chart-workspace"/, "main chart workspace uses full-bleed viewport layout");
+  assert.match(html, /\.chart-workspace\\{width:100vw;max-width:none;margin-left:calc\\(50% - 50vw\\)/, "chart spans the full viewport width without a max-width constraint");
+  assert.match(html, /\.chart-workspace \.chart\\.big\\{width:100%;height:100svh;min-height:560px;max-height:none/, "chart receives full viewport height without a desktop height cap");
+  assert.match(html, /\.chart-workspace:fullscreen/, "chart workspace supports native fullscreen mode");
   assert.match(html, /id="chartAdvanced"/);
   assert.match(html, /id="paneRsi"/);
   assert.match(html, /id="paneMacd"/);
