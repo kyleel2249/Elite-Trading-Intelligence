@@ -18,7 +18,8 @@ export interface PrecisionCandidate {
   stopLoss: number | null; targets: PrecisionTarget[]; riskReward: number | null;
   score: number; scoreType: "evidence_quality_not_probability"; passed: string[]; failed: string[];
   bos: { type: "BOS" | "CHoCH"; time: number; level: number } | null;
-  displacementAtr: number; supportResistance: { kind: "support" | "resistance"; price: number; strength: number } | null;\n  orderBlock: { lower: number; upper: number; strength: number } | null;
+  displacementAtr: number; supportResistance: { kind: "support" | "resistance"; price: number; strength: number } | null;
+  orderBlock: { lower: number; upper: number; strength: number } | null;
   dealingRange: { low: number; high: number; positionPct: number; zone: "discount" | "premium" | "equilibrium" } | null;
   liquiditySweep: { direction: "bullish" | "bearish"; time: number; level: number } | null;
   mitigationPct: number; freshnessBars: number; reaction: { confirmed: boolean; time: number | null; close: number | null; reason: string };
