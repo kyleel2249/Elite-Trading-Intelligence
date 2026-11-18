@@ -27,3 +27,10 @@ test("keeps unavailable trade/candle evidence explicit and never fabricates a tr
  const r=analyzeLiquidity({symbol:"ETHUSDT",venue:"bybit",market:"spot",depth:{bids:[[99,2]],asks:[[101,2]]}});
  assert.equal(r.confluence.direction,"WAIT");assert.equal(r.orderFlow.tradeCount,0);assert.ok(r.dataQuality.warnings.length>=2);
 });
+
+test("uses multiple historical snapshots to identify persistent price bands",()=>{
+ const history=Array.from({length:6},(_,i)=>({timestamp:now-i*1000,bids:[[99.9,10],[99.8,2]],asks:[[100.1,2],[100.2,10]]}));
+ const r=analyzeLiquidity({symbol:"BTCUSDT",venue:"bybit",market:"futures",depth,history,candles});
+ assert.ok(r.behaviour.persistent>=2);
+ assert.ok(r.dataQuality.historicalSnapshots===6);
+});
