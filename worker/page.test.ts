@@ -54,6 +54,8 @@ test("dashboard uses a static, contained 1920x1080 chart layout with no 3D anima
   assert.match(html, /id="imProfile"/);
   assert.match(html, /id="imLiquidity"/);
   assert.match(html, /id="imEvents"/);
+  assert.match(html, /id="imOrderBlocks"/);
+  assert.match(html, /id="imDisplacement"/);
   assert.match(html, /refreshInstitutionalIntel/);
   assert.match(html, /\/api\/analysis\/smc/);
   assert.match(html, /volumeProfile/);
