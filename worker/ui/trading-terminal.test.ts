@@ -43,3 +43,17 @@ test("terminal exposes recent trades, chart presentation and manual level tools"
   assert.match(TRADING_TERMINAL_JS, /api\/market\/trades/);
   assert.match(TRADING_TERMINAL_JS, /createPriceLine/);
 });
+
+test("institutional chart workspace exposes SMC, multi-timeframe and auction profile intelligence", () => {
+  assert.match(TRADING_TERMINAL_HTML, /Institutional market intelligence/);
+  assert.match(TRADING_TERMINAL_HTML, /tt-inst-layout/);
+  assert.match(TRADING_TERMINAL_HTML, /tt-vp-poc/);
+  assert.match(TRADING_TERMINAL_HTML, /tt-heatmap/);
+  assert.match(TRADING_TERMINAL_JS, /api\/analysis\/smc/);
+  assert.match(TRADING_TERMINAL_JS, /function calcProfile/);
+  assert.match(TRADING_TERMINAL_JS, /function renderDepthHeat/);
+  assert.match(TRADING_TERMINAL_JS, /function renderFlow/);
+  assert.match(TRADING_TERMINAL_JS, /saveChartPrefs/);
+  assert.match(TRADING_TERMINAL_JS, /liveExecutionAllowed/);
+  assert.doesNotMatch(TRADING_TERMINAL_JS, /fetch\(["']\/api\/orders/);
+});
