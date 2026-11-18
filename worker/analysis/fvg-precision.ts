@@ -102,7 +102,7 @@ export function analyzeFvgPrecision(
       if (touched) { firstTouch = i; break; }
     }
     // A first retest may still validate the original fresh setup, but it no longer receives the green unmitigated highlight.
-    const freshBeforeFirstRetest = fresh || (firstTouch >= 0 && z.touches === 1 && z.ageBars === currentIndex - confirmIndex);
+    const freshBeforeFirstRetest = fresh || (firstTouch >= 0 && z.touches === 1 && z.ageBars === currentIndex - confirmIndex + 1);
     const hardPass = freshBeforeFirstRetest && !!bos && !!impulse && !!level && correctHalf && !htfOpposed && higherPriority;
     let reaction = { confirmed: false, time: null as number | null, close: null as number | null, ageBars: null as number | null, distanceAtr: null as number | null, reason: "Awaiting first retest and a closed reaction candle" };
     if (firstTouch >= 0) {
@@ -135,7 +135,7 @@ export function analyzeFvgPrecision(
     else failed.push("No verified liquidity/structure target meets minimum reward/risk");
     const score = clamp(Math.round((fresh?15:0)+(bos?15:0)+(impulse?10:0)+(level?10:0)+(correctHalf?10:0)+(sweep?10:0)+(htfAligned?10:0)+(reaction.confirmed?10:0)+(higherPriority?5:0)+(orderBlock?5:0)),0,100);
     const tradableState = state === "confirmed" && hardPass && reaction.confirmed && targets.length > 0;
-    const highlight: PrecisionCandidate["highlight"] = hardPass && fresh ? "green" : state === "rejected" ? "red" : "yellow";
+    const highlight: PrecisionCandidate["highlight"] = hardPass && fresh && targets.length > 0 ? "green" : state === "rejected" ? "red" : "yellow";
     if (hardPass && fresh) explanation.push("Green: fresh, unmitigated FVG passed all pre-entry qualification filters.");
     if (firstTouch < 0 && hardPass) explanation.push("Entry remains pending; wait for the first retest and candle-close confirmation.");
     if (reaction.confirmed) explanation.push("First retest reaction is confirmed; midpoint remains the planned limit reference, subject to live price and spread.");
@@ -157,10 +157,10 @@ export function analyzeFvgPrecision(
   const rank = (c: PrecisionCandidate) => (c.state==="confirmed"?3:c.state==="qualified_fresh"?2:1)*1000+c.score;
   result.sort((a,b)=>rank(b)-rank(a) || (a.direction==="BUY"?a.zone.lower-b.zone.lower:b.zone.upper-a.zone.upper));
   const candidates = result.slice(0,FVG_PRECISION_RULES.maxCandidates);
-  const best = candidates.find(c=>c.state==="confirmed"&&c.targets.length>0) ?? candidates.find(c=>c.state==="qualified_fresh") ?? null;
+  const best = candidates.find(c=>c.state==="confirmed"&&c.targets.length>0) ?? candidates.find(c=>c.state==="qualified_fresh"&&c.highlight==="green"&&c.targets.length>0) ?? null;
   const direction = best?.state==="confirmed" ? best.direction : "WAIT";
   return { ...(opts.symbol?{symbol:opts.symbol}:{}), timeframe,status:"ready",price,direction,best,candidates,
     summary:{bullish:candidates.filter(c=>c.direction==="BUY").length,bearish:candidates.filter(c=>c.direction==="SELL").length,green:candidates.filter(c=>c.highlight==="green").length,confirmed:candidates.filter(c=>c.state==="confirmed").length,rejected:candidates.filter(c=>c.state==="rejected").length},
     rules:{...FVG_PRECISION_RULES},canTriggerTrade:false,submitsOrder:false,liveExecutionAllowed:false,
-    methodology:"FVG boundaries follow the three-candle definition. Freshness is strict: any wick entering the zone removes the green state. Green means all pre-entry filters passed (fresh, prior same-direction BOS/CHoCH, displacement, S/R overlap, correct premium/discount half, no opposing HTF structure, and directional priority). A first retest is separately checked for a closed directional reaction. The 50% midpoint is the reference entry; stop uses the farther of the structural swing and far FVG edge plus an ATR buffer; targets must be verified swing/liquidity levels meeting the minimum RR. Scores describe evidence quality, not probability. This engine cannot submit or authorize orders." };
+    methodology:"FVG boundaries follow the three-candle definition. Freshness is strict: any wick entering the zone removes the green state. Green means all pre-entry filters and a verified minimum-RR structural target passed (fresh, prior same-direction BOS/CHoCH, displacement, S/R overlap, correct premium/discount half, no opposing HTF structure, and directional priority). A first retest is separately checked for a closed directional reaction. The 50% midpoint is the reference entry; stop uses the farther of the structural swing and far FVG edge plus an ATR buffer; targets must be verified swing/liquidity levels meeting the minimum RR. Scores describe evidence quality, not probability. This engine cannot submit or authorize orders." };
 }
