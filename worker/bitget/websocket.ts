@@ -30,9 +30,10 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   const auth = await authenticate(req, env as any);
   if (!isOperator(auth)) return jsonError("operator_auth_required", 401);
 
-  const url = new URL(req.url);
   const environment = "production", account = "uta";
-  try { bitgetWsEndpoint("production", "uta", "private"); } catch { return jsonError("unsupported_transport", 400); }
+  let upstreamUrl: string;
+  try { upstreamUrl = bitgetWsEndpoint("production", "uta", "private", false, env); }
+  catch { return jsonError("invalid_websocket_endpoint", 503); }
   const creds = bitgetPrivateCredentialSet(env);
   if (!creds.key || !creds.secret || !creds.passphrase) return jsonError("credentials_missing", 503);
 
@@ -62,7 +63,7 @@ export async function handleBitgetPrivateWebSocket(req: Request, env: Record<str
   sendClient({ event: "status", state: "connecting", environment, account });
   connectTimeout = setTimeout(() => { if (!loggedIn && !closed) { sendClient({ event: "error", code: "upstream_login_timeout" }); close(1011, "upstream login timeout"); } }, 20000);
   try {
-    upstream = new Socket(bitgetWsEndpoint(environment, account, "private"));
+    upstream = new Socket(upstreamUrl);
     upstream.addEventListener("open", async () => {
       if (closed || !upstream) return;
       try { upstream.send(JSON.stringify(await bitgetPrivateLogin(env))); }
