@@ -655,8 +655,8 @@ async function load(){
    if(!window.ETIBitget)throw Error('Bitget browser adapter did not load');
    const category=info.market==='futures'?(info.productType||$('orderBitgetMarket').value.toUpperCase()):'SPOT';
    if(info.market==='futures'&&!info.productType)throw Error('Selected Bitget contract is not present in the '+category+' catalogue. Refresh the pair list or select a listed contract.');
-   const direct=await window.ETIBitget.marketData({symbol:s,interval:i,limit:BARS,market:info.market,category:category});
    ensureBitgetStream(info,key);
+   const direct=await window.ETIBitget.marketData({symbol:s,interval:i,limit:BARS,market:info.market,category:category});
    if(seq!==reqSeq)return;
    pricePrecision=2;capturePricePrecision((direct.candles||[]).flatMap(v=>v.slice(1,5)));if(direct.ticker)capturePricePrecision([direct.ticker.lastPrice,direct.ticker.bidPrice,direct.ticker.askPrice]);
    candles=direct.candles;book=direct.depth||{bids:[],asks:[]};trades=direct.trades||[];provider='bitget-browser';lastGoodAt=Date.now();lastGoodKey=key;
