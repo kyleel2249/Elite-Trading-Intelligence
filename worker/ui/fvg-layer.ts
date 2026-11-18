@@ -228,7 +228,7 @@ function paint(){
    var z=t.z,bull=z.direction==='bullish',lx=Math.max(t.x0+4,4);
    if(t.x1-lx<60||t.h<12||idx>=8)return;
    var q=precisionState.ids[z.id],head='FVG '+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+STATUS[z.status]+(q?' · ETI QUALIFIED · ENTRY '+price(q.entry.price):'')+(z.confluence.length?' · MTF×'+(z.confluence.length+1):'');
-   var badge=(q?'GREEN TRADE-ENTRY FVG · ':'FVG ')+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+(z.status==='fresh'?'UNMITIGATED':z.status==='partially_mitigated'?'PARTIALLY FILLED':STATUS[z.status].toUpperCase())+' · '+z.mitigationPct+'% FILLED';
+   var badge=(q?'GREEN TRADE-ENTRY FVG · ':'FVG ')+(bull?'▲ BULL ':'▼ BEAR ')+z.timeframe+' · '+(z.status==='fresh'?'UNFILLED':z.status==='partially_mitigated'?'PARTIALLY FILLED':STATUS[z.status].toUpperCase())+' · '+z.mitigationPct+'% FILLED';
    x.fillStyle=hexRgba(t.col,1);x.textAlign='left';x.fillText(head,lx,t.y0+8);
    if(t.h>=26){x.fillStyle=hexRgba(t.col,0.85);x.fillText(badge+' · gap '+price(z.sizeAbs)+' ('+z.sizeAtr+' ATR) · formed @'+price(z.formationPrice),lx,t.y0+20);}
    if(t.h>=34&&t.x1-lx>240){x.textAlign='right';x.fillStyle=hexRgba(t.col,1);x.fillText(price(z.upper),t.x1-5,t.y0+8);x.fillText(price(z.lower),t.x1-5,t.y0+t.h-7);x.textAlign='left';}
