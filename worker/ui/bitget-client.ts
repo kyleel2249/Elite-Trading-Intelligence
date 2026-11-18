@@ -175,7 +175,7 @@ function subscribePrivate(opts,handlers){
  opts=opts||{};handlers=handlers||{};
 
  var ws=null,closed=false,retry=0,retryTimer=null,pingTimer=null,watchdog=null,lastMessageAt=0,connected=false,authenticated=false,maxRetries=Math.max(1,Math.min(10,Number(opts.maxRetries)||5));
- var url=opts.url||((window.location&&window.location.protocol==="https:"?"wss:":"ws:")+"//"+(window.location&&window.location.host||"")+"/api/bitget/ws/private?environment="+encodeURIComponent(opts.environment==="demo"?"demo":"production")+"&account="+encodeURIComponent(opts.account==="classic"?"classic":"uta"));
+ var url=opts.url||((window.location&&window.location.protocol==="https:"?"wss:":"ws:")+"//"+(window.location&&window.location.host||"")+"/api/bitget/ws/private");
  function status(state,detail){if(typeof handlers.onStatus==="function")handlers.onStatus({state:state,detail:detail||"",connected:connected,authenticated:authenticated,lastMessageAt:lastMessageAt,retry:retry});}
  function emit(type,data,raw){if(typeof handlers.onMessage==="function")handlers.onMessage({type:type,data:data,timestamp:Date.now(),raw:raw||null});}
  function stopTimers(){if(pingTimer)clearInterval(pingTimer);if(watchdog)clearInterval(watchdog);pingTimer=null;watchdog=null;}
@@ -258,7 +258,7 @@ function mergeSbeDepth(book,d){
 }
 function subscribeTransport(opts,handlers){
  opts=opts||{};handlers=handlers||{};
- var environment=opts.environment==="demo"?"demo":"production",account=opts.account==="classic"?"classic":"uta",protocol=opts.protocol==="sbe"?"sbe":"json",symbol=String(opts.symbol||"").toUpperCase(),args=transportArgs(opts),url=transportEndpoint(environment,account,protocol);
+ var environment="production",account="uta",protocol=opts.protocol==="sbe"?"sbe":"json",symbol=String(opts.symbol||"").toUpperCase(),args=transportArgs(opts),url=transportEndpoint(protocol);
  if(protocol==="sbe"&&account!=="uta")throw new Error("SBE is UTA-only");
  if(protocol==="sbe"){var inst=opts.market==="futures"?String(opts.category||"USDT-FUTURES").toLowerCase():"spot";args=[{instType:inst,topic:"books50",symbol:symbol},{instType:inst,topic:"books1",symbol:symbol},{instType:inst,topic:"publicTrade",symbol:symbol}];}
  var ws=null,closed=false,retry=0,retryTimer=null,ping=null,watchdog=null,last=0,connected=false,sbeBookState=Object.create(null),sbeBboSeq=Object.create(null);
