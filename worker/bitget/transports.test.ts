@@ -71,3 +71,13 @@ test("SBE rejects unsupported schemas, templates and truncated frames",()=>{
  assert.throws(()=>decodeBitgetSbe(bad),/schema/);
  assert.throws(()=>decodeBitgetSbe(frame(9999,8,1,new Array(8).fill(0))),/template/);
 });
+
+
+test("SBE Depth50 schema v5 decodes groups and incremental continuity metadata",()=>{
+ const b:number[]=[];putU64(b,1700000000000000n);putU64(b,42n);b.push(0xfe,0xfc);putU64(b,1700000000001000n);b.push(1);putU64(b,41n);b.push(1,0,0,0);
+ b.push(16,0,1,0);putI64(b,6566738n);putI64(b,5000n);
+ b.push(16,0,1,0);putI64(b,6566438n);putI64(b,6000n);
+ b.push(7,...new TextEncoder().encode("BTCUSDT"));
+ const d=decodeBitgetSbe(frame(1001,40,5,b));
+ assert.equal(d.type,"books50");assert.equal(d.seq,42);assert.equal(d.pseq,41);assert.equal(d.depthAction,1);assert.equal(d.asks[0][0],65667.38);assert.equal(d.bids[0][1],0.6);assert.equal(d.symbol,"BTCUSDT");
+});
