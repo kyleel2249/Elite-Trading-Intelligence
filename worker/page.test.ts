@@ -31,7 +31,8 @@ test("dashboard ships the 3D motion layer: reduced-motion safe, no external scri
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
   assert.match(html, /id="eti-motion"/); assert.match(html, /prefers-reduced-motion/); assert.match(html, /execpanel'\)\)return/);
   assert.match(html, /<script[^>]+src="\/bitget-client\.js"/i, "the same-origin Bitget adapter is loaded");
-  assert.doesNotMatch(html, /<script[^>]+src="https?:\/\//i, "no third-party script is loaded");
+  assert.match(html, /lightweight-charts@4\.1\.3\/dist\/lightweight-charts\.standalone\.production\.js/, "the Pro terminal chart library is reused");
+  assert.doesNotMatch(html, /<script[^>]+src="https?:\/\/(?!cdn\.jsdelivr\.net\/npm\/lightweight-charts@4\.1\.3)/i, "only the pinned chart library may load from a CDN");
 });
 
 test("/elite is served, loads no external script, and carries none of the reference image's sample figures", async () => {
@@ -98,4 +99,25 @@ test("dashboard serves an installable PWA manifest, root-scoped service worker a
   assert.match(html, /apple-mobile-web-app-capable/);
   assert.match(html, /eti-install-app/);
   assert.match(html, /register\(['"]\/sw\.js/);
+});
+
+
+test("main dashboard Live Market Chart uses the Pro-style advanced chart and retains its native fallback and analysis panes", async () => {
+  const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
+  assert.match(html, /id="chartAdvanced"/);
+  assert.match(html, /id="chartFit"/);
+  assert.match(html, /id="chartStyle"/);
+  assert.match(html, /function initAdvancedLiveChart\(/);
+  assert.match(html, /function renderAdvancedLiveChart\(/);
+  assert.match(html, /addCandlestickSeries/);
+  assert.match(html, /addHistogramSeries/);
+  assert.match(html, /pricePrecision/);
+  assert.match(html, /minimumFractionDigits:pricePrecision/);
+  assert.match(html, /maximumFractionDigits:pricePrecision/);
+  assert.match(html, /coordinateToPrice/);
+  assert.match(html, /id="paneRsi"/);
+  assert.match(html, /id="paneMacd"/);
+  assert.match(html, /id="paneAdx"/);
+  assert.match(html, /id="paneScore"/);
+  assert.match(html, /classList.add\('legacy'\)/);
 });
