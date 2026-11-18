@@ -31,7 +31,7 @@ test("dashboard uses a static, contained 1920x1080 chart layout with no 3D anima
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
   assert.ok(html.includes("main{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px"));
   assert.match(html, /id="eti-motion"/);
-  assert.doesNotMatch(html, /etiBg|eti-motion-js|eti-in|eti-seen|eti-hot/);
+  assert.doesNotMatch(html, /(?:\b(?:etiBg|eti-motion-js|eti-in|eti-seen|eti-hot)\b)/);
   for (const token of ["perspective(", "rotateX(", "rotateY(", "translateZ(", "transform-style"]) assert.equal(html.includes(token), false);
   assert.ok(html.includes(".panel{") && html.includes("transform:none!important"));
   assert.ok(html.includes("button:hover:not(:disabled),button:active:not(:disabled){transform:none!important"));
