@@ -74,7 +74,7 @@ function parseDepth(data){
 function parseTrades(data){
  return (Array.isArray(data)?data:[]).map(function(t){
   if(Array.isArray(t))return {T:millis(t[0])||0,m:String(t[3]||"").toLowerCase()==="sell",p:String(t[1]||""),q:String(t[2]||"")};
-  return {T:millis(t.T||t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.S||t.side||"").toLowerCase()==="sell",p:String(t.p||t.price||t.fillPrice||""),q:String(t.v||t.size||t.baseVolume||t.qty||"")};
+  return {T:millis(t.T||t.ts||t.time||t.cTime||t.uTime)||0,m:String(t.S||t.side||"").toLowerCase()==="sell",p:String(t.p||t.price||t.fillPrice||""),q:String(t.q||t.v||t.size||t.baseVolume||t.qty||"")};
  }).filter(function(t){return t.T>0&&Number(t.p)>0&&Number(t.q)>0}).sort(function(a,b){return b.T-a.T}).slice(0,100);
 }
 function firstNumber(){for(var i=0;i<arguments.length;i++){var n=num(arguments[i]);if(n!==null)return n}return null}
