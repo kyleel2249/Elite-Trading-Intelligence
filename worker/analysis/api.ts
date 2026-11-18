@@ -1,5 +1,5 @@
 // /api/analysis/* : read-only analytical endpoints. No endpoint here can place orders, and no credential is ever returned.
-import { getMarketData, providerOrder, type Kline, type MarketEnv } from "../market.ts";
+import { getMarketData, providerOrder, bitgetProductFor, type Kline, type MarketEnv } from "../market.ts";
 import { runOmnisignal } from "../algo/omnisignal.ts";
 import { analyzeFvgMtf, FVG_RULES } from "./fvg.ts";
 import { analyzeFvgPrecision } from "./fvg-precision.ts";
@@ -181,13 +181,13 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
 
   try {
     if (path === "/api/analysis/orderflow") {
-      // Read-only trade-footprint and depth intelligence. Bitget's public feed is browser-direct;
-      // POST accepts that browser-fetched data without routing Bitget traffic through Worker egress.
+      // Read-only trade-footprint and depth intelligence. Both venues use ETI's validated market-data layer;
+      // Bitget REST is proxied same-origin, while browser POST remains available for supplied snapshots.
       const venueRaw = q("venue") ?? "bybit";
       if (venueRaw !== "bybit" && venueRaw !== "bitget") return reply({ error: "invalid_venue", allowed: ["bybit", "bitget"] }, 400);
       const venue = venueRaw as "bybit" | "bitget";
       const market: "spot" | "futures" = q("market") === "futures" ? "futures" : "spot";
-      const category = q("category") ?? (market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot");
+      const category = q("category") ?? (venue === "bitget" ? (market === "futures" ? bitgetProductFor(symbol) : "SPOT") : (market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot"));
       let trades: ReturnType<typeof normalizeTrades>, depth: ReturnType<typeof normalizeDepth>, candles: Kline[] = [], provider: string = venue;
       if (post) {
         trades = normalizeTrades(body.trades);
@@ -201,8 +201,8 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         }
         provider = String(body.provider ?? venue).slice(0, 40);
       } else {
-        if (venue === "bitget") return reply({ error: "browser_feed_required", detail: "Bitget public market data must be fetched from the browser because Bitget blocks Cloudflare Worker egress. POST the browser-fetched trades and depth to this endpoint.", venue, submitsOrder: false }, 424);
-        const order = providerOrder(env, "bybit");
+        const selected = venue === "bitget" ? (market === "futures" ? "bitget_mix" : "bitget") : "bybit";
+        const order = providerOrder(env, selected);
         const params = { symbol, interval: "1m", limit: 500, market, category: category as any };
         const [t, d, k] = await Promise.all([
           getMarketData("trades", params, order),
