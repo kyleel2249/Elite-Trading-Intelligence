@@ -278,7 +278,7 @@ function spread(labels,gap,lo,hi){labels.sort((a,b)=>a.y-b.y);for(let i=0;i<labe
 function updateOverlayNote(){const e=$('overlayNote');if(sigValid()&&provider&&sig.provider!==provider){e.style.display='inline-block';e.textContent='Overlays computed on '+sig.provider+' candles; chart candles from '+provider;}else e.style.display='none';}
 
 
-let liveChart=null,liveCandle=null,liveVolume=null,liveEma20=null,liveEma50=null,liveEma200=null,liveBbUpper=null,liveBbLower=null,liveLine=null,liveArea=null,livePriceLines=[],liveAdvancedKey='',liveSelectionKey='';
+let liveChart=null,liveCandle=null,liveVolume=null,liveEma20=null,liveEma50=null,liveEma200=null,liveBbUpper=null,liveBbLower=null,liveRibbon=null,liveLine=null,liveArea=null,livePriceLines=[],liveAdvancedKey='',liveSelectionKey='';
 function livePriceFormat(){return {type:'price',precision:pricePrecision,minMove:Math.pow(10,-pricePrecision)};}
 function liveEma(period){let prev=null,k=2/(period+1);return candles.map(v=>{const close=Number(v[4]);prev=prev===null?close:close*k+prev*(1-k);return {time:Math.floor(Number(v[0])/1000),value:prev};});}
 function initAdvancedLiveChart(){
@@ -289,6 +289,7 @@ function initAdvancedLiveChart(){
   liveChart=LightweightCharts.createChart(host,{width:host.clientWidth,height:host.clientHeight,layout:{background:{color:'#091729'},textColor:'#8fa3bd',fontFamily:'Inter,system-ui,sans-serif'},grid:{vertLines:{color:'#142a42'},horzLines:{color:'#142a42'}},rightPriceScale:{borderColor:'#233b56',minimumWidth:PAD_R},timeScale:{borderColor:'#233b56',timeVisible:true,secondsVisible:false},crosshair:{mode:LightweightCharts.CrosshairMode.Normal},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true}});
   liveCandle=liveChart.addCandlestickSeries({upColor:'#21d69a',downColor:'#ff637d',borderUpColor:'#21d69a',borderDownColor:'#ff637d',wickUpColor:'#21d69a',wickDownColor:'#ff637d',priceFormat:livePriceFormat()});
   liveVolume=liveChart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'volume',scaleMargins:{top:.84,bottom:0},lastValueVisible:false,priceLineVisible:false});
+  liveRibbon=liveChart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'ribbon',scaleMargins:{top:.94,bottom:0},lastValueVisible:false,priceLineVisible:false});
   liveEma20=liveChart.addLineSeries({color:'#f0c674',lineWidth:1,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
   liveEma50=liveChart.addLineSeries({color:'#56a8ff',lineWidth:1,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
   liveEma200=liveChart.addLineSeries({color:'#c792ea',lineWidth:1,priceLineVisible:false,lastValueVisible:false,priceFormat:livePriceFormat()});
@@ -319,11 +320,13 @@ function renderAdvancedLiveChart(){
  const upper=ix?series('bbUpper',20):[],lower=ix?series('bbLower',20):[];
  liveBbUpper.setData(upper);liveBbLower.setData(lower);liveBbUpper.applyOptions({visible:layers.bb&&upper.length>0});liveBbLower.applyOptions({visible:layers.bb&&lower.length>0});
  liveVolume.applyOptions({visible:layers.volume});
+ const ribbonData=ix?candles.map((v,i)=>{const j=ix[i],score=j===null?null:sig.chart.score&&sig.chart.score[j],direction=j===null?0:sig.chart.direction&&sig.chart.direction[j];return score==null?null:{time:Math.floor(Number(v[0])/1000),value:Number(score),color:direction===1?'rgba(33,214,154,.85)':'rgba(255,99,125,.85)'};}).filter(Boolean):[];liveRibbon.setData(ribbonData);liveRibbon.applyOptions({visible:layers.ribbon&&ribbonData.length>0});
  const style=$('chartStyle').value;liveCandle.applyOptions({visible:style==='candles'});liveLine.applyOptions({visible:style==='line'});liveArea.applyOptions({visible:style==='area'});
  const closes=candles.map(v=>({time:Math.floor(Number(v[0])/1000),value:Number(v[4])}));if(style==='line')liveLine.setData(closes);if(style==='area')liveArea.setData(closes);
  const marks=[];
- for(let i=2;i<candles.length;i++){const a=candles[i-2],b=candles[i];if(Number(b[3])>Number(a[2]))marks.push({time:Math.floor(Number(b[0])/1000),position:'belowBar',color:'#21d69a',shape:'arrowUp',text:'Bull FVG'});else if(Number(b[2])<Number(a[3]))marks.push({time:Math.floor(Number(b[0])/1000),position:'aboveBar',color:'#ff637d',shape:'arrowDown',text:'Bear FVG'});}
- if(ix&&sig.chart.markers) sig.chart.markers.forEach(m=>marks.push({time:Math.floor(Number(m.time)/1000),position:m.label==='BUY'?'belowBar':'aboveBar',color:m.label==='BUY'?'#21d69a':'#ff637d',shape:m.label==='BUY'?'arrowUp':'arrowDown',text:String(m.label||'SIGNAL')+' '+String(m.score==null?'':m.score)}));
+ if(layers.markers)for(let i=2;i<candles.length;i++){const a=candles[i-2],b=candles[i];if(Number(b[3])>Number(a[2]))marks.push({time:Math.floor(Number(b[0])/1000),position:'belowBar',color:'#21d69a',shape:'arrowUp',text:'Bull FVG'});else if(Number(b[2])<Number(a[3]))marks.push({time:Math.floor(Number(b[0])/1000),position:'aboveBar',color:'#ff637d',shape:'arrowDown',text:'Bear FVG'});}
+ if(layers.markers&&ix&&sig.chart.markers)sig.chart.markers.forEach(m=>marks.push({time:Math.floor(Number(m.time)/1000),position:m.label==='BUY'?'belowBar':'aboveBar',color:m.label==='BUY'?'#21d69a':'#ff637d',shape:m.label==='BUY'?'arrowUp':'arrowDown',text:String(m.label||'SIGNAL')+' '+String(m.score==null?'':m.score)}));
+ if(layers.replay&&ix&&sig.chart.replay)(sig.chart.replay||[]).forEach(t=>marks.push({time:Math.floor(Number(t.time)/1000),position:t.label==='BUY'?'belowBar':'aboveBar',color:t.outcome==='win'?'#21d69a':t.outcome==='loss'?'#ff637d':'#91a9c4',shape:'circle',text:'Replay '+(t.outcome||'open')}));
  marks.sort((a,b)=>a.time-b.time);liveCandle.setMarkers(marks.slice(-100));
  livePriceLines.forEach(p=>{try{liveCandle.removePriceLine(p);}catch(e){}});livePriceLines=[];
  if(sigValid()&&sig.chart&&layers.levels){const L=sig.chart.levels,levels=[['ENTRY',L.entry,C.entry],['STOP',L.stopLoss,C.down]].concat((L.targets||[]).map((p,i)=>['TP'+(i+1),p,C.up]));levels.forEach(v=>{if(Number.isFinite(Number(v[1]))&&Number(v[1])>0)livePriceLines.push(liveCandle.createPriceLine({price:Number(v[1]),color:v[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:v[0]}));});}
