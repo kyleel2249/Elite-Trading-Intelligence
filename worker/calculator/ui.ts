@@ -33,18 +33,19 @@ export const CALC_HTML = `
 <section class="panel cl" id="calcPanel" aria-labelledby="calcTitle">
 <h2 id="calcTitle">Profit &amp; Leverage Calculator <span class="muted" style="font-size:12px;font-weight:400">anchored to your entry price · can place the order for you (paper / testnet)</span></h2>
 <div class="clinfo" id="clSym" aria-live="polite">Chart symbol: not loaded yet.</div>
+<div class="clexec" id="clAnalysisPanel"><h3>ETI strategy-driven entry and exit</h3><label class="clchk muted"><input type="checkbox" id="clAutoAnalysis" checked> Automatically use qualified ETI Liquidity-FVG strategy levels</label><div class="clinfo" id="clAnalysisStatus" aria-live="polite">Waiting for current pair and timeframe analysis.</div><div class="clinfo" id="clAnalysisDetails" aria-live="polite">FVG, liquidity sweeps, order blocks, structure and strategy targets will appear here when analysis is ready.</div></div>
 <div class="clinfo" id="clMarketNote" aria-live="polite">Futures mode: choose Long or Short and set leverage. Calculations include fees, slippage and funding assumptions.</div>
 <div class="clgrid">
 <label>Market type<select id="clMarketMode"><option value="futures">Futures / Perpetual</option><option value="spot">Spot</option></select></label>
 <label>Direction<select id="clSide"><option value="buy">Long (buy)</option><option value="sell">Short (sell)</option></select></label>
 <label>Instrument type<select id="clInst"><option value="crypto">Crypto / units (1)</option><option value="forex">Forex lots (100,000)</option><option value="gold">Gold lots (100 oz)</option><option value="silver">Silver lots (5,000 oz)</option><option value="stock">Stocks / shares (1)</option><option value="custom">Custom contract size</option></select></label>
 <label>Contract size (units per 1 quantity)<input id="clCs" type="number" inputmode="decimal" min="0" step="any" value="1"></label>
-<label>Entry price<input id="clEntry" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 2650"></label>
-<label>Exit / target price<input id="clExit" type="number" inputmode="decimal" min="0" step="any"></label>
-<label>Stop price (optional)<input id="clStop" type="number" inputmode="decimal" min="0" step="any"></label>
-<label>Size by<select id="clSizeBy"><option value="quantity">Quantity</option><option value="margin">Margin (capital)</option></select></label>
+<label>ETI entry price<input id="clEntry" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 2650"></label>
+<label>ETI planned exit price<input id="clExit" type="number" inputmode="decimal" min="0" step="any"></label>
+<label>ETI stop-loss price<input id="clStop" type="number" inputmode="decimal" min="0" step="any"></label>
+<label>Amount type<select id="clSizeBy"><option value="margin" selected>Capital / margin to commit</option><option value="quantity">Quantity</option></select></label>
 <label id="clQtyL">Quantity (contracts, lots or units)<input id="clQty" type="number" inputmode="decimal" min="0" step="any" value="1"></label>
-<label id="clMarginL" style="display:none"><span id="clMarginTitle">Margin to commit (account currency)</span><input id="clMargin" type="number" inputmode="decimal" min="0" step="any" value="100"></label>
+<label id="clMarginL"><span id="clMarginTitle">Capital / margin to commit (account currency)</span><input id="clMargin" type="number" inputmode="decimal" min="0" step="any" value="100"></label>
 <label class="wide" id="clLevRangeL">Leverage <b id="clLevOut">10x</b><input id="clLevRange" type="range" min="1" max="125" step="1" value="10" aria-label="Leverage slider"></label>
 <label id="clLevL">Leverage (exact)<input id="clLev" type="number" inputmode="numeric" min="1" max="150" step="1" value="10"></label>
 <label>Fee per side (%)<input id="clFee" type="number" inputmode="decimal" min="0" step="any" value="0.05"></label>
@@ -89,10 +90,47 @@ function inputs(){
  var spot=g('clMarketMode').value==='spot',targetMode=g('clTargetMode').value;
  return {side:spot?'buy':g('clSide').value,entry:n('clEntry'),exit:n('clExit'),stop:n('clStop'),sizeBy:g('clSizeBy').value,quantity:n('clQty'),margin:n('clMargin'),leverage:spot?1:n('clLev'),feePct:n('clFee'),slippagePct:n('clSlip'),fundingPct:spot?0:n('clFund'),mmrPct:n('clMmr'),contractSize:n('clCs'),fxRate:n('clFx'),targetProfit:targetMode==='amount'?n('clTp'):null,targetProfitPct:targetMode==='pct'?n('clTpPct'):null};
 }
+var activeEtiAnalysis=null,activeEtiAnalysisSymbol='',activeEtiAnalysisTimeframe='';
+function autoAnalysisLevels(){
+ var a=activeEtiAnalysis,spot=g('clMarketMode').value==='spot',auto=g('clAutoAnalysis').checked,setup=a&&a.autopilotEligible&&a.setup?a.setup:null;
+ ['clEntry','clExit','clStop'].forEach(function(id){g(id).readOnly=auto;});
+ if(!auto||!setup)return null;
+ if(spot&&setup.direction!=='BUY')return {blocked:'The current qualified ETI setup is SHORT. Spot is long-only; switch to Futures to use this setup.'};
+ g('clSide').value=setup.direction==='BUY'?'buy':'sell';
+ g('clEntry').value=setup.entry;
+ g('clStop').value=setup.stopLoss===null?'':setup.stopLoss;
+ var strategyTarget=setup.targets&&setup.targets.length?Number(setup.targets[0].price):NaN;
+ if(!(strategyTarget>0))return {blocked:'The qualified setup has no valid strategy target. No exit price was invented.'};
+ var base=inputs();base.exit=null;
+ var targetCalc=computePosition(base),desired=targetCalc.ok?targetCalc.priceForTargetProfit:null,chosen=strategyTarget;
+ if(desired!==null&&isFinite(desired)&&desired>0)chosen=setup.direction==='BUY'?Math.min(desired,strategyTarget):Math.max(desired,strategyTarget);
+ g('clExit').value=chosen;
+ return {setup:setup,strategyTarget:strategyTarget,desired:desired,chosen:chosen,targetCalc:targetCalc};
+}
+function renderAnalysisPlan(plan){
+ var status=g('clAnalysisStatus'),details=g('clAnalysisDetails'),a=activeEtiAnalysis;
+ if(!a){status.textContent='Analysis unavailable: '+(plan&&plan.error||'waiting for market data');details.textContent='No entry or exit has been generated. Check the selected pair, chart timeframe and market-data feed.';return;}
+ var best=a.precision&&a.precision.best;
+ if(plan&&plan.blocked){status.textContent='WAIT · '+plan.blocked;details.textContent=(a.blocks||[]).join(' · ')||'No qualified setup.';return;}
+ if(!a.autopilotEligible||!a.setup){
+  status.textContent='WAIT · no fully qualified Liquidity-FVG entry on '+a.timeframe+'. No automatic order levels will be proposed.';
+  details.textContent=(best?'Best provisional '+best.direction+' FVG '+px(best.zone.lower)+'–'+px(best.zone.upper)+' · candidate entry '+px(best.entry.price)+' · state '+best.state+' · evidence '+best.score+'/100. ':'No precision FVG candidate is currently available. ')+(a.blocks||[]).join(' · ');
+  return;
+ }
+ var s=plan.setup,side=s.direction,parts=['Qualified '+side+' setup · '+a.timeframe+' · evidence '+a.score+'/100','FVG '+px(s.fvg.lower)+'–'+px(s.fvg.upper)+' (CE '+px(s.entry)+')','Stop '+px(s.stopLoss),'Strategy TP1 '+px(plan.strategyTarget)];
+ if(plan.desired!==null&&isFinite(plan.desired)){parts.push('Profit-target price '+px(plan.desired));if(Math.abs(plan.desired-plan.strategyTarget)>Math.abs(plan.strategyTarget)*1e-10)parts.push('planned exit '+px(plan.chosen)+' is capped at TP1');}
+ if(a.latestSweep)parts.push('latest sweep '+a.latestSweep.side.replace('_',' ')+' at '+px(a.latestSweep.level)+' · reclaimed '+(a.latestSweep.reclaimed?'yes':'no'));
+ if(a.manipulation)parts.push('stop-run risk '+a.manipulation.level+' ('+a.manipulation.score+'/100)');
+ if(a.pools&&a.pools.length)parts.push('nearest ranked liquidity '+a.pools[0].side.replace('_',' ')+' at '+px(a.pools[0].price));
+ if(plan.desired!==null&&isFinite(plan.desired)&&plan.chosen===plan.strategyTarget&&((side==='BUY'&&plan.desired>plan.strategyTarget)||(side==='SELL'&&plan.desired<plan.strategyTarget)))status.textContent='QUALIFIED SETUP · requested profit target lies beyond the strategy TP1; ETI uses TP1 instead, so the requested amount may not be reached.';
+ else status.textContent='QUALIFIED SETUP · entry, stop and exit are calculated from ETI analysis and your current capital / margin and profit target.';
+ details.textContent=parts.join(' · ');
+}
 function run(){
  var sizeBy=g('clSizeBy').value,spot=g('clMarketMode').value==='spot',targetMode=g('clTargetMode').value;
  g('clQtyL').style.display=sizeBy==='quantity'?'':'none';g('clMarginL').style.display=sizeBy==='margin'?'':'none';
  g('clTpL').style.display=targetMode==='amount'?'':'none';g('clTpPctL').style.display=targetMode==='pct'?'':'none';
+ var plan=autoAnalysisLevels();
  var r=computePosition(inputs());
  var msgs=g('clMsgs'),k=g('clKpis'),tb=g('clLadder').getElementsByTagName('tbody')[0];msgs.textContent='';k.textContent='';tb.textContent='';g('clUnits').textContent='';
  if(!r.ok){(r.errors||[]).forEach(function(e){msgs.appendChild(msg('clerr',e));});return;}
@@ -105,6 +143,7 @@ function run(){
  if(r.stopResult){k.appendChild(kpi('Net loss at stop',money(r.stopResult.net),sign(r.stopResult.net)));k.appendChild(kpi('Loss as % of margin',pct(r.stopResult.roiPct),sign(r.stopResult.roiPct)));}
  if(r.riskReward!==null)k.appendChild(kpi('Risk : reward','1 : '+r.riskReward.toFixed(2)));
  if(r.priceForTargetProfit!==null){k.appendChild(kpi('Exit price for target profit',px(r.priceForTargetProfit)));k.appendChild(kpi('Favourable price move required',pct(Math.abs(r.targetProfitMovePct))));k.appendChild(kpi('Net profit target',money(r.targetProfitAmount)));}
+ if(plan&&plan.setup){var strategy=computePosition(Object.assign(inputs(),{exit:plan.strategyTarget}));k.appendChild(kpi('ETI strategy TP1',px(plan.strategyTarget)));if(strategy.ok&&strategy.target)k.appendChild(kpi('Net profit at strategy TP1',money(strategy.target.net),sign(strategy.target.net)));}
  var cur=Number(g('clLev').value);
  r.ladder.forEach(function(l){var tr=document.createElement('tr');if(l.leverage===cur)tr.className='cur';if(l.immediate)tr.className+=' imm';
   var cells=[l.leverage+'x',money(l.margin),l.immediate?'liquidated at entry':l.liquidation===null?'none':px(l.liquidation),l.immediate||l.liquidationDistancePct===null?'-':pct(l.liquidationDistancePct),l.net===null?'-':money(l.net),l.roiPct===null?'-':pct(l.roiPct)];
@@ -120,14 +159,22 @@ g('clLev').addEventListener('input',function(){var v=Number(g('clLev').value);if
 g('clInst').addEventListener('change',function(){applyPreset();run();});
 IDS.forEach(function(i){if(i!=='clLev'&&i!=='clInst'){g(i).addEventListener('input',run);g(i).addEventListener('change',run);}});
 g('clMarketMode').addEventListener('change',function(){applyMarketMode();run();});g('clTargetMode').addEventListener('change',function(){applyTargetMode();run();});
+g('clAutoAnalysis').addEventListener('change',function(){run();});
+window.addEventListener('eti-liquidity-fvg-updated',function(ev){
+ var d=ev&&ev.detail||{},sym=$('symbol').value,tf=$('interval').value;
+ if(d.symbol!==sym||d.timeframe!==tf)return;
+ activeEtiAnalysis=d.analysis||null;activeEtiAnalysisSymbol=sym;activeEtiAnalysisTimeframe=tf;
+ if(!activeEtiAnalysis){renderAnalysisPlan({error:d.error});run();return;}
+ run();renderAnalysisPlan(autoAnalysisLevels());
+});
 function lastPrice(){var t=$('last').textContent.replace(/,/g,'').trim(),v=Number(t);return isFinite(v)&&v>0?v:null;}
-g('clUseLast').addEventListener('click',function(){var v=lastPrice();if(v===null){g('clSym').textContent='No live chart price yet: type the entry price manually.';return;}g('clEntry').value=v;run();});
-g('clReset').addEventListener('click',function(){g('clMarketMode').value='futures';g('clTargetMode').value='amount';applyMarketMode();applyTargetMode();g('clSide').value='buy';g('clInst').value='crypto';applyPreset();['clEntry','clExit','clStop','clTp','clTpPct'].forEach(function(i){g(i).value='';});g('clSizeBy').value='quantity';g('clQty').value=1;g('clMargin').value=100;g('clFund').value=0;g('clMmr').value=0.5;g('clFx').value=1;setLev(10);run();});
+g('clUseLast').addEventListener('click',function(){var v=lastPrice();if(v===null){g('clSym').textContent='No live chart price yet: type the entry price manually.';return;}if(!g('clAutoAnalysis').checked){g('clEntry').value=v;run();}});
+g('clReset').addEventListener('click',function(){g('clMarketMode').value='futures';g('clTargetMode').value='amount';g('clAutoAnalysis').checked=true;applyMarketMode();applyTargetMode();g('clSide').value='buy';g('clInst').value='crypto';applyPreset();['clEntry','clExit','clStop','clTp','clTpPct'].forEach(function(i){g(i).value='';});g('clSizeBy').value='quantity';g('clQty').value=1;g('clMargin').value=100;g('clFund').value=0;g('clMmr').value=0.5;g('clFx').value=1;setLev(10);run();});
 /* Entry follows chart clicks: the chart ticket sets its price field first, then this listener copies it into the entry. */
 if($('stack'))$('stack').addEventListener('click',function(){
  if(!g('clLink').checked||!$('ctPrice'))return;
  var v=Number($('ctPrice').value);
- if(isFinite(v)&&v>0){g('clEntry').value=v;run();}
+ if(isFinite(v)&&v>0&&!g('clAutoAnalysis').checked){g('clEntry').value=v;run();}
 });
 /* Place entry + protective exits through the dashboard's own order ticket and submitOrder (confirmation dialog included). */
 function fire(id,type){var e=$(id);if(e)e.dispatchEvent(new Event(type,{bubbles:true}));}
