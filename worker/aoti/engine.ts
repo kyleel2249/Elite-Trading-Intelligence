@@ -135,6 +135,15 @@ function normalizePair(p:any,now:number):Omit<AotiCandidate,"score"|"eligible"|"
   return {id:chain+":"+address.toLowerCase()+":"+pairAddress.toLowerCase(),chain,address,pairAddress,dexId:clean(p.dexId,80),name:clean(p.baseToken?.name,100),symbol:clean(p.baseToken?.symbol,24),url:typeof p.url==="string"?p.url:null,priceUsd,liquidityUsd:Number.isFinite(liquidityUsd)?liquidityUsd:0,volume5mUsd:Number.isFinite(volume5mUsd)?volume5mUsd:0,volume1hUsd:Number.isFinite(volume1hUsd)?volume1hUsd:0,buys5m,sells5m,pairCreatedAt:created,ageMinutes,holderGrowthPct:null,smartWalletBuys:null,kolBuyVerified:null,security:{holderCount:null,mintAuthorityRevoked:null,freezeAuthorityRevoked:null,lpLocked:null,lpLockDays:null,developerSupplyPct:null,top10SupplyPct:null,sellSimulationPassed:null,bundledLaunchClear:null,provider:"not_checked",checkedAt:0,risks:[]},profile:undefined,source:"dexscreener",observedAt:now};
 }
 const GEO:Record<AotiChain,string>={solana:"solana",ethereum:"eth",base:"base",bsc:"bsc",arbitrum:"arbitrum",polygon:"polygon_pos",optimism:"optimism"};
+async function loadPairProfile(chain:AotiChain,pairAddress:string,symbol:string,price:number,fetcher:typeof fetch){
+  const network=GEO[chain],url="https://api.geckoterminal.com/api/v2/networks/"+network+"/pools/"+encodeURIComponent(pairAddress)+"/ohlcv/minute?aggregate=5&limit=120";
+  const data=await json(fetcher,url),rows=data?.data?.attributes?.ohlcv_list;
+  if(!Array.isArray(rows)||!rows.length)return undefined;
+  const candles=rows.map((r:any)=>[Number(r[0])*1000,Number(r[1]),Number(r[2]),Number(r[3]),Number(r[4]),Number(r[5])]).filter((r:number[])=>r.every(Number.isFinite));
+  const result=buildAdvancedVolumeProfile({symbol,candles,currentPrice:price,bins:64});
+  if(result.status!=="ok")return undefined;
+  return {poc:result.poc,vah:result.vah,val:result.val,method:result.sourceCoverage.method,location:result.location};
+}
 export async function scanAotiPairs(fetcher:typeof fetch=fetch,now=Date.now(),limit=12){
   const profile=await json(fetcher,"https://api.dexscreener.com/token-profiles/latest/v1").catch(()=>[]);
   const tokens=(Array.isArray(profile)?profile:[]).filter((x:any)=>CHAIN_MAP[String(x.chainId||"").toLowerCase()]&&x.tokenAddress).slice(0,Math.max(1,Math.min(30,limit*2)));
@@ -176,4 +185,43 @@ export async function runAotiCycle(env:AotiEnv,now=Date.now(),fetcher:typeof fet
   const result=await scanAotiPairs(fetcher,now,Number(env.ETI_AOTI_MAX_CANDIDATES||12));
   await persistAotiScan(env.ETI_PORTFOLIO_DB,result);
   return {enabled:true,scanned:result.count,eligible:result.candidates.filter(c=>c.eligible).length,securityPending:result.candidates.filter(c=>c.securityGate==="PENDING").length,provider:result.provider};
+}
+
+/** Refreshes the two-slot paper book. A failed price/security refresh never creates a fictitious fill. */
+export async function manageAotiPaperPositions(env:AotiEnv,now=Date.now(),fetcher:typeof fetch=fetch){
+  const db=env.ETI_PORTFOLIO_DB;if(env.ETI_AOTI_ENABLED!=="true"||!db)return {checked:0,updated:0,closed:0,failures:0};
+  await ensureAotiSchema(db);
+  const rows=(await db.prepare("SELECT * FROM eti_aoti_positions WHERE status='open' ORDER BY opened_at LIMIT 2").all()).results||[];
+  let updated=0,closed=0,failures=0;
+  for(const row of rows){
+    try{
+      const p=JSON.parse(row.payload_json),chain=row.chain as AotiChain;
+      const result=await json(fetcher,"https://api.dexscreener.com/latest/dex/pairs/"+encodeURIComponent(chain)+"/"+encodeURIComponent(row.address===p.address?p.pairAddress||"":p.pairAddress||""));
+      const pair=(result.pairs||[]).find((x:any)=>String(x.pairAddress||"").toLowerCase()===String(p.pairAddress||"").toLowerCase())||(result.pairs||[])[0];
+      const price=Number(pair?.priceUsd);if(!(price>0))throw new Error("live_pair_price_unavailable");
+      const security=await securityFor(chain,row.address,fetcher,now);
+      const gate=evaluateSecurity(security,now),liquidity=Number(pair?.liquidity?.usd||0),liquidityIncident=Number(p.initialLiquidityUsd||0)>0&&liquidity<Number(p.initialLiquidityUsd)*.6;
+      const high=Math.max(Number(p.highWaterPrice||p.entryPrice),price),change=(price-Number(p.entryPrice))/Number(p.entryPrice),age=now-Number(p.openedAt);
+      let closePct=0,reason="mark_to_market",eventType="PAPER_MARK";
+      if(gate.status==="FAIL"||liquidityIncident){closePct=Number(row.remaining_pct);reason=liquidityIncident?"pool_liquidity_drop_over_40pct":"security_gate_failed_after_entry";eventType="PAPER_SECURITY_EXIT";}
+      else if(change<=-.12){closePct=Number(row.remaining_pct);reason="hard_stop_12pct";eventType="PAPER_STOP";}
+      else if(!p.takeProfit2xDone&&change>=1){closePct=Math.min(40,Number(row.remaining_pct));p.takeProfit2xDone=true;reason="take_profit_2x";eventType="PAPER_TP";}
+      else if(p.takeProfit2xDone&&!p.takeProfit4xDone&&change>=3){closePct=Math.min(30,Number(row.remaining_pct));p.takeProfit4xDone=true;reason="take_profit_4x";eventType="PAPER_TP";}
+      else if(p.takeProfit2xDone&&p.takeProfit4xDone&&price<=high*.75){closePct=Number(row.remaining_pct);reason="runner_trailing_stop_25pct";eventType="PAPER_TRAIL";}
+      else if(age>=25*60_000){closePct=Number(row.remaining_pct);reason="time_stop_25_minutes";eventType="PAPER_TIME_EXIT";}
+      const realized=Number(row.realized_pnl_usd)+Number(row.notional_usd)*change*closePct/100,remaining=Math.max(0,Number(row.remaining_pct)-closePct),status=remaining<=0.0001?"closed":"open";
+      const next={...p,lastPrice:price,highWaterPrice:high,remainingPct:remaining,realizedPnlUsd:realized,status,securityGate:gate.status,lastSecurityCheck:now,lastLiquidityUsd:liquidity};
+      await db.prepare("UPDATE eti_aoti_positions SET status=?,last_price=?,remaining_pct=?,realized_pnl_usd=?,closed_at=?,payload_json=? WHERE id=? AND status='open'").bind(status,price,remaining,realized,status==="closed"?now:null,JSON.stringify(next),row.id).run();
+      if(closePct>0){
+        const equity=Number(await (async()=>{const x=await db.prepare("SELECT v FROM eti_aoti_state WHERE k='equity_usd'").first();return x?.v??"70"})())+Number(row.notional_usd)*change*closePct/100;
+        const peakRow=await db.prepare("SELECT v FROM eti_aoti_state WHERE k='peak_equity_usd'").first(),peak=Math.max(Number(peakRow?.v??"70"),equity);
+        await db.prepare("INSERT INTO eti_aoti_state(k,v,updated_at) VALUES('equity_usd',?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.updated_at").bind(String(equity),now).run();
+        await db.prepare("INSERT INTO eti_aoti_state(k,v,updated_at) VALUES('peak_equity_usd',?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.updated_at").bind(String(peak),now).run();
+        if(status==="closed"){const loss=realized<0,old=await db.prepare("SELECT v FROM eti_aoti_state WHERE k='consecutive_losses'").first();const streak=loss?Number(old?.v||0)+1:0;await db.prepare("INSERT INTO eti_aoti_state(k,v,updated_at) VALUES('consecutive_losses',?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.at").bind(String(streak),now).run();}
+        await db.prepare("INSERT OR IGNORE INTO eti_aoti_events(id,event_type,candidate_id,position_id,reason,payload_json,created_at) VALUES(?,?,?,?,?,?,?)").bind("manage:"+row.id+":"+now,eventType,row.candidate_id,row.id,reason,JSON.stringify({price,closePct,realizedPnlUsd:realized,remainingPct:remaining,securityGate:gate.status,liquidityUsd:liquidity}),now).run();
+      }
+      updated++;if(status==="closed")closed++;
+    }catch{failures++;}
+  }
+  return {checked:rows.length,updated,closed,failures};
 }
