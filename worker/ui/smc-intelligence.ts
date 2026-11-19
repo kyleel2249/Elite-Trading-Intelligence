@@ -25,7 +25,7 @@ function provider(){const e=$("symVenue")||$("tt-venue")||$("venue")||$("ven");r
 function market(){const e=$("symMarket")||$("tt-market")||$("mkt");return e?(/future|contract/i.test(e.value)?"futures":"spot"):$("tt-chart")?"futures":"spot";}
 let busy=false,sequence=0;
 async function refresh(){
- if(busy)return;busy=true;const seq=++sequence,btn=$("eti-smci-refresh");if(btn)btn.disabled=true;text("eti-smci-state","Analyzing closed candles · "+currentSymbol()+"…");
+ const seq=++sequence;busy=true;const btn=$("eti-smci-refresh");if(btn)btn.disabled=true;text("eti-smci-state","Analyzing closed candles · "+currentSymbol()+"…");
  try{
  const entry=$("eti-smci-entry")?.value||"15m",params=new URLSearchParams({symbol:currentSymbol(),entry,provider:provider(),market:market(),include:"detections"});
  const res=await fetch("/api/analysis/confluence?"+params.toString(),{cache:"no-store",signal:AbortSignal.timeout(20000)});if(!res.ok)throw new Error("Confluence API HTTP "+res.status);
@@ -40,7 +40,7 @@ async function refresh(){
  const c=$("eti-smci-conflicts");if(c){c.replaceChildren();if(d.conflicts?.length){const w=document.createElement("div");w.className="eti-smci-conflict";w.textContent="STRUCTURE CONFLICT · "+d.conflicts.join(" | ");c.append(w);}if(d.status==="insufficient"){const w=document.createElement("div");w.className="eti-smci-conflict";w.textContent="Insufficient or stale timeframe coverage. Treat the score as incomplete.";c.append(w);}}
  text("eti-smci-state",d.status==="ready"?"Updated "+new Date(d.asOf||Date.now()).toLocaleTimeString()+" · "+(d.staleTimeframes?.length||0)+" stale TF":"Analysis incomplete");
  }catch(e){if(seq===sequence)text("eti-smci-state","Unavailable · "+(e&&e.message||"analysis error")+" · existing chart data remains active");}
- finally{busy=false;if(btn)btn.disabled=false;}
+ finally{if(seq===sequence){busy=false;if(btn)btn.disabled=false;}}
 }
 function mount(){
  const terminal=$("tt-chart"),canvas=$("chart"),stack=$("stack"),pro=$("p-struct");
