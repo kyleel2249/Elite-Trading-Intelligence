@@ -1,0 +1,3 @@
+import test from "node:test";import assert from "node:assert/strict";import {superviseAgent} from "./agent-supervisor.ts";
+test("defaults to analysis and never authorizes live execution",()=>{const r=superviseAgent({requestedAction:"live_trade",killSwitch:false,riskApproved:true,signalFresh:true,userPermission:true,confidence:90});assert.equal(r.approvedAction,"live_trade");assert.equal(r.liveExecutionAuthorized,false);assert.equal(r.requiresHumanApproval,true);});
+test("vetoes action when controls fail",()=>{const r=superviseAgent({requestedAction:"paper_trade",killSwitch:true,riskApproved:false,signalFresh:false,userPermission:false});assert.equal(r.approvedAction,"analyze");assert.ok(r.vetoes.length>=3);});
