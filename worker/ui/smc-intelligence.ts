@@ -55,4 +55,3 @@ refresh();setInterval(refresh,60000);
 }catch(e){if(window.console)console.warn("ETI SMC Intelligence mount failed",e&&e.message);}
 })();
 </script>`;
-`;
