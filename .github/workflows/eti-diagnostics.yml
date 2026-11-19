@@ -134,7 +134,7 @@ jobs:
           const errors = [];
           try {
             const region = read('region');
-            if (region.transport !== 'bybit-worker-rest+bitget-browser-direct') errors.push('Unexpected exchange transport configuration');
+            if (region.transport !== 'bybit-worker-rest+bitget-worker-proxy-with-browser-websocket') errors.push('Unexpected exchange transport configuration');
           } catch (error) { errors.push(`Region response invalid: ${error.message}`); }
           try {
             const catalogue = read('bybit-symbols');
