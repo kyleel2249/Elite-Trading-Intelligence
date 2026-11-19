@@ -159,8 +159,49 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const preflightBody = { ...body, record: true };
       const preflight = await app.fetch(new Request("https://eti.internal/api/agents/analyze", { method: "POST", headers, body: json(preflightBody) }), env);
       const analysis: any = await preflight.json().catch(() => ({}));
-      // Liquidity-FVG is an additional fail-closed strategy gate. It cannot replace the council,
-      // strategy consensus, risk checks, kill switch, or the internal-paper execution route.
+      const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
+      const councilApproved = preflight.ok && decision?.action === expectedAction
+        && confidence >= minConfidence && agreement >= minAgreement
+        && analysis.risk?.approved === true && !["high", "critical"].includes(analysis.security?.severity);
+      const councilDiagnostics = {
+        rationale: decision?.rationale || [],
+        vetoedBy: decision?.vetoedBy || null,
+        proposalAvailable: !!decision?.proposal,
+        consensus: decision?.consensus || null,
+        deliberation: analysis.deliberation ? {
+          direction: analysis.deliberation.direction, reason: analysis.deliberation.reason,
+          coverage: analysis.deliberation.coverage, participating: analysis.deliberation.participating,
+          abstaining: analysis.deliberation.abstaining,
+        } : null,
+        risk: analysis.risk ? {
+          decision: analysis.risk.decision, approved: analysis.risk.approved, vetoes: analysis.risk.vetoes || [],
+          failedChecks: (analysis.risk.checks || []).filter((x: any) => !x.passed).map((x: any) => ({ id: x.id, severity: x.severity, detail: x.detail })),
+        } : null,
+        dataQuality: analysis.dataQuality || null,
+        reports: Array.isArray(analysis.reports) ? analysis.reports.map((x: any) => ({
+          agent: x.agent, status: x.status, stance: x.stance, confidence: x.confidence,
+          summary: x.summary, missingInputs: x.missingInputs || [],
+        })) : [],
+      };
+      if (!councilApproved) {
+        outcomes.push({
+          symbol, status: "no_trade", action: decision?.action || "NO_TRADE",
+          reason: !preflight.ok ? "agent_analysis_unavailable" : decision?.vetoedBy || "agent_council_or_risk_gate_not_met",
+          ...(!preflight.ok ? { analysisFailure: {
+            httpStatus: preflight.status,
+            error: typeof analysis.error === "string" ? analysis.error : "analysis_request_failed",
+            detail: analysis.detail ?? analysis.message ?? null,
+            dataQuality: analysis.dataQuality ?? null,
+          } } : {}),
+          councilDiagnostics, downstreamChecksSkipped: true,
+          council: { action: decision?.action || "NO_TRADE", confidence, agreement, riskApproved: analysis.risk?.approved === true, security: analysis.security?.severity || "unknown", auditPersistence: analysis.auditPersistence || "unknown" },
+          vetoes: analysis.risk?.vetoes || [],
+        });
+        continue;
+      }
+
+      // Only run expensive downstream gates after the council and Risk Manager approve a direction.
+      // These checks can veto a candidate but can never revive a rejected council decision.
       let liquidityFvg: any = null, liquidityFvgHttpStatus = 0;
       try {
         const lfUrl = "https://eti.internal/api/analysis/liquidity-fvg?symbol=" + encodeURIComponent(symbol) + "&timeframe=" + encodeURIComponent(interval);
@@ -171,13 +212,7 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const liquidityFvgApproved = liquidityFvgHttpStatus >= 200 && liquidityFvgHttpStatus < 300
         && liquidityFvg?.autopilotEligible === true && liquidityFvg?.direction === expectedAction
         && liquidityFvg?.safety?.submitsOrder === false && liquidityFvg?.safety?.bypassesRiskManager === false;
-      const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
-      const councilApproved = preflight.ok && decision?.action === expectedAction
-        && confidence >= minConfidence && agreement >= minAgreement
-        && analysis.risk?.approved === true && !["high", "critical"].includes(analysis.security?.severity);
 
-      // Cross-check all four ETI strategy profiles after the council has run. These are
-      // independent gates: a strategy consensus cannot override a council or Risk veto.
       const strategyResults: any[] = [];
       for (const strategy of strategies) {
         try {
@@ -191,25 +226,11 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       }
       const alignedStrategies = strategyResults.filter(x => x.httpStatus >= 200 && x.httpStatus < 300 && x.tradeable && x.decision === expectedAction && x.confidence >= minOmniConfidence && x.hardFailures.length === 0);
       const councilSummary = {
-        action: decision?.action || "NO_TRADE", confidence, agreement,
+        action: decision.action, confidence, agreement,
         riskApproved: analysis.risk?.approved === true, security: analysis.security?.severity || "unknown",
-        auditPersistence: analysis.auditPersistence || "unknown",
+        auditPersistence: analysis.auditPersistence || "unknown", councilDiagnostics,
         liquidityFvg: { eligible: liquidityFvgApproved, direction: liquidityFvg?.direction || "WAIT", score: Number(liquidityFvg?.score || 0), manipulationRisk: liquidityFvg?.manipulation?.level || "unavailable", blocks: liquidityFvg?.blocks || ["Liquidity-FVG analysis unavailable"], httpStatus: liquidityFvgHttpStatus },
       };
-      if (!councilApproved) {
-        outcomes.push({
-          symbol, status: "no_trade", action: councilSummary.action,
-          reason: !preflight.ok ? "agent_analysis_unavailable" : decision?.vetoedBy || "agent_council_or_risk_gate_not_met",
-          ...(!preflight.ok ? { analysisFailure: {
-            httpStatus: preflight.status,
-            error: typeof analysis.error === "string" ? analysis.error : "analysis_request_failed",
-            detail: analysis.detail ?? analysis.message ?? null,
-            dataQuality: analysis.dataQuality ?? null,
-          } } : {}),
-          council: councilSummary, vetoes: analysis.risk?.vetoes || [], strategies: strategyResults,
-        });
-        continue;
-      }
       if (!liquidityFvgApproved) {
         outcomes.push({ symbol, status: "no_trade", action: "WAIT", reason: "liquidity_fvg_gate_not_met", council: councilSummary, liquidityFvg: liquidityFvg ? { direction: liquidityFvg.direction, score: liquidityFvg.score, manipulation: liquidityFvg.manipulation, blocks: liquidityFvg.blocks } : null, strategies: strategyResults });
         continue;
