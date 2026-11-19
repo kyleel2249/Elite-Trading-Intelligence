@@ -423,13 +423,14 @@ jobs:
           # Exercise the exact authenticated, read-only council preflight used by the scheduler.
           # This sends no order and does not persist a decision.
           test -n "$ETI_EXECUTION_TOKEN" || { echo "::error::ETI_EXECUTION_TOKEN unavailable to diagnostic step"; exit 1; }
-          analysis_response="$(curl --silent --show-error --max-time 45 -w '__HTTP_CODE__%{http_code}' -X POST "$base/api/agents/analyze" -H "Authorization: Bearer $ETI_EXECUTION_TOKEN" -H 'content-type: application/json' --data '{"symbol":"BTCUSDT","interval":"15m","providers":false}')"
+          analysis_response="$(curl --silent --show-error --max-time 45 -w '__HTTP_CODE__%{http_code}' -X POST "$base/api/agents/analyze" -H "Authorization: Bearer $ETI_EXECUTION_TOKEN" -H 'content-type: application/json' --data '{"symbol":"BTCUSDT","interval":"15m","account":{"equityUsd":10000,"availableUsd":10000,"positionQuantity":0,"dailyPnlPct":0,"drawdownPct":0,"openRiskPct":0}}')"
           analysis_status="${analysis_response##*__HTTP_CODE__}"
           analysis_body="${analysis_response%__HTTP_CODE__*}"
           printf '%s' "$analysis_body" | HTTP_STATUS="$analysis_status" node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{let x={};try{x=JSON.parse(s)}catch{}
               if(process.env.HTTP_STATUS!=="200"){console.error("Authenticated agent analysis preflight failed:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error||"unknown",detail:x.detail||x.message||null,decision:x.decision?.action||x.decision||null}));process.exit(1);}
-              console.log("Authenticated agent analysis preflight passed:",JSON.stringify({action:x.decision?.action||"unknown",confidence:x.decision?.confidence??null,agreement:x.decision?.consensus?.agreement??null,riskApproved:x.risk?.approved??null,provider:x.market?.provider||x.provider||"not_exposed"}));
+              if(!x.decision||!Array.isArray(x.reports)||x.reports.length!==12||!x.risk){console.error("Authenticated agent analysis response is incomplete:",JSON.stringify({hasDecision:!!x.decision,reportCount:x.reports?.length??0,hasRisk:!!x.risk}));process.exit(1);}
+              console.log("Authenticated twelve-agent analysis preflight passed:",JSON.stringify({action:x.decision.action||"unknown",confidence:x.decision.confidence??null,agreement:x.decision.consensus?.agreement??null,riskApproved:x.risk.approved??null,agentReports:x.reports.length,providerCount:x.providers?.length??0}));
             });'
           for symbol in BTCUSDT ETHUSDT SOLUSDT; do
             diagnostic="$(curl --silent --show-error --fail --max-time 20 "$base/api/market/diag?symbol=$symbol&interval=15m")" || { echo "::error::Could not read $symbol market-data diagnostics"; exit 1; }
