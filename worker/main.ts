@@ -159,7 +159,7 @@ export default {
     // The module is disabled unless ETI_AOTI_ENABLED=true and always keeps live DEX signing disabled.
     if (event.cron === UNIVERSE_CRON && env.ETI_AOTI_ENABLED === "true" && env.ETI_PORTFOLIO_DB) ctx.waitUntil((async () => {
       const [discovery, positions] = await Promise.allSettled([runAotiCycle(env, Date.now()), manageAotiPaperPositions(env, Date.now())]);
-      const result = { discovery: discovery.status === "fulfilled" ? discovery.value : { error: String(discovery.reason) }, positions: positions.status === "fulfilled" ? positions.value : { error: String(positions.reason) } };
+      const result: any = { discovery: discovery.status === "fulfilled" ? discovery.value : { error: String(discovery.reason) }, positions: positions.status === "fulfilled" ? positions.value : { error: String(positions.reason) } };
       if (result.discovery.scanned || result.positions.updated || result.positions.failures || result.discovery.error || result.positions.error) console.log("ETI AOTI cycle", JSON.stringify(result));
     })().catch(e => console.error("ETI AOTI cycle failed", e instanceof Error ? e.message : e)));
     // Public-address watchlist scans rotate through five due wallets per five-minute tick; D1 deduplicates event hashes.
