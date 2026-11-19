@@ -39,17 +39,54 @@ const ALLOWED = new Set([
 ]);
 
 export class BitgetError extends Error {
-  code: string; status: number | null;
-  constructor(code: string, status: number | null, message: string) { super(message); this.code = code; this.status = status; }
+  code: string; status: number | null; hint?: string;
+  constructor(code: string, status: number | null, message: string, hint?: string) { super(message); this.code = code; this.status = status; this.hint = hint; }
 }
-export interface Deps { fetchImpl?: typeof fetch; now?: () => number }
+export interface Deps { fetchImpl?: typeof fetch; now?: () => number; sleep?: (ms: number) => Promise<void> }
 
-export async function bitgetGetSigned(env: Record<string, any>, path: string, params: Record<string, string | number | undefined>, deps: Deps = {}): Promise<any> {
-  if (!ALLOWED.has(path)) throw new BitgetError("path_not_allowed", null, "path is not on the read-only allowlist");
-  const c = bitgetCreds(env);
-  if (!c.complete) throw new BitgetError("credentials_missing", null, "missing: " + c.missing.join(", "));
-  const q = Object.entries(params).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).sort().join("&");
-  const ts = String((deps.now ?? Date.now)());
+/** Plain-language cause for Bitget's documented V2 error codes. Codes not listed are passed through unexplained, never guessed. */
+export const BITGET_ERROR_HINTS: Record<string, string> = {
+  "40001": "ACCESS-KEY header is empty: the API key secret is not configured.",
+  "40003": "ACCESS-SIGN header is empty.",
+  "40004": "Request timestamp expired: the Worker clock differs from Bitget's by more than the allowed window.",
+  "40005": "ACCESS-TIMESTAMP is invalid.",
+  "40006": "ACCESS-KEY is invalid: the key does not exist (typo, deleted, or wrong environment).",
+  "40008": "Request timestamp expired: the Worker clock differs from Bitget's by more than the allowed window.",
+  "40009": "Signature error: the API secret does not match the key, or the signed string differs from the request.",
+  "40010": "Bitget timed out handling the request; the outcome of a write is unknown.",
+  "40011": "ACCESS-PASSPHRASE is missing.",
+  "40012": "API key or passphrase is incorrect.",
+  "40013": "The Bitget user is disabled.",
+  "40014": "The API key lacks the permission this call needs (enable Read, and Trade only if orders are required).",
+  "40016": "The account must complete KYC before this call.",
+  "40017": "Parameter verification failed.",
+  "40018": "Request IP is not on the API key's IP whitelist. Cloudflare Workers have no fixed egress IP: remove the whitelist or route through a fixed-IP proxy.",
+  "429": "Bitget rate limit reached.",
+};
+export const hintFor = (code: string) => BITGET_ERROR_HINTS[code.replace(/^bitget_/, "")];
+const TIMESTAMP_CODES = new Set(["40004", "40005", "40008"]);
+const RETRYABLE_CODES = new Set(["40010", "429", "43011", "50001"]);
+
+// Offset between Bitget's server clock and this isolate's clock (server minus local). Learned from /api/v2/public/time, shared by reads and writes.
+let clockOffsetMs = 0, clockSyncedAt = 0;
+export const getClockOffset = () => ({ offsetMs: clockOffsetMs, syncedAt: clockSyncedAt || null });
+export const _resetClock = () => { clockOffsetMs = 0; clockSyncedAt = 0; };
+export const signedNow = (deps: Deps = {}) => (deps.now ?? Date.now)() + clockOffsetMs;
+export async function syncClock(deps: Deps = {}): Promise<{ ok: boolean; offsetMs: number; rttMs: number }> {
+  const t0 = (deps.now ?? Date.now)();
+  try {
+    const res = await (deps.fetchImpl ?? fetch)(`${BASE}/api/v2/public/time`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(8000) });
+    const j: any = await res.json().catch(() => null), t1 = (deps.now ?? Date.now)();
+    const server = Number(j?.data?.serverTime);
+    if (!res.ok || j?.code !== "00000" || !Number.isFinite(server)) return { ok: false, offsetMs: clockOffsetMs, rttMs: t1 - t0 };
+    clockOffsetMs = Math.round(server - (t0 + t1) / 2); clockSyncedAt = t1;
+    return { ok: true, offsetMs: clockOffsetMs, rttMs: t1 - t0 };
+  } catch { return { ok: false, offsetMs: clockOffsetMs, rttMs: (deps.now ?? Date.now)() - t0 }; }
+}
+const pause = (deps: Deps, ms: number) => (deps.sleep ?? ((n: number) => new Promise<void>((r) => setTimeout(r, n))))(ms);
+
+async function getOnce(c: ReturnType<typeof bitgetCreds>, path: string, q: string, deps: Deps): Promise<any> {
+  const ts = String(signedNow(deps));
   const sign = await bitgetSign(c.secret!, ts, "GET", path, q);
   let res: Response;
   try {
@@ -57,12 +94,35 @@ export async function bitgetGetSigned(env: Record<string, any>, path: string, pa
   } catch (e) { throw new BitgetError(e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "network_error", null, "request failed"); }
   let j: any = null;
   try { j = await res.json(); } catch { /* handled below */ }
-  if (!j || typeof j !== "object") throw new BitgetError(res.status === 403 || res.status === 451 ? "geo_or_ip_blocked" : "invalid_payload", res.status, `HTTP ${res.status}`);
-  if (j.code !== "00000") {
-    // 40018/40017 = bad key / signature, 40014 = key lacks permission, 40019 = IP not whitelisted. Report Bitget's own code and message.
-    throw new BitgetError("bitget_" + j.code, res.status, String(j.msg ?? "rejected").slice(0, 200));
+  if (!j || typeof j !== "object") {
+    const code = res.status === 403 || res.status === 451 ? "geo_or_ip_blocked" : res.status === 429 ? "rate_limited" : "invalid_payload";
+    const e = new BitgetError(code, res.status, `HTTP ${res.status}`); (e as any).retryAfter = Number(res.headers?.get?.("retry-after")) || 0; throw e;
   }
+  if (j.code !== "00000") { const code = String(j.code); throw new BitgetError("bitget_" + code, res.status, String(j.msg ?? "rejected").slice(0, 200), hintFor(code)); }
   return j.data;
+}
+
+/**
+ * Signed, allowlisted GET. Transient failures (network, timeout, HTTP 429/5xx, Bitget 40010) are retried with backoff; a timestamp rejection
+ * resynchronises the clock from Bitget's own time and retries once. Authentication and permission errors are never retried.
+ */
+export async function bitgetGetSigned(env: Record<string, any>, path: string, params: Record<string, string | number | undefined>, deps: Deps = {}): Promise<any> {
+  if (!ALLOWED.has(path)) throw new BitgetError("path_not_allowed", null, "path is not on the read-only allowlist");
+  const c = bitgetCreds(env);
+  if (!c.complete) throw new BitgetError("credentials_missing", null, "missing: " + c.missing.join(", "));
+  const q = Object.entries(params).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).sort().join("&");
+  let resynced = false;
+  for (let attempt = 0; ; attempt++) {
+    try { return await getOnce(c, path, q, deps); }
+    catch (e) {
+      if (!(e instanceof BitgetError)) throw e;
+      const bare = e.code.replace(/^bitget_/, "");
+      if (TIMESTAMP_CODES.has(bare) && !resynced) { resynced = true; const r = await syncClock(deps); if (r.ok) continue; throw e; }
+      const transient = e.code === "network_error" || e.code === "timeout" || e.code === "rate_limited" || RETRYABLE_CODES.has(bare) || (e.status !== null && e.status >= 500 && e.code === "invalid_payload");
+      if (!transient || attempt >= 2) throw e;
+      await pause(deps, Math.min(4000, Math.max((e as any).retryAfter * 1000 || 0, 300 * 2 ** attempt + Math.floor(Math.random() * 150))));
+    }
+  }
 }
 
 // ----------------------------------------------------------------------------------------------------------------- normalisation
@@ -282,7 +342,7 @@ export async function handleBitget(req: Request, env: Record<string, any>, deps:
   if (!market) return reply({ error: "invalid_market", allowed: BITGET_MARKETS }, 400);
   const symbol = (url.searchParams.get("symbol") || "").toUpperCase() || undefined;
   if (symbol && !/^[A-Z0-9]{5,20}$/.test(symbol)) return reply({ error: "invalid_symbol" }, 400);
-  const fail = (e: unknown) => e instanceof BitgetError ? reply({ error: e.code, message: e.message, upstreamStatus: e.status }, e.code === "symbol_required" || e.code === "not_applicable" ? 400 : 502) : reply({ error: "failed" }, 500);
+  const fail = (e: unknown) => e instanceof BitgetError ? reply({ error: e.code, message: e.message, hint: e.hint ?? hintFor(e.code) ?? null, upstreamStatus: e.status }, e.code === "symbol_required" || e.code === "not_applicable" ? 400 : 502) : reply({ error: "failed" }, 500);
   try {
     if (sub === "/account" && req.method === "GET") return reply({ market, assets: await getAssets(env, market, deps) });
     if (sub === "/positions" && req.method === "GET") return reply({ market, positions: await getPositions(env, market, deps) });

@@ -3,7 +3,7 @@
  * This module never handles transfers or withdrawals. All orders require master ETI auth,
  * the global kill switch to be off, a unique clientOid, and riskConfirmed=true.
  */
-import { bitgetCreds, bitgetSign, bitgetGetSigned } from "./api.ts";
+import { bitgetCreds, bitgetSign, bitgetGetSigned, signedNow, hintFor } from "./api.ts";
 import { readOperationalConfig, isMarketDataFresh } from "../operational-config.ts";
 
 type BitgetMarket = "spot" | "margin-crossed" | "margin-isolated" | "usdt-futures" | "usdc-futures" | "coin-futures";
@@ -22,7 +22,7 @@ export interface BitgetLiveDeps { fetchImpl?: typeof fetch; now?:()=>number }
 type Sent = { ok:true; data:any } | { ok:false; definite:boolean; status:number; data:any };
 async function post(env:BitgetLiveEnv,path:string,payload:Record<string,unknown>,deps:BitgetLiveDeps):Promise<Sent>{
   const c=bitgetCreds(env as any); if(!c.complete) return {ok:false,definite:true,status:503,data:{code:"credentials_missing",missing:c.missing}};
-  const body=json(payload),ts=String((deps.now??Date.now)());
+  const body=json(payload),ts=String(signedNow(deps));
   const sign=await bitgetSign(c.secret!,ts,"POST",path,"",body);
   const requestHeaders={"ACCESS-KEY":c.key!,"ACCESS-SIGN":sign,"ACCESS-TIMESTAMP":ts,"ACCESS-PASSPHRASE":c.passphrase!,"Content-Type":"application/json","locale":"en-US"};
   const hosts=[BASE,"https://capi.bitget.com"];let last:Sent|null=null;

@@ -66,6 +66,9 @@ All private routes except the public margin catalogue require `Authorization: Be
 
 The 5-minute sync covers all six account market types when credentials and KV storage are configured. Margin fill history needs explicit symbols via `ETI_BITGET_MARGIN_SYMBOLS`.
 
+## Signed-request reliability and error codes
+Signed reads retry transient failures (network error, timeout, HTTP 429/5xx, Bitget 40010) up to three attempts with backoff and honour `Retry-After`. A timestamp rejection (40004/40005/40008) resynchronises from `GET /api/v2/public/time` and retries once; the learned clock offset is shared with the order path. Authentication and permission errors are never retried. Errors carry a `hint` from Bitget's documented V2 list: `40009` signature error, `40012` wrong key or passphrase, `40014` key lacks permission, `40018` request IP not whitelisted (Workers have no fixed egress IP), `40008` timestamp expired. Earlier docs and comments mapped 40018/40019 incorrectly.
+
 ## Account-mode note
 
 The existing private account, fill-history and live-order adapter is retained on Bitget Classic V2 endpoints. The new shared chart feed uses the current public V3 market-data endpoints. Bitget documents a UTA V3 migration path and unified order/account endpoints; this change does not silently rewrite the existing private trading adapter. If the Bitget account is already in Unified Trading Account mode, verify the private account/order routes against that account before enabling live execution. The live adapter remains gated by the ETI execution token, explicit enable flag, kill switch and audit log.
