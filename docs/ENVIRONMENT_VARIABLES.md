@@ -50,6 +50,10 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_AGENT_AUTOPILOT_STRATEGIES` | config | Comma-separated Omnisignal strategies evaluated by the autopilot (default scalp,intraday,swing,position). |
 | `ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT` | config | Minimum number of configured strategies that must produce an aligned tradeable decision (default 3). |
 | `ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE` | config | Minimum Omnisignal confidence score on its 0–100 heuristic scale (default 60; not a win probability). |
+| `ETI_AOTI_ENABLED` | config | Enables scheduled multi-chain AOTI discovery and paper-position monitoring; live DEX execution remains disabled. |
+| `ETI_AOTI_MAX_CANDIDATES` | config | Maximum number of newly discovered DEX candidates retained per scan (default 12). |
+| `ETI_AOTI_SESSION_START_UTC` | config | UTC start time for new AOTI paper entries (default 23:00). |
+| `ETI_AOTI_SESSION_END_UTC` | config | UTC end time for new AOTI paper entries (default 07:00). |
 | `ETI_ALPHA_KV` | binding | KV namespace for Global Alpha (falls back to ETI_EXECUTION_LOG). |
 | `ETI_ALPHA_TOKEN` | secret | Token for Global Alpha write routes (falls back to ETI_EXECUTION_TOKEN). |
 | `ETI_ANALYSIS_ALLOW_FULL` | config | `true` lets a Free-plan deployment serve `detail=full` analysis (only if you raised your own CPU limit). Default off. |

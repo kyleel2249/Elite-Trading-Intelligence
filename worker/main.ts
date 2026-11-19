@@ -71,6 +71,8 @@ import { readOperationalConfig, isOperationalIntervalDue } from "./operational-c
 import { runInvestorMonitor, runMarkToMarket, runPortfolioReconciliation } from "./operational-monitor.ts";
 import { runOnchainWatchCycle } from "./analysis/onchain-monitor.ts";
 import { runTokenMonitorCycle } from "./analysis/token-intelligence.ts";
+import { withAoti } from "./aoti/api.ts";
+import { runAotiCycle, manageAotiPaperPositions } from "./aoti/engine.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
 
@@ -101,7 +103,7 @@ const core: any = coreLayers.reduce((next: any, layer) => layer(next), base as a
 
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
 const withSmc = (next: any) => ({ fetch: async (request: Request, env: any) => withSmcIntelligence(request, await next.fetch(request, env)) });
-const outerLayers: Array<(next: any) => any> = [withBitget, withPerp, withWallets, withBackup, withProviders, withIdentity, withBybitAccount, withDataX, withSmc, withSecurityHeaders];
+const outerLayers: Array<(next: any) => any> = [withAoti, withBitget, withPerp, withWallets, withBackup, withProviders, withIdentity, withBybitAccount, withDataX, withSmc, withSecurityHeaders];
 const app: any = outerLayers.reduce((next: any, layer) => layer(next), core);
 const inner: any = base;
 const MONITOR_CRON = "* * * * *";
@@ -153,6 +155,13 @@ export default {
         ctx.waitUntil(runInvestorMonitor(env, monitorNow).catch(e => console.error("ETI investor monitor failed", e instanceof Error ? e.message : e)));
     }
 
+    // AOTI scans supported DEX networks and refreshes paper positions on the five-minute universe cadence.
+    // The module is disabled unless ETI_AOTI_ENABLED=true and always keeps live DEX signing disabled.
+    if (event.cron === UNIVERSE_CRON && env.ETI_AOTI_ENABLED === "true" && env.ETI_PORTFOLIO_DB) ctx.waitUntil((async () => {
+      const [discovery, positions] = await Promise.allSettled([runAotiCycle(env, Date.now()), manageAotiPaperPositions(env, Date.now())]);
+      const result: any = { discovery: discovery.status === "fulfilled" ? discovery.value : { error: String(discovery.reason) }, positions: positions.status === "fulfilled" ? positions.value : { error: String(positions.reason) } };
+      if (result.discovery.scanned || result.positions.updated || result.positions.failures || result.discovery.error || result.positions.error) console.log("ETI AOTI cycle", JSON.stringify(result));
+    })().catch(e => console.error("ETI AOTI cycle failed", e instanceof Error ? e.message : e)));
     // Public-address watchlist scans rotate through five due wallets per five-minute tick; D1 deduplicates event hashes.
     if (event.cron === UNIVERSE_CRON && env.ETI_PORTFOLIO_DB) ctx.waitUntil(runOnchainWatchCycle(env, Date.now()).then(r => { if (r.events || r.failures) console.log("ETI on-chain watch cycle", JSON.stringify(r)); }, e => console.error("ETI on-chain watch cycle failed", e instanceof Error ? e.message : e)));
     // Token monitors independently scan due contracts on the same five-minute cadence.
