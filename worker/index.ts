@@ -32,6 +32,7 @@ import { handleTestnetExecute } from "./algo/testnet-api.ts";
 import { handleManage } from "./algo/manage.ts";
 import { handleAlerts } from "./algo/alerts-api.ts";
 import { handleAnalysis } from "./analysis/api.ts";
+import { handlePrecision } from "./precision/api.ts";
 import { handleExtremeForecast } from "./analysis/extremes.ts";
 import type { AnalysisEnv } from "./analysis/fundamental-sources.ts";
 import { handleKnowledge } from "./knowledge.ts";
@@ -1178,6 +1179,7 @@ export default {
     if (url.pathname === "/omnisignal" || url.pathname === "/omnisignal.js") {
       return handleOmniUi(request) as Response;
     }
+    if (url.pathname.startsWith("/api/precision/")) return handlePrecision(request, _env as any);
     if (url.pathname === "/api/analysis/extremes") return handleExtremeForecast(request, _env);
     if (url.pathname === "/api/analysis" || url.pathname.startsWith("/api/analysis/")) {
       return handleAnalysis(request, _env);
