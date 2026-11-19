@@ -406,7 +406,7 @@ jobs:
                 const fresh=x.lastCycleFresh===true&&last&&typeof last.at==="string"&&Number.isFinite(Date.parse(last.at))&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
                 if(!fresh)process.exit(1);
                 const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
-                console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
+                console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
               });
             '; then cycle_ok=1; break; fi
             sleep 5
