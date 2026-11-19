@@ -90,14 +90,34 @@ async function skippedResult(env: AgentAutopilotEnv, disabled: { enabled: boolea
 /** Schedule the paper-only agent cycle independently of other handlers sharing the same cron expression. */
 export function scheduleAgentAutopilot(cron: string | undefined, env: AgentAutopilotEnv, app: App, ctx: { waitUntil(promise: Promise<unknown>): void }): boolean {
   if (cron !== AGENT_AUTOPILOT_CRON) return false;
-  ctx.waitUntil(runAgentAutopilotCycle(env, app).then(r => {
-    if ((r as any).submitted) console.log("agent autopilot paper orders", (r as any).submitted, "evaluated", (r as any).evaluated);
-    else console.log("agent autopilot cycle completed without orders", (r as any).skipped || (r as any).evaluated || 0);
-  }).catch(async e => {
-    const failure = { enabled: env.ETI_AGENT_AUTOPILOT_ENABLED === "true", mode: "internal_paper_only", liveOrdersAllowed: false, at: new Date().toISOString(), submitted: 0, evaluated: 0, outcomes: [], skipped: "cycle_error", error: e instanceof Error ? e.message : "unknown_error" };
-    if (env.ETI_EXECUTION_LOG) await env.ETI_EXECUTION_LOG.put("agent-autopilot:last", json(failure), { expirationTtl: 60 * 60 * 24 * 30 }).catch(() => undefined);
-    console.error("agent autopilot cycle failed", failure.error);
-  }));
+  ctx.waitUntil((async () => {
+    const startedAt = new Date().toISOString();
+    const writeHeartbeat = async (value: Record<string, unknown>) => {
+      if (env.ETI_EXECUTION_LOG) await env.ETI_EXECUTION_LOG.put("agent-autopilot:heartbeat", json(value), { expirationTtl: 60 * 60 * 24 * 30 }).catch(() => undefined);
+    };
+    // Persist dispatch before doing expensive analysis. This separates a missing Cron Trigger
+    // from a slow or failed cycle, even when the final cycle summary has not been written yet.
+    await writeHeartbeat({ status: "started", cron, at: startedAt, enabled: env.ETI_AGENT_AUTOPILOT_ENABLED === "true", mode: "internal_paper_only", liveOrdersAllowed: false });
+    try {
+      const result = await runAgentAutopilotCycle(env, app);
+      const completedAt = new Date().toISOString();
+      await writeHeartbeat({
+        status: "completed", cron, at: startedAt, completedAt,
+        enabled: (result as any).enabled === true, mode: "internal_paper_only", liveOrdersAllowed: false,
+        submitted: Number((result as any).submitted || 0), evaluated: Number((result as any).evaluated || 0),
+        skipped: (result as any).skipped || null,
+      });
+      if ((result as any).submitted) console.log("agent autopilot paper orders", (result as any).submitted, "evaluated", (result as any).evaluated);
+      else console.log("agent autopilot cycle completed without orders", (result as any).skipped || (result as any).evaluated || 0);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "unknown_error";
+      const completedAt = new Date().toISOString();
+      const failure = { enabled: env.ETI_AGENT_AUTOPILOT_ENABLED === "true", mode: "internal_paper_only", liveOrdersAllowed: false, at: startedAt, completedAt, submitted: 0, evaluated: 0, outcomes: [], skipped: "cycle_error", error: message };
+      await writeHeartbeat({ status: "failed", cron, at: startedAt, completedAt, enabled: failure.enabled, mode: failure.mode, liveOrdersAllowed: false, error: message });
+      if (env.ETI_EXECUTION_LOG) await env.ETI_EXECUTION_LOG.put("agent-autopilot:last", json(failure), { expirationTtl: 60 * 60 * 24 * 30 }).catch(() => undefined);
+      console.error("agent autopilot cycle failed", failure.error);
+    }
+  })());
   return true;
 }
 
