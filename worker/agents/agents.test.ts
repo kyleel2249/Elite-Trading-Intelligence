@@ -218,6 +218,7 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
     assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions", { headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN } }), env)).status, 503);
     const a: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&interval=1h"), env)).json();
     assert.equal(a.reports.length, 12); assert.deepEqual(a.providers, status); assert.equal(a.reports.find((x: any) => x.agent === "news").status, "ok");
+    assert.ok(Number.isFinite(a.dataQuality.atr14) && a.dataQuality.atr14 > 0, "agent data quality should expose a usable ATR(14) for Commander proposals");
     const off: any = await (await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=BTCUSDT&providers=0"), env)).json();
     assert.equal(off.reports.find((x: any) => x.agent === "news").status, "insufficient_data"); assert.deepEqual(off.providers, []);
     assert.equal((await app.fetch(new Request("https://e.test/api/agents/analyze?symbol=bad!"), env)).status, 400);
