@@ -7,6 +7,7 @@ Live order placement is disabled unless ETI_MT5_LIVE_TRADING=true is set.
 from __future__ import annotations
 
 import hmac
+import math
 import os
 import secrets
 import threading
@@ -30,7 +31,11 @@ _LOCK = threading.RLock()
 _MT5: Any = None
 _SESSION_TOKEN = os.environ.get("ETI_MT5_BRIDGE_TOKEN") or secrets.token_urlsafe(32)
 _LIVE_ENABLED = os.environ.get("ETI_MT5_LIVE_TRADING", "false").lower() == "true"
-_MAX_RISK_PERCENT = float(os.environ.get("ETI_MT5_MAX_RISK_PERCENT", "1.0"))
+try:
+    _configured_risk = float(os.environ.get("ETI_MT5_MAX_RISK_PERCENT", "0.5"))
+except (TypeError, ValueError):
+    _configured_risk = 0.5
+_MAX_RISK_PERCENT = min(5.0, max(0.05, _configured_risk)) if math.isfinite(_configured_risk) else 0.5
 _CONNECTED = False
 _ACCOUNT_LOGIN: Optional[int] = None
 
