@@ -108,9 +108,30 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
           result = {
             kind: "market_analysis", symbol: a.symbol, interval: a.interval, generatedAt: a.generatedAt,
             decision: a.decision, consensus: a.deliberation,
-            agents: (a.reports ?? []).map((r: any) => ({ agent: r.agent, status: r.status, stance: r.stance, confidence: r.confidence, summary: r.summary, warnings: r.warnings })),
+            marketRead: {
+              direction: a.deliberation?.direction ?? "none",
+              agreement: a.deliberation?.agreement ?? 0,
+              technicalSummary: a.reports?.find((r: any) => r.agent === "technical")?.summary ?? "Technical report unavailable.",
+              entrySetup: (() => {
+                const t = a.reports?.find((r: any) => r.agent === "technical");
+                const ev = (label: string) => t?.evidence?.find((e: any) => e.label === label)?.value;
+                const eligible = ev("liquidity_fvg_autopilot_eligible") === true;
+                return { status: eligible ? "confirmed" : "not_actionable", direction: ev("liquidity_fvg_direction") ?? "WAIT", entry: eligible ? ev("liquidity_fvg_entry") : null, stop: eligible ? ev("liquidity_fvg_stop") : null, reason: eligible ? "Liquidity sweep, market structure and FVG conditions passed the fusion engine." : (ev("liquidity_fvg_autopilot_eligible") === false ? "No confirmed actionable liquidity/FVG setup. Do not treat the last close as an entry." : "Liquidity/FVG evidence unavailable.") };
+              })(),
+              tradeReadiness: a.decision?.action === "NO_TRADE" ? "not_ready" : "risk_approved",
+              accountState: a.risk?.checks?.find((c: any) => c.id === "account_state")?.passed ? "available" : "missing_or_unverified",
+              priceCrossCheck: a.dataQuality?.priceCrossCheck ?? { status: "not_performed" },
+            },
+            agents: (a.reports ?? []).map((r: any) => ({ agent: r.agent, status: r.status, stance: r.stance, confidence: r.confidence, summary: r.summary, evidence: r.evidence, missingInputs: r.missingInputs, warnings: r.warnings })),
             risk: a.risk, security: a.security, dataQuality: a.dataQuality,
-            explanation: a.decision?.rationale ?? [], disclosures: a.disclosures,
+            explanation: a.decision?.rationale ?? [],
+            nextSteps: [
+              ...(a.risk?.vetoes?.includes("account_state") ? ["Connect or supply verified account equity and available balance; do not bypass the Risk Manager."] : []),
+              ...(a.risk?.checks?.some((c: any) => c.id === "pnl_state_unknown" && !c.passed) ? ["Supply verified daily P&L and account drawdown so loss limits can be checked."] : []),
+              ...(a.dataQuality?.priceCrossCheck?.status !== "verified" ? ["Independent exchange price cross-check was not performed; provider confirmation is incomplete."] : []),
+              ...(a.decision?.action === "NO_TRADE" ? ["Wait for a confirmed setup and all risk checks to pass; no order is authorised."] : []),
+            ],
+            disclosures: a.disclosures,
           };
         }
       } else if (command.intent === "status") {
