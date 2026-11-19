@@ -20,7 +20,7 @@ async function overview(db:any){
 async function openPaper(req:Request,env:any){
  const db=dbOf(env);if(!db)return reply({error:"d1_unavailable"},503);
  const start=env.ETI_AOTI_SESSION_START_UTC||"23:00",end=env.ETI_AOTI_SESSION_END_UTC||"07:00";if(!isAotiSessionOpen(Date.now(),start,end))return reply({error:"outside_aoti_session",sessionUtc:{start,end}},423);
- const body=await req.json().catch(()=>null);const candidateId=String(body?.candidateId||"");
+ const body:any=await req.json().catch(()=>null);const candidateId=String(body?.candidateId||"");
  if(!candidateId||candidateId.length>300)return reply({error:"candidate_id_required"},400);
  await ensureAotiSchema(db);
  const row=await db.prepare("SELECT payload_json FROM eti_aoti_candidates WHERE id=?").bind(candidateId).first();
@@ -44,7 +44,7 @@ async function openPaper(req:Request,env:any){
 }
 async function closePaper(req:Request,env:any){
  const db=dbOf(env);if(!db)return reply({error:"d1_unavailable"},503);
- const body=await req.json().catch(()=>null),id=String(body?.positionId||"");
+ const body:any=await req.json().catch(()=>null),id=String(body?.positionId||"");
  if(!id)return reply({error:"position_id_required"},400);
  const row=await db.prepare("SELECT * FROM eti_aoti_positions WHERE id=? AND status='open'").bind(id).first();
  if(!row)return reply({error:"open_position_not_found"},404);
@@ -72,7 +72,7 @@ export function withAoti<E extends Record<string,any>>(base:{fetch(request:Reque
      const result=await scanAotiPairs(fetch,Date.now(),Number(env.ETI_AOTI_MAX_CANDIDATES||12));await persistAotiScan(db,result);return reply(result);
     }
     if(path==="/api/aoti/security"){
-     const body=await request.json().catch(()=>null),candidateId=String(body?.candidateId||""),raw=body?.evidence;
+     const body:any=await request.json().catch(()=>null),candidateId=String(body?.candidateId||""),raw=body?.evidence;
      if(!candidateId||!raw||typeof raw!=="object")return reply({error:"candidate_and_evidence_required"},400);
      const row=await db.prepare("SELECT payload_json FROM eti_aoti_candidates WHERE id=?").bind(candidateId).first();if(!row)return reply({error:"candidate_not_found"},404);
      const c=JSON.parse(row.payload_json),bool=(v:any)=>typeof v==="boolean"?v:null,num=(v:any)=>Number.isFinite(Number(v))?Number(v):null;
