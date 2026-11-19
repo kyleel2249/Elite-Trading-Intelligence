@@ -25,8 +25,8 @@ async function openPaper(req:Request,env:any){
  await ensureAotiSchema(db);
  const row=await db.prepare("SELECT payload_json FROM eti_aoti_candidates WHERE id=?").bind(candidateId).first();
  if(!row)return reply({error:"candidate_not_found"},404);
- const c=JSON.parse(row.payload_json);
- if(!c.eligible||c.securityGate!=="PASS")return reply({error:"security_or_opportunity_gate_blocked",securityGate:c.securityGate,reasons:c.reasons},409);
+ const c=scoreAotiCandidate(JSON.parse(row.payload_json),Date.now());
+ if(Date.now()-Number(c.observedAt)>5*60_000||!c.eligible||c.securityGate!=="PASS")return reply({error:"security_or_opportunity_gate_blocked",securityGate:c.securityGate,reasons:c.reasons,stale:Date.now()-Number(c.observedAt)>5*60_000},409);
  const existing=await db.prepare("SELECT id FROM eti_aoti_positions WHERE status='open' AND candidate_id=?").bind(candidateId).first();
  if(existing)return reply({error:"position_already_open",positionId:existing.id},409);
  const [equity,peak,count,losses]=await Promise.all([
