@@ -16,6 +16,8 @@ test("SMC Intelligence is chart-aware and stale requests are discarded", () => {
   assert.ok(SMC_INTELLIGENCE_JS.includes('$("chart")'));
   assert.ok(SMC_INTELLIGENCE_JS.includes('$("p-struct")'));
   assert.ok(SMC_INTELLIGENCE_JS.includes("let busy=false,sequence=0"));
+  assert.ok(SMC_INTELLIGENCE_JS.includes("const seq=++sequence"));
+  assert.ok(SMC_INTELLIGENCE_JS.includes("if(seq===sequence){busy=false"));
   assert.ok(SMC_INTELLIGENCE_JS.includes("if(seq!==sequence)return"));
   assert.ok(SMC_INTELLIGENCE_JS.includes("Insufficient or stale timeframe coverage"));
 });
