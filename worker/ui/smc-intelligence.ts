@@ -50,7 +50,7 @@ function mount(){
  else if(stack)stack.insertAdjacentElement("afterend",root);else if(pro)pro.insertAdjacentElement("afterend",root);
 }
 mount();$("eti-smci-refresh")?.addEventListener("click",refresh);$("eti-smci-entry")?.addEventListener("change",refresh);
-["symbol","tt-symbol","interval","tt-interval","symVenue","symMarket","tt-venue","tt-market"].forEach(id=>$(id)?.addEventListener("change",refresh));
+["symbol","tt-symbol","interval","tt-interval","symVenue","symMarket","tt-venue","tt-market","sym","ven","mkt"].forEach(id=>$(id)?.addEventListener("change",refresh));
 refresh();setInterval(refresh,60000);
 }catch(e){if(window.console)console.warn("ETI SMC Intelligence mount failed",e&&e.message);}
 })();
