@@ -398,6 +398,15 @@ jobs:
           done
           test "$ready" -eq 1 || { echo "::error::Scheduled AI autopilot is not ready; inspect /api/agents/autopilot"; exit 1; }
           echo "Autopilot readiness verified: enabled, token configured, audit and portfolio storage bound, five-minute scheduler registered, paper-only mode."
+          for symbol in ETHUSDT SOLUSDT; do
+            diagnostic="$(curl --silent --show-error --fail --max-time 20 "$base/api/market/diag?symbol=$symbol&interval=15m")" || { echo "::error::Could not read $symbol market-data diagnostics"; exit 1; }
+            printf '%s' "$diagnostic" | SYMBOL="$symbol" node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),p=(x.providers||[]).find(v=>v.provider==="bybit"),hosts=p?.hosts||[],ok=hosts.some(h=>h.ok===true&&Number(h.candles)>0);
+                if(!ok){console.error("Primary Bybit candle diagnostics for "+process.env.SYMBOL+":",JSON.stringify({connectionStatus:p?.connectionStatus,hosts,failover:x.failover}));process.exit(1);}
+                console.log("Primary Bybit 15m candles verified for "+process.env.SYMBOL+":",JSON.stringify(hosts.map(h=>({host:h.host,status:h.upstreamStatus,candles:h.candles,freshness:h.freshness}))));
+              });
+            '
+          done
           cycle_ok=0
           for attempt in $(seq 1 72); do
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
