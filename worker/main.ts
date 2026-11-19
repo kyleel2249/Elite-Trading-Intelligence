@@ -71,6 +71,7 @@ import { readOperationalConfig, isOperationalIntervalDue } from "./operational-c
 import { runInvestorMonitor, runMarkToMarket, runPortfolioReconciliation } from "./operational-monitor.ts";
 import { runOnchainWatchCycle } from "./analysis/onchain-monitor.ts";
 import { runTokenMonitorCycle } from "./analysis/token-intelligence.ts";\nimport { runTokenMarketAnomalyCycle } from "./analysis/token-market-anomaly-monitor.ts";
+import { withAdvancedSmc } from "./analysis/advanced-smc-route.ts";
 import { withAoti } from "./aoti/api.ts";
 import { runAotiCycle, manageAotiPaperPositions, isAotiEnabled } from "./aoti/engine.ts";
 
@@ -103,7 +104,7 @@ const core: any = coreLayers.reduce((next: any, layer) => layer(next), base as a
 
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
 const withSmc = (next: any) => ({ fetch: async (request: Request, env: any) => withSmcIntelligence(request, await next.fetch(request, env)) });
-const outerLayers: Array<(next: any) => any> = [withAoti, withBitget, withPerp, withWallets, withBackup, withProviders, withIdentity, withBybitAccount, withDataX, withSmc, withSecurityHeaders];
+const outerLayers: Array<(next: any) => any> = [withAdvancedSmc, withAoti, withBitget, withPerp, withWallets, withBackup, withProviders, withIdentity, withBybitAccount, withDataX, withSmc, withSecurityHeaders];
 const app: any = outerLayers.reduce((next: any, layer) => layer(next), core);
 const inner: any = base;
 const MONITOR_CRON = "* * * * *";
