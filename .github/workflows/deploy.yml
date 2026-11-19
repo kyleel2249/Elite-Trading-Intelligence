@@ -110,6 +110,8 @@ jobs:
           else
             npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file"
           fi
+          # Record the actual successful Worker deployment time, not workflow start time.
+          echo "ETI_WORKER_DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       - name: Sync DataX Pages integration secret and redeploy production
         shell: bash
@@ -383,7 +385,6 @@ jobs:
         shell: bash
         env:
           ETI_EXECUTION_TOKEN: ${{ secrets.ETI_EXECUTION_TOKEN }}
-          DEPLOY_STARTED_AT: ${{ github.run_started_at }}
         run: |
           set -euo pipefail
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
@@ -422,10 +423,11 @@ jobs:
             '
             if [ "$symbol" = "ETHUSDT" ]; then sleep 11; fi
           done
+          test -n "${ETI_WORKER_DEPLOYED_AT:-}" || { echo "::error::Worker deployment timestamp was not recorded"; exit 1; }
           cycle_ok=0
           for attempt in $(seq 1 72); do
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
-            if printf '%s' "$response" | node -e '
+            if printf '%s' "$response" | DEPLOY_STARTED_AT="$ETI_WORKER_DEPLOYED_AT" node -e '
               let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest;
                 const cycleAt=last&&typeof last.at==="string"?Date.parse(last.at):NaN;const fresh=x.lastCycleFresh===true&&Number.isFinite(cycleAt)&&cycleAt>=Date.parse(process.env.DEPLOY_STARTED_AT)&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
                 if(!fresh)process.exit(1);
