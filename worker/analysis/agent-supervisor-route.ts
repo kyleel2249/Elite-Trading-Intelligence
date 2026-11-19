@@ -1,0 +1,3 @@
+import {superviseAgent} from "./agent-supervisor.ts";const json=(x:any,s=200)=>new Response(JSON.stringify(x),{status:s,headers:{"content-type":"application/json","cache-control":"no-store"}});
+export function withAgentSupervisor<E>(base:any):any{return {fetch(req:Request,env:E){if(new URL(req.url).pathname==="/api/intelligence/agent-supervision")return handleAgentSupervision(req);return base.fetch(req,env);}}}
+export function handleAgentSupervision(req:Request):Response|Promise<Response>{if(req.method!=="POST")return json({error:"method_not_allowed"},405);return req.json().then((b:any)=>json({ok:true,decision:superviseAgent(b)})).catch(()=>json({error:"malformed_json"},400));}
