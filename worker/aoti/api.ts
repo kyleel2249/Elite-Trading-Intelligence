@@ -1,5 +1,5 @@
 import { authenticate } from "../auth/session.ts";
-import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, scoreAotiCandidate, aotiConfig, type AotiEnv, type AotiPosition } from "./engine.ts";
+import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, scoreAotiCandidate, aotiConfig, isAotiSessionOpen, type AotiEnv, type AotiPosition } from "./engine.ts";
 import { AOTI_PAGE } from "./ui.ts";
 const H={"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"};
 const reply=(v:unknown,status=200)=>new Response(JSON.stringify(v),{status,headers:H});
