@@ -1,5 +1,5 @@
 import { authenticate } from "../auth/session.ts";
-import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, scoreAotiCandidate, type AotiEnv, type AotiPosition } from "./engine.ts";
+import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, scoreAotiCandidate, isAotiSessionOpen, type AotiEnv, type AotiPosition } from "./engine.ts";
 import { AOTI_PAGE } from "./ui.ts";
 const H={"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"};
 const reply=(v:unknown,status=200)=>new Response(JSON.stringify(v),{status,headers:H});
@@ -47,13 +47,13 @@ async function closePaper(req:Request,env:any){
  if(!id)return reply({error:"position_id_required"},400);
  const row=await db.prepare("SELECT * FROM eti_aoti_positions WHERE id=? AND status='open'").bind(id).first();
  if(!row)return reply({error:"open_position_not_found"},404);
- const now=Date.now(),price=Number(body?.price||row.last_price);if(!(price>0))return reply({error:"invalid_price"},400);
+ const now=Date.now(),price=Number(row.last_price);if(!(price>0))return reply({error:"invalid_price"},400);
  const p=JSON.parse(row.payload_json),change=(price-Number(row.entry_price))/Number(row.entry_price),pnl=Number(row.notional_usd)*change*Number(row.remaining_pct)/100;
- const equity=Number(await state(db,"equity_usd","70"))+pnl,peak=Math.max(Number(await state(db,"peak_equity_usd","70")),equity);
- await db.prepare("UPDATE eti_aoti_positions SET status='closed',last_price=?,remaining_pct=0,realized_pnl_usd=?,closed_at=?,payload_json=? WHERE id=? AND status='open'").bind(price,pnl,now,JSON.stringify({...p,lastPrice:price,remainingPct:0,realizedPnlUsd:pnl,status:"closed",closeReason:"manual_paper_close"}),id).run();
+ const totalPnl=Number(row.realized_pnl_usd)+pnl,equity=Number(await state(db,"equity_usd","70"))+pnl,peak=Math.max(Number(await state(db,"peak_equity_usd","70")),equity);
+ await db.prepare("UPDATE eti_aoti_positions SET status='closed',last_price=?,remaining_pct=0,realized_pnl_usd=?,closed_at=?,payload_json=? WHERE id=? AND status='open'").bind(price,totalPnl,now,JSON.stringify({...p,lastPrice:price,remainingPct:0,realizedPnlUsd:totalPnl,status:"closed",closeReason:"manual_paper_close"}),id).run();
  await setState(db,"equity_usd",String(equity),now);await setState(db,"peak_equity_usd",String(peak),now);await setState(db,"consecutive_losses",String(pnl<0?Number(await state(db,"consecutive_losses","0"))+1:0),now);
- await db.prepare("INSERT INTO eti_aoti_events(id,event_type,position_id,reason,payload_json,created_at) VALUES(?,?,?,?,?,?)").bind("close:"+id,"PAPER_EXIT",id,"manual_paper_close",JSON.stringify({price,pnl,equity,peak}),now).run();
- return reply({ok:true,positionId:id,realizedPnlUsd:pnl,equityUsd:equity,mode:"paper_only"});
+ await db.prepare("INSERT INTO eti_aoti_events(id,event_type,position_id,reason,payload_json,created_at) VALUES(?,?,?,?,?,?)").bind("close:"+id,"PAPER_EXIT",id,"manual_paper_close",JSON.stringify({price,closePnlUsd:pnl,totalRealizedPnlUsd:totalPnl,equity,peak}),now).run();
+ return reply({ok:true,positionId:id,closePnlUsd:pnl,totalRealizedPnlUsd:totalPnl,equityUsd:equity,mode:"paper_only"});
 }
 export function withAoti<E extends Record<string,any>>(base:{fetch(request:Request,env:E,ctx?:any):Promise<Response>|Response}){
  return {async fetch(request:Request,env:E,ctx?:any){
