@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateSecurity, scoreAotiCandidate, sizeAotiPosition, manageAotiPosition, scanAotiPairs } from "./engine.ts";
+import { evaluateSecurity, scoreAotiCandidate, sizeAotiPosition, manageAotiPosition, scanAotiPairs, isAotiSessionOpen } from "./engine.ts";
 const now=1_800_000_000_000;
 const secure={holderCount:500,mintAuthorityRevoked:true,freezeAuthorityRevoked:true,lpLocked:true,lpLockDays:45,developerSupplyPct:2,top10SupplyPct:30,sellSimulationPassed:true,bundledLaunchClear:true,provider:"test",checkedAt:now,risks:[]};
 const base={id:"solana:mint:pair",chain:"solana" as const,address:"mint",pairAddress:"pair",dexId:"raydium",name:"Example",symbol:"EX",url:null,priceUsd:1,liquidityUsd:80000,volume5mUsd:30000,volume1hUsd:50000,buys5m:80,sells5m:20,pairCreatedAt:now-60_000,ageMinutes:1,holderGrowthPct:null,smartWalletBuys:null,kolBuyVerified:null,security:secure,profile:{poc:1,vah:1.1,val:.9,method:"ohlcv_approximation",location:"inside_value"},source:"dexscreener" as const,observedAt:now};
@@ -53,4 +53,12 @@ test("scanner applies pair age, liquidity and volume gates and retains security 
  assert.equal(result.candidates[0].eligible,false);
  assert.equal(result.candidates[0].profile?.method,"ohlcv_approximation");
  assert.equal(result.liveExecutionAllowed,false);
+});
+
+test("overnight paper-entry session handles UTC midnight correctly",()=>{
+ const at=(h:number,m:number)=>Date.UTC(2026,0,1,h,m);
+ assert.equal(isAotiSessionOpen(at(23,0)),true);
+ assert.equal(isAotiSessionOpen(at(6,59)),true);
+ assert.equal(isAotiSessionOpen(at(7,0)),false);
+ assert.equal(isAotiSessionOpen(at(22,59)),false);
 });
