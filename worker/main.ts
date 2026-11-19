@@ -158,9 +158,9 @@ export default {
     // AOTI scans supported DEX networks and refreshes paper positions on the five-minute universe cadence.
     // The module is disabled unless ETI_AOTI_ENABLED=true and always keeps live DEX signing disabled.
     if (event.cron === UNIVERSE_CRON && env.ETI_AOTI_ENABLED === "true" && env.ETI_PORTFOLIO_DB) ctx.waitUntil((async () => {
-      const discovery = await runAotiCycle(env, Date.now());
-      const positions = await manageAotiPaperPositions(env, Date.now());
-      if (discovery.scanned || positions.updated || positions.failures) console.log("ETI AOTI cycle", JSON.stringify({ discovery, positions }));
+      const [discovery, positions] = await Promise.allSettled([runAotiCycle(env, Date.now()), manageAotiPaperPositions(env, Date.now())]);
+      const result = { discovery: discovery.status === "fulfilled" ? discovery.value : { error: String(discovery.reason) }, positions: positions.status === "fulfilled" ? positions.value : { error: String(positions.reason) } };
+      if (result.discovery.scanned || result.positions.updated || result.positions.failures || result.discovery.error || result.positions.error) console.log("ETI AOTI cycle", JSON.stringify(result));
     })().catch(e => console.error("ETI AOTI cycle failed", e instanceof Error ? e.message : e)));
     // Public-address watchlist scans rotate through five due wallets per five-minute tick; D1 deduplicates event hashes.
     if (event.cron === UNIVERSE_CRON && env.ETI_PORTFOLIO_DB) ctx.waitUntil(runOnchainWatchCycle(env, Date.now()).then(r => { if (r.events || r.failures) console.log("ETI on-chain watch cycle", JSON.stringify(r)); }, e => console.error("ETI on-chain watch cycle failed", e instanceof Error ? e.message : e)));
