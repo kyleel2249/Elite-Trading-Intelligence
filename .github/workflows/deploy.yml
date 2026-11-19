@@ -80,6 +80,7 @@ jobs:
           ETI_GAINZ_WEBHOOK_SECRET: ${{ secrets.ETI_GAINZ_WEBHOOK_SECRET }}
           ETI_GAINZ_ADMIN_TOKEN: ${{ secrets.ETI_GAINZ_ADMIN_TOKEN }}
           ETI_EXECUTION_TOKEN: ${{ secrets.ETI_EXECUTION_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}
           BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
           BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
@@ -96,7 +97,7 @@ jobs:
           const names = [
             "ODDSPAPI_API_KEY", "ETI_SPORTS_PAPER_TOKEN", "ODDS_API_KEY", "BACKEND_URL",
             "INFURA_API_KEY", "INFURA_API_SECRET", "ETI_GAINZ_WEBHOOK_SECRET", "ETI_GAINZ_ADMIN_TOKEN",
-            "ETI_EXECUTION_TOKEN",
+            "ETI_EXECUTION_TOKEN", "ANTHROPIC_API_KEY",
             "BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_API_PASSPHRASE",
             "DATAX_INTEGRATION_SECRET",
           ];
