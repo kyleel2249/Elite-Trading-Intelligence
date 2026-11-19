@@ -21,8 +21,8 @@ function item(a,b){const d=document.createElement("div");d.className="eti-smci-i
 function list(id,rows,empty){const e=$(id);if(!e)return;e.replaceChildren();if(!rows||!rows.length){e.textContent=empty;return;}rows.forEach(r=>e.append(item(r[0],r[1])));}
 function currentSymbol(){return (($("symbol")&&$("symbol").value)||($("tt-symbol")&&$("tt-symbol").value)||($("sym")&&$("sym").value)||"BTCUSDT").trim().toUpperCase();}
 function timeframe(){const e=$("interval")||$("tt-interval");return e&&e.value||"15m";}
-function provider(){const e=$("symVenue")||$("tt-venue")||$("venue")||$("ven");return e&&/bitget/i.test(e.value)?"bitget":"bybit";}
-function market(){const e=$("symMarket")||$("tt-market")||$("mkt");return e&&/future|contract/i.test(e.value)?"futures":"spot";}
+function provider(){const e=$("symVenue")||$("tt-venue")||$("venue")||$("ven");return e?(/bitget/i.test(e.value)?"bitget":"bybit"):$("tt-chart")?"bitget":"bybit";}
+function market(){const e=$("symMarket")||$("tt-market")||$("mkt");return e?(/future|contract/i.test(e.value)?"futures":"spot"):$("tt-chart")?"futures":"spot";}
 let busy=false,sequence=0;
 async function refresh(){
  if(busy)return;busy=true;const seq=++sequence,btn=$("eti-smci-refresh");if(btn)btn.disabled=true;text("eti-smci-state","Analyzing closed candles · "+currentSymbol()+"…");
