@@ -116,8 +116,8 @@ async function securityFor(chain:AotiChain,address:string,fetcher:typeof fetch,n
       const risks=Array.isArray(r.risks)?r.risks.map((x:any)=>clean(x.name||x.description,120)):[],markets=Array.isArray(r.markets)?r.markets:[];
       const top=Array.isArray(r.topHolders)?r.topHolders:[],top10=top.slice(0,10).reduce((s:number,x:any)=>s+Number(x.pct??x.percentage??0),0);
       const lp=markets.flatMap((m:any)=>m.lp?.lpLocked===true?[m.lp]:[]),lpDays=lp.length?Math.max(...lp.map((x:any)=>Number(x.lockDuration||0)/86400)):null;
-      const authority=(v:any)=>v===null||v===undefined||v===""?true:false;
-      return {holderCount:n(r.totalHolders),mintAuthorityRevoked:authority(r.mintAuthority),freezeAuthorityRevoked:authority(r.freezeAuthority),lpLocked:lp.length>0,lpLockDays:lpDays,developerSupplyPct:n(r.creatorPercentage),top10SupplyPct:top.length?top10:null,sellSimulationPassed:null,bundledLaunchClear:risks.some(x=>/bundle|insider/i.test(x))?false:null,provider:"rugcheck",checkedAt:now,risks};
+      const authority=(v:any)=>v===null||v===""?true:v===undefined?null:false;
+      return {holderCount:n(r.totalHolders),mintAuthorityRevoked:authority(r.mintAuthority),freezeAuthorityRevoked:authority(r.freezeAuthority),lpLocked:markets.length?lp.length>0:null,lpLockDays:lpDays,developerSupplyPct:n(r.creatorPercentage),top10SupplyPct:top.length?top10:null,sellSimulationPassed:null,bundledLaunchClear:risks.some(x=>/bundle|insider/i.test(x))?false:null,provider:"rugcheck",checkedAt:now,risks};
     }
     const chainId=GOPLUS[chain as Exclude<AotiChain,"solana">],r=await json(fetcher,"https://api.gopluslabs.io/api/v1/token_security/"+chainId+"?contract_addresses="+encodeURIComponent(address)),item=r.result?.[address.toLowerCase()]||r.result?.[address];
     if(!item)return empty("goplus");
@@ -125,7 +125,7 @@ async function securityFor(chain:AotiChain,address:string,fetcher:typeof fetch,n
     const lpRows=Array.isArray(item.lp_holders)?item.lp_holders:[],locked=lpRows.some((x:any)=>Number(x.is_locked)===1);
     const lockDays=locked?Math.max(...lpRows.filter((x:any)=>Number(x.is_locked)===1).map((x:any)=>Number(x.locked_detail?.[0]?.end_time||0)>now/1000?(Number(x.locked_detail[0].end_time)-now/1000)/86400:0)):null;
     const honeypot=asBool(item.is_honeypot),buyTax=n(item.buy_tax),sellTax=n(item.sell_tax);
-    return {holderCount:holders,mintAuthorityRevoked:asBool(item.is_mintable)===false,freezeAuthorityRevoked:asBool(item.transfer_pausable)===false,lpLocked:locked,lpLockDays:lockDays,developerSupplyPct:dev===null?null:dev*100,top10SupplyPct:top10===null?null:top10*100,sellSimulationPassed:honeypot===false&&sellTax!==null&&sellTax<.1,bundledLaunchClear:null,provider:"goplus",checkedAt:now,risks:[...(honeypot===true?["honeypot"]:[]),...(asBool(item.is_mintable)===true?["mintable"]:[]),...(asBool(item.transfer_pausable)===true?["transfer_pausable"]:[])]};
+    return {holderCount:holders,mintAuthorityRevoked:asBool(item.is_mintable)===null?null:asBool(item.is_mintable)===false,freezeAuthorityRevoked:asBool(item.transfer_pausable)===null?null:asBool(item.transfer_pausable)===false,lpLocked:lpRows.length?locked:null,lpLockDays:lockDays,developerSupplyPct:dev===null?null:dev*100,top10SupplyPct:top10===null?null:top10*100,sellSimulationPassed:honeypot===false&&sellTax!==null&&sellTax<.1,bundledLaunchClear:null,provider:"goplus",checkedAt:now,risks:[...(honeypot===true?["honeypot"]:[]),...(asBool(item.is_mintable)===true?["mintable"]:[]),...(asBool(item.transfer_pausable)===true?["transfer_pausable"]:[])]};
   }catch{return empty(chain==="solana"?"rugcheck_unavailable":"goplus_unavailable")}
 }
 function normalizePair(p:any,now:number):Omit<AotiCandidate,"score"|"eligible"|"reasons"|"securityGate"|"signals">|null{
