@@ -340,6 +340,26 @@ test("API: catalog, method and symbol validation", async () => {
   assert.equal((await call("/api/analysis/mtf?symbol=BTCUSDT&strategy=yolo")).status, 400);
   assert.equal((await call("/api/analysis/nope?symbol=BTCUSDT")).status, 404);
 });
+test("API: Liquidity-FVG keeps supplied chart candles and loads higher timeframes from the selected futures venue", async () => {
+  const real = globalThis.fetch, step = 15 * 60 * 1000;
+  const rows = series(120, { drift: 0.2, noise: 0.5, seed: 17, stepMs: step, end: Date.now() - step * 2 });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input)), interval = Number(url.searchParams.get("interval") || 60), tfStep = interval * 60 * 1000, end = Date.now() - tfStep * 2;
+    const list = Array.from({ length: 100 }, (_, i) => {
+      const close = 100 + i * 0.08, open = close - 0.03;
+      return [String(end - (99 - i) * tfStep), String(open), String(close + 0.2), String(open - 0.2), String(close), "100"];
+    });
+    return new Response(JSON.stringify({ retCode: 0, result: { list } }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const r = await post("/api/analysis/liquidity-fvg?symbol=BTCUSDT&timeframe=15m&assetClass=crypto&provider=bybit&market=futures&category=linear", { candles: { "15m": rows } });
+    assert.equal(r.status, 200);
+    const j = await r.json() as any;
+    assert.deepEqual(j.higherTimeframesLoaded.sort(), ["1h", "30m"]);
+    assert.equal(j.dataQuality.provider, "supplied+bybit");
+    assert.equal(j.submitsOrder, false);
+  } finally { globalThis.fetch = real; }
+});
 test("API: POST technical analyses supplied candles and rejects malformed ones", async () => {
   const rows = reindex(series(300, { drift: 0.25, noise: 0.5, seed: 3 }));
   const r = await postEnv("/api/analysis/technical?symbol=AAPL&timeframe=1h", { candles: rows }, PAID); assert.equal(r.status, 200); const j = await r.json() as any; assert.equal(j.report.domain, "technical"); assert.ok(j.structure && j.volumeProfile); assert.equal(j.dataQuality.detail, "full");

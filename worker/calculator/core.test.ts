@@ -37,6 +37,21 @@ test("price needed for a target net profit round-trips through the P&L", () => {
     close(be.target.net, 0, 1e-7);
   }
 });
+test("target return percentage calculates a net-profit exit for spot and leveraged long/short futures", () => {
+  for (const side of ["buy", "sell"] as const) {
+    const base = { side, entry: 100, sizeBy: "margin" as const, margin: 50, leverage: side === "buy" ? 1 : 10, feePct: 0.05, slippagePct: 0.02, fundingPct: 0.01 };
+    const target: any = computePosition({ ...base, targetProfitPct: 2 });
+    assert.equal(target.ok, true);
+    close(target.targetProfitAmount, 1);
+    const back: any = computePosition({ ...base, exit: target.priceForTargetProfit });
+    close(back.target.net, 1, 1e-7);
+    close(Math.abs(target.targetProfitMovePct), Math.abs((target.priceForTargetProfit - 100) / 100 * 100));
+  }
+  const both: any = computePosition({ side: "buy", entry: 100, quantity: 1, leverage: 1, targetProfit: 1, targetProfitPct: 2 });
+  assert.equal(both.ok, false);
+  assert.match(both.errors.join(" "), /either a target profit amount or a target return percentage/);
+});
+
 test("warnings: stop beyond liquidation, wrong-side stop, thin liquidation distance, exit beyond liquidation", () => {
   const a: any = computePosition({ side: "buy", entry: 100, stop: 80, exit: 120, quantity: 1, leverage: 10 });
   assert.ok(a.warnings.some((w: string) => /Stop is beyond the estimated liquidation/.test(w)));
@@ -75,7 +90,7 @@ test("the function embedded in the dashboard script is the same arithmetic (runs
   const a: any = fn({ side: "buy", entry: 100, exit: 110, quantity: 1, leverage: 10, feePct: 0.05 }), b: any = computePosition({ side: "buy", entry: 100, exit: 110, quantity: 1, leverage: 10, feePct: 0.05 });
   assert.deepEqual(a, b);
   assert.ok(!CALC_JS.includes("`") && !CALC_JS.includes("${") && !CALC_JS.includes("\\"));
-  for (const id of ["clSide", "clEntry", "clExit", "clStop", "clLev", "clLevRange", "clFee", "clMmr", "clFx", "clTp", "clLadder", "clKpis", "clMsgs"]) assert.ok(CALC_HTML.includes('id="' + id + '"'), id);
+  for (const id of ["clMarketMode", "clTargetMode", "clSide", "clEntry", "clExit", "clStop", "clLev", "clLevRange", "clFee", "clMmr", "clFx", "clTp", "clTpPct", "clLadder", "clKpis", "clMsgs"]) assert.ok(CALC_HTML.includes('id="' + id + '"'), id);
 });
 test("dashboard serves the calculator panel and script", async () => {
   const { default: app } = await import("../index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();

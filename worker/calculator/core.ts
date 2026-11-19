@@ -12,7 +12,7 @@
 export interface CalcInput {
   side: "buy" | "sell"; entry: number; exit?: number | null; stop?: number | null;
   sizeBy?: "quantity" | "margin"; quantity?: number; margin?: number; leverage: number;
-  feePct?: number; slippagePct?: number; fundingPct?: number; mmrPct?: number; contractSize?: number; fxRate?: number; targetProfit?: number | null;
+  feePct?: number; slippagePct?: number; fundingPct?: number; mmrPct?: number; contractSize?: number; fxRate?: number; targetProfit?: number | null; targetProfitPct?: number | null;
 }
 export type CalcResult = { ok: false; errors: string[] } | { ok: true; [k: string]: any };
 
@@ -24,7 +24,9 @@ export function computePosition(i: CalcInput): CalcResult {
   const feePct = i.feePct === undefined || i.feePct === null ? 0.05 : num(i.feePct), slipPct = i.slippagePct === undefined || i.slippagePct === null ? 0 : num(i.slippagePct);
   const fundPct = i.fundingPct === undefined || i.fundingPct === null ? 0 : num(i.fundingPct), mmrPct = i.mmrPct === undefined || i.mmrPct === null ? 0.5 : num(i.mmrPct);
   const cs = i.contractSize === undefined || i.contractSize === null ? 1 : num(i.contractSize), fx = i.fxRate === undefined || i.fxRate === null ? 1 : num(i.fxRate);
-  const exit = num(i.exit), stop = num(i.stop), tp = num(i.targetProfit);
+  const exit = num(i.exit), stop = num(i.stop), tp = num(i.targetProfit), tpPct = num(i.targetProfitPct);
+  const hasTp = i.targetProfit !== undefined && i.targetProfit !== null && String(i.targetProfit) !== "";
+  const hasTpPct = i.targetProfitPct !== undefined && i.targetProfitPct !== null && String(i.targetProfitPct) !== "";
   if (!dir) errors.push("Choose Long or Short.");
   if (!(entry > 0) || !isFinite(entry)) errors.push("Entry price must be greater than zero.");
   if (!(lev >= 1 && lev <= 150) || !isFinite(lev)) errors.push("Leverage must be between 1x and 150x.");
@@ -36,6 +38,9 @@ export function computePosition(i: CalcInput): CalcResult {
   if (!(fx > 0) || !isFinite(fx)) errors.push("Quote-to-account rate must be greater than zero.");
   if (i.exit !== undefined && i.exit !== null && String(i.exit) !== "" && !(exit > 0)) errors.push("Exit price must be greater than zero.");
   if (i.stop !== undefined && i.stop !== null && String(i.stop) !== "" && !(stop > 0)) errors.push("Stop price must be greater than zero.");
+  if (hasTp && hasTpPct) errors.push("Choose either a target profit amount or a target return percentage, not both.");
+  if (hasTp && (!(tp > 0) || !isFinite(tp))) errors.push("Target net profit must be greater than zero.");
+  if (hasTpPct && (!(tpPct > 0) || tpPct > 100000 || !isFinite(tpPct))) errors.push("Target return percentage must be greater than zero and no more than 100000%.");
   const sizeRaw = sizeBy === "margin" ? num(i.margin) : num(i.quantity);
   if (!(sizeRaw > 0) || !isFinite(sizeRaw)) errors.push(sizeBy === "margin" ? "Margin must be greater than zero." : "Quantity must be greater than zero.");
   if (errors.length) return { ok: false, errors };
@@ -45,6 +50,7 @@ export function computePosition(i: CalcInput): CalcResult {
   const quantity = sizeBy === "margin" ? units / cs : sizeRaw;
   const notional = units * entry * fx, margin = notional / lev;
   const fundingCost = fund * notional;
+  const targetAmount = hasTp ? tp : hasTpPct ? margin * tpPct / 100 : NaN;
   const liqOf = (L: number) => {
     if (dir === 1 && L === 1) return null; // an unleveraged long cannot be liquidated
     const p = entry * (1 - dir * (1 / L - mmr));
@@ -75,7 +81,11 @@ export function computePosition(i: CalcInput): CalcResult {
       if (exit > 0 && dir * (exit - entry) > 0) out.riskReward = Math.abs(exit - entry) / Math.abs(entry - stop);
     }
   }
-  if (tp > 0) out.priceForTargetProfit = breakEvenFor(tp);
+  if (targetAmount > 0) {
+    out.targetProfitAmount = targetAmount;
+    out.priceForTargetProfit = breakEvenFor(targetAmount);
+    out.targetProfitMovePct = ((out.priceForTargetProfit - entry) / entry) * 100;
+  }
   if (liqDistancePct !== null && liqDistancePct < 5) warnings.push("Liquidation is only " + liqDistancePct.toFixed(2) + "% away: a normal intraday move could close this position.");
   if (lev > 20) warnings.push("Leverage above 20x leaves very little room for adverse moves; most venues also cap leverage per instrument and position size.");
   for (const L of [1, 2, 3, 5, 10, 20, 25, 50, 75, 100, 125]) {
