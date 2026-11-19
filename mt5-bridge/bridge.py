@@ -165,7 +165,7 @@ $("search").onchange=()=>load().catch(e=>msg(e.message,true));
 $("positions").onclick=async e=>{const t=e.target.dataset.close;if(!t)return;if(!confirm("Close position "+t+"?"))return;try{await api("/positions/close",{method:"POST",body:JSON.stringify({ticket:Number(t)})});await load()}catch(err){msg(err.message,true)}};
 $("quote").onclick=async()=>{try{const t=await api("/tick/"+encodeURIComponent($("symbol").value));msg("Bid "+t.bid+" · Ask "+t.ask)}catch(e){msg(e.message,true)}};
 $("orderForm").onsubmit=async e=>{e.preventDefault();const type=$("type").value;const body={symbol:$("symbol").value.trim(),side:$("side").value,order_type:type,volume:Number($("volume").value),sl:Number($("sl").value),tp:Number($("tp").value)};if(type!=="market")body.price=Number($("price").value);if(!confirm("Send "+body.side.toUpperCase()+" "+body.volume+" "+body.symbol+" order with SL/TP?"))return;try{const d=await api("/orders",{method:"POST",body:JSON.stringify(body)});msg("Order accepted · risk "+d.risk_percent+"%");await load()}catch(err){msg(err.message,true)}};
-if(token)load().catch(e=>msg(e.message,true));
+if(token)load().catch(e=>msg(e.message,true));setInterval(()=>{if(token)load().catch(e=>msg(e.message,true))},5000);
 </script></body></html>"""
 
 
