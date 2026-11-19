@@ -7,7 +7,6 @@ import { AGENT_ROSTER } from "./types.ts";
 
 type RuntimeEnv = {
   ANTHROPIC_API_KEY?: string;
-  ETI_EXECUTION_TOKEN?: string;
   ETI_AGENT_AUTOPILOT_ENABLED?: string;
   ETI_EXECUTION_TOKEN?: string;
   ETI_EXECUTION_LOG?: unknown;
