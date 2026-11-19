@@ -95,9 +95,9 @@ function autoAnalysisLevels(){
  var a=activeEtiAnalysis,spot=g('clMarketMode').value==='spot',auto=g('clAutoAnalysis').checked,setup=a&&a.autopilotEligible&&a.setup?a.setup:null;
  ['clEntry','clExit','clStop'].forEach(function(id){g(id).readOnly=auto;});
  if(!auto){['clEntry','clExit','clStop'].forEach(function(id){g(id).dataset.etiGenerated='';});return null;}
- if(activeEtiAnalysisSymbol!==$('symbol').value||activeEtiAnalysisTimeframe!==$('interval').value){if(g('clEntry').dataset.etiGenerated==='1'){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});}return {blocked:'Waiting for fresh analysis of the selected pair and timeframe.'};}
- if(!setup){if(g('clEntry').dataset.etiGenerated==='1'){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});}return null;}
- if(spot&&setup.direction!=='BUY'){if(g('clEntry').dataset.etiGenerated==='1'){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});}return {blocked:'The current qualified ETI setup is SHORT. Spot is long-only; switch to Futures to use this setup.'};}
+ if(activeEtiAnalysisSymbol!==$('symbol').value||activeEtiAnalysisTimeframe!==$('interval').value){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});return {blocked:'Waiting for fresh analysis of the selected pair and timeframe.'};}
+ if(!setup){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});return null;}
+ if(spot&&setup.direction!=='BUY'){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});return {blocked:'The current qualified ETI setup is SHORT. Spot is long-only; switch to Futures to use this setup.'};}
  g('clSide').value=setup.direction==='BUY'?'buy':'sell';
  g('clEntry').value=setup.entry;g('clEntry').dataset.etiGenerated='1';
  g('clStop').value=setup.stopLoss===null?'':setup.stopLoss;g('clStop').dataset.etiGenerated='1';
