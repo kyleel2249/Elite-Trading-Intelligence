@@ -49,3 +49,14 @@ ADX, relative volume, score, conviction, regime and method for/against counts fo
 The positive factors sum to +74 while the negative factors sum to -110 (clamped to -100), so the BUY side of the
 score can never reach +100. The BUY gate (55) is reachable, but BUY and SELL conviction are not symmetric. This was
 left unchanged on purpose; changing it would alter live signals and the historical replay.
+
+
+## Chart annotation interpretation and trader guidance
+
+The Pro Terminal includes a live **Chart Signal Interpretation** panel. It summarises the selected symbol, venue, market and timeframe using the terminal's current signal, Liquidity-FVG result, SMC structure, order-flow snapshot and independent Omnisignal result. It explains whether the signal is tradeable, blocked, expired or unavailable and gives the next safe action. The panel is read-only.
+
+The expandable glossary covers every chart annotation family emitted by the current terminal and technical overlay: ORDER, ENTRY/CE ENTRY, STOP/SL, TP1-TP3, BSL/SSL, sweeps and estimated sweep reach, FVG, order blocks, BOS/CHoCH, support/resistance, EMA, VWAP, Bollinger Bands, RSI, MACD, ADX, ATR, volume/RVOL, order-book walls/imbalance, delta/CVD/footprint, spread/microprice, funding/open interest, volume-profile POC/VAH/VAL and ETI score/conviction/BUY/SELL/HOLD.
+
+**ORDER safety rule:** a chart label or horizontal line named ORDER is only an annotation/reference unless it can be matched to authenticated venue order data, an order ID and an exchange status. The chart label alone must never be treated as evidence that an order was placed or filled. Liquidity pools, order blocks and estimated sweep reach are analytical approximations, not proof of institutional orders or guaranteed resting liquidity.
+
+Each glossary item explains what it means, why it matters and what the trader should do. When source data is missing, stale or unverified, the panel says so and recommends waiting rather than inventing a market reading.
