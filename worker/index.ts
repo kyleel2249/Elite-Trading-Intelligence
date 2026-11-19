@@ -1274,13 +1274,15 @@ export default {
       return json(advancedAssessment({ ...body, candles, evidence: Array.isArray(body.evidence) ? body.evidence.slice(0, 300) : [], transactions: Array.isArray(body.transactions) ? body.transactions.slice(0, 200) : [] }));
     }
     if (url.pathname === "/api/trading-coach/predictions" && request.method === "GET") {
+      const auth = await authenticate(request, _env); if (!auth.user && !auth.master) return json({ error: "authentication_required" }, 401); const owner = auth.user?.uid || "__master__";
       const db = _env.ETI_PORTFOLIO_DB; if (!db || typeof db.prepare !== "function") return json({ error: "prediction_storage_unavailable", note: "ETI_PORTFOLIO_DB binding is required for persistent prediction records." }, 503);
       await db.prepare("CREATE TABLE IF NOT EXISTS eti_coach_predictions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL, symbol TEXT NOT NULL, direction TEXT NOT NULL, probability REAL NOT NULL, entry REAL, stop REAL, target REAL, payload TEXT NOT NULL, evaluated_at INTEGER, outcome TEXT, score_json TEXT)").run();
       const limit = Math.max(1, Math.min(50, Number(url.searchParams.get("limit") || 25)));
-      const rows = await db.prepare("SELECT id,created_at,symbol,direction,probability,entry,stop,target,payload,evaluated_at,outcome,score_json FROM eti_coach_predictions ORDER BY created_at DESC LIMIT ?").bind(limit).all();
+      const rows = await db.prepare("SELECT id,created_at,symbol,direction,probability,entry,stop,target,payload,evaluated_at,outcome,score_json FROM eti_coach_predictions WHERE owner_id=? ORDER BY created_at DESC LIMIT ?").bind(owner,limit).all();
       return json({ count: rows.results?.length || 0, predictions: (rows.results || []).map((r:any)=>({...r,payload:JSON.parse(r.payload),score:r.score_json?JSON.parse(r.score_json):null})) });
     }
     if (url.pathname === "/api/trading-coach/predictions" && request.method === "POST") {
+      const auth = await authenticate(request, _env); if (!auth.user && !auth.master) return json({ error: "authentication_required" }, 401); const owner = auth.user?.uid || "__master__";
       const db = _env.ETI_PORTFOLIO_DB; if (!db || typeof db.prepare !== "function") return json({ error: "prediction_storage_unavailable", note: "ETI_PORTFOLIO_DB binding is required for persistent prediction records." }, 503);
       const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = coachRateLimited(ip, 3, Date.now(), 10); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
       const raw = await request.text(); if (raw.length > 50000) return json({ error: "payload_too_large" }, 413);
@@ -1290,18 +1292,19 @@ export default {
       if(entry!==null&&stop!==null&&target!==null&&!(direction==="long"?stop<entry&&target>entry:stop>entry&&target<entry))return json({error:"invalid_levels"},400);
       await db.prepare("CREATE TABLE IF NOT EXISTS eti_coach_predictions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL, symbol TEXT NOT NULL, direction TEXT NOT NULL, probability REAL NOT NULL, entry REAL, stop REAL, target REAL, payload TEXT NOT NULL, evaluated_at INTEGER, outcome TEXT, score_json TEXT)").run();
       const id=crypto.randomUUID(),now=Date.now(),payload=JSON.stringify({thesis:String(body.thesis||"").slice(0,3000),evidence:Array.isArray(body.evidence)?body.evidence.slice(0,30):[],timeframe:String(body.timeframe||"").slice(0,16),evaluationWindow:String(body.evaluationWindow||"").slice(0,50)});
-      await db.prepare("INSERT INTO eti_coach_predictions (id,created_at,symbol,direction,probability,entry,stop,target,payload,evaluated_at,outcome,score_json) VALUES (?,?,?,?,?,?,?,?,?,NULL,NULL,NULL)").bind(id,now,symbol,direction,probability,entry,stop,target,payload).run();
+      await db.prepare("INSERT INTO eti_coach_predictions (id,owner_id,created_at,symbol,direction,probability,entry,stop,target,payload,evaluated_at,outcome,score_json) VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL)").bind(id,owner,now,symbol,direction,probability,entry,stop,target,payload).run();
       return json({saved:true,id,createdAt:now,symbol,direction,probability,note:"Forecast saved. Evaluate it later against an independently recorded outcome."},201);
     }
     if (url.pathname === "/api/trading-coach/predictions/evaluate" && request.method === "POST") {
+      const auth = await authenticate(request, _env); if (!auth.user && !auth.master) return json({ error: "authentication_required" }, 401); const owner = auth.user?.uid || "__master__";
       const db = _env.ETI_PORTFOLIO_DB; if (!db || typeof db.prepare !== "function") return json({ error: "prediction_storage_unavailable" }, 503);
       const raw=await request.text();if(raw.length>50000)return json({error:"payload_too_large"},413);let body:any;try{body=JSON.parse(raw)}catch{return json({error:"invalid_json"},400)}
       const id=String(body?.id||""),outcome=String(body?.outcome||"").toLowerCase();if(!id||!["long","short","neutral"].includes(outcome))return json({error:"prediction_id_and_outcome_required"},400);
       await db.prepare("CREATE TABLE IF NOT EXISTS eti_coach_predictions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL, symbol TEXT NOT NULL, direction TEXT NOT NULL, probability REAL NOT NULL, entry REAL, stop REAL, target REAL, payload TEXT NOT NULL, evaluated_at INTEGER, outcome TEXT, score_json TEXT)").run();
-      const row=await db.prepare("SELECT id,direction,probability,entry,stop,target,payload,evaluated_at FROM eti_coach_predictions WHERE id=?").bind(id).first();
+      const row=await db.prepare("SELECT id,direction,probability,entry,stop,target,payload,evaluated_at FROM eti_coach_predictions WHERE id=? AND owner_id=?").bind(id,owner).first();
       if(!row)return json({error:"prediction_not_found"},404);if(row.evaluated_at)return json({error:"already_evaluated"},409);
       const score=evaluateForecast({direction:row.direction,probability:row.probability,outcome,entry:row.entry,exit:body.exit,candles:Array.isArray(body.candles)?body.candles.slice(-500):[]});
-      await db.prepare("UPDATE eti_coach_predictions SET evaluated_at=?,outcome=?,score_json=? WHERE id=? AND evaluated_at IS NULL").bind(Date.now(),outcome,JSON.stringify(score),id).run();
+      const updated=await db.prepare("UPDATE eti_coach_predictions SET evaluated_at=?,outcome=?,score_json=? WHERE id=? AND owner_id=? AND evaluated_at IS NULL").bind(Date.now(),outcome,JSON.stringify(score),id,owner).run();if(updated.meta?.changes===0)return json({error:"already_evaluated"},409);
       return json({evaluated:true,id,score});
     }
     if (url.pathname === "/jarvis") return new Response(COMMAND_CENTRE_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
