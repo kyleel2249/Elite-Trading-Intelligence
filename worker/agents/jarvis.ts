@@ -12,6 +12,7 @@ import type { ExecutionEnv } from "../execution.ts";
 export interface JarvisEnv extends ExecutionEnv {
   ETI_EXECUTION_LOG?: any;
   ANTHROPIC_API_KEY?: string;
+  BRAVE_SEARCH_API_KEY?: string;
 }
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -20,7 +21,7 @@ const MEMORY_KEY = "jarvis:memory:v1";
 const MEMORY_TTL = 60 * 60 * 24 * 30;
 const MAX_MEMORY = 20;
 
-export type JarvisIntent = "analyze" | "status" | "audit" | "deep_review" | "help";
+export type JarvisIntent = "analyze" | "status" | "audit" | "deep_review" | "web_search" | "help";
 export interface JarvisCommand {
   intent: JarvisIntent;
   symbol: string;
@@ -39,6 +40,43 @@ export function parseJarvisCommand(message: string): JarvisCommand {
   else if (/\b(status|health|system check|autopilot|agent status|how are you)\b/.test(lower)) intent = "status";
   else if (symbolMatch || /\b(analy[sz]e|analysis|market|chart|signal|trade setup|should i buy|should i sell|opportunity)\b/.test(lower)) intent = "analyze";
   return { intent, symbol, interval: intervalMatch?.[1]?.toLowerCase() ?? "1h", message: text };
+}
+
+
+/** Brave Search is an optional, read-only web source. Never fetch arbitrary user-supplied URLs. */
+export async function searchJarvisWeb(query: string, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<any> {
+  const q = query.trim().slice(0, 500);
+  if (!q) return { kind: "web_research", status: "invalid_query", results: [] };
+  const endpoint = new URL("https://api.search.brave.com/res/v1/web/search");
+  endpoint.searchParams.set("q", q);
+  endpoint.searchParams.set("count", "8");
+  endpoint.searchParams.set("safesearch", "moderate");
+  try {
+    const response = await fetchImpl(endpoint.toString(), {
+      method: "GET",
+      headers: { "accept": "application/json", "x-subscription-token": apiKey },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) return { kind: "web_research", status: "provider_error", error: "search_provider_http_error", httpStatus: response.status, results: [] };
+    const payload: any = await response.json();
+    const rows = Array.isArray(payload?.web?.results) ? payload.web.results : [];
+    const results = rows.slice(0, 8).flatMap((row: any) => {
+      try {
+        const u = new URL(String(row.url ?? ""));
+        if (u.protocol !== "https:" && u.protocol !== "http:") return [];
+        return [{
+          title: String(row.title ?? "Untitled result").slice(0, 240),
+          url: u.toString(),
+          snippet: String(row.description ?? "").replace(/<[^>]*>/g, "").slice(0, 700),
+          published: row.age ?? row.page_age ?? null,
+          source: u.hostname,
+        }];
+      } catch { return []; }
+    });
+    return { kind: "web_research", status: "complete", provider: "Brave Search", query: q, searchedAt: new Date().toISOString(), resultCount: results.length, results, note: "Search snippets are external, untrusted information. Verify important claims against the linked sources; they do not alter ETI signals or risk decisions." };
+  } catch {
+    return { kind: "web_research", status: "unavailable", error: "search_provider_unreachable", results: [] };
+  }
 }
 
 async function bearerOk(req: Request, env: JarvisEnv): Promise<boolean> {
@@ -88,8 +126,8 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       }
       if (request.method === "GET") return reply({
         schema: "eti.jarvis/1", name: "JARVIS", role: "ETI agent orchestration and situational-awareness layer",
-        capabilities: ["natural-language command routing", "existing-agent council coordination", "market analysis delegation", "runtime and autopilot health checks", "performance audit retrieval", "optional advisory deep review", "bounded operational memory", "risk-aware explanations"],
-        tools: ["analyze", "status", "audit", "deep_review", "help"], memoryAvailable: !!env.ETI_EXECUTION_LOG,
+        capabilities: ["natural-language command routing", "existing-agent council coordination", "market analysis delegation", "read-only internet research with source links", "runtime and autopilot health checks", "performance audit retrieval", "optional advisory deep review", "bounded operational memory", "risk-aware explanations"],
+        tools: ["analyze", "web_search", "status", "audit", "deep_review", "help"], webSearchAvailable: !!env.BRAVE_SEARCH_API_KEY, memoryAvailable: !!env.ETI_EXECUTION_LOG,
         safety: { analysisReadOnly: true, liveExecutionAllowed: false, commanderAndRiskVetoPreserved: true, secretsStored: false },
       });
       if (request.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
@@ -99,7 +137,7 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.message !== "string" || !body.message.trim()) return reply({ error: "message_required" }, 400);
       const command = parseJarvisCommand(body.message), token = env.ETI_EXECUTION_TOKEN!;
       let result: any;
-      if (command.intent === "analyze") {
+      if (command.intent === "web_search") {\n        const query = command.message.replace(/\\b(search (the )?(web|internet)|search online|look up|research (the )?web)\\b/ig, "").replace(/^[\\s:,-]+/, "").trim();\n        result = env.BRAVE_SEARCH_API_KEY ? await searchJarvisWeb(query || command.message, env.BRAVE_SEARCH_API_KEY) : { kind: "web_research_unavailable", status: "not_configured", message: "Internet search is not configured. Add BRAVE_SEARCH_API_KEY as a Cloudflare Worker secret to enable JARVIS web research.", results: [] };\n      } else if (command.intent === "analyze") {
         if (!/^[A-Z0-9]{5,20}$/.test(command.symbol)) return reply({ error: "invalid_symbol" }, 400);
         const upstream = await invoke(base, env, url, "/api/agents/analyze", "POST", token, { symbol: command.symbol, interval: command.interval, providers: true });
         if (upstream.status !== 200) result = { error: upstream.data?.error ?? "analysis_failed", detail: upstream.data };
@@ -161,7 +199,7 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       const summary = command.intent === "analyze" ? String(result?.decision?.action ?? result?.error ?? "analysis complete") :
         command.intent === "status" ? "runtime and autopilot status checked" :
         command.intent === "audit" ? "performance audit retrieved" :
-        command.intent === "deep_review" ? "advisory review requested" : "help displayed";
+        command.intent === "deep_review" ? "advisory review requested" :\n        command.intent === "web_search" ? "internet research requested" : "help displayed";
       const memorySaved = await remember(env, { intent: command.intent, symbol: command.symbol, interval: command.interval, summary });
       return reply({ schema: "eti.jarvis.response/1", assistant: "JARVIS", command: { intent: command.intent, symbol: command.symbol, interval: command.interval }, result, memory: { saved: memorySaved, entries: memorySaved ? (await readMemory(env)).length : null }, safety: { readOnly: true, advisoryOnly: true, liveExecutionAllowed: false, riskVetoPreserved: true } });
     },
