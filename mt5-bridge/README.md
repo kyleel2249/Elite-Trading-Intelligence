@@ -1,6 +1,6 @@
 # ETI MT5 Windows Bridge
 
-A local Windows connector that controls an installed MetaTrader 5 terminal through the official MetaTrader5 Python package. It supports demo and live account login, account snapshots, symbols, ticks, positions, pending orders, deal history and risk-checked execution.
+A local Windows connector and browser-based trading workspace that controls an installed MetaTrader 5 terminal through the official MetaTrader5 Python package. Open `http://127.0.0.1:8765/` after starting the service to use the local account and order-management UI. It supports demo and live account login, account snapshots, symbols, ticks, positions, pending orders, deal history and risk-checked execution.
 
 ## Security model
 
@@ -24,6 +24,10 @@ A local Windows connector that controls an installed MetaTrader 5 terminal throu
 
 4. Keep the terminal and bridge running. The launcher prints a random bearer token once.
 5. Health check: `http://127.0.0.1:8765/health`.
+
+## Local terminal UI
+
+Open `http://127.0.0.1:8765/` on the Windows PC. Paste the one-time bridge token, then enter the MT5 account number, broker server and trading password. The password field is cleared after login; the service does not persist credentials. The workspace shows balance, equity, free margin, floating P/L, symbols, positions and pending orders, and provides guarded order placement and position closing.
 
 ## API
 
