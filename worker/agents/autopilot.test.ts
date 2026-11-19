@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readAutopilotConfig, runAgentAutopilotCycle, scheduleAgentAutopilot } from "./autopilot.ts";
+import { agreementMagnitudeMeetsThreshold, readAutopilotConfig, runAgentAutopilotCycle, scheduleAgentAutopilot } from "./autopilot.ts";
 
 function memoryKV() {
   const data = new Map<string, string>();
@@ -14,6 +14,14 @@ function memoryKV() {
     data,
   };
 }
+
+test("signed council agreement uses magnitude for both bullish and bearish consensus", () => {
+  assert.equal(agreementMagnitudeMeetsThreshold(0.78, 0.65), true);
+  assert.equal(agreementMagnitudeMeetsThreshold(-0.78, 0.65), true);
+  assert.equal(agreementMagnitudeMeetsThreshold(-0.64, 0.65), false);
+  assert.equal(agreementMagnitudeMeetsThreshold(0, 0.65), false);
+  assert.equal(agreementMagnitudeMeetsThreshold(Number.NaN, 0.65), false);
+});
 
 test("consolidated autopilot JSON config supplies all strategy and risk settings", () => {
   const config = readAutopilotConfig({ ETI_AGENT_AUTOPILOT_CONFIG: JSON.stringify({
@@ -83,20 +91,42 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
   assert.equal(result.liveOrdersAllowed, false);
 });
 
-test("autopilot preserves classified analysis failures for diagnosis without weakening fail-closed behavior", async () => {
+test("autopilot preserves classified analysis failures and skips downstream calls", async () => {
   const kv = memoryKV();
   const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
+  const calls: string[] = [];
   const app = { fetch: async (req: Request) => {
-    const path = new URL(req.url).pathname;
-    if (path === "/api/agents/analyze") return Response.json({ error: "market_data_unavailable", detail: ["bybit:timeout"], submitsOrder: false }, { status: 503 });
-    if (path === "/api/analysis/liquidity-fvg") return Response.json({ autopilotEligible: false, direction: "WAIT", safety: { submitsOrder: false, bypassesRiskManager: false }, blocks: ["analysis unavailable"] });
-    if (path === "/api/omnisignal") return Response.json({ decision: "DATA_UNRELIABLE", tradeable: false, confidence: 0, validation: { hardFailures: ["market_data_unavailable"] } }, { status: 503 });
-    return Response.json({ ok: false }, { status: 503 });
+    const path = new URL(req.url).pathname; calls.push(path);
+    return Response.json({ error: "market_data_unavailable", detail: ["bybit:timeout"], submitsOrder: false }, { status: 503 });
   } };
   const result = await runAgentAutopilotCycle(env, app, 2_250_000);
   assert.equal(result.submitted, 0);
+  assert.equal(calls.length, 1, "failed council preflight must short-circuit FVG and strategy calls");
   assert.equal(result.outcomes[0].reason, "agent_analysis_unavailable");
   assert.deepEqual(result.outcomes[0].analysisFailure, { httpStatus: 503, error: "market_data_unavailable", detail: ["bybit:timeout"], dataQuality: null });
+  assert.equal(result.outcomes[0].downstreamChecksSkipped, true);
+});
+
+test("autopilot records council abstention diagnostics and skips downstream gates", async () => {
+  const kv = memoryKV();
+  const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
+  const calls: string[] = [];
+  const app = { fetch: async (req: Request) => {
+    const path = new URL(req.url).pathname; calls.push(path);
+    return Response.json({
+      decision: { action: "NO_TRADE", confidence: 0, consensus: { direction: "short", agreement: -0.668, coverage: 0.8, participating: ["quant","technical","crypto"], abstaining: [] }, proposal: null, vetoedBy: null, rationale: ["Consensus favoured SELL but no valid proposal could be built (ATR unavailable); standing aside."] },
+      deliberation: { direction: "short", agreement: -0.668, reason: "Weighted agreement -0.67 ≤ -0.35.", coverage: 0.8, participating: ["quant","technical","crypto"], abstaining: [] },
+      risk: null, security: { severity: "none" }, auditPersistence: "d1", dataQuality: { provider: "bybit", candles: 300, orderBook: "rest_snapshot" },
+      reports: [{ agent: "technical", status: "ok", stance: "bearish", confidence: 0.8, summary: "Technical bearish", missingInputs: [] }],
+    });
+  } };
+  const result = await runAgentAutopilotCycle(env, app, 2_550_000);
+  assert.equal(result.submitted, 0);
+  assert.deepEqual(calls, ["/api/agents/analyze"], "no FVG/Omnisignal requests should follow a council NO_TRADE");
+  assert.equal(result.outcomes[0].reason, "agent_council_or_risk_gate_not_met");
+  assert.equal(result.outcomes[0].councilDiagnostics.deliberation.direction, "short");
+  assert.equal(result.outcomes[0].councilDiagnostics.proposalAvailable, false);
+  assert.match(result.outcomes[0].councilDiagnostics.rationale[0], /ATR unavailable/);
 });
 
 test("autopilot runs and records the full council before abstaining on strategy disagreement", async () => {
@@ -133,11 +163,10 @@ test("autopilot refuses a trade below configured confidence and agreement", asyn
   } };
   const result = await runAgentAutopilotCycle(env, app, 2_100_000);
   assert.equal(result.submitted, 0);
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 1, "low-confidence council must short-circuit downstream gates");
   assert.equal(calls[0], "/api/agents/analyze");
-  assert.equal(calls[1], "/api/analysis/liquidity-fvg");
-  assert.equal(calls.slice(2).every(x => x === "/api/omnisignal"), true);
   assert.equal(result.outcomes[0].status, "no_trade");
+  assert.equal(result.outcomes[0].downstreamChecksSkipped, true);
 });
 
 test("autopilot idempotency claim prevents duplicate symbol-slot runs", async () => {
@@ -148,6 +177,6 @@ test("autopilot idempotency claim prevents duplicate symbol-slot runs", async ()
   const now = 2_400_000;
   await runAgentAutopilotCycle(env, app, now);
   const second = await runAgentAutopilotCycle(env, app, now);
-  assert.equal(calls, 6, "one council analysis, one liquidity-FVG gate and four strategy checks run in the first slot");
+  assert.equal(calls, 1, "a NO_TRADE council result must not call downstream gates");
   assert.equal(second.outcomes[0].reason, "already_processed_this_slot");
 });

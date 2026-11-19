@@ -410,7 +410,13 @@ jobs:
           printf '%s' "$analysis_body" | HTTP_STATUS="$analysis_status" node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{let x={};try{x=JSON.parse(s)}catch{}
               if(process.env.HTTP_STATUS!=="200"){console.error("Authenticated agent analysis preflight failed:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error||"unknown",detail:x.detail||x.message||null,decision:x.decision?.action||x.decision||null}));process.exit(1);}
-              console.log("Authenticated agent analysis preflight passed:",JSON.stringify({action:x.decision?.action||"unknown",confidence:x.decision?.confidence??null,agreement:x.decision?.consensus?.agreement??null,riskApproved:x.risk?.approved??null,provider:x.market?.provider||x.provider||"not_exposed"}));
+              console.log("Authenticated agent analysis preflight passed:",JSON.stringify({
+                action:x.decision?.action||"unknown",confidence:x.decision?.confidence??null,agreement:x.decision?.consensus?.agreement??null,
+                consensus:x.decision?.consensus||null,rationale:x.decision?.rationale||[],vetoedBy:x.decision?.vetoedBy||null,
+                proposalAvailable:!!x.decision?.proposal,risk:x.risk?{decision:x.risk.decision,approved:x.risk.approved,vetoes:x.risk.vetoes||[],failedChecks:(x.risk.checks||[]).filter(c=>!c.passed).map(c=>({id:c.id,detail:c.detail}))}:null,
+                deliberation:x.deliberation?{direction:x.deliberation.direction,reason:x.deliberation.reason,coverage:x.deliberation.coverage,participating:x.deliberation.participating,abstaining:x.deliberation.abstaining}:null,
+                dataQuality:x.dataQuality||null,reports:(x.reports||[]).map(r=>({agent:r.agent,status:r.status,stance:r.stance,confidence:r.confidence,summary:r.summary,missingInputs:r.missingInputs||[]})),
+              }));
             });'
           for symbol in BTCUSDT ETHUSDT SOLUSDT; do
             diagnostic="$(curl --silent --show-error --fail --max-time 20 "$base/api/market/diag?symbol=$symbol&interval=15m")" || { echo "::error::Could not read $symbol market-data diagnostics"; exit 1; }
