@@ -40,6 +40,11 @@ async function post(env:BitgetLiveEnv,path:string,payload:Record<string,unknown>
 const response=(body:unknown,status=200)=>new Response(json(body),{status,headers});
 export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:BitgetLiveDeps={}):Promise<Response>{
   const now=(deps.now??Date.now)(),at=new Date(now).toISOString(),kv=env.ETI_EXECUTION_LOG;
+  const operationalConfig=readOperationalConfig(env as any);
+  const rawReferenceTimestamp=num(body?.referencePriceTimestamp);
+  const referenceTimestamp=Number.isFinite(rawReferenceTimestamp)&&rawReferenceTimestamp>0
+    ? (rawReferenceTimestamp<1e12?rawReferenceTimestamp*1000:rawReferenceTimestamp) : NaN;
+
   const market=String(body?.bitgetMarket??body?.market??"spot") as BitgetMarket;
   const symbol=typeof body?.symbol==="string"?body.symbol.trim().toUpperCase():"";
   const side=String(body?.side??"").toLowerCase(),type=String(body?.type??"market").toLowerCase();
@@ -74,10 +79,6 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   if(reduceOnly&&(!futures||tradeSide!=="close"))return response({ok:false,error:"invalid_reduce_only"},400);
   const quoteAmount=num(body?.quoteAmount);
   const referencePrice=num(body?.referencePrice);
-  const operationalConfig=readOperationalConfig(env as any);
-  const rawReferenceTimestamp=num(body?.referencePriceTimestamp);
-  const referenceTimestamp=Number.isFinite(rawReferenceTimestamp)&&rawReferenceTimestamp>0
-    ? (rawReferenceTimestamp<1e12?rawReferenceTimestamp*1000:rawReferenceTimestamp) : NaN;
   const stopPrice=num(body?.plan?.stop), takeProfit=num(body?.plan?.tp1);
   if(body?.plan&&!futures)return response({ok:false,error:"protective_levels_require_futures"},400);
   if(Number.isFinite(stopPrice)&&stopPrice>0&&(!(referencePrice>0)||(side==="buy"?stopPrice>=referencePrice:stopPrice<=referencePrice)))return response({ok:false,error:"invalid_stop_loss_direction",message:"For a long order, stop loss must be below entry; for a short order, it must be above entry."},400);
