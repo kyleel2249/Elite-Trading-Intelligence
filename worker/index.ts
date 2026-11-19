@@ -1216,6 +1216,12 @@ initAdvancedLiveChart();$('chartStyle').addEventListener('change',()=>{liveAdvan
 loadSymbols();setInterval(loadSymbols,60000);
 $('refresh').onclick=()=>{failCount=0;load();};$('symbol').onchange=()=>{$('orderSymbol').value=$('symbol').value;resetAndLoad();etiMarketNote();};$('interval').onchange=()=>{resetAndLoad();};window.onresize=()=>{drawChart();renderSignalCharts();if(liveChart)liveChart.applyOptions({width:$('chartAdvanced').clientWidth,height:$('chartAdvanced').clientHeight});};wireChartInteractions();load();setInterval(()=>refreshLiquidityFvg(false),45000);
 </script></body></html>`;
+const coachRateBuckets = new Map<string, { count: number; reset: number }>();
+function coachRateLimited(ip: string, cost: number, now = Date.now(), limit = 30): number | null {
+  const b = coachRateBuckets.get(ip);
+  if (!b || b.reset <= now) { coachRateBuckets.set(ip, { count: cost, reset: now + 60000 }); if (coachRateBuckets.size > 5000) for (const [k, v] of coachRateBuckets) if (v.reset <= now) coachRateBuckets.delete(k); return null; }
+  b.count += cost; return b.count > limit ? Math.ceil((b.reset - now) / 1000) : null;
+}
 const page = withMotion(html);
 
 export default {
@@ -1224,7 +1230,7 @@ export default {
     if (url.pathname === "/trading-coach" && request.method === "GET") return new Response(tradingCoachPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
     if (url.pathname === "/api/trading-coach/assess") {
       if (request.method !== "POST") return json({ error: "method_not_allowed", note: "Use POST with an evidence payload." }, 405);
-      const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = rateLimited(ip, 2, Date.now(), 12); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
+      const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = coachRateLimited(ip, 2, Date.now(), 12); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
       const raw = await request.text(); if (raw.length > 1000000) return json({ error: "payload_too_large" }, 413);
       let body: any; try { body = JSON.parse(raw); } catch { return json({ error: "invalid_json" }, 400); }
       if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "object_payload_required" }, 400);
@@ -1236,7 +1242,7 @@ export default {
     }
     if (url.pathname === "/api/trading-coach/transactions") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = rateLimited(ip, 1, Date.now(), 20); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
+      const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = coachRateLimited(ip, 1, Date.now(), 20); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
       const raw = await request.text(); if (raw.length > 1000000) return json({ error: "payload_too_large" }, 413);
       let body: any; try { body = JSON.parse(raw); } catch { return json({ error: "invalid_json" }, 400); }
       if (!Array.isArray(body?.transactions)) return json({ error: "transactions_array_required" }, 400);
