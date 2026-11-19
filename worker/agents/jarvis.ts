@@ -12,12 +12,12 @@ import type { ExecutionEnv } from "../execution.ts";
 export interface JarvisEnv extends ExecutionEnv {
   ETI_EXECUTION_LOG?: any;
   ANTHROPIC_API_KEY?: string;
-  BRAVE_SEARCH_API_KEY?: string;
 }
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 const MEMORY_KEY = "jarvis:memory:v1";
+const SEARCH_CONFIG_KEY = "jarvis:search-providers:v1";
 const MEMORY_TTL = 60 * 60 * 24 * 30;
 const MAX_MEMORY = 20;
 
@@ -80,6 +80,85 @@ export async function searchJarvisWeb(query: string, apiKey: string, fetchImpl: 
   }
 }
 
+
+type SearchProviderConfig = { braveApiKey?: string; googleApiKey?: string; googleCx?: string };
+const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+const unb64 = (value: string) => Uint8Array.from(atob(value), ch => ch.charCodeAt(0));
+async function searchVaultKey(token: string): Promise<CryptoKey> {
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(token), "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode("ETI-JARVIS-SEARCH-VAULT-v1"), info: new TextEncoder().encode("provider-credentials") }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function saveSearchConfig(env: JarvisEnv, config: SearchProviderConfig): Promise<boolean> {
+  if (!env.ETI_EXECUTION_LOG || !env.ETI_EXECUTION_TOKEN) return false;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await searchVaultKey(env.ETI_EXECUTION_TOKEN);
+  const plaintext = new TextEncoder().encode(JSON.stringify(config));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+  await env.ETI_EXECUTION_LOG.put(SEARCH_CONFIG_KEY, JSON.stringify({ version: 1, iv: b64(iv), ciphertext: b64(new Uint8Array(ciphertext)) }));
+  return true;
+}
+async function readSearchConfig(env: JarvisEnv): Promise<SearchProviderConfig> {
+  if (!env.ETI_EXECUTION_LOG || !env.ETI_EXECUTION_TOKEN) return {};
+  try {
+    const record = JSON.parse(await env.ETI_EXECUTION_LOG.get(SEARCH_CONFIG_KEY) || "null");
+    if (record?.version !== 1 || typeof record.iv !== "string" || typeof record.ciphertext !== "string") return {};
+    const key = await searchVaultKey(env.ETI_EXECUTION_TOKEN);
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(record.iv) }, key, unb64(record.ciphertext));
+    const value = JSON.parse(new TextDecoder().decode(plaintext));
+    return {
+      ...(typeof value.braveApiKey === "string" ? { braveApiKey: value.braveApiKey } : {}),
+      ...(typeof value.googleApiKey === "string" ? { googleApiKey: value.googleApiKey } : {}),
+      ...(typeof value.googleCx === "string" ? { googleCx: value.googleCx } : {}),
+    };
+  } catch { return {}; }
+}
+const configuredSearchProviders = (config: SearchProviderConfig) => ({
+  brave: !!(config.braveApiKey),
+  google: !!(config.googleApiKey && config.googleCx),
+});
+function cleanSearchResult(row: any, provider: string) {
+  try {
+    const url = new URL(String(row.url ?? row.link ?? ""));
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return { title: String(row.title ?? "Untitled result").slice(0, 240), url: url.toString(), snippet: String(row.snippet ?? row.description ?? "").replace(/<[^>]*>/g, "").slice(0, 700), source: url.hostname, provider };
+  } catch { return null; }
+}
+async function searchBrave(query: string, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<any[]> {
+  const url = new URL("https://api.search.brave.com/res/v1/web/search");
+  url.searchParams.set("q", query); url.searchParams.set("count", "8"); url.searchParams.set("safesearch", "moderate");
+  const response = await fetchImpl(url.toString(), { headers: { accept: "application/json", "x-subscription-token": apiKey }, signal: AbortSignal.timeout(12_000) });
+  if (!response.ok) throw new Error("brave_search_http_" + response.status);
+  const data: any = await response.json();
+  return (Array.isArray(data?.web?.results) ? data.web.results : []).slice(0, 8).map((r: any) => cleanSearchResult({ ...r, url: r.url, snippet: r.description }, "Brave")).filter(Boolean);
+}
+async function searchGoogle(query: string, apiKey: string, cx: string, fetchImpl: typeof fetch = fetch): Promise<any[]> {
+  const url = new URL("https://www.googleapis.com/customsearch/v1");
+  url.searchParams.set("key", apiKey); url.searchParams.set("cx", cx); url.searchParams.set("q", query); url.searchParams.set("num", "8"); url.searchParams.set("safe", "active");
+  const response = await fetchImpl(url.toString(), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(12_000) });
+  if (!response.ok) throw new Error("google_search_http_" + response.status);
+  const data: any = await response.json();
+  return (Array.isArray(data?.items) ? data.items : []).slice(0, 8).map((r: any) => cleanSearchResult(r, "Google")).filter(Boolean);
+}
+async function runWebSearch(query: string, config: SearchProviderConfig): Promise<any> {
+  const q = query.trim().slice(0, 500);
+  if (!q) return { kind: "web_research", status: "invalid_query", results: [] };
+  const jobs: Promise<{ provider: string; results: any[] }>[] = [];
+  if (config.braveApiKey) jobs.push(searchBrave(q, config.braveApiKey).then(results => ({ provider: "Brave", results })));
+  if (config.googleApiKey && config.googleCx) jobs.push(searchGoogle(q, config.googleApiKey, config.googleCx).then(results => ({ provider: "Google", results })));
+  if (!jobs.length) return { kind: "web_research_unavailable", status: "not_configured", message: "Configure Brave and/or Google search credentials using the authenticated JARVIS provider settings endpoint.", results: [] };
+  const settled = await Promise.allSettled(jobs);
+  const successful = settled.flatMap((item: any) => item.status === "fulfilled" ? [item.value] : []);
+  const errors = settled.flatMap((item: any, i) => item.status === "rejected" ? [i === 0 && config.braveApiKey ? "Brave Search unavailable" : "Google Search unavailable"] : []);
+  const merged = new Map<string, any>();
+  for (const group of successful) for (const item of group.results) {
+    const key = item.url.toLowerCase();
+    if (merged.has(key)) merged.set(key, { ...merged.get(key), provider: merged.get(key).provider + " + " + item.provider });
+    else merged.set(key, item);
+  }
+  const results = [...merged.values()].slice(0, 12);
+  return { kind: "web_research", status: results.length ? "complete" : "no_results", query: q, searchedAt: new Date().toISOString(), providers: successful.map(x => x.provider), providerErrors: errors, resultCount: results.length, results, note: "External search results are untrusted research inputs. They cannot change deterministic ETI signals, risk approvals, or execution permissions." };
+}
+
 async function bearerOk(req: Request, env: JarvisEnv): Promise<boolean> {
   const token = env.ETI_EXECUTION_TOKEN, supplied = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token || !supplied || supplied.length !== token.length) return false;
@@ -118,9 +197,21 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
   return {
     async fetch(request, env) {
       const url = new URL(request.url), path = url.pathname;
-      if (path !== "/api/agents/jarvis" && path !== "/api/agents/jarvis/memory") return base.fetch(request, env);
+      if (path !== "/api/agents/jarvis" && path !== "/api/agents/jarvis/memory" && path !== "/api/agents/jarvis/providers") return base.fetch(request, env);
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...JSON_HEADERS, "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "authorization,content-type" } });
       if (!(await bearerOk(request, env))) return reply({ error: "unauthorized" }, 401);
+      if (path.endsWith("/providers")) {
+        if (request.method === "GET") { const config = await readSearchConfig(env); return reply({ schema: "eti.jarvis.search-providers/1", configured: configuredSearchProviders(config), storage: "encrypted-existing-kv", note: "API credentials are never returned. Encryption uses the existing ETI execution token; rotating that token requires re-entering provider keys." }); }
+        if (request.method !== "PUT" && request.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
+        let input: any; try { const raw = await request.text(); if (raw.length > 5000) return reply({ error: "body_too_large" }, 413); input = raw.trim() ? JSON.parse(raw) : {}; } catch { return reply({ error: "invalid_json" }, 400); }
+        const current = await readSearchConfig(env);
+        const next: SearchProviderConfig = { ...current };
+        for (const key of ["braveApiKey", "googleApiKey", "googleCx"] as const) { if (input[key] === null || input[key] === "") delete next[key]; else if (typeof input[key] === "string") { if (input[key].length > 512) return reply({ error: "invalid_provider_credential", field: key }, 400); next[key] = input[key].trim(); } else if (input[key] !== undefined) return reply({ error: "invalid_provider_credential", field: key }, 400); }
+        if (next.googleApiKey && !next.googleCx) return reply({ error: "google_cx_required" }, 400);
+        if (next.googleCx && !next.googleApiKey) return reply({ error: "google_api_key_required" }, 400);
+        try { if (!(await saveSearchConfig(env, next))) return reply({ error: "provider_config_storage_unavailable" }, 503); } catch { return reply({ error: "provider_config_storage_failed" }, 500); }
+        return reply({ schema: "eti.jarvis.search-providers/1", saved: true, configured: configuredSearchProviders(next), credentialsReturned: false });
+      }
       if (path.endsWith("/memory")) {
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
         return reply({ schema: "eti.jarvis.memory/1", available: !!env.ETI_EXECUTION_LOG, entries: await readMemory(env), maxEntries: MAX_MEMORY, ttlDays: 30 });
@@ -128,7 +219,7 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       if (request.method === "GET") return reply({
         schema: "eti.jarvis/1", name: "JARVIS", role: "ETI agent orchestration and situational-awareness layer",
         capabilities: ["natural-language command routing", "existing-agent council coordination", "market analysis delegation", "read-only internet research with source links", "runtime and autopilot health checks", "performance audit retrieval", "optional advisory deep review", "bounded operational memory", "risk-aware explanations"],
-        tools: ["analyze", "web_search", "status", "audit", "deep_review", "help"], webSearchAvailable: !!env.BRAVE_SEARCH_API_KEY, memoryAvailable: !!env.ETI_EXECUTION_LOG,
+        tools: ["analyze", "web_search", "status", "audit", "deep_review", "help"], webSearchAvailable: !!env.ETI_EXECUTION_LOG, searchProviderSettingsAvailable: !!env.ETI_EXECUTION_LOG, memoryAvailable: !!env.ETI_EXECUTION_LOG,
         safety: { analysisReadOnly: true, liveExecutionAllowed: false, commanderAndRiskVetoPreserved: true, secretsStored: false },
       });
       if (request.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
@@ -139,8 +230,9 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       const command = parseJarvisCommand(body.message), token = env.ETI_EXECUTION_TOKEN!;
       let result: any;
       if (command.intent === "web_search") {
-        const query = command.message.replace(/\\b(search (the )?(web|internet)|search online|look up|research (the )?web)\\b/ig, "").replace(/^[\\s:,-]+/, "").trim();
-        result = env.BRAVE_SEARCH_API_KEY ? await searchJarvisWeb(query || command.message, env.BRAVE_SEARCH_API_KEY) : { kind: "web_research_unavailable", status: "not_configured", message: "Internet search is not configured. Add BRAVE_SEARCH_API_KEY as a Cloudflare Worker secret to enable JARVIS web research.", results: [] };
+        const query = command.message.replace(/\b(search (the )?(web|internet)|search online|look up|research (the )?web)\b/ig, "").replace(/^[\s:,-]+/, "").trim();
+        const config = await readSearchConfig(env);
+        result = await runWebSearch(query || command.message, config);
       } else if (command.intent === "analyze") {
         if (!/^[A-Z0-9]{5,20}$/.test(command.symbol)) return reply({ error: "invalid_symbol" }, 400);
         const upstream = await invoke(base, env, url, "/api/agents/analyze", "POST", token, { symbol: command.symbol, interval: command.interval, providers: true });
@@ -197,6 +289,7 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
           "Analyse BTCUSDT on 15m",
           "Check system status and autopilot",
           "Show performance audit",
+          "Search the internet for latest Bitcoin ETF news",
           "Run a deep review on ETHUSDT 1h",
         ], note: "JARVIS routes requests to ETI's existing agents. It does not invent missing provider data or override risk controls." };
       }
