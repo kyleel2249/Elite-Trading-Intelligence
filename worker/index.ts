@@ -47,7 +47,9 @@ import { tradingCoachPage } from "./ui/trading-coach.ts";
 import { advancedIntelligencePage } from "./ui/advanced-intelligence.ts";
 import { advancedAssessment, evaluateForecast, explainTransaction } from "./analysis/advanced-intelligence.ts";
 import { authenticate } from "./auth/session.ts";
-import { scanPublicAddress, isValidPublicAddress, runOnchainWatchCycle, type SupportedChain } from "./analysis/onchain-monitor.ts";\nimport { handleTokenIntelligence, tokenIntelligencePage } from "./analysis/token-intelligence.ts";\n
+import { scanPublicAddress, isValidPublicAddress, runOnchainWatchCycle, type SupportedChain } from "./analysis/onchain-monitor.ts";
+import { handleTokenIntelligence, tokenIntelligencePage } from "./analysis/token-intelligence.ts";
+
 
 export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
   ETI_EDGE?: string;
@@ -1232,7 +1234,8 @@ const page = withMotion(html);
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/trading-coach/tokens" && request.method === "GET") return new Response(tokenIntelligencePage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });\n      if (url.pathname === "/trading-coach/advanced" && request.method === "GET") return new Response(advancedIntelligencePage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
+    if (url.pathname === "/trading-coach/tokens" && request.method === "GET") return new Response(tokenIntelligencePage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
+      if (url.pathname === "/trading-coach/advanced" && request.method === "GET") return new Response(advancedIntelligencePage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
     if (url.pathname === "/trading-coach" && request.method === "GET") return new Response(tradingCoachPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
     if (url.pathname === "/api/trading-coach/assess") {
       if (request.method !== "POST") return json({ error: "method_not_allowed", note: "Use POST with an evidence payload." }, 405);
@@ -1275,7 +1278,8 @@ export default {
       if(url.pathname==="/api/trading-coach/alerts"&&request.method==="POST"){const ip=request.headers.get("cf-connecting-ip")||"unknown",wait=coachRateLimited(ip,1,Date.now(),20);if(wait!==null)return json({error:"rate_limited",retryAfterSeconds:wait},429);const raw=await request.text();if(raw.length>10000)return json({error:"payload_too_large"},413);let b:any;try{b=JSON.parse(raw)}catch{return json({error:"invalid_json"},400)}const ids=Array.isArray(b?.ids)?b.ids.map(String).slice(0,50):[];if(!ids.length)return json({error:"alert_ids_required"},400);let changed=0;for(const id of ids){const r=await db.prepare("UPDATE eti_onchain_alerts SET acknowledged_at=? WHERE owner_id=? AND id=? AND acknowledged_at IS NULL").bind(Date.now(),owner,id).run();changed+=Number(r.meta?.changes||0);}return json({acknowledged:changed});}
       return json({error:"method_not_allowed"},405);
     }
-    if (url.pathname.startsWith("/api/trading-coach/token-search") || url.pathname.startsWith("/api/trading-coach/token-monitor") || url.pathname.startsWith("/api/trading-coach/token-alerts")) { const tokenResponse = await handleTokenIntelligence(request, _env); if (tokenResponse) return tokenResponse; }\n    if (url.pathname === "/api/trading-coach/advanced/assess") {
+    if (url.pathname.startsWith("/api/trading-coach/token-search") || url.pathname.startsWith("/api/trading-coach/token-monitor") || url.pathname.startsWith("/api/trading-coach/token-alerts")) { const tokenResponse = await handleTokenIntelligence(request, _env); if (tokenResponse) return tokenResponse; }
+    if (url.pathname === "/api/trading-coach/advanced/assess") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = coachRateLimited(ip, 4, Date.now(), 12); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
       const raw = await request.text(); if (raw.length > 1000000) return json({ error: "payload_too_large" }, 413);

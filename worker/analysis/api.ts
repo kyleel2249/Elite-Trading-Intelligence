@@ -7,6 +7,7 @@ import { analyzeLiquidityFvg } from "./liquidity-fvg.ts";
 import { detectDisplacement, detectLiquiditySweeps, detectOrderBlocks, findLiquidityPools } from "./smc.ts";
 import { analyzeStructure, findPivots } from "./structure.ts";
 import { volumeProfile } from "./volume-profile.ts";
+import { buildAdvancedVolumeProfile } from "./advanced-volume-profile.ts";
 import { TIMEFRAMES as ALGO_TFS, type Timeframe as AlgoTf } from "../algo/timeframes.ts";
 import { fetchCurrencyMacro, fetchDollarTrend, fetchStockFundamentals, SourceError, type AnalysisEnv, type FetchFn } from "./fundamental-sources.ts";
 import { cryptoFundamentals, fundamentalUnavailable, fxFundamentals, stockFundamentals } from "./fundamental.ts";
@@ -168,21 +169,99 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: HEADERS });
   if (req.method !== "GET" && req.method !== "POST") return reply({ error: "method_not_allowed", note: "Analytical endpoints only; they cannot place orders." }, 405);
   const limits0 = planOf(env);
-  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/liquidity-fvg", "/api/analysis/fvg-precision", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow", "/api/analysis/confluence", "/api/analysis/signal-intel"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
+  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/liquidity-fvg", "/api/analysis/fvg-precision", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow", "/api/analysis/volume-profile", "/api/analysis/confluence", "/api/analysis/signal-intel"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
     plan: { plan: limits0.plan, defaultDetail: limits0.defaultDetail, fullDetailAllowed: limits0.allowFullDetail, maxCandlesPerTimeframe: limits0.maxCandles, calibrationAllowed: limits0.calibrateAllowed, maxNewsItems: limits0.maxNewsItems }, configured: { SENTIMENT_AI: String(env.SENTIMENT_AI ?? "").toLowerCase() === "on" && !!env.AI, TOKENOMIST_API_KEY: !!env.TOKENOMIST_API_KEY, GITHUB_TOKEN: !!env.GITHUB_TOKEN, CRYPTO_PROFILES_JSON: !!env.CRYPTO_PROFILES_JSON, institutionalDb: !!env.ETI_PORTFOLIO_DB, FRED_API_KEY: !!env.FRED_API_KEY, SEC_USER_AGENT: !!env.SEC_USER_AGENT, COINGECKO_API_KEY: !!env.COINGECKO_API_KEY, NEWS_FEEDS_JSON: !!env.NEWS_FEEDS_JSON }, submitsOrder: false });
-  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : (path.endsWith("/confluence") || path.endsWith("/fvg-precision") || path.endsWith("/liquidity-fvg")) ? 6 : (path.endsWith("/orderflow") || path.endsWith("/signal-intel")) ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : (path.endsWith("/confluence") || path.endsWith("/fvg-precision") || path.endsWith("/liquidity-fvg")) ? 6 : (path.endsWith("/orderflow") || path.endsWith("/signal-intel")) ? 5 : path.endsWith("/volume-profile") ? 4 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
   if (wait !== null) return reply({ error: "rate_limited", retryAfterSeconds: wait }, 429, { "retry-after": String(wait) });
   const post = req.method === "POST", limits = planOf(env);
   let body: any = {};
   if (post) { const j = await readJson(req); if (j.error) return reply({ error: j.error }, j.error === "body_too_large" ? 413 : 400); body = j.body; }
   const q = (k: string) => (post && body[k] !== undefined ? String(body[k]) : url.searchParams.get(k));
-  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") || (path.endsWith("/confluence") || path.endsWith("/fvg-precision") || path.endsWith("/liquidity-fvg")) ? "AAPL" : null));
+  const symbol = parseSymbol(q("symbol") ?? (path.endsWith("/technical") || path.endsWith("/mtf") || path.endsWith("/fundamental") || path.endsWith("/news") || path.endsWith("/intelligence") || path.endsWith("/calibrate") || path.endsWith("/institutional") || path.endsWith("/fvg") || path.endsWith("/smc") || path.endsWith("/orderflow") || path.endsWith("/volume-profile") || (path.endsWith("/confluence") || path.endsWith("/fvg-precision") || path.endsWith("/liquidity-fvg")) ? "AAPL" : null));
   if (!symbol) return reply({ error: "invalid_symbol", expected: "1-20 characters from A-Z, 0-9, '.', '_' or '-'" }, 400);
   const stratRaw = (q("strategy") ?? "intraday") as MtfStrategy;
   if (!STRATEGIES.includes(stratRaw)) return reply({ error: "invalid_strategy", strategies: STRATEGIES }, 400);
   const clsRaw = q("assetClass") ?? q("class"), cls: AssetClass = clsRaw === "crypto" || clsRaw === "fx" || clsRaw === "stock" ? clsRaw : inferAssetClass(symbol);
 
   try {
+    if (path === "/api/analysis/volume-profile") {
+      const venueRaw = (q("venue") ?? "bybit").toLowerCase();
+      const market: "spot" | "futures" = q("market") === "futures" ? "futures" : "spot";
+      const venues = venueRaw === "all" ? ["bybit", "bitget"] : [venueRaw];
+      if (venues.some(v => v !== "bybit" && v !== "bitget") && !post) return reply({ error: "invalid_venue", allowed: ["bybit", "bitget", "all"] }, 400);
+      if (post && body.sources !== undefined && !Array.isArray(body.sources)) return reply({ error: "sources_must_be_array" }, 400);
+      const parsedCandles = post && body.candles !== undefined ? sanitizeCandles(body.candles, 5000) : null;
+      if (parsedCandles?.error) return reply({ error: "invalid_candles", detail: parsedCandles.error }, 400);
+      const candleRows: Kline[] = parsedCandles?.rows ?? [];
+      const inputs: Array<{ venue: string; trades: any[]; swaps: any[]; provider: string; candles: Kline[] }> = [];
+      const failures: Record<string, string> = {};
+      const parseSwaps = (value: unknown, source: string) => {
+        if (value === undefined) return [];
+        if (!Array.isArray(value) || value.length > 5000) throw new Error("swaps_must_be_an_array_of_at_most_5000_decoded_events");
+        return value.map((item: any, i: number) => {
+          if (!item || typeof item !== "object") throw new Error("invalid_swap_event_" + i);
+          const time = Number(item.time ?? item.timestamp), price = Number(item.price);
+          const baseQuantity = item.baseQuantity === undefined ? undefined : Number(item.baseQuantity);
+          const quoteQuantity = item.quoteQuantity === undefined ? undefined : Number(item.quoteQuantity);
+          if (![time, price].every(Number.isFinite) || time <= 0 || price <= 0 ||
+              (baseQuantity !== undefined && (!Number.isFinite(baseQuantity) || baseQuantity <= 0)) ||
+              (quoteQuantity !== undefined && (!Number.isFinite(quoteQuantity) || quoteQuantity <= 0)) ||
+              (baseQuantity === undefined && quoteQuantity === undefined)) throw new Error("invalid_priced_swap_event_" + i);
+          const side = ["buy", "sell", "unknown"].includes(item.side) ? item.side : "unknown";
+          return { time, price, baseQuantity, quoteQuantity, side, source: String(item.source ?? source).slice(0, 100), txHash: typeof item.txHash === "string" ? item.txHash.slice(0, 120) : undefined, pool: typeof item.pool === "string" ? item.pool.slice(0, 120) : undefined };
+        });
+      };
+      if (post) {
+        const sources = Array.isArray(body.sources) ? body.sources : [{ venue: venueRaw, trades: body.trades, swaps: body.swaps, provider: body.provider }];
+        if (sources.length < 1) return reply({ error: "at_least_one_source_required" }, 400);
+        if (sources.length > 12) return reply({ error: "too_many_sources", maximum: 12 }, 400);
+        for (const [i, source] of sources.entries()) {
+          if (!source || typeof source !== "object") return reply({ error: "invalid_source", index: i }, 400);
+          const rawTrades = source.trades === undefined ? [] : normalizeTrades(source.trades);
+          if (source.trades !== undefined && !rawTrades) return reply({ error: "invalid_trades", index: i, detail: "Each trade needs time, price, qty and isBuyerMaker." }, 400);
+          const name = String(source.venue ?? source.source ?? "supplied").slice(0, 40);
+          const trades = (rawTrades ?? []).map(t => ({ time: t.time, price: t.price, qty: t.qty, side: t.isBuyerMaker ? "sell" : "buy", source: name }));
+          let swaps: any[];
+          try { swaps = parseSwaps(source.swaps, name); } catch (e) { return reply({ error: "invalid_swaps", detail: e instanceof Error ? e.message : "invalid swap data" }, 400); }
+          if (!trades.length && !swaps.length && !candleRows.length) return reply({ error: "volume_data_required", index: i }, 400);
+          inputs.push({ venue: name, trades, swaps, provider: String(source.provider ?? name).slice(0, 60), candles: candleRows });
+        }
+      } else {
+        const results = await Promise.allSettled(venues.map(async venue => {
+          const selected = venue === "bitget" ? (market === "futures" ? "bitget_mix" : "bitget") : "bybit";
+          const category = (venue === "bitget" ? (market === "futures" ? bitgetProductFor(symbol) : "SPOT") : (market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot")) as Parameters<typeof getMarketData>[1]["category"];
+          const params: Parameters<typeof getMarketData>[1] = { symbol, interval: q("timeframe") ?? "1m", limit: 1000, market, category, ...(venue === "bitget" && market === "futures" ? { productType: category as BitgetProductType } : {}) };
+          const order = providerOrder(env, selected);
+          const [t, k] = await Promise.all([
+            getMarketData("trades", params, order),
+            getMarketData("klines", { ...params, limit: 500 }, order).catch(() => null)
+          ]);
+          const normalized = normalizeTrades(t.data);
+          if (!normalized) throw new Error("exchange_trade_data_failed_validation");
+          const trades = normalized.map(x => ({ time: x.time, price: x.price, qty: x.qty, side: x.isBuyerMaker ? "sell" : "buy", source: venue }));
+          inputs.push({ venue, trades, swaps: [], provider: t.provider, candles: k ? k.data as Kline[] : [] });
+        }));
+        results.forEach((result, i) => { if (result.status === "rejected") failures[venues[i]] = result.reason instanceof Error ? result.reason.message.slice(0, 180) : "provider_unavailable"; });
+        if (!inputs.length) return reply({ error: "market_data_unavailable", failures, submitsOrder: false }, 424);
+      }
+      const profiles = inputs.map(input => {
+        const latest = input.trades.at(-1), latestEventAt = Math.max(latest?.time ?? 0, ...input.swaps.map(x => x.time)), profile = buildAdvancedVolumeProfile({
+          symbol, candles: input.candles, trades: input.trades, swaps: input.swaps,
+          bins: Number(q("bins")) || 64, valueAreaPct: Number(q("valueAreaPct")) || 0.7,
+          currentPrice: latest?.price, now
+        });
+        return { venue: input.venue, provider: input.provider, ...profile,
+          freshness: { latestTradeAt: latestEventAt ? new Date(latestEventAt).toISOString() : null, tradeAgeMs: latestEventAt ? Math.max(0, now - latestEventAt) : null, stale: latestEventAt ? now - latestEventAt > 180000 : true } };
+      });
+      return reply({
+        schema: "eti.multi-market-volume-profile/1", symbol, market, generatedAt: new Date(now).toISOString(),
+        selectedVenue: venueRaw, profiles, failures,
+        crossVenueComparison: profiles.map(p => ({ venue: p.venue, poc: p.poc ?? null, vah: p.vah ?? null, val: p.val ?? null, method: p.sourceCoverage?.method ?? "unavailable", stale: p.freshness.stale })),
+        blockchain: { decodedSwapEvents: inputs.reduce((n, x) => n + x.swaps.length, 0), note: "Submit decoded DEX swaps with timestamp, execution price and base or quote quantity. Raw transfers and wallet movements are not trading volume." },
+        dataQuality: { providers: inputs.map(x => x.provider), successfulSources: inputs.length, requestedSources: venues.length, failures, exactTradePrints: inputs.reduce((n, x) => n + x.trades.length, 0), decodedSwapEvents: inputs.reduce((n, x) => n + x.swaps.length, 0), candleFallbacks: inputs.filter(x => !x.trades.length && !x.swaps.length && x.candles.length).length },
+        submitsOrder: false, liveExecutionAllowed: false
+      });
+    }
     if (path === "/api/analysis/orderflow") {
       // Read-only trade-footprint and depth intelligence. Both venues use ETI's validated market-data layer;
       // Bitget REST is proxied same-origin, while browser POST remains available for supplied snapshots.
