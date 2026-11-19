@@ -19,6 +19,7 @@ async function overview(db:any){
 }
 async function openPaper(req:Request,env:any){
  const db=dbOf(env);if(!db)return reply({error:"d1_unavailable"},503);
+ const start=env.ETI_AOTI_SESSION_START_UTC||"23:00",end=env.ETI_AOTI_SESSION_END_UTC||"07:00";if(!isAotiSessionOpen(Date.now(),start,end))return reply({error:"outside_aoti_session",sessionUtc:{start,end}},423);
  const body=await req.json().catch(()=>null);const candidateId=String(body?.candidateId||"");
  if(!candidateId||candidateId.length>300)return reply({error:"candidate_id_required"},400);
  await ensureAotiSchema(db);
