@@ -1056,7 +1056,7 @@ async function runIntel(force){
  if(!force&&key===intelLastKey&&Date.now()-intelLastAt<300000){renderChartInterpretation();return;}
  intelBusy=true;$('intelAutoStatus').textContent='Analysing '+sym+' · '+info.venue+' '+market+'…';out.textContent='Combining technical, multi-timeframe, fundamental, news and sentiment evidence for '+sym+'…';btn.disabled=true;
  try{
-  const params=new URLSearchParams({symbol:sym,strategy:strat,detail:det,include:'omnisignal',provider:info.venue,market:market});
+  const params=new URLSearchParams({symbol:sym,strategy:strat,detail:det,include:'omnisignal',provider:(info.venue==='bitget'&&market==='futures'?'bitget_mix':info.venue),market:market});
   if(info.productType)params.set('productType',info.productType);
   if(category)params.set('category',category);
   const r=await fetch('/api/analysis/intelligence?'+params.toString(),{cache:'no-store'}),j=await r.json();
