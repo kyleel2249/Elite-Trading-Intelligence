@@ -15,6 +15,7 @@ test("calculator script compiles and wires the entry link and the automatic orde
   for (const id of ["clPlace", "clMode", "clLink", "clPlaceMsg", "clMarketMode", "clTargetMode", "clTpPct"]) assert.ok(CALC_HTML.includes('id="' + id + '"'), "missing #" + id);
   assert.match(CALC_JS, /submitOrder\('buy'\)/, "must go through the dashboard order flow (confirmation + safeguards)");
   assert.match(CALC_JS, /Futures order execution is not connected/, "must not route futures plans into the spot order flow");
+  assert.match(CALC_JS, /Calculator shortcut is disabled for Bitget Live/, "must prevent the calculator shortcut from submitting live orders");
   assert.match(CALC_JS, /targetProfitPct/, "must calculate exits from a target return percentage");
   assert.match(CALC_JS, /planStop/, "stop level must be attached as a protective exit");
   assert.match(CALC_JS, /ctPrice/, "chart clicks must set the entry");
