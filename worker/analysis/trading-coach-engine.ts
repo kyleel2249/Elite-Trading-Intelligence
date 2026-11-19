@@ -228,7 +228,7 @@ export function analyzeStructure(candles: readonly CandleRow[] = [], options: St
 
   const events: StructureEvent[] = [];
   const look = Math.min(20, Math.max(3, Math.floor(num(options.swingLookback) ?? 5)));
-  const swings: Array<{ type: "swing_high" | "swing_low"; index: number; price: number }> = [];
+  const swings: Array<{ type: "swing_high"; index: number; price: number } | { type: "swing_low"; index: number; price: number }> = [];
 
   for (let index = look; index < rows.length - look; index++) {
     const high = rows[index][2], low = rows[index][3];
