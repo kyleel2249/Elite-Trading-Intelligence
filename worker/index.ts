@@ -258,6 +258,32 @@ ${PERP_HTML}
 <div class="execution-note" id="signalEvidence" style="margin-top:8px"></div>
 <div class="execution-note" id="signalAttribution" style="margin-top:8px"></div>
 </section>
+<section class="panel" id="chartInterpretationPanel" style="margin-top:14px">
+<style>
+.cmi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin:10px 0}
+.cmi-card{background:#0b1422;border:1px solid var(--line);border-radius:10px;padding:11px;min-width:0}
+.cmi-card b{display:block;color:#eaf2ff;margin-bottom:5px}
+.cmi-card p{margin:4px 0;color:var(--muted);line-height:1.5}
+.cmi-chip{display:inline-block;padding:3px 8px;border:1px solid #36516f;border-radius:999px;margin:2px;font-size:11px}
+.cmi-glossary{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:7px;margin-top:10px}
+.cmi-glossary details{border:1px solid var(--line);border-radius:8px;background:#0b1422;padding:9px}
+.cmi-glossary summary{cursor:pointer;font-weight:700;color:#dbeafe}
+.cmi-glossary details p{font-size:12px;color:var(--muted);line-height:1.5;margin:7px 0 0}
+.cmi-note{font-size:11px;color:var(--muted);line-height:1.5}
+</style>
+<div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Chart Signal Interpretation</h2><span id="chartInterpretationStatus" class="muted" aria-live="polite">Waiting for chart data</span></div>
+<p class="execution-note">Live explanation of the selected chart: what each signal means, why it matters, whether it is confirmed, and what the trader should do next. Values are read from ETI's current analysis; missing or stale data is never guessed.</p>
+<div class="cmi-grid">
+ <div class="cmi-card"><b>What is happening?</b><div id="chartMarketRead">Waiting for a validated market signal.</div></div>
+ <div class="cmi-card"><b>What should I do now?</b><div id="chartNextAction">Wait for market analysis to complete. Do not enter on an unconfirmed annotation.</div></div>
+ <div class="cmi-card"><b>What confirms or invalidates it?</b><div id="chartConfirmations">Confirmation and invalidation evidence will appear here.</div></div>
+ <div class="cmi-card"><b>Price and indicator snapshot</b><div id="chartIndicatorSnapshot">Waiting for candles and indicators.</div></div>
+</div>
+<div class="toolbar" style="justify-content:space-between;align-items:center"><h3 style="margin:4px 0">Indicator and chart annotation glossary</h3><input id="chartGlossarySearch" type="search" placeholder="Search ORDER, BSL, RSI, FVG…" aria-label="Search chart indicator glossary" style="max-width:260px"></div>
+<p class="cmi-note">Expand any item to see its meaning, implications, limitations and recommended response. A label is not automatically a trade instruction.</p>
+<div id="chartSignalGlossary" class="cmi-glossary"></div>
+<p class="cmi-note">ORDER verification rule: a chart annotation alone does not prove that an exchange order was submitted, accepted or filled. Verify the authenticated venue, order ID, symbol, side, quantity and exchange status. This panel is read-only and cannot submit or modify orders.</p>
+</section>
 <section class="panel" id="readinessPanel" style="margin-top:14px">
 <style>.rdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:10px}.rdcard{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0b1422}.rdchip{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11px;border:1px solid currentColor;white-space:nowrap}.rdhours{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px;margin-top:8px}.rdhours span{height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#06101c;font-weight:700}.rdtable td,.rdtable th{text-align:left;vertical-align:top}.rdtable details{margin-top:4px;color:var(--muted)}@media(max-width:850px){.rdhours{grid-template-columns:repeat(6,minmax(0,1fr))}}</style>
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Market Readiness Engine</h2><span class="muted" id="rdMeta">Loading...</span></div>
@@ -273,9 +299,9 @@ ${PERP_HTML}
 <div id="rdOut" role="status" aria-live="polite"><span class="muted">Waiting for assessment...</span></div>
 <pre id="rdText" class="execution-output" style="display:none"></pre>
 <section class="panel" id="intelPanel" style="margin-top:14px">
-<div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Analysis Intelligence</h2><span class="muted" id="intelMeta">Technical, multi-timeframe, fundamental and news engines, weighed by a central intelligence layer</span></div>
-<div class="toolbar"><select id="intelStrategy"><option value="intraday">Intraday</option><option value="scalp">Scalp</option><option value="swing">Swing</option><option value="position">Position</option></select><select id="intelDetail" title="Lite skips the heaviest detectors to fit Workers Free CPU limits"><option value="lite">Lite (Free plan)</option><option value="full">Full (needs Paid plan)</option></select><button id="intelRun">Run analysis for selected symbol</button></div>
-<div id="intelOut" class="execution-note">Not run yet. Analysis is evidence for review, not an instruction to trade; it never places orders.</div>
+<div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Central Market Intelligence</h2><span class="muted" id="intelMeta">Automatic market assessment · technical · fundamentals · sentiment · Omnisignal</span></div>
+<div class="toolbar"><select id="intelStrategy"><option value="intraday">Intraday</option><option value="scalp">Scalp</option><option value="swing">Swing</option><option value="position">Position</option></select><select id="intelDetail" title="Lite skips the heaviest detectors to fit Workers Free CPU limits"><option value="lite">Lite (Free plan)</option><option value="full">Full (needs Paid plan)</option></select><button id="intelRun" class="active">Refresh Central Intelligence</button><span id="intelAutoStatus" class="muted" aria-live="polite">Automatic assessment starts after market data loads</span></div>
+<div id="intelOut" class="execution-note">Waiting for live market context. Central intelligence is read-only and never places orders.</div>
 </section>
 <section class="panel" style="margin-top:14px">
 <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 style="margin:0">ETI Execution Audit History</h2><button id="refreshExecutionHistory">Refresh audit history</button></div>
@@ -945,7 +971,7 @@ async function loadSignal(){
   $('signalAttribution').innerHTML='<b style="color:#eaf2ff">Strategy attribution</b> · regime '+esc(d.regime.state)+' (ADX '+esc(d.regime.adx)+')'+d.strategyAttribution.map(function(a){return '<div>'+esc(a.trader)+' — '+esc(a.contribution)+'</div>';}).join('');
   $('signalSummary').textContent+=' Sizing: '+(d.positionSizing?(d.positionSizing.suggestedRiskPercent>0?'up to '+d.positionSizing.suggestedRiskPercent+'% of equity at risk':'none suggested')+' ('+d.positionSizing.basis+')':'n/a')+'.';
   $('chart').setAttribute('aria-label','Candlestick chart with ETI signal engine overlays. Engine reads '+d.label+' with score '+sg(d.score)+', '+d.conviction+' conviction.');
-  drawChart();renderSignalCharts();syncSignalProvider();
+  drawChart();renderSignalCharts();syncSignalProvider();renderChartInterpretation();runIntel(false);
  }catch(e){
   if(seq!==sigSeq)return;
   sig=null;
@@ -953,7 +979,7 @@ async function loadSignal(){
   $('signalScore').textContent='—';$('signalConviction').textContent='—';$('signalWinRate').textContent='Not validated';
   $('signalEntry').textContent='—';$('signalStop').textContent='—';$('signalTargets').textContent='No signal: '+e.message;
   $('signalEvidence').textContent='Fail-closed: no trade recommendation without fresh, valid market candles.';
-  drawChart();renderSignalCharts();
+  drawChart();renderSignalCharts();renderChartInterpretation();
  }
 }
 window.addEventListener('error',e=>{setConn('Dashboard script error · '+String(e.message||'unknown').slice(0,100),'#ff637d');});
@@ -1021,36 +1047,86 @@ $('rdTextBtn').onclick=()=>{const t=$('rdText');t.style.display=t.style.display=
 $('symbol').addEventListener('change',()=>{if($('rdMarket').value==='crypto'){$('rdSymbol').value=$('symbol').value;loadReadiness();}});
 $('rdSymbol').value=$('symbol').value;rdSync();loadReadiness();rdTimer=setInterval(loadReadiness,120000);
 function intelRow(a,b){return '<tr><td style="padding:3px 8px 3px 0;color:#94a3b8">'+esc(a)+'</td><td style="padding:3px 0">'+b+'</td></tr>';}
-async function runIntel(){
- const out=$('intelOut'),btn=$('intelRun'),sym=$('symbol').value,strat=$('intelStrategy').value,det=$('intelDetail').value;
- out.textContent='Running engines for '+sym+' ('+strat+')… this fetches candles, fundamentals and news and can take several seconds.';btn.disabled=true;
+let intelLastKey="",intelLastAt=0,intelBusy=false,intelLatest=null;
+async function runIntel(force){
+ const out=$('intelOut'),btn=$('intelRun'),sym=$('symbol').value,strat=$('intelStrategy').value,det=$('intelDetail').value,info=symInfo();
+ const market=info.market==='futures'?'futures':'spot',category=info.venue==='bitget'?(info.productType||''):market==='futures'?(/USD$/.test(sym)&&!/(USDT|USDC)$/.test(sym)?'inverse':'linear'):'spot';
+ const key=[sym,$('interval').value,strat,det,info.venue,market,category].join('|');
+ if(intelBusy)return;
+ if(!force&&key===intelLastKey&&Date.now()-intelLastAt<300000){renderChartInterpretation();return;}
+ intelBusy=true;$('intelAutoStatus').textContent='Analysing '+sym+' · '+info.venue+' '+market+'…';out.textContent='Combining technical, multi-timeframe, fundamental, news and sentiment evidence for '+sym+'…';btn.disabled=true;
  try{
-  const r=await fetch('/api/analysis/intelligence?symbol='+encodeURIComponent(sym)+'&strategy='+encodeURIComponent(strat)+'&detail='+encodeURIComponent(det)+'&include=omnisignal',{cache:'no-store'}),j=await r.json();
-  if(!r.ok||!j.verdict){out.textContent='Analysis unavailable: '+(j.detail||j.error||('HTTP '+r.status));btn.disabled=false;return;}
-  let h='<div style="font-size:16px;margin-bottom:6px"><b>'+esc(j.headline)+'</b></div><div class="muted" style="margin-bottom:8px">Generated '+esc(j.generatedAt)+' | evidence quality '+esc(j.confidence)+'/100 (not a probability of profit)</div><table>';
-  j.domains.forEach(function(d){h+=intelRow(d.domain,esc(d.stance)+(d.effectiveWeight>0?' | score '+esc(d.score)+' | confidence '+esc(d.confidence)+' | weight '+esc(Math.round(d.effectiveWeight*100))+'%':' | '+esc(d.summary)));});
-  h+='</table>';
-  if(j.tradingAdvice){var a=j.tradingAdvice;h+='<section style="margin:12px 0;padding:12px;border:1px solid #34465f;border-radius:10px;background:#0b1422"><div style="font-weight:750;font-size:15px;margin-bottom:6px">ETI Trader Guidance · '+esc(a.action.replace(/_/g,' '))+'</div><div>'+esc(a.summary)+'</div>';
+  const params=new URLSearchParams({symbol:sym,strategy:strat,detail:det,include:'omnisignal',provider:info.venue,market:market});
+  if(info.productType)params.set('productType',info.productType);
+  if(category)params.set('category',category);
+  const r=await fetch('/api/analysis/intelligence?'+params.toString(),{cache:'no-store'}),j=await r.json();
+  if(!r.ok||!j.verdict)throw Error(j.detail||j.error||('HTTP '+r.status));
+  intelLatest=j;intelLastKey=key;intelLastAt=Date.now();
+  let h='<div style="font-size:17px;margin-bottom:6px"><b>'+esc(j.headline)+'</b></div><div class="muted" style="margin-bottom:8px">Generated '+esc(j.generatedAt)+' · '+esc(j.symbol)+' · '+esc(j.strategy)+' · evidence quality '+esc(j.confidence)+'/100 (not a probability of profit)</div>';
+  h+='<div class="cmi-grid"><div class="cmi-card"><b>Overall verdict</b>'+esc(j.verdict)+'<p>Net evidence score '+esc(j.netScore)+' · confidence '+esc(j.confidence)+'/100</p></div><div class="cmi-card"><b>Evidence coverage</b>'+esc((j.coverage.available||[]).join(', ')||'None')+'<p>Unavailable: '+esc((j.coverage.unavailable||[]).join(', ')||'None')+'</p></div><div class="cmi-card"><b>Execution authority</b>Read-only<p>CMI cannot place orders or authorise live execution.</p></div></div><table>';
+  (j.domains||[]).forEach(function(d){h+=intelRow(d.domain,esc(d.stance)+(d.effectiveWeight>0?' · score '+esc(d.score)+' · confidence '+esc(d.confidence)+' · weight '+esc(Math.round(d.effectiveWeight*100))+'%':' · '+esc(d.summary)));});h+='</table>';
+  if(j.tradingAdvice){var a=j.tradingAdvice;h+='<section class="cmi-card" style="margin:12px 0"><div style="font-weight:750;font-size:15px;margin-bottom:6px">Trader Guidance · '+esc(a.action.replace(/_/g,' '))+'</div><div>'+esc(a.summary)+'</div>';
    function adviceList(title,items){h+='<div style="margin-top:8px"><b>'+title+'</b><ul>'+(items||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';}
    adviceList('Why ETI recommends this',a.why);adviceList('When to enter',a.entryWhen);adviceList('When NOT to enter',a.doNotEnterWhen);adviceList('When to exit / manage',a.exitWhen);adviceList('Invalidation',a.invalidation);
-   h+='<div class="muted">Read-only guidance. This layer does not invent exact prices or submit orders; use a supported trade planner for entry/SL/TP and pass all execution risk checks.</div></section>';
+   h+='<div class="muted">Exact prices are not generated by this engine. Use the Spot/Futures profit planner for price calculations and complete execution checks separately.</div></section>';
   }
-  if(j.vetoes.length)h+='<div style="margin-top:8px"><b>Vetoes and safeguards</b><ul>'+j.vetoes.map(function(v){return '<li>['+esc(v.effect)+'] '+esc(v.reason)+'</li>';}).join('')+'</ul></div>';
-  if(j.conflicts.length)h+='<div style="margin-top:8px"><b>Engine conflicts (not averaged away)</b><ul>'+j.conflicts.map(function(c){return '<li>'+esc(c.detail)+'</li>';}).join('')+'</ul></div>';
-  if(j.timing.length)h+='<div style="margin-top:8px"><b>Timeframe read</b><ul>'+j.timing.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
-  if(j.risks.length)h+='<div style="margin-top:8px"><b>Risks and warnings</b><ul>'+j.risks.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
-  if(j.whatWouldChangeThisView.length)h+='<div style="margin-top:8px"><b>What would change this view</b><ul>'+j.whatWouldChangeThisView.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
-  if(j.technicalDetail){h+='<div style="margin-top:8px"><b>Multi-timeframe</b> '+esc(j.technicalDetail.alignment.replace(/_/g,' '))+'<table style="margin-top:4px">'+j.technicalDetail.timeframes.map(function(t){return '<tr><td style="padding:2px 10px 2px 0">'+esc(t.timeframe)+'</td><td style="padding:2px 10px 2px 0;color:#94a3b8">'+esc(t.layer)+'</td><td style="padding:2px 10px 2px 0">'+esc(t.mode==='full'||t.mode==='macro'?t.stance:t.mode)+'</td><td style="padding:2px 10px 2px 0">'+(t.mode==='full'||t.mode==='macro'?esc(t.score)+' / conf '+esc(t.confidence):'')+'</td><td class="muted">'+esc(t.closedCandles)+' candles</td></tr>';}).join('')+'</table></div>';}
-  const sent=j.engineReports.filter(function(e){return e.domain==='sentiment';})[0];
-  if(sent)h+='<div style="margin-top:8px"><b>News and sentiment</b><ul>'+sent.findings.slice(0,6).map(function(f){return '<li>'+esc(f.description)+'</li>';}).join('')+'</ul></div>';
+  if(j.vetoes&&j.vetoes.length)h+='<div style="margin-top:8px"><b>Vetoes and safeguards</b><ul>'+j.vetoes.map(function(v){return '<li>['+esc(v.effect)+'] '+esc(v.reason)+'</li>';}).join('')+'</ul></div>';
+  if(j.conflicts&&j.conflicts.length)h+='<div style="margin-top:8px"><b>Engine conflicts (not averaged away)</b><ul>'+j.conflicts.map(function(c){return '<li>'+esc(c.detail)+'</li>';}).join('')+'</ul></div>';
+  if(j.timing&&j.timing.length)h+='<div style="margin-top:8px"><b>Timeframe read</b><ul>'+j.timing.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
+  if(j.risks&&j.risks.length)h+='<div style="margin-top:8px"><b>Risks and warnings</b><ul>'+j.risks.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
+  if(j.whatWouldChangeThisView&&j.whatWouldChangeThisView.length)h+='<div style="margin-top:8px"><b>What would change this view</b><ul>'+j.whatWouldChangeThisView.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
+  if(j.technicalDetail){h+='<div style="margin-top:8px"><b>Multi-timeframe alignment:</b> '+esc(j.technicalDetail.alignment.replace(/_/g,' '))+'<table style="margin-top:4px">'+j.technicalDetail.timeframes.map(function(t){return '<tr><td style="padding:2px 10px 2px 0">'+esc(t.timeframe)+'</td><td style="padding:2px 10px 2px 0;color:#94a3b8">'+esc(t.layer)+'</td><td style="padding:2px 10px 2px 0">'+esc(t.stance||t.mode)+'</td><td style="padding:2px 10px 2px 0">'+esc(t.score)+' / conf '+esc(t.confidence)+'</td><td class="muted">'+esc(t.closedCandles)+' closed candles</td></tr>';}).join('')+'</table></div>';}
+  const sent=(j.engineReports||[]).find(function(e){return e.domain==='sentiment';});if(sent)h+='<div style="margin-top:8px"><b>News and sentiment evidence</b><ul>'+sent.findings.slice(0,8).map(function(f){return '<li>'+esc(f.description)+'</li>';}).join('')+'</ul></div>';
   if(j.crossCheck&&j.crossCheck.omnisignal)h+='<div style="margin-top:8px"><b>Omnisignal cross-check</b> '+esc(j.crossCheck.omnisignal.decision)+': '+esc(j.crossCheck.omnisignal.note)+'</div>';
-  if(j.dataQuality&&j.dataQuality.setupRequired)h+='<div style="margin-top:8px"><b>Setup required</b> '+esc(j.dataQuality.setupRequired)+'</div>';
-  h+='<div class="muted" style="margin-top:10px">'+esc(j.disclaimer)+'</div>';
-  out.innerHTML=h;$('intelMeta').textContent='Last run '+new Date().toLocaleTimeString();
- }catch(e){out.textContent='Analysis failed: '+e.message;}
- btn.disabled=false;
+  if(j.dataQuality)h+='<div class="cmi-note" style="margin-top:8px"><b>Data quality:</b> providers '+esc((j.dataQuality.providers||[]).join(', ')||'unavailable')+' · plan '+esc(j.dataQuality.plan)+' · detail '+esc(j.dataQuality.detail)+' · '+esc((j.dataQuality.notes||[]).join('; '))+'</div>';
+  h+='<div class="muted" style="margin-top:10px">'+esc(j.disclaimer)+'</div>';out.innerHTML=h;$('intelMeta').textContent='Live · '+new Date().toLocaleTimeString();$('intelAutoStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · refreshes on market change / every 5 minutes';
+  renderChartInterpretation();
+ }catch(e){out.textContent='Central Market Intelligence unavailable: '+e.message;$('intelAutoStatus').textContent='Unavailable · no integrated verdict; do not rely on stale guidance';intelLatest=null;renderChartInterpretation();}
+ finally{intelBusy=false;btn.disabled=false;}
 }
-$('intelRun').onclick=runIntel;
+$('intelRun').onclick=()=>runIntel(true);
+const CHART_SIGNAL_GLOSSARY=[
+["ORDER","An order annotation or price marker; it may be a manual drawing, strategy level or exchange overlay.","It does not prove an order was submitted, accepted or filled.","Verify authenticated venue, symbol, side, order ID, quantity and exchange status. Without that evidence, treat it as an unverified chart reference."],
+["ENTRY / CE ENTRY","A planned entry level. CE (consequent encroachment) commonly refers to the 50% midpoint of a Fair Value Gap.","A price level is not an entry trigger; price may never revisit it or the setup may invalidate first.","Wait for the strategy's confirmation, retest and fresh data. Check reward-to-risk after fees and slippage."],
+["STOP / SL","The planned stop-loss or structural invalidation price.","It marks where the trade thesis is considered wrong; gaps and slippage can exceed the planned loss.","Define it before entry, size from the stop distance and never widen it to avoid a loss."],
+["TP1 / TP2 / TP3","Sequential take-profit targets at projected structure or liquidity levels.","They support staged exits; targets are not guaranteed fills.","Follow planned partial exits and reassess at each target. Exit if the thesis is invalidated."],
+["BSL / SSL","Buy-side liquidity above prior highs and sell-side liquidity below prior lows.","These are inferred areas where stops or breakout orders may cluster, not a view of all actual resting orders.","Treat them as possible price magnets. Wait for sweep/reclaim or acceptance; test counts are touches, not liquidity volume."],
+["SWEEP / SWEPT BUY_SIDE / SWEPT SELL_SIDE","Price moves beyond a prior high or low and may then reclaim the level.","A failed break can trap traders and precede reversal; acceptance beyond the level can instead mean continuation.","Wait for a completed-candle reclaim, displacement, BOS/CHoCH and retest. Do not fade a wick alone."],
+["SWEEP REACH HIGH / LOW","An estimated scenario band for where a liquidity sweep could extend.","It is a model estimate, not a guaranteed target, forecast or visible order-book wall.","Use only as a watch area with fresh independent confirmation. Discard stale estimates."],
+["FVG / BULL FVG / BEAR FVG","Fair Value Gap: a three-candle price imbalance.","Price can revisit, partially mitigate or leave the gap unfilled; not every gap is tradeable.","Prefer fresh zones aligned with structure. Require reaction and a defensible stop."],
+["ORDER BLOCK","A model-identified price zone near the origin of an impulsive move.","It is an analytical approximation, not proof of institutional orders.","Check freshness, mitigation, displacement, structure alignment and retest quality."],
+["BOS / CHoCH","Break of Structure / Change of Character: swing breaks that describe continuation or possible transition.","A wick-only break can fail; a structure label is not certainty of a trend reversal.","Prefer completed-candle closes and retests. Stand aside when timeframes conflict."],
+["SUPPORT / RESISTANCE","Areas where prior swings or trading activity suggest demand or supply may respond.","Zones can break, flip roles or be swept; they are not exact barriers.","Observe acceptance, rejection and retests. Allow for spread and volatility around stops."],
+["EMA 20 / 50 / 200","Exponential moving averages that weight recent prices more heavily.","Alignment and slope describe trend context but lag and whipsaw in ranges.","Use as context with price structure; avoid chasing extended moves."],
+["VWAP","Volume Weighted Average Price for a defined session or window.","Holding above/below can describe intraday control; reset and feed volume matter.","Look for acceptance/rejection and retests. Do not use a VWAP value if the chart has not calculated it."],
+["BOLLINGER BANDS","A moving average with volatility bands, often two standard deviations away.","Expansion signals volatility growth; contraction signals compression. A band touch alone is not reversal evidence.","Combine with trend and structure. Price can ride a band in strong trends."],
+["RSI 14","Momentum oscillator from 0 to 100 based on recent gains and losses.","High/low values show stretched momentum, not automatic reversal.","Check divergence and structure. RSI can remain elevated or depressed in a strong trend."],
+["MACD / SIGNAL / HISTOGRAM","Moving-average convergence/divergence and its signal line; histogram shows their separation.","Crossovers describe momentum shifts but lag and can reverse in ranges.","Confirm with price structure, volume and a completed candle."],
+["ADX","Average Directional Index, measuring trend strength rather than direction.","Rising/high ADX can mean stronger movement; low ADX often accompanies range conditions.","Read with directional movement and price trend. Avoid treating ADX alone as bullish or bearish."],
+["ATR","Average True Range, measuring recent volatility, not direction.","It contextualises normal price noise and stop distance.","Use to size risk and avoid stops inside ordinary volatility; recalculate as conditions change."],
+["VOLUME / RVOL","Traded quantity and relative volume versus a recent baseline.","Volume expansion may validate participation; low-volume breaks can be weaker.","Confirm venue units and look for participation on a break and retest."],
+["ORDER BOOK / WALL / IMBALANCE","Visible bid/ask depth and relative size imbalance.","Displayed orders can be cancelled, spoofed or consumed; snapshots are not guaranteed executable liquidity.","Check persistence, spread and actual trades. Never trade from one wall snapshot alone."],
+["DELTA / CVD / FOOTPRINT","Aggressive buy minus sell volume, cumulative delta and traded volume by price.","May reveal participation, absorption or divergence; classification and feed quality matter.","Confirm fresh venue-native data. Treat divergence as a warning, not a standalone reversal."],
+["SPREAD / MICROPRICE","Spread is best ask minus best bid; microprice weights mid-price by top-of-book size.","Wide spreads raise costs; microprice is sensitive to order cancellations.","Avoid entries when spread/depth fails strategy limits. Recheck before execution."],
+["FUNDING / OPEN INTEREST","Futures funding is a periodic long/short payment; open interest is outstanding contracts.","Crowded funding and OI changes add derivatives context but do not prove direction.","Check contract type, venue and timestamp. Missing values must remain unavailable."],
+["POC / VAH / VAL","Volume Profile Point of Control and Value Area High/Low for the selected profile window.","They describe where the profile estimates most activity; they are not guaranteed support/resistance.","Observe acceptance or rejection and verify profile window and data quality."],
+["BUY / SELL / HOLD / WAIT / CONVICTION","ETI's signal summary and heuristic evidence score.","A score is evidence strength, not a probability of profit. WAIT means the current gates do not support entry.","Read blockers, opposing evidence, freshness, expiry and risk gates. Only use a separate risk-approved execution plan."]
+];
+function renderChartGlossary(filter){const host=$('chartSignalGlossary');if(!host)return;const q=String(filter||'').trim().toLowerCase();host.innerHTML=CHART_SIGNAL_GLOSSARY.filter(x=>!q||x.join(' ').toLowerCase().includes(q)).map(x=>'<details><summary>'+esc(x[0])+'</summary><p><b>Meaning:</b> '+esc(x[1])+'</p><p><b>Why it matters:</b> '+esc(x[2])+'</p><p><b>What to do:</b> '+esc(x[3])+'</p></details>').join('')||'<p class="muted">No glossary entry matches that search.</p>';}
+function renderChartInterpretation(){
+ const status=$('chartInterpretationStatus'),read=$('chartMarketRead'),next=$('chartNextAction'),confirm=$('chartConfirmations'),snap=$('chartIndicatorSnapshot');if(!status||!read)return;
+ const info=symInfo(),last=candles&&candles.length?candles[candles.length-1]:null,signal=sig,brief=intelLatest,lf=etiLiquidityFvg;
+ status.textContent=last?$('symbol').value+' · '+$('interval').value+' · '+info.venue+' '+info.market:'No validated candles';
+ read.innerHTML='<p><b>Market:</b> '+esc($('symbol').value)+' · '+esc(info.market)+' · '+esc(info.venue)+'</p><p><b>Last chart close:</b> '+(last?esc(fp(Number(last[4]))):'Unavailable')+'</p><p><b>Signal:</b> '+(signal?esc(signal.action)+' · '+esc(signal.conviction)+' · score '+esc(signal.score):'Unavailable')+'</p><p><b>Central verdict:</b> '+(brief?esc(brief.verdict)+' · evidence '+esc(brief.confidence)+'/100':'Pending or unavailable')+'</p><p><b>Liquidity/FVG:</b> '+(lf?esc(lf.autopilotEligible?'Qualified '+lf.direction:'Not qualified · '+(lf.eligibilityReasons||lf.blocks||[]).slice(0,2).join('; ')):'Unavailable')+'</p>';
+ let action='WAIT. ETI has not yet validated a complete market assessment. Do not enter from a chart label alone.';
+ if(brief&&brief.tradingAdvice)action=brief.tradingAdvice.summary+' '+brief.tradingAdvice.action.replace(/_/g,' ')+'.';
+ else if(signal&&!signal.tradeable)action='WAIT / DO NOT ENTER. The chart signal is not tradeable under ETI signal gates: '+(signal.evidence||[]).slice(0,2).join('; ');
+ else if(signal&&signal.tradeable)action='A chart signal is tradeable under its own gate, but the central multi-domain assessment is still pending. Wait for CMI confirmation before treating it as a complete decision.';
+ next.innerHTML='<p>'+esc(action)+'</p><p><b>Entry conditions:</b> '+esc(brief&&brief.tradingAdvice?(brief.tradingAdvice.entryWhen||[]).slice(0,3).join('; '):'Wait for a completed-candle trigger, fresh analysis and aligned structure.')+'</p><p><b>No-entry conditions:</b> '+esc(brief&&brief.tradingAdvice?(brief.tradingAdvice.doNotEnterWhen||[]).slice(0,3).join('; '):'Missing/stale data, unqualified setup, conflicting timeframes or invalid risk/reward.')+'</p><p><b>Exit / invalidation:</b> '+esc(brief&&brief.tradingAdvice?(brief.tradingAdvice.exitWhen||[]).concat(brief.tradingAdvice.invalidation||[]).slice(0,4).join('; '):'Use the approved structural stop and planned targets; exit when the thesis is invalidated.')+'</p>';
+ confirm.innerHTML='<p><b>Conflicts:</b> '+esc(brief&&brief.conflicts&&brief.conflicts.length?brief.conflicts.map(x=>x.detail).join(' | '):'No reported CMI conflict, or CMI is not yet available.')+'</p><p><b>Vetoes:</b> '+esc(brief&&brief.vetoes&&brief.vetoes.length?brief.vetoes.map(x=>x.reason).join(' | '):'No reported veto, or CMI is not yet available.')+'</p><p><b>Data quality:</b> '+esc(brief&&brief.dataQuality?(brief.dataQuality.providers||[]).join(', '):'Not yet assessed')+'</p>';
+ const close=last?Number(last[4]):NaN,vals=[];if(Number.isFinite(close))vals.push('Close '+fp(close));if(signal&&signal.regime)vals.push('Regime '+signal.regime.state+' · ADX '+signal.regime.adx);if(signal&&Number.isFinite(Number(signal.rsi)))vals.push('RSI '+Number(signal.rsi).toFixed(1));if(signal&&Number.isFinite(Number(signal.macdHistogram)))vals.push('MACD hist '+Number(signal.macdHistogram).toPrecision(3));if(signal&&Number.isFinite(Number(signal.adx)))vals.push('ADX '+Number(signal.adx).toFixed(1));snap.innerHTML='<p>'+esc(vals.join(' · ')||'Indicator values unavailable')+'</p><p>Provider '+esc(provider||info.venue)+' · candle timestamp '+(last?esc(new Date(Number(last[0])).toISOString()):'unavailable')+'</p>';
+}
+$('chartGlossarySearch').addEventListener('input',e=>renderChartGlossary(e.target.value));renderChartGlossary('');renderChartInterpretation();
 loadTraders();
 refreshExecutionStatus();startSessions().then(()=>refreshExecutionHistory());
 loadSignal();
