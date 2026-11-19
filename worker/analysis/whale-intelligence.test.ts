@@ -1,4 +1,4 @@
 import test from "node:test";import assert from "node:assert/strict";import {scoreWalletFlows} from "./whale-intelligence.ts";import {handleWhales} from "./whale-route.ts";
 test("aggregates whale flow and wallet directional labels",()=>{const now=1000000000;const a=scoreWalletFlows([{wallet:"w1",amountUsd:200000,direction:"inflow",timestamp:now-1},{wallet:"w1",amountUsd:50000,direction:"outflow",timestamp:now-2}],now);assert.equal(a.validEvents,2);assert.equal(a.largeFlows,1);assert.equal(a.wallets[0].signal,"accumulation");});
-test("filters stale and invalid wallet activity",()=>{const a=scoreWalletFlows([{wallet:"old",amountUsd:1,direction:"inflow",timestamp:1},{wallet:"x",amountUsd:-1,direction:"outflow",timestamp:999}],100000000);assert.equal(a.validEvents,0);});
+test("filters stale and invalid wallet activity",()=>{const a=scoreWalletFlows([{wallet:"old",amountUsd:1,direction:"inflow",timestamp:1},{wallet:"x",amountUsd:-1,direction:"outflow",timestamp:999}],30*86400000);assert.equal(a.validEvents,0);});
 test("endpoint method guard",async()=>assert.equal((await handleWhales(new Request("https://x/api/intelligence/whales"))).status,405));

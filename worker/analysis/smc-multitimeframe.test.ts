@@ -1,7 +1,8 @@
 import test from "node:test";import assert from "node:assert/strict";import {validateCandles,findSwingPoints,detectFairValueGaps,analyzeMultiTimeframe,analyzeTimeframe} from "./smc-multitimeframe.ts";
 function candles(n=40){const a=[];let price=100;for(let i=0;i<n;i++){const move=i%4===0?2:i%4===1?1:i%4===2?-.5:-.25;const open=price;price+=move;const close=price;a.push({time:i+1,open,high:Math.max(open,close)+.4,low:Math.min(open,close)-.4,close,volume:10+i});}return a;}
 test("candle validator enforces chronological valid OHLC rows",()=>{assert.equal(validateCandles(candles()).length,40);assert.throws(()=>validateCandles(candles().slice(0,10)),/candles_require/);const bad=candles();bad[3].time=bad[2].time;assert.throws(()=>validateCandles(bad),/chronological/);});
-test("swing detection returns local pivot candidates",()=>{const s=findSwingPoints(candles());assert.ok(s.highs.length>0);assert.ok(s.lows.length>0);});
+function zigzag(n=40){const a=[];for(let i=0;i<n;i++){const close=100+Math.sin(i*0.9)*5;a.push({time:i+1,open:close-.2,high:close+.5,low:close-.5,close,volume:10});}return a;}
+test("swing detection returns local pivot candidates",()=>{const s=findSwingPoints(zigzag());assert.ok(s.highs.length>0);assert.ok(s.lows.length>0);});
 test("fair value gaps output valid bounds and direction",()=>{for(const g of detectFairValueGaps(candles())){assert.ok(g.top>=g.bottom);assert.ok(["bullish","bearish"].includes(g.direction));}});
 test("multi-timeframe result reports alignment and confluence",()=>{const c=candles();const r=analyzeMultiTimeframe({"5m":c,"15m":c,"1h":c});assert.equal(r.timeframes.length,3);assert.ok(r.confluenceScore>=0&&r.confluenceScore<=100);assert.equal(typeof r.conflict,"boolean");});
 test("single timeframe analysis includes transparent limitations",()=>{const r=analyzeTimeframe(candles(),"1h");assert.equal(r.candleCount,40);assert.equal(r.notes.length,3);assert.ok(["bullish","bearish","neutral"].includes(r.signal));});
