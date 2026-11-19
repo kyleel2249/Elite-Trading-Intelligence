@@ -34,6 +34,10 @@ export const DEFAULT_OPERATIONAL_CONFIG: Readonly<OperationalConfig> = Object.fr
 type ConfigEnv = { ETI_OPERATIONAL_CONFIG?: string };
 const positiveInt = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : fallback;
+const minuteInterval = (value: unknown, fallback: number): number => {
+  const n = positiveInt(value, fallback);
+  return n >= 60 && n % 60 === 0 ? n : fallback;
+};
 const validTimezone = (value: unknown, fallback: string): string => {
   if (typeof value !== "string" || !value.trim()) return fallback;
   try { new Intl.DateTimeFormat("en", { timeZone: value }).format(0); return value; }
@@ -49,9 +53,9 @@ export function readOperationalConfig(env: ConfigEnv = {}): OperationalConfig {
   const d = DEFAULT_OPERATIONAL_CONFIG;
   return {
     monitoring: {
-      mtmIntervalSeconds: positiveInt(raw?.monitoring?.mtmIntervalSeconds, d.monitoring.mtmIntervalSeconds),
-      reconcileIntervalSeconds: positiveInt(raw?.monitoring?.reconcileIntervalSeconds, d.monitoring.reconcileIntervalSeconds),
-      investorMonitorIntervalSeconds: positiveInt(raw?.monitoring?.investorMonitorIntervalSeconds, d.monitoring.investorMonitorIntervalSeconds),
+      mtmIntervalSeconds: minuteInterval(raw?.monitoring?.mtmIntervalSeconds, d.monitoring.mtmIntervalSeconds),
+      reconcileIntervalSeconds: minuteInterval(raw?.monitoring?.reconcileIntervalSeconds, d.monitoring.reconcileIntervalSeconds),
+      investorMonitorIntervalSeconds: minuteInterval(raw?.monitoring?.investorMonitorIntervalSeconds, d.monitoring.investorMonitorIntervalSeconds),
     },
     dataQuality: {
       maxAgeSeconds: positiveInt(raw?.dataQuality?.maxAgeSeconds, d.dataQuality.maxAgeSeconds),
