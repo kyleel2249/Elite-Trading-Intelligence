@@ -46,7 +46,7 @@ import { assessCoach, classifyTransaction } from "./analysis/trading-coach-engin
 import { tradingCoachPage } from "./ui/trading-coach.ts";
 import { advancedIntelligencePage } from "./ui/advanced-intelligence.ts";
 import { advancedAssessment, evaluateForecast, explainTransaction } from "./analysis/advanced-intelligence.ts";
-import { scanPublicAddress, type SupportedChain } from "./analysis/onchain-monitor.ts";
+import { scanPublicAddress, isValidPublicAddress, type SupportedChain } from "./analysis/onchain-monitor.ts";
 
 export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
   ETI_EDGE?: string;
@@ -1258,6 +1258,7 @@ export default {
       const chain = String(url.searchParams.get("chain") || "").toLowerCase(), address = String(url.searchParams.get("address") || "").trim();
       if (!["bitcoin","ethereum","base","arbitrum","polygon","optimism","solana"].includes(chain)) return json({ error: "unsupported_chain", supported: ["bitcoin","ethereum","base","arbitrum","polygon","optimism","solana"] }, 400);
       if (!address || address.length > 100) return json({ error: "address_required" }, 400);
+      if (!isValidPublicAddress(chain as SupportedChain, address)) return json({ error: "invalid_address", chain }, 400);
       try { const scan = await scanPublicAddress(chain as SupportedChain, address), explained = scan.events.map((event:any)=>explainTransaction({ type:"transfer",hash:event.hash,chain:event.chain,asset:event.nativeAsset,amount:event.amountNative,from:event.from,to:event.to,timestamp:event.timestamp,source:event.source,verified:event.verified }));
         return json({ ...scan, explainedEvents: explained, marketContextNote: "Address activity is not automatically attributed to an exchange, institution or whale. Market impact requires entity verification and market-price context." });
       } catch (e) { return json({ error: "onchain_scan_failed", detail: e instanceof Error ? e.message.slice(0,160) : "unknown" }, 502); }
