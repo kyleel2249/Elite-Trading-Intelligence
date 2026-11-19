@@ -106,7 +106,7 @@ export function buildAdvancedVolumeProfile(input: AdvancedProfileInput) {
   const events: VolumePrint[] = [...trades, ...swaps].sort((a, b) => a.time - b.time);
   const lows = [...candles.map(r => r[3]), ...events.map(e => e.price)];
   const highs = [...candles.map(r => r[2]), ...events.map(e => e.price)];
-  if (lows.length === 0) return { schema: "eti.volume-profile/2", symbol: input.symbol, status: "unavailable", reason: "No valid candle, exchange trade or decoded swap data was supplied.", poc: null, vah: null, val: null, sourceCoverage: { method: "unavailable" }, submitsOrder: false };
+  if (lows.length === 0) return { schema: "eti.volume-profile/2", symbol: input.symbol, status: "unavailable" as const, reason: "No valid candle, exchange trade or decoded swap data was supplied.", poc: null, vah: null, val: null, sourceCoverage: { method: "unavailable" }, submitsOrder: false };
   let low = Math.min(...lows), high = Math.max(...highs);
   if (!(high > low)) { const pad = Math.max(high * 0.0005, 1e-8); low -= pad; high += pad; }
   const count = Math.round(clamp(input.bins ?? 64, 24, 200)), valueAreaPct = clamp(input.valueAreaPct ?? 0.7, 0.5, 0.9), step = (high - low) / count;
@@ -156,7 +156,7 @@ export function buildAdvancedVolumeProfile(input: AdvancedProfileInput) {
   const sourceCounts: Record<string, number> = {};
   for (const e of events) sourceCounts[e.source ?? "exchange_or_supplied"] = (sourceCounts[e.source ?? "exchange_or_supplied"] ?? 0) + 1;
   return {
-    schema: "eti.volume-profile/2", symbol: input.symbol, status: "ok", generatedAt: new Date(now).toISOString(),
+    schema: "eti.volume-profile/2", symbol: input.symbol, status: "ok" as const, generatedAt: new Date(now).toISOString(),
     ...profile, valueAreaPct, currentPrice: round(currentPrice), developingPoc: developing.at(-1)?.poc ?? profile.poc,
     developingPocHistory: developing, sessions,
     historicalPocs: touchedHistoricalPocs,

@@ -229,8 +229,8 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
       } else {
         const results = await Promise.allSettled(venues.map(async venue => {
           const selected = venue === "bitget" ? (market === "futures" ? "bitget_mix" : "bitget") : "bybit";
-          const category = venue === "bitget" ? (market === "futures" ? bitgetProductFor(symbol) : "SPOT") : (market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot");
-          const params = { symbol, interval: q("timeframe") ?? "1m", limit: 1000, market, category, ...(venue === "bitget" && market === "futures" ? { productType: category as any } : {}) };
+          const category = (venue === "bitget" ? (market === "futures" ? bitgetProductFor(symbol) : "SPOT") : (market === "futures" ? (/USD$/.test(symbol) && !/(USDT|USDC)$/.test(symbol) ? "inverse" : "linear") : "spot")) as Parameters<typeof getMarketData>[1]["category"];
+          const params: Parameters<typeof getMarketData>[1] = { symbol, interval: q("timeframe") ?? "1m", limit: 1000, market, category, ...(venue === "bitget" && market === "futures" ? { productType: category as BitgetProductType } : {}) };
           const order = providerOrder(env, selected);
           const [t, k] = await Promise.all([
             getMarketData("trades", params, order),

@@ -12,6 +12,7 @@ test("uses execution prints for POC instead of spreading candle volume", () => {
   const trades = Array.from({ length: 40 }, (_, i) => ({ time: 1700000000000 + i, price: i < 30 ? 101 : 105, qty: i < 30 ? 2 : 1, side: i % 2 ? "buy" as const : "sell" as const }));
   const result = buildAdvancedVolumeProfile({ symbol: "BTCUSDT", candles, trades, bins: 48 });
   assert.equal(result.status, "ok");
+  if (result.status !== "ok") throw new Error("profile unavailable");
   assert.equal(result.sourceCoverage.method, "transaction_level");
   assert.ok(Math.abs(result.poc - 101) < 0.2);
   assert.equal(result.sourceCoverage.exchangeTradeCount, 40);
@@ -21,6 +22,7 @@ test("uses execution prints for POC instead of spreading candle volume", () => {
 test("uses OHLCV approximation only when no execution prints exist", () => {
   const result = buildAdvancedVolumeProfile({ symbol: "ETHUSDT", candles, bins: 32 });
   assert.equal(result.status, "ok");
+  if (result.status !== "ok") throw new Error("profile unavailable");
   assert.equal(result.sourceCoverage.method, "ohlcv_approximation");
   assert.match(result.method, /OHLCV approximation/);
 });
@@ -29,6 +31,7 @@ test("counts decoded DEX swaps but excludes unpriced wallet transfers", () => {
   const result = buildAdvancedVolumeProfile({ symbol: "TOKENUSDC", swaps: [
     { time: 1700000000000, price: 2, baseQuantity: 50, quoteQuantity: 100, side: "buy", source: "ethereum:uniswap-v3" }
   ] });
+  if (result.status !== "ok") throw new Error("profile unavailable");
   assert.equal(result.sourceCoverage.decodedSwapCount, 1);
   assert.equal(result.sourceCoverage.method, "transaction_level");
   assert.equal(result.sourceCoverage.eventCount, 1);
@@ -39,12 +42,14 @@ test("rejects empty data and clamps profile parameters", () => {
   const empty = buildAdvancedVolumeProfile({ symbol: "BTCUSDT" });
   assert.equal(empty.status, "unavailable");
   const result = buildAdvancedVolumeProfile({ symbol: "BTCUSDT", candles, bins: 999, valueAreaPct: 1 });
+  if (result.status !== "ok") throw new Error("profile unavailable");
   assert.equal(result.bins.length, 200);
   assert.equal(result.valueAreaPct, 0.9);
 });
 
 test("marks historical POCs revisited only after their formation time", () => {
   const result = buildAdvancedVolumeProfile({ symbol: "BTCUSDT", candles, historicalPocs: [{ price: candles[5][2], formedAt: candles[5][0] - 1 }] });
+  if (result.status !== "ok") throw new Error("profile unavailable");
   assert.equal(result.historicalPocs[0].status, "revisited");
 });
 
