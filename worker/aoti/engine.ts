@@ -44,7 +44,7 @@ const CHAIN_MAP:Record<string,AotiChain>={solana:"solana",ethereum:"ethereum",et
 const GOPLUS:Record<Exclude<AotiChain,"solana">,string>={ethereum:"1",base:"8453",bsc:"56",arbitrum:"42161",polygon:"137",optimism:"10"};
 const json=async(fetcher:typeof fetch,url:string,init?:RequestInit)=>{const r=await fetcher(url,{...init,headers:{accept:"application/json",...(init?.headers||{})},signal:AbortSignal.timeout(10000)});if(!r.ok)throw new Error("provider_http_"+r.status);return r.json() as Promise<any>};
 
-export function evaluateSecurity(e:SecurityEvidence,now=Date.now()){
+export function evaluateSecurity(e:SecurityEvidence,now=Date.now()):{status:"PASS"|"FAIL"|"PENDING";failed:string[];unknown:string[];checkedAt:number;provider:string}{
   const age=now-e.checkedAt, fields:[string,unknown][]=[
     ["holder_count",e.holderCount!==null&&e.holderCount>=300],
     ["mint_authority",e.mintAuthorityRevoked],["freeze_authority",e.freezeAuthorityRevoked],
@@ -117,7 +117,7 @@ async function securityFor(chain:AotiChain,address:string,fetcher:typeof fetch,n
       const top=Array.isArray(r.topHolders)?r.topHolders:[],top10=top.slice(0,10).reduce((s:number,x:any)=>s+Number(x.pct??x.percentage??0),0);
       const lp=markets.flatMap((m:any)=>m.lp?.lpLocked===true?[m.lp]:[]),lpDays=lp.length?Math.max(...lp.map((x:any)=>Number(x.lockDuration||0)/86400)):null;
       const authority=(v:any)=>v===null||v===""?true:v===undefined?null:false;
-      return {holderCount:n(r.totalHolders),mintAuthorityRevoked:authority(r.mintAuthority),freezeAuthorityRevoked:authority(r.freezeAuthority),lpLocked:markets.length?lp.length>0:null,lpLockDays:lpDays,developerSupplyPct:n(r.creatorPercentage),top10SupplyPct:top.length?top10:null,sellSimulationPassed:null,bundledLaunchClear:risks.some(x=>/bundle|insider/i.test(x))?false:null,provider:"rugcheck",checkedAt:now,risks};
+      return {holderCount:n(r.totalHolders),mintAuthorityRevoked:authority(r.mintAuthority),freezeAuthorityRevoked:authority(r.freezeAuthority),lpLocked:markets.length?lp.length>0:null,lpLockDays:lpDays,developerSupplyPct:n(r.creatorPercentage),top10SupplyPct:top.length?top10:null,sellSimulationPassed:null,bundledLaunchClear:risks.some((x:string)=>/bundle|insider/i.test(x))?false:null,provider:"rugcheck",checkedAt:now,risks};
     }
     const chainId=GOPLUS[chain as Exclude<AotiChain,"solana">],r=await json(fetcher,"https://api.gopluslabs.io/api/v1/token_security/"+chainId+"?contract_addresses="+encodeURIComponent(address)),item=r.result?.[address.toLowerCase()]||r.result?.[address];
     if(!item)return empty("goplus");
@@ -140,7 +140,7 @@ async function loadPairProfile(chain:AotiChain,pairAddress:string,symbol:string,
   const data=await json(fetcher,url),rows=data?.data?.attributes?.ohlcv_list;
   if(!Array.isArray(rows)||!rows.length)return undefined;
   const candles=rows.map((r:any)=>[Number(r[0])*1000,Number(r[1]),Number(r[2]),Number(r[3]),Number(r[4]),Number(r[5])]).filter((r:number[])=>r.every(Number.isFinite));
-  const result=buildAdvancedVolumeProfile({symbol,candles,currentPrice:price,bins:64});
+  const result=buildAdvancedVolumeProfile({symbol,candles:candles as any,currentPrice:price,bins:64});
   if(result.status!=="ok")return undefined;
   return {poc:result.poc,vah:result.vah,val:result.val,method:result.sourceCoverage.method,location:result.location};
 }
