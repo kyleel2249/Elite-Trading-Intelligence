@@ -1,4 +1,7 @@
 import { analyzeMultiTimeframe } from "./smc-multitimeframe.ts";
+interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
+export function withAdvancedSmc<E>(base:App<E>):App<E>{return {fetch(request,env){if(new URL(request.url).pathname==="/api/advanced/smc")return handleAdvancedSmc(request);return base.fetch(request,env);}}}
+
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"}});
 export function handleAdvancedSmc(request:Request):Response|Promise<Response>{
  const path=new URL(request.url).pathname;if(path!=="/api/advanced/smc")return new Response("Not found",{status:404});
