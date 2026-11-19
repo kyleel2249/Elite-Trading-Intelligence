@@ -348,7 +348,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         }
         // Keep the chart's exact execution-timeframe candles, but enrich the setup with two independently fetched higher timeframes.
         const missingHigher = tfs.slice(1).filter(h => !by[h]);
-        if (missingHigher.length && cls === "crypto") {
+        if (missingHigher.length && (cls === "crypto" || cls === "unknown")) {
           const ptRaw = q("productType"), productType = BITGET_PRODUCT_TYPES.includes(ptRaw as BitgetProductType) ? ptRaw as BitgetProductType : undefined;
           const marketRaw = q("market"), market: "spot" | "futures" | undefined = marketRaw === "spot" || marketRaw === "futures" ? marketRaw : undefined, categoryRaw = q("category"), category: "spot" | "linear" | "inverse" | undefined = categoryRaw === "spot" || categoryRaw === "linear" || categoryRaw === "inverse" ? categoryRaw : undefined;
           const higher = await loadCandles(symbol, missingHigher, env, q("provider"), productType, market, category);
