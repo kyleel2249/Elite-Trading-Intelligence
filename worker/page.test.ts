@@ -158,3 +158,18 @@ test("main dashboard Live Market Chart uses the Pro-style advanced chart and ret
   assert.match(html, /base="\/api\/algo\/v3-alpha\/"/);
   assert.match(html, /base\+"signals\?/);
 });
+
+// Regression: "Cannot access 'SYM' before initialization". The dashboard start-up calls
+// renderChartInterpretation() -> symInfo() -> SYM at top level, so the `const SYM` pair-list
+// state must be declared before that call (a syntax-only parse cannot catch this).
+test("dashboard declares SYM before any top-level start-up call can read it", () => {
+  const src = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const start = src.indexOf("const html = `") + "const html = `".length;
+  const end = src.indexOf("</script></body></html>`;") + "</script></body></html>".length;
+  const cooked = vm.runInNewContext("`" + src.slice(start, end) + "`", { PORTFOLIO_CSS, PORTFOLIO_HTML, PORTFOLIO_JS, PLAN_HTML, CALC_CSS, CALC_HTML, CALC_JS, PERP_CSS, PERP_HTML, PERP_JS, PERP_ORDER_HTML }) as string;
+  const decl = cooked.indexOf("const SYM=");
+  const firstStartupCall = cooked.indexOf("renderChartGlossary('');renderChartInterpretation();");
+  assert.ok(decl > 0 && firstStartupCall > 0, "SYM declaration or start-up call not found");
+  assert.ok(decl < firstStartupCall, "const SYM must be declared before the top-level start-up calls");
+  assert.equal(cooked.split("const SYM=").length - 1, 1, "SYM must be declared exactly once");
+});
