@@ -37,6 +37,14 @@ test("five-minute autopilot is scheduled even when the universe scanner uses the
   const last = JSON.parse(kv.data.get("agent-autopilot:last") || "null");
   assert.equal(last.skipped, "autopilot_disabled");
   assert.equal(last.submitted, 0);
+  const heartbeat = JSON.parse(kv.data.get("agent-autopilot:heartbeat") || "null");
+  assert.equal(heartbeat.status, "completed");
+  assert.equal(heartbeat.cron, "*/5 * * * *");
+  assert.equal(heartbeat.mode, "internal_paper_only");
+  assert.equal(heartbeat.liveOrdersAllowed, false);
+  assert.equal(heartbeat.skipped, "autopilot_disabled");
+  assert.ok(Date.parse(heartbeat.at) > 0);
+  assert.ok(Date.parse(heartbeat.completedAt) >= Date.parse(heartbeat.at));
 });
 
 test("autopilot scheduler ignores unrelated cron expressions", () => {
