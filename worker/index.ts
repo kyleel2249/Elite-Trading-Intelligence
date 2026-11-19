@@ -1275,6 +1275,7 @@ export default {
     }
     if (url.pathname === "/api/trading-coach/predictions" && request.method === "GET") {
       const auth = await authenticate(request, _env); if (!auth.user && !auth.master) return json({ error: "authentication_required" }, 401); const owner = auth.user?.uid || "__master__";
+      const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = coachRateLimited(ip, 1, Date.now(), 30); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
       const db = _env.ETI_PORTFOLIO_DB; if (!db || typeof db.prepare !== "function") return json({ error: "prediction_storage_unavailable", note: "ETI_PORTFOLIO_DB binding is required for persistent prediction records." }, 503);
       await db.prepare("CREATE TABLE IF NOT EXISTS eti_coach_predictions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL, symbol TEXT NOT NULL, direction TEXT NOT NULL, probability REAL NOT NULL, entry REAL, stop REAL, target REAL, payload TEXT NOT NULL, evaluated_at INTEGER, outcome TEXT, score_json TEXT)").run();
       const limit = Math.max(1, Math.min(50, Number(url.searchParams.get("limit") || 25)));
