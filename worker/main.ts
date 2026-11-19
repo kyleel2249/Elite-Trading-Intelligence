@@ -72,7 +72,7 @@ import { runInvestorMonitor, runMarkToMarket, runPortfolioReconciliation } from 
 import { runOnchainWatchCycle } from "./analysis/onchain-monitor.ts";
 import { runTokenMonitorCycle } from "./analysis/token-intelligence.ts";
 import { withAoti } from "./aoti/api.ts";
-import { runAotiCycle, manageAotiPaperPositions } from "./aoti/engine.ts";
+import { runAotiCycle, manageAotiPaperPositions, isAotiEnabled } from "./aoti/engine.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
 
@@ -157,7 +157,7 @@ export default {
 
     // AOTI scans supported DEX networks and refreshes paper positions on the five-minute universe cadence.
     // The module is disabled unless ETI_AOTI_ENABLED=true and always keeps live DEX signing disabled.
-    if (event.cron === UNIVERSE_CRON && env.ETI_AOTI_ENABLED === "true" && env.ETI_PORTFOLIO_DB) ctx.waitUntil((async () => {
+    if (event.cron === UNIVERSE_CRON && isAotiEnabled(env) && env.ETI_PORTFOLIO_DB) ctx.waitUntil((async () => {
       const [discovery, positions] = await Promise.allSettled([runAotiCycle(env, Date.now()), manageAotiPaperPositions(env, Date.now())]);
       const result: any = { discovery: discovery.status === "fulfilled" ? discovery.value : { error: String(discovery.reason) }, positions: positions.status === "fulfilled" ? positions.value : { error: String(positions.reason) } };
       if (result.discovery.scanned || result.positions.updated || result.positions.failures || result.discovery.error || result.positions.error) console.log("ETI AOTI cycle", JSON.stringify(result));
