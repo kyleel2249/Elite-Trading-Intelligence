@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readAutopilotConfig, runAgentAutopilotCycle, scheduleAgentAutopilot } from "./autopilot.ts";
+import { agreementMagnitudeMeetsThreshold, readAutopilotConfig, runAgentAutopilotCycle, scheduleAgentAutopilot } from "./autopilot.ts";
 
 function memoryKV() {
   const data = new Map<string, string>();
@@ -14,6 +14,14 @@ function memoryKV() {
     data,
   };
 }
+
+test("signed council agreement uses magnitude for both bullish and bearish consensus", () => {
+  assert.equal(agreementMagnitudeMeetsThreshold(0.78, 0.65), true);
+  assert.equal(agreementMagnitudeMeetsThreshold(-0.78, 0.65), true);
+  assert.equal(agreementMagnitudeMeetsThreshold(-0.64, 0.65), false);
+  assert.equal(agreementMagnitudeMeetsThreshold(0, 0.65), false);
+  assert.equal(agreementMagnitudeMeetsThreshold(Number.NaN, 0.65), false);
+});
 
 test("consolidated autopilot JSON config supplies all strategy and risk settings", () => {
   const config = readAutopilotConfig({ ETI_AGENT_AUTOPILOT_CONFIG: JSON.stringify({
