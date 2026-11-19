@@ -1,0 +1,7 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { detectMarketAnomalies, selectMarketSnapshot } from "./token-market-anomaly-monitor.ts";
+test("selects the most liquid pair for market monitoring",()=>{const s=selectMarketSnapshot([{baseToken:{address:"a"},priceUsd:"0.1",liquidity:{usd:100},volume:{h24:10}},{baseToken:{address:"b"},priceUsd:"2",liquidity:{usd:900},volume:{h24:800},priceChange:{h24:3}}]);assert.equal(s?.priceUsd,2);assert.equal(s?.liquidityUsd,900);});
+test("detects price, volume and liquidity anomaly thresholds",()=>{const prev={priceUsd:1,liquidityUsd:100000,volume24hUsd:1000,fdvUsd:1000000,marketCapUsd:900000,pairAddress:"p",source:"test"},next={priceUsd:1.25,liquidityUsd:55000,volume24hUsd:6000,fdvUsd:1000000,marketCapUsd:900000,pairAddress:"p",source:"test"};const alerts=detectMarketAnomalies(prev,next);assert.equal(alerts.length,3);assert.ok(alerts.some(a=>a.kind==="price_surge"));assert.ok(alerts.some(a=>a.kind==="volume_surge"));assert.ok(alerts.some(a=>a.kind==="liquidity_drop"));});
+test("does not alert without baseline snapshot",()=>{assert.deepEqual(detectMarketAnomalies(null,{priceUsd:1,liquidityUsd:100,volume24hUsd:50,fdvUsd:null,marketCapUsd:null,pairAddress:null,source:"test"}),[]);});
+test("subthreshold movement does not create alert",()=>{const a={priceUsd:10,liquidityUsd:5000,volume24hUsd:100,fdvUsd:null,marketCapUsd:null,pairAddress:null,source:"test"},b={...a,priceUsd:10.5,liquidityUsd:4900,volume24hUsd:250};assert.deepEqual(detectMarketAnomalies(a,b),[]);});
