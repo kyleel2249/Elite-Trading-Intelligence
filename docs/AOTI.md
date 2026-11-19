@@ -19,7 +19,7 @@ Paper sizing uses a 1% equity risk budget, hard caps of 2% risk, 20% equity noti
 - POST /api/aoti/paper/open — open a candidate that passes all gates (requires ETI paper session).
 - POST /api/aoti/paper/close — close a paper position (requires ETI paper session).
 
-The scheduled cycle runs every five minutes when ETI_AOTI_ENABLED=true and ETI_PORTFOLIO_DB is bound. It refreshes market discovery and open paper positions. No live DEX transaction is signed or sent.
+The scheduled cycle runs every five minutes when ETI_AOTI_ENABLED=true and ETI_PORTFOLIO_DB is bound. It refreshes market discovery and open paper positions. New entries are restricted to 23:00–07:00 UTC (Ghana local time); configure ETI_AOTI_SESSION_START_UTC and ETI_AOTI_SESSION_END_UTC to change the window. Existing positions continue to be monitored outside the entry window. No live DEX transaction is signed or sent.
 
 ## Explicit integration requirements for live DEX execution
 Live swaps remain disabled until ETI has a dedicated transaction builder per chain/DEX, authenticated RPC/indexer access, quote and route simulation, isolated signing service, transaction simulation, idempotent submission, confirmation/finality tracking, reorg/failed-transaction handling, and wallet balance reconciliation. A browser wallet connection or a displayed token price is not proof of execution. Private keys and seed phrases must never enter browser storage, API request bodies, logs or the AOTI dashboard.
