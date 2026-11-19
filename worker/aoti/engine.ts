@@ -3,7 +3,7 @@
  * Discovery and risk decisions are deterministic. Unknown security evidence fails closed.
  * This module never signs a transaction or submits a live DEX swap.
  */
-import { buildAdvancedVolumeProfile } from "./analysis/advanced-volume-profile.ts";
+import { buildAdvancedVolumeProfile } from "../analysis/advanced-volume-profile.ts";
 
 export const AOTI_CHAINS = ["solana","ethereum","base","bsc","arbitrum","polygon","optimism"] as const;
 export type AotiChain = typeof AOTI_CHAINS[number];
