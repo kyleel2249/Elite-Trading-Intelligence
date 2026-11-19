@@ -42,6 +42,8 @@ import type { ReadinessEnv } from "./readiness/api.ts";
 import type { MarketEnv } from "./market.ts";
 import { handleAlpha, type AlphaEnv } from "./alpha/routes.ts";
 import { handleAuth } from "./auth/routes.ts";
+import { assessCoach, classifyTransaction } from "./analysis/trading-coach-engine.ts";
+import { tradingCoachPage } from "./ui/trading-coach.ts";
 
 export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
   ETI_EDGE?: string;
@@ -154,7 +156,7 @@ ${PORTFOLIO_CSS}
 ${CALC_CSS}
 ${PERP_CSS}
 </style></head><body>
-<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><a href="/terminal" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">PRO TRADING TERMINAL →</a><a href="#chartInterpretationPanel" style="color:#9ed7ff">Chart Interpretation</a><a href="#intelPanel" style="color:#9ed7ff">Central Intelligence</a><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><a href="/jarvis" style="color:var(--cyan)">JARVIS Command Centre</a><a href="/agents" style="color:var(--blue)">AI Agents</a><div id="connection" class="status">Connecting…</div></div></header>
+<header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><a href="/terminal" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">PRO TRADING TERMINAL →</a><a href="/trading-coach" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">TRADING COACH ↗</a><a href="#chartInterpretationPanel" style="color:#9ed7ff">Chart Interpretation</a><a href="#intelPanel" style="color:#9ed7ff">Central Intelligence</a><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><a href="/jarvis" style="color:var(--cyan)">JARVIS Command Centre</a><a href="/agents" style="color:var(--blue)">AI Agents</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
 <div class="toolbar"><select id="symVenue" aria-label="Exchange" title="Choose Bybit or Bitget public spot, margin and futures market data. Live orders require the master ETI token and explicit confirmation."><option value="bybit" selected>Bybit (market data)</option><option value="bitget">Bitget (spot, margin &amp; futures)</option></select><select id="symMarket" aria-label="Market type" title="Spot pairs, USDT/USDC-margined perpetual futures, or Metals: gold, silver, platinum, palladium, copper and gold-backed tokens listed on Bybit"><option value="spot">Spot</option><option value="futures">Futures (perpetual)</option><option value="margin">Margin (cross / isolated)</option><option value="metals">Metals (gold, silver, copper)</option></select><select id="symCat" aria-label="Contract category" style="display:none"><option value="">All types</option></select><input id="symSearch" type="search" placeholder="Search any coin or pair" aria-label="Search exchange pairs" autocomplete="off" style="width:150px"><select id="symQuote" aria-label="Quote currency filter" title="Show pairs by quote currency"><option value="">All quotes</option></select><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select><span id="symEti" class="muted" aria-live="polite" style="font-size:12px;display:none"></span><span id="symCount" class="muted" aria-live="polite" style="font-size:12px"></span>
 <select id="interval"><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
@@ -1219,6 +1221,24 @@ const page = withMotion(html);
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/trading-coach" && request.method === "GET") return new Response(tradingCoachPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
+    if (url.pathname === "/api/trading-coach/assess") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed", note: "Use POST with an evidence payload." }, 405);
+      const length = Number(request.headers.get("content-length") || 0); if (length > 1000000) return json({ error: "payload_too_large" }, 413);
+      let body: any; try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "object_payload_required" }, 400);
+      const candles = Array.isArray(body.candles) ? body.candles.slice(-500) : [];
+      const events = Array.isArray(body.events) ? body.events.slice(-200) : [];
+      const transactions = Array.isArray(body.transactions) ? body.transactions.slice(-200) : [];
+      const signals = Array.isArray(body.signals) ? body.signals.slice(0, 50) : [];
+      return json(assessCoach({ ...body, candles, events, transactions, signals }));
+    }
+    if (url.pathname === "/api/trading-coach/transactions") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      let body: any; try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      if (!Array.isArray(body?.transactions)) return json({ error: "transactions_array_required" }, 400);
+      return json({ count: Math.min(body.transactions.length, 200), records: body.transactions.slice(-200).map(classifyTransaction), note: "Classifications are descriptive. Wallet labels and entity attribution require independently verifiable evidence." });
+    }
     if (url.pathname === "/jarvis") return new Response(COMMAND_CENTRE_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/jarvis.js") return new Response(COMMAND_CENTRE_JS, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=60", "x-content-type-options": "nosniff" } });
     if (url.pathname === "/terminal") return new Response(TRADING_TERMINAL_HTML.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
