@@ -98,7 +98,8 @@ const coreLayers: Array<(next: any) => any> = [
 const core: any = coreLayers.reduce((next: any, layer) => layer(next), base as any);
 
 // Identity, provider status and backup sit in front of the application; the security-headers layer wraps everything (see docs/SECURITY.md).
-const outerLayers: Array<(next: any) => any> = [withBitget, withPerp, withWallets, withBackup, withProviders, withIdentity, withBybitAccount, withDataX, withSecurityHeaders];
+const withSmc = (next: any) => ({ fetch: async (request: Request, env: any) => withSmcIntelligence(request, await next.fetch(request, env)) });
+const outerLayers: Array<(next: any) => any> = [withBitget, withPerp, withWallets, withBackup, withProviders, withIdentity, withBybitAccount, withDataX, withSmc, withSecurityHeaders];
 const app: any = outerLayers.reduce((next: any, layer) => layer(next), core);
 const inner: any = base;
 const MONITOR_CRON = "* * * * *";
@@ -119,7 +120,7 @@ function withSmcIntelligence(request: Request, response: Response): Promise<Resp
 }
 
 export default {
-  fetch: async (request: Request, env: any) => withSmcIntelligence(request, await app.fetch(request, env)),
+  fetch: async (request: Request, env: any) => app.fetch(request, env),
   async scheduled(event: { cron?: string }, env: any, ctx: { waitUntil(p: Promise<unknown>): void }) {
     if (event.cron === "*/15 * * * *" && env.ETI_PORTFOLIO_DB) ctx.waitUntil(runV3AlphaTrackingCycle(env).then(r => { if (r.resolved) console.log("V3 Alpha forward outcomes resolved", r.resolved); }, e => console.error("V3 Alpha tracking failed", e instanceof Error ? e.message : e)));
     // Autonomous football scan and result-history collection are quota-throttled in D1 (scan >= 60 min, history >= 360 min),
