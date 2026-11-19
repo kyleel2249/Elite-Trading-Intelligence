@@ -22,6 +22,9 @@ import type { KVLike } from "./tokenomist.ts";
 import { loadInstitutional, type D1Like } from "./institutional.ts";
 import { calibrateTechnical } from "./calibrate.ts";
 import { analyzeSmc } from "./smc-intel.ts";
+import { buildSignalIntel } from "./signal-intel.ts";
+import { fetchBybitDerivatives } from "./derivatives-intel.ts";
+import { loadSignalInputs } from "../algo/market-inputs.ts";
 import { recordAndLoadDurable } from "./depth-store.ts";
 import type { AgentAuditDb } from "../agents/persistence.ts";
 import { confluence, CONFLUENCE_TIMEFRAMES, type ConfluenceOrderFlow, type ConfluenceTf } from "./confluence.ts";
@@ -165,9 +168,9 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: HEADERS });
   if (req.method !== "GET" && req.method !== "POST") return reply({ error: "method_not_allowed", note: "Analytical endpoints only; they cannot place orders." }, 405);
   const limits0 = planOf(env);
-  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/liquidity-fvg", "/api/analysis/fvg-precision", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow", "/api/analysis/confluence"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
+  if (path === "/api/analysis") return reply({ service: "ETI analysis engine", endpoints: ["/api/analysis/technical", "/api/analysis/mtf", "/api/analysis/liquidity-fvg", "/api/analysis/fvg-precision", "/api/analysis/fundamental", "/api/analysis/news", "/api/analysis/intelligence", "/api/analysis/calibrate", "/api/analysis/institutional", "/api/analysis/fvg", "/api/analysis/smc", "/api/analysis/orderflow", "/api/analysis/confluence", "/api/analysis/signal-intel"], methods: "GET fetches data server-side (crypto candles via exchange providers); POST analyses data you supply", strategies: STRATEGIES, timeframes: MTF_TIMEFRAMES,
     plan: { plan: limits0.plan, defaultDetail: limits0.defaultDetail, fullDetailAllowed: limits0.allowFullDetail, maxCandlesPerTimeframe: limits0.maxCandles, calibrationAllowed: limits0.calibrateAllowed, maxNewsItems: limits0.maxNewsItems }, configured: { SENTIMENT_AI: String(env.SENTIMENT_AI ?? "").toLowerCase() === "on" && !!env.AI, TOKENOMIST_API_KEY: !!env.TOKENOMIST_API_KEY, GITHUB_TOKEN: !!env.GITHUB_TOKEN, CRYPTO_PROFILES_JSON: !!env.CRYPTO_PROFILES_JSON, institutionalDb: !!env.ETI_PORTFOLIO_DB, FRED_API_KEY: !!env.FRED_API_KEY, SEC_USER_AGENT: !!env.SEC_USER_AGENT, COINGECKO_API_KEY: !!env.COINGECKO_API_KEY, NEWS_FEEDS_JSON: !!env.NEWS_FEEDS_JSON }, submitsOrder: false });
-  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : (path.endsWith("/confluence") || path.endsWith("/fvg-precision") || path.endsWith("/liquidity-fvg")) ? 6 : path.endsWith("/orderflow") ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown", cost = path.endsWith("/intelligence") ? 6 : path.endsWith("/calibrate") ? 8 : (path.endsWith("/confluence") || path.endsWith("/fvg-precision") || path.endsWith("/liquidity-fvg")) ? 6 : (path.endsWith("/orderflow") || path.endsWith("/signal-intel")) ? 5 : path.endsWith("/mtf") ? 4 : (path.endsWith("/fvg") || path.endsWith("/smc")) ? 3 : 2, wait = rateLimited(ip, cost, now);
   if (wait !== null) return reply({ error: "rate_limited", retryAfterSeconds: wait }, 429, { "retry-after": String(wait) });
   const post = req.method === "POST", limits = planOf(env);
   let body: any = {};
@@ -242,6 +245,43 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
         },
         canTriggerTrade: false, submitsOrder: false, liveExecutionAllowed: false
       });
+    }
+    if (path === "/api/analysis/signal-intel") {
+      // Read-only fused indicator + institutional signal intelligence. Closed candles only; never places an order.
+      const tf = (q("timeframe") ?? q("interval") ?? "1h") as MtfTimeframe;
+      if (!(["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"] as string[]).includes(tf)) return reply({ error: "invalid_timeframe", timeframes: ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"] }, 400);
+      if (cls !== "crypto" && !post) return reply({ error: "market_data_unavailable", detail: "Signal intelligence reads exchange candles, order flow and derivatives; use a crypto symbol or POST candles." }, 424);
+      const market: "spot" | "futures" = q("market") === "futures" ? "futures" : "spot";
+      const strategy: MtfStrategy = tf === "1m" || tf === "5m" ? "scalp" : tf === "4h" ? "swing" : tf === "1d" || tf === "1w" ? "position" : "intraday";
+      const depthCap = Math.min(limits.maxCandles, 1000);
+      let candles: Record<string, Kline[]> = {}, validationRows: Kline[] | undefined, orderflow: any = null, provider = "supplied", failures: Record<string, string> = {}, derivatives: any = null, oi: any = null, funding: any = null, category = market === "spot" ? "spot" : "linear";
+      if (post) {
+        const sc = sanitizeCandles(body.candles, 1000);
+        if (sc.error) return reply({ error: "invalid_candles", detail: sc.error }, 400);
+        candles = { [tf]: sc.rows }; provider = String(body.provider ?? "supplied").slice(0, 40);
+      } else {
+        const loaded = await loadSignalInputs(env, symbol, strategy as any, q("provider"), now, market, q("category") ?? undefined, fetchFn as any);
+        if ("error" in loaded) return reply({ error: loaded.error, failures: loaded.failures }, 424);
+        candles = loaded.candles as Record<string, Kline[]>; provider = loaded.provider; failures = { ...loaded.failures }; derivatives = loaded.derivatives; category = loaded.category;
+        const order = providerOrder(env, q("provider") === "bitget" || q("provider") === "bitget_mix" ? (market === "futures" ? "bitget_mix" : "bitget") : q("provider"));
+        const params = { symbol, market, category: category as any };
+        if (!candles[tf]?.length) { try { candles[tf] = (await getMarketData("klines", { ...params, interval: PROVIDER_INTERVAL[tf as MtfTimeframe], limit: 300 }, order)).data as Kline[]; } catch (e) { failures[tf] = e instanceof Error ? e.message : "unknown"; } }
+        const [deep, tr, ofd, feed] = await Promise.all([
+          getMarketData("klines", { ...params, interval: PROVIDER_INTERVAL[tf as MtfTimeframe], limit: depthCap }, order).then((r) => r.data as Kline[]).catch(() => null),
+          getMarketData("trades", { ...params, interval: "1m", limit: 500 }, order).catch(() => null),
+          getMarketData("depth", { ...params, interval: "1m", limit: 50 }, order).catch(() => null),
+          market === "futures" && provider === "bybit" ? fetchBybitDerivatives(symbol, category, tf).catch(() => null) : Promise.resolve(null),
+        ]);
+        if (deep && deep.length > (candles[tf]?.length ?? 0)) validationRows = deep;
+        const trades = tr ? normalizeTrades(tr.data) : null, depth = ofd ? normalizeDepth(ofd.data) : null;
+        if (trades && depth && now - trades.at(-1)!.time <= 180_000) {
+          const flow = buildOrderFlow({ symbol, venue: provider === "bybit" ? "bybit" : "bitget", market, provider, trades, depth, candles: [], now });
+          orderflow = { trades: flow.tape.trades, deltaPct: flow.tape.deltaPct, cumulativeDelta: flow.tape.cumulativeDelta, depthImbalance: flow.depth.imbalance, spreadBps: flow.depth.spreadBps };
+        } else failures.orderflow = trades && depth ? "trade tape is stale" : "trades or depth unavailable";
+        if (feed) { oi = feed.oi; funding = feed.funding; Object.assign(failures, Object.fromEntries(Object.entries(feed.failures).map(([k, v]) => [`bybit_${k}`, v]))); }
+      }
+      const intel = buildSignalIntel({ symbol, timeframe: tf, market, now, candles, validationRows, orderflow, derivatives, oi, funding });
+      return reply({ ...intel, assetClass: cls, dataQuality: { provider, category, failures, validationCandles: validationRows?.length ?? null, planCap: limits.plan } });
     }
     if (path === "/api/analysis/smc") {
       // Read-only Smart Money Concepts snapshot. Closed candles and confirmed pivots prevent repainting.

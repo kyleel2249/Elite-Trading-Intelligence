@@ -2,6 +2,7 @@ import { withChartView } from "./chartview.ts";
 import { withFvgLayer } from "./fvg-layer.ts";
 import { withIndicatorOverlay } from "./indicator-overlay.ts";
 import { withSmcLayer } from "./smc-layer.ts";
+import { withSignalIntelLayer } from "./signal-intel-layer.ts";
 import { withExtremeForecastLayer } from "./extreme-forecast.ts";
 import { withPwa } from "./pwa.ts";
 import { withV3AlphaDashboard } from "./v3-alpha-dashboard.ts";
@@ -29,5 +30,5 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 export const MOTION_JS = "";
 
 export function withMotion(page: string): string {
-  return withPwa(withV3AlphaDashboard(withExtremeForecastLayer(withSmcLayer(withIndicatorOverlay(withFvgLayer(withChartView(page.replace("</head>", MOTION_CSS + "</head>"))))))));
+  return withPwa(withV3AlphaDashboard(withExtremeForecastLayer(withSignalIntelLayer(withSmcLayer(withIndicatorOverlay(withFvgLayer(withChartView(page.replace("</head>", MOTION_CSS + "</head>")))))))));
 }
