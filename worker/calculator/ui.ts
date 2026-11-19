@@ -94,17 +94,19 @@ var activeEtiAnalysis=null,activeEtiAnalysisSymbol='',activeEtiAnalysisTimeframe
 function autoAnalysisLevels(){
  var a=activeEtiAnalysis,spot=g('clMarketMode').value==='spot',auto=g('clAutoAnalysis').checked,setup=a&&a.autopilotEligible&&a.setup?a.setup:null;
  ['clEntry','clExit','clStop'].forEach(function(id){g(id).readOnly=auto;});
- if(!auto||!setup)return null;
- if(spot&&setup.direction!=='BUY')return {blocked:'The current qualified ETI setup is SHORT. Spot is long-only; switch to Futures to use this setup.'};
+ if(!auto)return null;
+ if(activeEtiAnalysisSymbol!==$('symbol').value||activeEtiAnalysisTimeframe!==$('interval').value){if(g('clEntry').dataset.etiGenerated==='1'){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});}return {blocked:'Waiting for fresh analysis of the selected pair and timeframe.'};}
+ if(!setup){if(g('clEntry').dataset.etiGenerated==='1'){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});}return null;}
+ if(spot&&setup.direction!=='BUY'){if(g('clEntry').dataset.etiGenerated==='1'){['clEntry','clExit','clStop'].forEach(function(id){g(id).value='';g(id).dataset.etiGenerated='';});}return {blocked:'The current qualified ETI setup is SHORT. Spot is long-only; switch to Futures to use this setup.'};}
  g('clSide').value=setup.direction==='BUY'?'buy':'sell';
- g('clEntry').value=setup.entry;
- g('clStop').value=setup.stopLoss===null?'':setup.stopLoss;
+ g('clEntry').value=setup.entry;g('clEntry').dataset.etiGenerated='1';
+ g('clStop').value=setup.stopLoss===null?'':setup.stopLoss;g('clStop').dataset.etiGenerated='1';
  var strategyTarget=setup.targets&&setup.targets.length?Number(setup.targets[0].price):NaN;
  if(!(strategyTarget>0))return {blocked:'The qualified setup has no valid strategy target. No exit price was invented.'};
  var base=inputs();base.exit=null;
  var targetCalc=computePosition(base),desired=targetCalc.ok?targetCalc.priceForTargetProfit:null,chosen=strategyTarget;
  if(desired!==null&&isFinite(desired)&&desired>0)chosen=setup.direction==='BUY'?Math.min(desired,strategyTarget):Math.max(desired,strategyTarget);
- g('clExit').value=chosen;
+ g('clExit').value=chosen;g('clExit').dataset.etiGenerated='1';
  return {setup:setup,strategyTarget:strategyTarget,desired:desired,chosen:chosen,targetCalc:targetCalc};
 }
 function renderAnalysisPlan(plan){
@@ -160,6 +162,8 @@ g('clInst').addEventListener('change',function(){applyPreset();run();});
 IDS.forEach(function(i){if(i!=='clLev'&&i!=='clInst'){g(i).addEventListener('input',run);g(i).addEventListener('change',run);}});
 g('clMarketMode').addEventListener('change',function(){applyMarketMode();run();});g('clTargetMode').addEventListener('change',function(){applyTargetMode();run();});
 g('clAutoAnalysis').addEventListener('change',function(){run();});
+$('symbol').addEventListener('change',function(){activeEtiAnalysis=null;activeEtiAnalysisSymbol='';activeEtiAnalysisTimeframe='';run();renderAnalysisPlan(null);});
+$('interval').addEventListener('change',function(){activeEtiAnalysis=null;activeEtiAnalysisSymbol='';activeEtiAnalysisTimeframe='';run();renderAnalysisPlan(null);});
 window.addEventListener('eti-liquidity-fvg-updated',function(ev){
  var d=ev&&ev.detail||{},sym=$('symbol').value,tf=$('interval').value;
  if(d.symbol!==sym||d.timeframe!==tf)return;
