@@ -21,6 +21,7 @@ test("calculator script compiles and wires the entry link and the automatic orde
   assert.match(CALC_JS, /autopilotEligible/, "must only auto-fill a qualified ETI strategy setup");
   assert.match(CALC_JS, /No automatic order levels will be proposed/, "must wait rather than invent levels when analysis is not qualified");
   assert.match(CALC_JS, /strategyTarget/, "must compare the requested profit price with the existing strategy target");
+  assert.match(CALC_JS, /analysis candles are stale/, "must reject stale entry analysis");
   for (const id of ["clAutoAnalysis", "clAnalysisStatus", "clAnalysisDetails"]) assert.ok(CALC_HTML.includes('id="' + id + '"'), "missing analysis control #" + id);
   assert.match(CALC_JS, /planStop/, "stop level must be attached as a protective exit");
   assert.match(CALC_JS, /ctPrice/, "chart clicks must set the entry");
