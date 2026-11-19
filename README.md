@@ -395,3 +395,10 @@ Discovery, independent validation, strategy competition, investor-disclosure ana
 ## Wallet and profit management
 - `/wallet/chain`: on-chain wallet dashboard with live native-coin balances, block height and gas read from the node over JSON-RPC (see `docs/CHAIN.md`). The custodial wallet itself needs the Python backend (`BACKEND_URL`).
 - `/profit`: automatic profit management (realized, confirmed, net-of-fees profit only; capital protection; allocation; expense forecast; reports). See `docs/PROFIT_MANAGEMENT.md`.
+
+
+## MetaTrader 5 on Windows
+
+ETI now includes a local Windows MT5 connector and browser terminal in `mt5-bridge/`. It uses the official MetaTrader5 Python package to connect to broker demo or live accounts on the Windows PC. Start with `mt5-bridge/start-mt5-bridge.ps1`, then open `http://127.0.0.1:8765/`. Credentials remain local and live order placement is disabled by default. See [the Windows bridge setup](docs/MT5_WINDOWS_BRIDGE.md).
+
+**Integration boundary:** this release supplies the local terminal/adapter, not yet cloud-to-PC pairing or the remote ETI account selector. Do not expose the local bridge port to the public internet. Cloud pairing requires a signed outbound bridge channel and durable command queue.
