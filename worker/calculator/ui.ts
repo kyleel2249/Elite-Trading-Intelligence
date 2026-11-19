@@ -134,6 +134,7 @@ function fire(id,type){var e=$(id);if(e)e.dispatchEvent(new Event(type,{bubbles:
 function say(t,cls){var m=g('clPlaceMsg');m.className=cls||'clinfo';m.textContent=t;}
 g('clPlace').addEventListener('click',function(){
  if(g('clMarketMode').value==='futures'){say('Futures order execution is not connected to this calculator. Use the dedicated futures order panel; this button only supports the existing spot paper/testnet order flow.','clerr');return;}
+ var selectedVenue=$('orderBroker')?$('orderBroker').value:'eti_paper';if(selectedVenue==='bitget'){say('Calculator shortcut is disabled for Bitget Live to prevent accidental real-money orders. Use the main order ticket only after independently checking the calculated levels.','clerr');return;}
  if(g('clSide').value!=='buy'){say('Spot paper and testnet trading is long-only. Set Direction to Long, or keep this plan for reference.','clerr');return;}
  if(typeof submitOrder!=='function'||!$('orderType')||!$('orderQuantity')){say('The order panel is not available on this page.','clerr');return;}
  var mode=g('clMode').value,live=lastPrice(),entry=n('clEntry'),stop=n('clStop'),exit=n('clExit');
@@ -152,7 +153,7 @@ g('clPlace').addEventListener('click',function(){
  $('orderQuantity').value=units;fire('orderQuantity','input');
  var pl={planStop:stop,planTp1:exit,planTp2:null,planTp3:null};
  Object.keys(pl).forEach(function(k){if($(k))$(k).value=pl[k]===null?'':pl[k];});
- var venue=$('orderBroker')?$('orderBroker').value:'eti_paper';
+ var venue=selectedVenue;
  var lev=n('clLev');
  say('Order ticket filled from this calculation: BUY '+px(units)+' '+$('symbol').value+(mode==='limit'?' limit at '+px(entry)+' (fills automatically when the market reaches it)':' at market (about '+px(entry)+')')+(stop!==null?', stop '+px(stop):'')+(exit!==null?', target '+px(exit):'')+'. Venue: '+venue+'. '+(lev&&lev>1?'Spot orders are unleveraged: this buys the full '+money(units*entry)+' of notional. ':'')+'Confirm in the dialog to submit.','clok');
  submitOrder('buy');
