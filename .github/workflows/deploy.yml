@@ -59,6 +59,13 @@ jobs:
           test -n "$ETI_GAINZ_WEBHOOK_SECRET" || (echo "::error::Set ETI_GAINZ_WEBHOOK_SECRET in GitHub Actions secrets"; exit 1)
           test "${#ETI_GAINZ_WEBHOOK_SECRET}" -ge 32 || (echo "::error::ETI_GAINZ_WEBHOOK_SECRET must contain at least 32 characters"; exit 1)
 
+      - name: Validate ETI paper-autopilot execution token
+        env:
+          ETI_EXECUTION_TOKEN: ${{ secrets.ETI_EXECUTION_TOKEN }}
+        run: |
+          test -n "$ETI_EXECUTION_TOKEN" || (echo "::error::Set ETI_EXECUTION_TOKEN in GitHub Actions secrets; scheduled paper autopilot is fail-closed without it"; exit 1)
+          test "${#ETI_EXECUTION_TOKEN}" -ge 32 || (echo "::error::ETI_EXECUTION_TOKEN must contain at least 32 characters"; exit 1)
+
       - name: Deploy to Cloudflare Workers with versioned secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -88,6 +95,7 @@ jobs:
           const names = [
             "ODDSPAPI_API_KEY", "ETI_SPORTS_PAPER_TOKEN", "ODDS_API_KEY", "BACKEND_URL",
             "INFURA_API_KEY", "INFURA_API_SECRET", "ETI_GAINZ_WEBHOOK_SECRET", "ETI_GAINZ_ADMIN_TOKEN",
+            "ETI_EXECUTION_TOKEN",
             "BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_API_PASSPHRASE",
             "DATAX_INTEGRATION_SECRET",
           ];
