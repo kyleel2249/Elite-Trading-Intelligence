@@ -124,7 +124,7 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/elite-trading-intelligence-eti/schedules")"
           printf '%s' "$response" | node -e '
-            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),crons=(x.result||[]).map(v=>v.cron);
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),crons=(x.result?.schedules||[]).map(v=>v.cron);
               const required=["* * * * *","*/5 * * * *","*/15 * * * *"];
               const missing=required.filter(v=>!crons.includes(v));
               if(x.success!==true||missing.length){console.error("Cloudflare Worker Cron Trigger registration:",JSON.stringify({success:x.success,crons,missing}));process.exit(1);}
