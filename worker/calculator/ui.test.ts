@@ -12,8 +12,10 @@ test("calculator and chart-layout fragments are safe to embed in the dashboard t
 
 test("calculator script compiles and wires the entry link and the automatic order button", () => {
   assert.doesNotThrow(() => new vm.Script(CALC_JS));
-  for (const id of ["clPlace", "clMode", "clLink", "clPlaceMsg"]) assert.ok(CALC_HTML.includes('id="' + id + '"'), "missing #" + id);
+  for (const id of ["clPlace", "clMode", "clLink", "clPlaceMsg", "clMarketMode", "clTargetMode", "clTpPct"]) assert.ok(CALC_HTML.includes('id="' + id + '"'), "missing #" + id);
   assert.match(CALC_JS, /submitOrder\('buy'\)/, "must go through the dashboard order flow (confirmation + safeguards)");
+  assert.match(CALC_JS, /Futures order execution is not connected/, "must not route futures plans into the spot order flow");
+  assert.match(CALC_JS, /targetProfitPct/, "must calculate exits from a target return percentage");
   assert.match(CALC_JS, /planStop/, "stop level must be attached as a protective exit");
   assert.match(CALC_JS, /ctPrice/, "chart clicks must set the entry");
   assert.doesNotMatch(CALC_JS, /fetch\('\/api\/orders/, "the calculator must not bypass the order ticket");
