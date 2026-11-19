@@ -66,6 +66,8 @@ import { withSecurityHeaders } from "./security/headers.ts";
 import { withBybitAccount } from "./bybit/route.ts";
 import { withBitget } from "./bitget/route.ts";
 import { withDataX } from "./datax/integration.ts";
+import { readOperationalConfig, isOperationalIntervalDue } from "./operational-config.ts";
+import { runInvestorMonitor, runMarkToMarket, runPortfolioReconciliation } from "./operational-monitor.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
 
@@ -117,6 +119,20 @@ export default {
         const history = await app.fetch(new Request("https://eti.internal/api/sports/football/sync-history", { method: "POST", headers, body: JSON.stringify({ automatic: true, limit: Math.max(1, Math.min(30, Number(env.ETI_SPORTS_HISTORY_BATCH_SIZE || 5))) }) }), env);
         if (!history.ok) console.error("sports history sync", history.status, (await history.text()).slice(0, 200));
       })().catch(e => console.error("sports autonomous cycle failed", e instanceof Error ? e.message : e)));
+    }
+
+    // One minute-level dispatcher runs all operational monitors without adding Cron Triggers.
+    // MTM is independent of the agent cycle; reconciliation is an internal-ledger self-check,
+    // not a claim that exchange accounts have been reconciled. Investor monitoring is read-only.
+    if (event.cron === MONITOR_CRON) {
+      const operational = readOperationalConfig(env);
+      const monitorNow = Date.now();
+      if (isOperationalIntervalDue(monitorNow, operational.monitoring.mtmIntervalSeconds))
+        ctx.waitUntil(runMarkToMarket(env, monitorNow).catch(e => console.error("ETI MTM monitor failed", e instanceof Error ? e.message : e)));
+      if (isOperationalIntervalDue(monitorNow, operational.monitoring.reconcileIntervalSeconds))
+        ctx.waitUntil(runPortfolioReconciliation(env, monitorNow).catch(e => console.error("ETI internal reconciliation failed", e instanceof Error ? e.message : e)));
+      if (isOperationalIntervalDue(monitorNow, operational.monitoring.investorMonitorIntervalSeconds))
+        ctx.waitUntil(runInvestorMonitor(env, monitorNow).catch(e => console.error("ETI investor monitor failed", e instanceof Error ? e.message : e)));
     }
 
     // The autopilot and universe scanner intentionally share the five-minute cron.
