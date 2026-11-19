@@ -42,7 +42,7 @@ export function forecastScenarios(input:unknown,now=Date.now(),horizons:Forecast
  const volQuality=clamp(1-Math.abs(Math.log(Math.max(sigma,1e-6)/0.01))/5,0,1);
  return [...new Set(horizons)].filter(h=>h in HORIZONS).map(h=>{
   const ms=HORIZONS[h],steps=Math.max(1,ms/interval),drift=mean*steps,vol=sigma*Math.sqrt(steps);
-  const expected=last.close*Math.exp(drift),oneSigma=vol*last.close;
+  const expected=last.close*Math.exp(drift);
   const z=vol>0?drift/vol:0,up=normalCdf(z),down=1-up;
   const neutralBand=Math.min(0.35,Math.max(0.08,vol*0.25));
   const neutral=clamp(normalCdf((neutralBand-drift)/Math.max(vol,1e-9))-normalCdf((-neutralBand-drift)/Math.max(vol,1e-9)),0,1);
