@@ -14,9 +14,11 @@ Defaults:
 All timestamps remain UTC in storage. Investor monitoring snapshots include a localized display timestamp.
 The optional `ETI_OPERATIONAL_CONFIG` single JSON binding is supported for future operator overrides, but is not required.
 
-The scheduled monitor currently updates the ETI internal-paper ledger and checks its own event/fill consistency.
-This is not an exchange-account reconciliation and must not be represented as one. Exchange account verification remains
-separate and requires supported venue credentials and a complete exchange snapshot.
+The scheduled monitor updates the ETI internal-paper ledger and checks its event/fill consistency. When both
+Bybit and Bitget read-only API credentials are configured, the same 120-second reconciliation job also runs the
+existing cross-exchange snapshot comparison against the exchange-testnet ledger and persists the latest result.
+If either venue's credentials are absent, the exchange comparison is explicitly marked as skipped; incomplete or
+stale venue data is never reported as a successful reconciliation.
 
 The current multi-agent scheduled autopilot remains internal-paper only. The freshness policy does not activate live
 execution or bypass the existing execution, authentication, risk, or kill-switch controls.
