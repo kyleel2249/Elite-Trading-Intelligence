@@ -5,7 +5,7 @@
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
 const num=(v)=>Number.isFinite(Number(v))?Number(v):null;
 export function scoreBehavior(events=[],rules={}) {
- const e=events.slice(-200).map(x=>({...x,at:num(x.at)})).filter(x=>x.at!==null);
+ const e=events.slice(-200).map(x=>({...x,at:num(x.at)})).filter(x=>x.at!==null).sort((a,b)=>a.at-b.at);
  const counts={revenge:0,fomo:0,impulsive:0,overtrade:0,riskEscalation:0,planViolation:0,earlyExit:0};
  const findings=[];
  const recentLoss=e.filter(x=>x.type==="trade_close"&&num(x.pnl)<0).slice(-1)[0];
@@ -46,7 +46,7 @@ export function analyzeIndicators(candles=[]) {
  const ema=(values,n)=>{const k=2/(n+1),out=[];let prev=null;for(const v of values){prev=prev===null?v:v*k+prev*(1-k);out.push(prev);}return out;},fastSeries=ema(cl,12),slowSeries=ema(cl,26),macdSeries=fastSeries.map((v,i)=>v-slowSeries[i]),signalSeries=ema(macdSeries,9),macd=macdSeries.at(-1),signal=signalSeries.at(-1),hist=macd-signal;
  const tr=r.slice(-14).map((x,i)=>i===0?x[2]-x[3]:Math.max(x[2]-x[3],Math.abs(x[2]-r[r.length-15+i][4]),Math.abs(x[3]-r[r.length-15+i][4]))),atr=avg(tr);
  const volAvg=avg(r.slice(-20).map(x=>x[5])),vol=r.at(-1)[5],vRatio=volAvg?vol/volAvg:null;
- return {status:"ok",rsi14:Number(rsi.toFixed(2)),macdApprox:Number(macd.toPrecision(8)),macdSignalApprox:Number(signal.toPrecision(8)),macdHistogramApprox:Number(hist.toPrecision(8)),atr14:Number(atr.toPrecision(8)),volumeRatio: vRatio===null?null:Number(vRatio.toFixed(3)),sma20:Number(sma(20).toPrecision(8)),sma50:Number(sma(50).toPrecision(8)),close:cl.at(-1),notes:["Approximate compact calculations for coach display only; ETI's existing indicator modules are authoritative.","This RSI/MACD approximation is not the canonical ETI indicator implementation."]};
+ return {status:"ok",rsi14:Number(rsi.toFixed(2)),macdApprox:Number(macd.toPrecision(8)),macdSignalApprox:Number(signal.toPrecision(8)),macdHistogramApprox:Number(hist.toPrecision(8)),atr14:Number(atr.toPrecision(8)),volumeRatio: vRatio===null?null:Number(vRatio.toFixed(3)),sma20:Number(sma(20).toPrecision(8)),sma50:cl.length>=50?Number(sma(50).toPrecision(8)):null,close:cl.at(-1),notes:["Approximate compact calculations for coach display only; ETI's existing indicator modules are authoritative.","This RSI/MACD approximation is not the canonical ETI indicator implementation."]};
 }
 export function classifyTransaction(tx={}) {
  const amount=num(tx.amount),type=String(tx.type||tx.category||"unknown").toLowerCase(),labels={
