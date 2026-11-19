@@ -86,6 +86,14 @@ export function withAoti<E extends Record<string,any>>(base:{fetch(request:Reque
     return reply({error:"not_found"},404);
    }catch(e){return reply({error:"aoti_operation_failed",detail:e instanceof Error?e.message:"unknown"},502)}
   }
-  return base.fetch(request,env,ctx);
+  const response=await base.fetch(request,env,ctx);
+  if(request.method==="GET"&&(path==="/"||path==="/terminal")&&/^text\/html/i.test(response.headers.get("content-type")||"")){
+   const html=await response.text();
+   if(html.includes('href="/aoti"'))return new Response(html,{status:response.status,statusText:response.statusText,headers:response.headers});
+   const patched=html.replace("</header>",'<a href="/aoti" aria-label="Open Autonomous On-chain Trading Intelligence">AOTI Intelligence ↗</a></header>');
+   const headers=new Headers(response.headers);headers.delete("content-length");
+   return new Response(patched,{status:response.status,statusText:response.statusText,headers});
+  }
+  return response;
  }};
 }
