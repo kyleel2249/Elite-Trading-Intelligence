@@ -15,12 +15,7 @@ export interface ScenarioForecast {
 const HORIZONS:Record<ForecastHorizon,number>={"1h":3600000,"4h":14400000,"1d":86400000};
 const clamp=(x:number,a:number,b:number)=>Math.max(a,Math.min(b,x));
 const finite=(x:unknown):x is number=>typeof x==="number"&&Number.isFinite(x);
-function erf(x:number):number {
- const s=x<0?-1:1; x=Math.abs(x); const t=1/(1+0.3275911*x);
- const y=1-((((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t)*Math.exp(-x*x);
- return s*y;
-}
-const normalCdf=(x:number)=>0.5*(1+erf(x/Math.SQRT2));
+const normalCdf=(x:number)=>1/(1+Math.exp(-1.702*x));
 export function validateForecastCandles(input:unknown):ForecastCandle[]{
  if(!Array.isArray(input)||input.length<20||input.length>500)throw new Error("candles_require_20_to_500");
  const out=input.map((x:any)=>({time:Number(x?.time),open:Number(x?.open),high:Number(x?.high),low:Number(x?.low),close:Number(x?.close),volume:x?.volume==null?undefined:Number(x.volume)}));
