@@ -3,6 +3,7 @@ import { loadMinuteBars } from "./algo/market-inputs.ts";
 import { readOperationalConfig, isMarketDataFresh, formatOperationalTime } from "./operational-config.ts";
 import { ensureInit, reconcile } from "./portfolio/engine.ts";
 import { openStore } from "./portfolio/store.ts";
+import { buildCrossExchangeReconciliation } from "./portfolio/reconciliation.ts";
 
 type MonitorEnv = {
   ETI_PORTFOLIO_DB?: any;
@@ -39,13 +40,33 @@ export async function runMarkToMarket(env: MonitorEnv, now = Date.now()) {
   return { ok: stale.length === 0, marked, stale, at: now };
 }
 
-/** Internal-ledger consistency check; this does not claim to reconcile exchange accounts. */
-export async function runPortfolioReconciliation(env: MonitorEnv, now = Date.now()) {
+/** Reconcile the internal paper ledger and, when both venue credentials exist, verify the Bybit/Bitget exchange snapshot. */
+export async function runPortfolioReconciliation(env: MonitorEnv & Record<string, any>, now = Date.now()) {
   const store = monitorStore(env);
   if (!store) return { ok: false, skipped: "portfolio_storage_unavailable" };
-  const result = await reconcile(env as any, {}, "internal_paper", now);
-  if (!result.ok) console.error("ETI internal portfolio reconciliation found discrepancies", result.problems);
-  return result;
+  const internal = await reconcile(env as any, {}, "internal_paper", now);
+  if (!internal.ok) console.error("ETI internal portfolio reconciliation found discrepancies", internal.problems);
+
+  const hasBybit = !!(env.BYBIT_API_KEY && env.BYBIT_API_SECRET);
+  const hasBitget = !!(
+    (env.BITGET_API_KEY || env.BITGET_KEY || env.BITGET_ACCESS_KEY)
+    && (env.BITGET_API_SECRET || env.BITGET_SECRET_KEY || env.BITGET_SECRET)
+    && (env.BITGET_API_PASSPHRASE || env.BITGET_PASSPHRASE)
+  );
+  let exchange: any = { skipped: "bybit_and_bitget_read_credentials_required" };
+  if (hasBybit && hasBitget) {
+    try {
+      exchange = await buildCrossExchangeReconciliation(env as any, "exchange_testnet", now);
+      if (env.ETI_EXECUTION_LOG) {
+        await env.ETI_EXECUTION_LOG.put("eti:cross-exchange-reconciliation:last", JSON.stringify(exchange), { expirationTtl: 60 * 60 * 24 * 30 });
+      }
+      if (!exchange.ok) console.error("ETI cross-exchange reconciliation is not verified", exchange.problems || []);
+    } catch (e) {
+      exchange = { ok: false, status: "unavailable", error: e instanceof Error ? e.message : "reconciliation_failed" };
+      console.error("ETI cross-exchange reconciliation failed", exchange.error);
+    }
+  }
+  return { ok: internal.ok && (exchange.skipped !== undefined || exchange.ok === true), internal, exchange };
 }
 
 /** Store an investor-level snapshot. It is monitoring/reporting only and cannot place or close orders. */
