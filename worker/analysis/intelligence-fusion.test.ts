@@ -1,0 +1,3 @@
+import test from "node:test";import assert from "node:assert/strict";import {fuseIntelligence} from "./intelligence-fusion.ts";
+test("fuses components and risk controls into flags",()=>{const r=fuseIntelligence({forecast:{confidence:75,directionalBias:"bullish"},whales:{netFlowUsd:-500},signal:{confidence:70},risk:{entryAllowed:false},execution:{estimatedTotalCostBps:10},agent:{approvedAction:"analyze",vetoes:["risk"]}});assert.equal(r.status,"complete");assert.equal(r.riskBlocked,true);assert.ok(r.flags.includes("risk_veto"));assert.ok(r.flags.includes("net_wallet_outflow"));});
+test("partial fusion reports missing components",()=>{const r=fuseIntelligence({forecast:{confidence:60}});assert.equal(r.status,"partial");assert.ok(r.missingInputs.length>=4);});

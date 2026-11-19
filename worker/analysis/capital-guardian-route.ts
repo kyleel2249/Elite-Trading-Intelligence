@@ -1,0 +1,3 @@
+import {evaluateCapitalRisk} from "./capital-guardian.ts";const json=(x:any,s=200)=>new Response(JSON.stringify(x),{status:s,headers:{"content-type":"application/json","cache-control":"no-store"}});
+export function withCapitalGuardian<E>(base:any):any{return {fetch(req:Request,env:E){if(new URL(req.url).pathname==="/api/intelligence/risk")return handleRisk(req);return base.fetch(req,env);}}}
+export function handleRisk(req:Request):Response|Promise<Response>{if(req.method!=="POST")return json({error:"method_not_allowed"},405);return req.json().then((b:any)=>{try{return json({ok:true,risk:evaluateCapitalRisk(b)});}catch(e){return json({error:e instanceof Error?e.message:"risk_input_invalid"},400);}}).catch(()=>json({error:"malformed_json"},400));}

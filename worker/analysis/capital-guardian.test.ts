@@ -1,0 +1,4 @@
+import test from "node:test";import assert from "node:assert/strict";import {evaluateCapitalRisk} from "./capital-guardian.ts";
+test("risk engine caps sizing and approves only within controls",()=>{const r=evaluateCapitalRisk({equity:1000,riskPct:1,stopDistancePct:2,price:50,leverage:2});assert.equal(r.entryAllowed,true);assert.equal(r.riskBudgetUsd,10);assert.ok(r.suggestedNotionalUsd<=500);});
+test("risk vetoes loss drawdown exposure and position violations",()=>{const r=evaluateCapitalRisk({equity:500,dailyLossPct:3,drawdownPct:12,leverage:10,positions:[{notionalUsd:600},{notionalUsd:100}],maxDailyLossPct:2,maxDrawdownPct:10,maxLeverage:3,maxExposurePct:100,maxPositions:1});assert.equal(r.entryAllowed,false);assert.ok(r.reasons.length>=4);});
+test("rejects invalid equity",()=>assert.throws(()=>evaluateCapitalRisk({equity:0}),/positive_equity/));
