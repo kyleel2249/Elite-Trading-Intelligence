@@ -12,7 +12,12 @@ test("an explicit trading symbol and timeframe are enough to request analysis", 
   assert.equal(parseJarvisCommand("BTCUSDT 15m").intent, "analyze");
 });
 
-test("JARVIS recognizes internet research requests", () => {\n  assert.equal(parseJarvisCommand("Search the internet for latest Bitcoin ETF news").intent, "web_search");\n  assert.equal(parseJarvisCommand("Look up current ETH regulation").intent, "web_search");\n});\n\ntest("JARVIS recognizes status, audit and explicit deep-review intents", () => {
+test("JARVIS recognizes internet research requests", () => {
+  assert.equal(parseJarvisCommand("Search the internet for latest Bitcoin ETF news").intent, "web_search");
+  assert.equal(parseJarvisCommand("Look up current ETH regulation").intent, "web_search");
+});
+
+test("JARVIS recognizes status, audit and explicit deep-review intents", () => {
   assert.equal(parseJarvisCommand("Check system health and autopilot").intent, "status");
   assert.equal(parseJarvisCommand("Show performance audit").intent, "audit");
   assert.equal(parseJarvisCommand("Give me a deep review of BTCUSDT 1h").intent, "deep_review");
@@ -80,7 +85,7 @@ test("JARVIS analysis explains missing setup, account veto and verification gaps
 
 test("JARVIS web search normalizes results and rejects non-http URLs", async () => {
   const fakeFetch: any = async (url: string, init: any) => {
-    assert.match(url, /api\\.search\\.brave\\.com/);
+    assert.match(url, /api\.search\.brave\.com/);
     assert.equal(init.headers["x-subscription-token"], "test-key");
     return Response.json({ web: { results: [
       { title: "Bitcoin news", url: "https://example.com/story", description: "A useful <b>summary</b>" },
