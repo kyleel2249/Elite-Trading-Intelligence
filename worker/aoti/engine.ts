@@ -169,7 +169,7 @@ export async function scanAotiPairs(fetcher:typeof fetch=fetch,now=Date.now(),li
 export interface AotiEnv {ETI_PORTFOLIO_DB?:any;ETI_OPERATIONAL_CONFIG?:string}
 export function aotiConfig(env:AotiEnv){
   let root:any={};try{root=JSON.parse(env.ETI_OPERATIONAL_CONFIG||"{}")}catch{}
-  const raw=root?.aoti||{},time=(v:any,fallback:string)=>typeof v==="string"&&/^(?:([01]\\d|2[0-3])):([0-5]\\d)$/.test(v)?v:fallback;
+  const raw=root?.aoti||{},time=(v:any,fallback:string)=>typeof v==="string"&&/^(?:([01]\d|2[0-3])):([0-5]\d)$/.test(v)?v:fallback;
   return {enabled:raw.enabled!==false,maxCandidates:clamp(Number(raw.maxCandidates)||12,1,30),sessionStartUtc:time(raw.sessionStartUtc,"23:00"),sessionEndUtc:time(raw.sessionEndUtc,"07:00")};
 }
 export const isAotiEnabled=(env:AotiEnv)=>aotiConfig(env).enabled;
