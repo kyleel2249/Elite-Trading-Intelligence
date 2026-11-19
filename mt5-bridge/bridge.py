@@ -159,7 +159,7 @@ async function load(){if(!token)throw Error("Enter the bridge token first");cons
 const [s,p,o]=await Promise.all([api("/symbols?search="+encodeURIComponent($("search").value)),api("/positions"),api("/orders")]);
 $("symbols").innerHTML=s.symbols.slice(0,80).map(x=>"<tr><td>"+esc(x.name)+"</td><td>"+(x.bid||"—")+"</td><td>"+(x.ask||"—")+"</td><td>"+(x.spread||"—")+"</td><td>"+x.digits+"</td></tr>").join("");
 $("positions").innerHTML=p.positions.map(x=>"<tr><td>"+x.ticket+"</td><td>"+esc(x.symbol)+"</td><td>"+(x.type===0?"BUY":"SELL")+"</td><td>"+x.volume+"</td><td>"+x.price_open+"</td><td>"+x.sl+"</td><td>"+x.tp+"</td><td>"+money(x.profit,a.currency)+"</td><td><button data-close='"+x.ticket+"'>Close</button></td></tr>").join("")||"<tr><td colspan='9'>No open positions</td></tr>";
-$("orders").innerHTML=o.orders.map(x=>"<tr><td>"+x.ticket+"</td><td>"+x.symbol+"</td><td>"+x.type+"</td><td>"+x.volume_current+"</td><td>"+x.price_open+"</td><td>"+x.sl+"</td><td>"+x.tp+"</td></tr>").join("")||"<tr><td colspan='7'>No pending orders</td></tr>";
+$("orders").innerHTML=o.orders.map(x=>"<tr><td>"+x.ticket+"</td><td>"+esc(x.symbol)+"</td><td>"+x.type+"</td><td>"+x.volume_current+"</td><td>"+x.price_open+"</td><td>"+x.sl+"</td><td>"+x.tp+"</td></tr>").join("")||"<tr><td colspan='7'>No pending orders</td></tr>";
 }
 $("search").onchange=()=>load().catch(e=>msg(e.message,true));
 $("positions").onclick=async e=>{const t=e.target.dataset.close;if(!t)return;if(!confirm("Close position "+t+"?"))return;try{await api("/positions/close",{method:"POST",body:JSON.stringify({ticket:Number(t)})});await load()}catch(err){msg(err.message,true)}};
