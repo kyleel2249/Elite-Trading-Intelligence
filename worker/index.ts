@@ -434,7 +434,7 @@ async function refreshLiquidityFvg(force){
  try{const cr=await fetch('/api/markets/classify?symbol='+encodeURIComponent(sym),{cache:'no-store'});const cd=cr.ok?await cr.json():null;const rawClass=cd&&cd.asset_class||'unknown',assetClass=rawClass==='forex'?'fx':rawClass==='stock'||rawClass==='crypto'?rawClass:'unknown';const provider=info.venue==='bitget'?(info.market==='futures'?'bitget_mix':'bitget'):'bybit',productType=info.productType||'',market=info.market==='futures'?'futures':'spot',category=info.venue==='bitget'?(productType||''):(market==='futures'?(/USD$/.test(sym)&&!/(USDT|USDC)$/.test(sym)?'inverse':'linear'):'spot');const r=await fetch('/api/analysis/liquidity-fvg?symbol='+encodeURIComponent(sym)+'&timeframe='+encodeURIComponent(tf)+'&assetClass='+encodeURIComponent(assetClass)+'&provider='+encodeURIComponent(provider)+'&productType='+encodeURIComponent(productType)+'&market='+encodeURIComponent(market)+'&category='+encodeURIComponent(category),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candles:{[tf]:candles.map(v=>v.map(Number))}}),cache:'no-store'});
  const d=await r.json();if(seq!==etiLiquidityFvgSeq)return;if(!r.ok)throw Error(d.detail||d.error||'HTTP '+r.status);
  if([$('symbol').value,$('interval').value,symVenueOf(),symMkt(),candles.at(-1)&&candles.at(-1)[0]].join('|')!==key)return;
- etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();window.dispatchEvent(new CustomEvent('eti-liquidity-fvg-updated',{detail:{symbol:sym,timeframe:tf,venue:info.venue,market:info.market,analysis:d}}));const lf=$('imLiquidityFvg');if(lf){const z=d.precision&&d.precision.best,band=d.manipulation&&d.manipulation.estimatedReach;lf.textContent='Combined '+(d.autopilotEligible?d.direction:'WAIT')+' · evidence '+d.score+'/100 · manipulation '+(d.manipulation&&d.manipulation.level||'unknown')+' ('+(d.manipulation&&d.manipulation.score||0)+'/100) · likely '+String(d.manipulation&&d.manipulation.likelySide||'none').replace(/_/g,' ')+' liquidity '+(d.manipulation&&d.manipulation.likelySweepPrice?fp(d.manipulation.likelySweepPrice):'—')+(band?' · estimated reach '+fp(band.low)+'–'+fp(band.high):'')+(z?' · '+z.direction+' FVG '+fp(z.zone.lower)+'–'+fp(z.zone.upper)+' · CE '+fp(z.entry.price):' · no qualified FVG')+' · '+(d.blocks||[]).slice(0,2).join('; ');}renderAdvancedLiveChart();drawChart();
+ etiLiquidityFvg=d;etiLiquidityFvgAt=Date.now();renderChartInterpretation();window.dispatchEvent(new CustomEvent('eti-liquidity-fvg-updated',{detail:{symbol:sym,timeframe:tf,venue:info.venue,market:info.market,analysis:d}}));const lf=$('imLiquidityFvg');if(lf){const z=d.precision&&d.precision.best,band=d.manipulation&&d.manipulation.estimatedReach;lf.textContent='Combined '+(d.autopilotEligible?d.direction:'WAIT')+' · evidence '+d.score+'/100 · manipulation '+(d.manipulation&&d.manipulation.level||'unknown')+' ('+(d.manipulation&&d.manipulation.score||0)+'/100) · likely '+String(d.manipulation&&d.manipulation.likelySide||'none').replace(/_/g,' ')+' liquidity '+(d.manipulation&&d.manipulation.likelySweepPrice?fp(d.manipulation.likelySweepPrice):'—')+(band?' · estimated reach '+fp(band.low)+'–'+fp(band.high):'')+(z?' · '+z.direction+' FVG '+fp(z.zone.lower)+'–'+fp(z.zone.upper)+' · CE '+fp(z.entry.price):' · no qualified FVG')+' · '+(d.blocks||[]).slice(0,2).join('; ');}renderAdvancedLiveChart();drawChart();
  }catch(e){if(seq===etiLiquidityFvgSeq){etiLiquidityFvg=null;etiLiquidityFvgAt=Date.now();window.dispatchEvent(new CustomEvent('eti-liquidity-fvg-updated',{detail:{symbol:sym,timeframe:tf,venue:info.venue,market:info.market,analysis:null,error:e instanceof Error?e.message:'Analysis unavailable'}}));renderAdvancedLiveChart();}}
  finally{if(etiLiquidityFvgBusyKey===key)etiLiquidityFvgBusyKey='';}
 }
@@ -1047,12 +1047,12 @@ $('rdTextBtn').onclick=()=>{const t=$('rdText');t.style.display=t.style.display=
 $('symbol').addEventListener('change',()=>{if($('rdMarket').value==='crypto'){$('rdSymbol').value=$('symbol').value;loadReadiness();}});
 $('rdSymbol').value=$('symbol').value;rdSync();loadReadiness();rdTimer=setInterval(loadReadiness,120000);
 function intelRow(a,b){return '<tr><td style="padding:3px 8px 3px 0;color:#94a3b8">'+esc(a)+'</td><td style="padding:3px 0">'+b+'</td></tr>';}
-let intelLastKey="",intelLastAt=0,intelBusy=false,intelLatest=null;
+let intelLastKey="",intelLastAt=0,intelBusy=false,intelRerun=false,intelLatest=null;
 async function runIntel(force){
  const out=$('intelOut'),btn=$('intelRun'),sym=$('symbol').value,strat=$('intelStrategy').value,det=$('intelDetail').value,info=symInfo();
  const market=info.market==='futures'?'futures':'spot',category=info.venue==='bitget'?(info.productType||''):market==='futures'?(/USD$/.test(sym)&&!/(USDT|USDC)$/.test(sym)?'inverse':'linear'):'spot';
  const key=[sym,$('interval').value,strat,det,info.venue,market,category].join('|');
- if(intelBusy)return;
+ if(intelBusy){intelRerun=true;return;}
  if(!force&&key===intelLastKey&&Date.now()-intelLastAt<300000){renderChartInterpretation();return;}
  intelBusy=true;$('intelAutoStatus').textContent='Analysing '+sym+' · '+info.venue+' '+market+'…';out.textContent='Combining technical, multi-timeframe, fundamental, news and sentiment evidence for '+sym+'…';btn.disabled=true;
  try{
@@ -1082,9 +1082,9 @@ async function runIntel(force){
   h+='<div class="muted" style="margin-top:10px">'+esc(j.disclaimer)+'</div>';out.innerHTML=h;$('intelMeta').textContent='Live · '+new Date().toLocaleTimeString();$('intelAutoStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · refreshes on market change / every 5 minutes';
   renderChartInterpretation();
  }catch(e){out.textContent='Central Market Intelligence unavailable: '+e.message;$('intelAutoStatus').textContent='Unavailable · no integrated verdict; do not rely on stale guidance';intelLatest=null;renderChartInterpretation();}
- finally{intelBusy=false;btn.disabled=false;}
+ finally{intelBusy=false;btn.disabled=false;if(intelRerun){intelRerun=false;runIntel(true);}}
 }
-$('intelRun').onclick=()=>runIntel(true);
+$('intelRun').onclick=()=>runIntel(true);$('intelStrategy').addEventListener('change',()=>runIntel(true));$('intelDetail').addEventListener('change',()=>runIntel(true));
 const CHART_SIGNAL_GLOSSARY=[
 ["ORDER","An order annotation or price marker; it may be a manual drawing, strategy level or exchange overlay.","It does not prove an order was submitted, accepted or filled.","Verify authenticated venue, symbol, side, order ID, quantity and exchange status. Without that evidence, treat it as an unverified chart reference."],
 ["ENTRY / CE ENTRY","A planned entry level. CE (consequent encroachment) commonly refers to the 50% midpoint of a Fair Value Gap.","A price level is not an entry trigger; price may never revisit it or the setup may invalidate first.","Wait for the strategy's confirmation, retest and fresh data. Check reward-to-risk after fees and slippage."],
