@@ -115,6 +115,8 @@ function renderAnalysisPlan(plan){
  if(!a){status.textContent='Analysis unavailable: '+(plan&&plan.error||'waiting for market data');details.textContent='No entry or exit has been generated. Check the selected pair, chart timeframe and market-data feed.';return;}
  var best=a.precision&&a.precision.best;
  if(plan&&plan.blocked){status.textContent='WAIT · '+plan.blocked;details.textContent=(a.blocks||[]).join(' · ')||'No qualified setup.';return;}
+ var tfMs=({'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,'4h':14400000,'1d':86400000,'1w':604800000})[a.timeframe]||0,lastClosed=Date.parse(a.dataQuality&&a.dataQuality.lastClosedCandleAt||'');
+ if(tfMs&&(!Number.isFinite(lastClosed)||Date.now()-lastClosed>tfMs*3)){status.textContent='WAIT · analysis candles are stale for '+a.timeframe+'.';details.textContent='No entry or exit will be generated until fresh closed-candle analysis arrives.';return;}
  if(!a.autopilotEligible||!a.setup){
   status.textContent='WAIT · no fully qualified Liquidity-FVG entry on '+a.timeframe+'. No automatic order levels will be proposed.';
   details.textContent=(best?'Best provisional '+best.direction+' FVG '+px(best.zone.lower)+'–'+px(best.zone.upper)+' · candidate entry '+px(best.entry.price)+' · state '+best.state+' · evidence '+best.score+'/100. ':'No precision FVG candidate is currently available. ')+(a.blocks||[]).join(' · ');
