@@ -69,7 +69,7 @@ export function withAoti<E extends Record<string,any>>(base:{fetch(request:Reque
     await ensureAotiSchema(db);
     if(path==="/api/aoti/scan"){
      if(!aotiConfig(env).enabled)return reply({error:"aoti_disabled",message:"AOTI is disabled in ETI_OPERATIONAL_CONFIG.aoti.enabled."},423);
-     const result=await scanAotiPairs(fetch,Date.now(),Number(env.ETI_AOTI_MAX_CANDIDATES||12));await persistAotiScan(db,result);return reply(result);
+     const result=await scanAotiPairs(fetch,Date.now(),aotiConfig(env).maxCandidates);await persistAotiScan(db,result);return reply(result);
     }
     if(path==="/api/aoti/security"){
      const body:any=await request.json().catch(()=>null),candidateId=String(body?.candidateId||""),raw=body?.evidence;
