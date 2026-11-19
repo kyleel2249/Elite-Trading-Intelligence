@@ -168,7 +168,7 @@ export async function scanAotiPairs(fetcher:typeof fetch=fetch,now=Date.now(),li
 }
 export interface AotiEnv {ETI_PORTFOLIO_DB?:any;ETI_AOTI_ENABLED?:string;ETI_AOTI_MAX_CANDIDATES?:string;ETI_AOTI_SESSION_START_UTC?:string;ETI_AOTI_SESSION_END_UTC?:string}
 export function isAotiSessionOpen(now=Date.now(),start="23:00",end="07:00"){
-  const parse=(v:string)=>{const m=/^(?:([01]\\d|2[0-3])):([0-5]\\d)$/.exec(v);return m?Number(m[1])*60+Number(m[2]):-1};
+  const parse=(v:string)=>{const m=/^(?:([01]\d|2[0-3])):([0-5]\d)$/.exec(v);return m?Number(m[1])*60+Number(m[2]):-1};
   const a=parse(start),b=parse(end);if(a<0||b<0)return false;if(a===b)return true;
   const d=new Date(now),minute=d.getUTCHours()*60+d.getUTCMinutes();
   return a<b?minute>=a&&minute<b:minute>=a||minute<b;
