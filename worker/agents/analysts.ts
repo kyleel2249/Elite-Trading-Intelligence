@@ -141,7 +141,7 @@ export function technicalAnalyst(ctx: Ctx): AgentReport {
 
 /** Entry at last close, stop 1.5×ATR(14), targets 1R/2R/3R. Shared by the Commander; the Risk Manager re-derives its own ATR. */
 export function buildProposal(symbol: string, side: "buy" | "sell", cs: Kline[], setup?: { entry: number; stop?: number }): TradeProposal | null {
-  const a = lastFinite(atrSeries(cs, 14)), entry = setup?.entry ?? NaN;
+  const a = lastFinite(atrSeries(cs, 14)), entry = setup?.entry ?? (cs.length ? cs[cs.length - 1][4] : NaN);
   if (!Number.isFinite(a) || a <= 0 || !(entry > 0)) return null;
   const d = side === "buy" ? 1 : -1, dist = setup?.stop !== undefined ? Math.abs(entry - setup.stop) : 1.5 * a, stop = setup?.stop ?? entry - d * dist;
   if (!(dist > 0) || d * (entry - stop) <= 0) return null;
