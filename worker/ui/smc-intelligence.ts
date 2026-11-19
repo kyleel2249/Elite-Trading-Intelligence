@@ -19,10 +19,10 @@ function text(id,v){const e=$(id);if(e)e.textContent=v==null?"—":String(v);}
 function cls(d){return d==="bullish"?"eti-smci-bull":d==="bearish"?"eti-smci-bear":"eti-smci-neutral";}
 function item(a,b){const d=document.createElement("div");d.className="eti-smci-item";const x=document.createElement("b"),y=document.createElement("span");x.textContent=a;y.textContent=b;d.append(x,y);return d;}
 function list(id,rows,empty){const e=$(id);if(!e)return;e.replaceChildren();if(!rows||!rows.length){e.textContent=empty;return;}rows.forEach(r=>e.append(item(r[0],r[1])));}
-function currentSymbol(){return (($("symbol")&&$("symbol").value)||($("tt-symbol")&&$("tt-symbol").value)||"BTCUSDT").trim().toUpperCase();}
+function currentSymbol(){return (($("symbol")&&$("symbol").value)||($("tt-symbol")&&$("tt-symbol").value)||($("sym")&&$("sym").value)||"BTCUSDT").trim().toUpperCase();}
 function timeframe(){const e=$("interval")||$("tt-interval");return e&&e.value||"15m";}
-function provider(){const e=$("symVenue")||$("tt-venue")||$("venue");return e&&/bitget/i.test(e.value)?"bitget":"bybit";}
-function market(){const e=$("symMarket")||$("tt-market");return e&&/future|contract/i.test(e.value)?"futures":"spot";}
+function provider(){const e=$("symVenue")||$("tt-venue")||$("venue")||$("ven");return e&&/bitget/i.test(e.value)?"bitget":"bybit";}
+function market(){const e=$("symMarket")||$("tt-market")||$("mkt");return e&&/future|contract/i.test(e.value)?"futures":"spot";}
 let busy=false,sequence=0;
 async function refresh(){
  if(busy)return;busy=true;const seq=++sequence,btn=$("eti-smci-refresh");if(btn)btn.disabled=true;text("eti-smci-state","Analyzing closed candles · "+currentSymbol()+"…");
@@ -43,11 +43,11 @@ async function refresh(){
  finally{busy=false;if(btn)btn.disabled=false;}
 }
 function mount(){
- const terminal=$("tt-chart"),canvas=$("chart"),stack=$("stack");
- let anchor=terminal||canvas||stack;if(!anchor)return;
+ const terminal=$("tt-chart"),canvas=$("chart"),stack=$("stack"),pro=$("p-struct");
+ let anchor=terminal||canvas||stack||pro;if(!anchor)return;
  if(terminal){const card=terminal.closest(".tt-chart-card")||terminal.parentElement;if(card&&card.parentElement)card.insertAdjacentElement("afterend",root);else terminal.insertAdjacentElement("afterend",root);}
  else if(canvas){const parent=canvas.parentElement||canvas;if(stack&&stack.parentElement===parent)stack.insertAdjacentElement("afterend",root);else parent.insertAdjacentElement("afterend",root);}
- else stack.insertAdjacentElement("afterend",root);
+ else if(stack)stack.insertAdjacentElement("afterend",root);else if(pro)pro.insertAdjacentElement("afterend",root);
 }
 mount();$("eti-smci-refresh")?.addEventListener("click",refresh);$("eti-smci-entry")?.addEventListener("change",refresh);
 ["symbol","tt-symbol","interval","tt-interval","symVenue","symMarket","tt-venue","tt-market"].forEach(id=>$(id)?.addEventListener("change",refresh));
