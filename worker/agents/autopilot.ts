@@ -143,7 +143,7 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
   if (!strategies.length || minStrategyAgreement > strategies.length) return skippedResult(env, disabled, "invalid_strategy_configuration", now);
 
   const store = openStore(env as any, "internal_paper");
-  if (!store) return { ...disabled, skipped: "portfolio_storage_missing" };
+  if (!store) return skippedResult(env, disabled, "portfolio_storage_missing", now);
   await ensureInit(env as any, now);
   const { ledger } = await store.ledgerFast(now);
   const accountBySymbol = (symbol: string) => accountFromLedger(ledger, symbol, now);
