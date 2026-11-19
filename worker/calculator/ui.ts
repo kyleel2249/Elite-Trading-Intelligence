@@ -92,7 +92,7 @@ function inputs(){
 function run(){
  var sizeBy=g('clSizeBy').value,spot=g('clMarketMode').value==='spot',targetMode=g('clTargetMode').value;
  g('clQtyL').style.display=sizeBy==='quantity'?'':'none';g('clMarginL').style.display=sizeBy==='margin'?'':'none';
- g('clTpL').style.display=targetMode==='amount'?'':'none';g('clTpPctL').style.display=targetMode==='pct'?'none':'';
+ g('clTpL').style.display=targetMode==='amount'?'':'none';g('clTpPctL').style.display=targetMode==='pct'?'':'none';
  var r=computePosition(inputs());
  var msgs=g('clMsgs'),k=g('clKpis'),tb=g('clLadder').getElementsByTagName('tbody')[0];msgs.textContent='';k.textContent='';tb.textContent='';g('clUnits').textContent='';
  if(!r.ok){(r.errors||[]).forEach(function(e){msgs.appendChild(msg('clerr',e));});return;}
