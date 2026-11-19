@@ -83,6 +83,22 @@ test("autopilot preflights Commander, confidence and Risk Manager before paper o
   assert.equal(result.liveOrdersAllowed, false);
 });
 
+test("autopilot preserves classified analysis failures for diagnosis without weakening fail-closed behavior", async () => {
+  const kv = memoryKV();
+  const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
+  const app = { fetch: async (req: Request) => {
+    const path = new URL(req.url).pathname;
+    if (path === "/api/agents/analyze") return Response.json({ error: "market_data_unavailable", detail: ["bybit:timeout"], submitsOrder: false }, { status: 503 });
+    if (path === "/api/analysis/liquidity-fvg") return Response.json({ autopilotEligible: false, direction: "WAIT", safety: { submitsOrder: false, bypassesRiskManager: false }, blocks: ["analysis unavailable"] });
+    if (path === "/api/omnisignal") return Response.json({ decision: "DATA_UNRELIABLE", tradeable: false, confidence: 0, validation: { hardFailures: ["market_data_unavailable"] } }, { status: 503 });
+    return Response.json({ ok: false }, { status: 503 });
+  } };
+  const result = await runAgentAutopilotCycle(env, app, 2_250_000);
+  assert.equal(result.submitted, 0);
+  assert.equal(result.outcomes[0].reason, "agent_analysis_unavailable");
+  assert.deepEqual(result.outcomes[0].analysisFailure, { httpStatus: 503, error: "market_data_unavailable", detail: ["bybit:timeout"], dataQuality: null });
+});
+
 test("autopilot runs and records the full council before abstaining on strategy disagreement", async () => {
   const kv = memoryKV();
   const env: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_AGENT_AUTOPILOT_SYMBOLS: "BTCUSDT", ETI_EXECUTION_TOKEN: "master-token", ETI_EXECUTION_LOG: kv, ETI_PAPER_START_BALANCE: "10000" };
