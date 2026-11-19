@@ -57,6 +57,20 @@ test("full analysis yields 12 valid structured reports and never allows live exe
   if (r.decision.action !== "NO_TRADE") assert.equal(r.risk!.approved, true);
 });
 
+test("Commander never creates a last-close proposal without an aligned confirmed liquidity-FVG setup", () => {
+  const r = analyze({ market: market(candles(300, 0.002, 0.004)), integrity, account, now: NOW });
+  const technical = r.reports.find((x) => x.agent === "technical")!;
+  const eligible = technical.evidence.find((e) => e.label === "liquidity_fvg_autopilot_eligible")?.value === true;
+  const direction = technical.evidence.find((e) => e.label === "liquidity_fvg_direction")?.value;
+  const aligned = (r.deliberation.direction === "long" && direction === "BUY") || (r.deliberation.direction === "short" && direction === "SELL");
+  if (!eligible || !aligned) {
+    assert.equal(r.decision.proposal, null);
+    assert.equal(r.decision.action, "NO_TRADE");
+  } else {
+    assert.equal(r.decision.proposal?.entry, technical.evidence.find((e) => e.label === "liquidity_fvg_entry")?.value);
+  }
+});
+
 test("technical agent reads a persistent uptrend as bullish", () => {
   const r = analyze({ market: market(candles(300, 0.002, 0.004)), integrity, account, now: NOW });
   assert.equal(r.reports.find((x) => x.agent === "technical")!.stance, "bullish");

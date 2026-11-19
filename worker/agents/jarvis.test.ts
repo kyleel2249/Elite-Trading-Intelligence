@@ -46,3 +46,34 @@ test("JARVIS help is bounded, authenticated and does not delegate execution", as
   assert.deepEqual(calls, []);
   assert.equal(data.memory.saved, true);
 });
+
+test("JARVIS analysis explains missing setup, account veto and verification gaps", async () => {
+  const env: any = {
+    ETI_EXECUTION_TOKEN: "jarvis-test-token",
+    ETI_EXECUTION_LOG: { async get() { return null; }, async put() {} },
+  };
+  const analysis = {
+    symbol: "BTCUSDT", interval: "1h", generatedAt: "2026-11-19T03:47:33.246Z",
+    decision: { action: "NO_TRADE", rationale: ["Risk veto"], proposal: null },
+    deliberation: { direction: "short", agreement: -0.71 },
+    reports: [{ agent: "technical", summary: "Technical bearish", evidence: [
+      { label: "liquidity_fvg_autopilot_eligible", value: false },
+      { label: "liquidity_fvg_direction", value: "WAIT" },
+    ] }],
+    risk: { vetoes: ["account_state"], checks: [{ id: "account_state", passed: false }, { id: "pnl_state_unknown", passed: false }] },
+    security: {}, dataQuality: { priceCrossCheck: { status: "not_performed" } }, disclosures: [],
+  };
+  const app = withJarvis({ fetch: () => Response.json(analysis) });
+  const res = await app.fetch(new Request("https://eti.test/api/agents/jarvis", {
+    method: "POST", headers: { authorization: "Bearer jarvis-test-token", "content-type": "application/json" },
+    body: JSON.stringify({ message: "Analyse Bitcoin" }),
+  }), env);
+  const data: any = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(data.result.marketRead.entrySetup.status, "not_actionable");
+  assert.equal(data.result.marketRead.entrySetup.entry, null);
+  assert.equal(data.result.marketRead.accountState, "missing_or_unverified");
+  assert.ok(data.result.nextSteps.some((x: string) => x.includes("account equity")));
+  assert.ok(data.result.nextSteps.some((x: string) => x.includes("drawdown")));
+  assert.equal(data.safety.riskVetoPreserved, true);
+});

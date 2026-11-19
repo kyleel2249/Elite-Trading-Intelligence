@@ -129,6 +129,8 @@ export function technicalAnalyst(ctx: Ctx): AgentReport {
     { label: "liquidity_fvg_autopilot_eligible", value: liquidityFvg?.autopilotEligible ?? false, note: liquidityFvg?.eligibilityReasons.join("; ") || liquidityFvg?.blocks.slice(0,3).join("; ") || "Fusion engine unavailable." },
     { label: "liquidity_fvg_direction", value: liquidityFvg?.direction ?? "WAIT" },
     { label: "liquidity_fvg_score", value: liquidityFvg?.score ?? 0 },
+    { label: "liquidity_fvg_entry", value: liquidityFvg?.setup?.entry ?? null },
+    { label: "liquidity_fvg_stop", value: liquidityFvg?.setup?.stopLoss ?? null },
     { label: "liquidity_manipulation_risk", value: liquidityFvg?.manipulation.level ?? "unavailable", note: liquidityFvg?.manipulation.evidence.slice(0,2).join("; ") ?? "No manipulation assessment." },
     { label: "liquidity_nearest_sweep_price", value: liquidityFvg?.manipulation.likelySweepPrice ?? null }];
   if (liquidityFvg?.blocks.length) warnings.push("Liquidity-FVG fusion: " + liquidityFvg.blocks.slice(0,3).join("; "));
@@ -138,12 +140,13 @@ export function technicalAnalyst(ctx: Ctx): AgentReport {
 }
 
 /** Entry at last close, stop 1.5×ATR(14), targets 1R/2R/3R. Shared by the Commander; the Risk Manager re-derives its own ATR. */
-export function buildProposal(symbol: string, side: "buy" | "sell", cs: Kline[]): TradeProposal | null {
-  const a = lastFinite(atrSeries(cs, 14)), entry = cs.length ? cs[cs.length - 1][4] : NaN;
+export function buildProposal(symbol: string, side: "buy" | "sell", cs: Kline[], setup?: { entry: number; stop?: number }): TradeProposal | null {
+  const a = lastFinite(atrSeries(cs, 14)), entry = setup?.entry ?? (cs.length ? cs[cs.length - 1][4] : NaN);
   if (!Number.isFinite(a) || a <= 0 || !(entry > 0)) return null;
-  const dist = 1.5 * a, d = side === "buy" ? 1 : -1, stop = entry - d * dist;
+  const d = side === "buy" ? 1 : -1, dist = setup?.stop !== undefined ? Math.abs(entry - setup.stop) : 1.5 * a, stop = setup?.stop ?? entry - d * dist;
+  if (!(dist > 0) || d * (entry - stop) <= 0) return null;
   if (!(stop > 0)) return null;
-  return { symbol, side, entry, stop, targets: [entry + d * dist, entry + d * 2 * dist, entry + d * 3 * dist], atr: a, stopDistance: dist, basis: "Entry at last close; stop 1.5×ATR(14); targets 1R/2R/3R of stop distance." };
+  return { symbol, side, entry, stop, targets: [entry + d * dist, entry + d * 2 * dist, entry + d * 3 * dist], atr: a, stopDistance: dist, basis: "Entry from confirmed liquidity-sweep + structure + FVG-retest setup; stop from that setup when supplied, otherwise 1.5×ATR(14); targets 1R/2R/3R." };
 }
 
 // ----------------------------------------------------------- 4. FUNDAMENTAL
