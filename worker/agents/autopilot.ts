@@ -197,7 +197,17 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
         liquidityFvg: { eligible: liquidityFvgApproved, direction: liquidityFvg?.direction || "WAIT", score: Number(liquidityFvg?.score || 0), manipulationRisk: liquidityFvg?.manipulation?.level || "unavailable", blocks: liquidityFvg?.blocks || ["Liquidity-FVG analysis unavailable"], httpStatus: liquidityFvgHttpStatus },
       };
       if (!councilApproved) {
-        outcomes.push({ symbol, status: "no_trade", action: councilSummary.action, reason: !preflight.ok ? "agent_analysis_unavailable" : decision?.vetoedBy || "agent_council_or_risk_gate_not_met", council: councilSummary, vetoes: analysis.risk?.vetoes || [], strategies: strategyResults });
+        outcomes.push({
+          symbol, status: "no_trade", action: councilSummary.action,
+          reason: !preflight.ok ? "agent_analysis_unavailable" : decision?.vetoedBy || "agent_council_or_risk_gate_not_met",
+          ...(!preflight.ok ? { analysisFailure: {
+            httpStatus: preflight.status,
+            error: typeof analysis.error === "string" ? analysis.error : "analysis_request_failed",
+            detail: analysis.detail ?? analysis.message ?? null,
+            dataQuality: analysis.dataQuality ?? null,
+          } } : {}),
+          council: councilSummary, vetoes: analysis.risk?.vetoes || [], strategies: strategyResults,
+        });
         continue;
       }
       if (!liquidityFvgApproved) {
