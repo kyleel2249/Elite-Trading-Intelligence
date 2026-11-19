@@ -1,0 +1,4 @@
+import test from "node:test";import assert from "node:assert/strict";import {handleAdvancedSmc} from "./advanced-smc-route.ts";
+test("advanced SMC route rejects non-POST requests",async()=>{const r=await handleAdvancedSmc(new Request("https://eti.test/api/advanced/smc"));assert.equal(r.status,405);});
+test("advanced SMC route validates malformed payloads",async()=>{const r=await handleAdvancedSmc(new Request("https://eti.test/api/advanced/smc",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({timeframes:{}})}));assert.equal(r.status,400);});
+test("advanced SMC route rejects unsupported timeframes",async()=>{const candles=Array.from({length:20},(_,i)=>({time:i+1,open:2,high:3,low:1,close:2}));const r=await handleAdvancedSmc(new Request("https://eti.test/api/advanced/smc",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({timeframes:{"1w":candles}})}));assert.equal(r.status,400);});
