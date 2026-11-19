@@ -38,7 +38,7 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_ALERT_EMAIL` | config | Alert recipient address. |
 | `ETI_ALERT_FROM` | config | Alert sender address (must be allowed by the mail provider). |
 | `ETI_ALERT_MAX_PER_HOUR` | config | Alert rate cap per hour. |
-| `ETI_OPERATIONAL_CONFIG` | config | Optional single JSON override for the central version-controlled operational defaults (monitoring intervals, market-data age, live-order freshness policy and reporting timezone). Not required; defaults are in worker/operational-config.ts. |
+| `ETI_OPERATIONAL_CONFIG` | config | Optional single JSON override for central operational defaults, including monitoring intervals, market-data age, live-order freshness, reporting timezone and nested AOTI settings (`aoti.enabled`, `aoti.maxCandidates`, `aoti.sessionStartUtc`, `aoti.sessionEndUtc`). Not required; defaults are in worker/operational-config.ts and worker/aoti/engine.ts. |
 | `ETI_AGENT_AUTOPILOT_ENABLED` | config | Enables the scheduled multi-agent autopilot. It is restricted to ETI INTERNAL PAPER and never submits live orders. |
 | `ETI_AGENT_AUTOPILOT_CONFIG` | config | Consolidated JSON configuration for symbols, interval, strategy quorum, confidence thresholds, cycle budget and position cap. Used to keep the Worker within the Cloudflare Free 64-variable limit. |
 | `ETI_AGENT_AUTOPILOT_SYMBOLS` | config | Comma-separated symbols evaluated by the agent autopilot. Default: BTCUSDT,ETHUSDT,SOLUSDT. |
@@ -50,10 +50,6 @@ Set secrets with `wrangler secret put NAME` (never in `wrangler.jsonc`, the repo
 | `ETI_AGENT_AUTOPILOT_STRATEGIES` | config | Comma-separated Omnisignal strategies evaluated by the autopilot (default scalp,intraday,swing,position). |
 | `ETI_AGENT_AUTOPILOT_MIN_STRATEGY_AGREEMENT` | config | Minimum number of configured strategies that must produce an aligned tradeable decision (default 3). |
 | `ETI_AGENT_AUTOPILOT_MIN_OMNI_CONFIDENCE` | config | Minimum Omnisignal confidence score on its 0–100 heuristic scale (default 60; not a win probability). |
-| `ETI_AOTI_ENABLED` | config | Enables scheduled multi-chain AOTI discovery and paper-position monitoring; live DEX execution remains disabled. |
-| `ETI_AOTI_MAX_CANDIDATES` | config | Maximum number of newly discovered DEX candidates retained per scan (default 12). |
-| `ETI_AOTI_SESSION_START_UTC` | config | UTC start time for new AOTI paper entries (default 23:00). |
-| `ETI_AOTI_SESSION_END_UTC` | config | UTC end time for new AOTI paper entries (default 07:00). |
 | `ETI_ALPHA_KV` | binding | KV namespace for Global Alpha (falls back to ETI_EXECUTION_LOG). |
 | `ETI_ALPHA_TOKEN` | secret | Token for Global Alpha write routes (falls back to ETI_EXECUTION_TOKEN). |
 | `ETI_ANALYSIS_ALLOW_FULL` | config | `true` lets a Free-plan deployment serve `detail=full` analysis (only if you raised your own CPU limit). Default off. |
