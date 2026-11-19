@@ -302,9 +302,28 @@ jobs:
           grep -q 'bitget-client.js' /tmp/eti-home.html || { echo "::error::Dashboard does not load the Bitget browser adapter"; failed=1; }
           curl --silent --show-error --fail "$base/omnisignal" -o /tmp/eti-omnisignal.html || { echo "::error::Omnisignal HTML is unavailable"; failed=1; }
           grep -q 'bitget-client.js' /tmp/eti-omnisignal.html || { echo "::error::Omnisignal does not load the Bitget browser adapter"; failed=1; }
-          bitget_probe_code="$(curl --silent --show-error -o /tmp/eti-bitget-probe.json -w '%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","engines":["swift","gainz"],"venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")"
-          [ "$bitget_probe_code" = "400" ] && grep -q 'bitget_browser_market_data_required' /tmp/eti-bitget-probe.json || { echo "::error::Omnisignal did not enforce the validated browser-feed boundary for Bitget"; failed=1; }
-          echo "Bitget browser-direct public market feed is wired into the dashboard and Omnisignal; Worker-side public egress is not assumed.";
+          bitget_probe_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","engines":["swift","gainz"],"venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")" || { echo "::error::Could not contact the Bitget Omnisignal route"; failed=1; bitget_probe_response='{}__HTTP_CODE__000'; }
+          bitget_probe_code="${bitget_probe_response##*__HTTP_CODE__}"
+          bitget_probe_body="${bitget_probe_response%__HTTP_CODE__*}"
+          if [ "$bitget_probe_code" = "200" ]; then
+            printf '%s' "$bitget_probe_body" | node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                const x=JSON.parse(s),q=x.dataQuality||{};
+                if(q.venue!=="bitget"||q.market!=="futures"||!x.decision){console.error("Bitget Omnisignal response contract:",JSON.stringify({venue:q.venue,market:q.market,decision:x.decision,error:x.error}));process.exit(1);}
+                console.log("Bitget Worker-proxy Omnisignal returned a valid futures analysis response.");
+              }catch(e){console.error("Invalid Bitget Omnisignal JSON:",e.message);process.exit(1);}});' || failed=1
+          elif [ "$bitget_probe_code" = "503" ]; then
+            printf '%s' "$bitget_probe_body" | node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                const x=JSON.parse(s);
+                if(x.error!=="market_data_unavailable"||x.submitsOrder!==false){console.error("Unexpected Bitget classified outage:",JSON.stringify(x));process.exit(1);}
+                console.log("Bitget Worker proxy reports a classified upstream market-data outage; no order can be submitted from this analytical route.");
+              }catch(e){console.error("Invalid Bitget outage JSON:",e.message);process.exit(1);}});' || failed=1
+          else
+            echo "::error::Bitget Omnisignal returned unexpected HTTP $bitget_probe_code"
+            printf '%s\n' "$bitget_probe_body"
+            failed=1
+          fi
           
           forecast_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }
           forecast_status="${forecast_response##*__HTTP_CODE__}"
@@ -359,6 +378,40 @@ jobs:
           done
           echo "::error::GainzAlgo readiness failed. Verify ETI_GAINZ_WEBHOOK_SECRET, ETI_PORTFOLIO_DB binding and migration 0014."
           exit 1
+
+      - name: Verify scheduled AI autopilot readiness and paper cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
+          ready=0
+          for attempt in $(seq 1 12); do
+            response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
+            if printf '%s' "$response" | node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),scheduler=x.scheduler||{};
+                if(x.enabled===true&&x.ready===true&&x.executionTokenConfigured===true&&x.auditLogConfigured===true&&x.portfolioStorageConfigured===true&&x.durableAuditConfigured===true&&scheduler.cron==="*/5 * * * *"&&scheduler.dispatchRegistered===true&&x.mode==="internal_paper_only"&&x.liveOrdersAllowed===false)process.exit(0);
+                console.error("Autopilot readiness:",JSON.stringify({enabled:x.enabled,ready:x.ready,blockedReasons:x.blockedReasons,executionTokenConfigured:x.executionTokenConfigured,auditLogConfigured:x.auditLogConfigured,portfolioStorageConfigured:x.portfolioStorageConfigured,scheduler,mode:x.mode,liveOrdersAllowed:x.liveOrdersAllowed}));
+                process.exit(1);
+              });
+            '; then ready=1; break; fi
+            sleep 5
+          done
+          test "$ready" -eq 1 || { echo "::error::Scheduled AI autopilot is not ready; inspect /api/agents/autopilot"; exit 1; }
+          echo "Autopilot readiness verified: enabled, token configured, audit and portfolio storage bound, five-minute scheduler registered, paper-only mode."
+          cycle_ok=0
+          for attempt in $(seq 1 72); do
+            response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
+            if printf '%s' "$response" | node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest;
+                const fresh=x.lastCycleFresh===true&&last&&typeof last.at==="string"&&Number.isFinite(Date.parse(last.at))&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
+                if(!fresh)process.exit(1);
+                const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
+                console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
+              });
+            '; then cycle_ok=1; break; fi
+            sleep 5
+          done
+          test "$cycle_ok" -eq 1 || { echo "::error::No fresh scheduled autopilot analysis cycle was observed within six minutes; inspect Worker cron delivery and /api/agents/autopilot"; exit 1; }
 
       - name: Verify live sports service and D1 readiness
         shell: bash
