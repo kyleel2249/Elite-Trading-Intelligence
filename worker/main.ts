@@ -69,6 +69,7 @@ import { withBitget } from "./bitget/route.ts";
 import { withDataX } from "./datax/integration.ts";
 import { readOperationalConfig, isOperationalIntervalDue } from "./operational-config.ts";
 import { runInvestorMonitor, runMarkToMarket, runPortfolioReconciliation } from "./operational-monitor.ts";
+import { runOnchainWatchCycle } from "./analysis/onchain-monitor.ts";
 
 const withMarkets = (next: any) => ({ fetch: (request: Request, env: any) => handleMarketsApi(request, env) ?? next.fetch(request, env) });
 
@@ -151,6 +152,8 @@ export default {
         ctx.waitUntil(runInvestorMonitor(env, monitorNow).catch(e => console.error("ETI investor monitor failed", e instanceof Error ? e.message : e)));
     }
 
+    // Public-address watchlist scans rotate through five due wallets per five-minute tick; D1 deduplicates event hashes.
+    if (event.cron === UNIVERSE_CRON && env.ETI_PORTFOLIO_DB) ctx.waitUntil(runOnchainWatchCycle(env, Date.now()).then(r => { if (r.events || r.failures) console.log("ETI on-chain watch cycle", JSON.stringify(r)); }, e => console.error("ETI on-chain watch cycle failed", e instanceof Error ? e.message : e)));
     // The autopilot and universe scanner intentionally share the five-minute cron.
     // Schedule autopilot BEFORE the universe branch, whose early return handles that tick.
     scheduleAgentAutopilot(event.cron, env, app, ctx);
