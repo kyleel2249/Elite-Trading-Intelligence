@@ -196,7 +196,7 @@ export async function manageAotiPaperPositions(env:AotiEnv,now=Date.now(),fetche
   for(const row of rows){
     try{
       const p=JSON.parse(row.payload_json),chain=row.chain as AotiChain;
-      const result=await json(fetcher,"https://api.dexscreener.com/latest/dex/pairs/"+encodeURIComponent(chain)+"/"+encodeURIComponent(row.address===p.address?p.pairAddress||"":p.pairAddress||""));
+      const result=await json(fetcher,"https://api.dexscreener.com/latest/dex/pairs/"+encodeURIComponent(chain)+"/"+encodeURIComponent(p.pairAddress||""));
       const pair=(result.pairs||[]).find((x:any)=>String(x.pairAddress||"").toLowerCase()===String(p.pairAddress||"").toLowerCase())||(result.pairs||[])[0];
       const price=Number(pair?.priceUsd);if(!(price>0))throw new Error("live_pair_price_unavailable");
       const security=await securityFor(chain,row.address,fetcher,now);
@@ -217,7 +217,7 @@ export async function manageAotiPaperPositions(env:AotiEnv,now=Date.now(),fetche
         const peakRow=await db.prepare("SELECT v FROM eti_aoti_state WHERE k='peak_equity_usd'").first(),peak=Math.max(Number(peakRow?.v??"70"),equity);
         await db.prepare("INSERT INTO eti_aoti_state(k,v,updated_at) VALUES('equity_usd',?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.updated_at").bind(String(equity),now).run();
         await db.prepare("INSERT INTO eti_aoti_state(k,v,updated_at) VALUES('peak_equity_usd',?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.updated_at").bind(String(peak),now).run();
-        if(status==="closed"){const loss=realized<0,old=await db.prepare("SELECT v FROM eti_aoti_state WHERE k='consecutive_losses'").first();const streak=loss?Number(old?.v||0)+1:0;await db.prepare("INSERT INTO eti_aoti_state(k,v,updated_at) VALUES('consecutive_losses',?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.at").bind(String(streak),now).run();}
+        if(status==="closed"){const loss=realized<0,old=await db.prepare("SELECT v FROM eti_aoti_state WHERE k='consecutive_losses'").first();const streak=loss?Number(old?.v||0)+1:0;await db.prepare("INSERT INTO eti_aoti_state(k,v,updated_at) VALUES('consecutive_losses',?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.updated_at").bind(String(streak),now).run();}
         await db.prepare("INSERT OR IGNORE INTO eti_aoti_events(id,event_type,candidate_id,position_id,reason,payload_json,created_at) VALUES(?,?,?,?,?,?,?)").bind("manage:"+row.id+":"+now,eventType,row.candidate_id,row.id,reason,JSON.stringify({price,closePct,realizedPnlUsd:realized,remainingPct:remaining,securityGate:gate.status,liquidityUsd:liquidity}),now).run();
       }
       updated++;if(status==="closed")closed++;
