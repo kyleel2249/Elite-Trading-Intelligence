@@ -42,7 +42,7 @@ export function analyzeIndicators(candles=[]) {
  if(cl.length<30)return {status:"insufficient_data",count:cl.length};
  const avg=a=>a.reduce((s,v)=>s+v,0)/a.length;
  const sma=(n)=>avg(cl.slice(-n));
- const changes=cl.slice(1).map((v,i)=>v-cl[i]),g=changes.slice(-14).filter(v=>v>0),l=changes.slice(-14).filter(v=>v<0).map(v=>-v),rs=avg(g||[0])/(avg(l||[0])||1e-12),rsi=100-100/(1+rs);
+ const changes=cl.slice(1).map((v,i)=>v-cl[i]),g=changes.slice(-14).filter(v=>v>0),l=changes.slice(-14).filter(v=>v<0).map(v=>-v),rs=avg(g.length?g:[0])/(avg(l.length?l:[1])||1e-12),rsi=100-100/(1+rs);
  const fast=avg(cl.slice(-12)),slow=avg(cl.slice(-26)),macd=fast-slow,signal=avg(cl.slice(-9)),hist=macd-signal;
  const tr=r.slice(-14).map((x,i)=>i===0?x[2]-x[3]:Math.max(x[2]-x[3],Math.abs(x[2]-r[r.length-15+i][4]),Math.abs(x[3]-r[r.length-15+i][4]))),atr=avg(tr);
  const volAvg=avg(r.slice(-20).map(x=>x[5])),vol=r.at(-1)[5],vRatio=volAvg?vol/volAvg:null;
