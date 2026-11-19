@@ -52,7 +52,7 @@ Example order:
 
 ## Demo/live policy
 
-The bridge accepts both demo and live MT5 accounts. Demo trading is available with live mode disabled. Real-money orders are rejected by default. To enable them after demo validation, set `ETI_MT5_LIVE_TRADING=true` in the Windows environment before starting the bridge. Keep `ETI_MT5_MAX_RISK_PERCENT` at or below 1.0 unless an independently reviewed risk policy requires otherwise.
+The bridge accepts both demo and live MT5 accounts. Demo trading is available with live mode disabled. Real-money orders are rejected by default. To enable them after demo validation, set `ETI_MT5_LIVE_TRADING=true` in the Windows environment before starting the bridge. Keep `ETI_MT5_MAX_RISK_PERCENT` at or below 0.5 unless an independently reviewed risk policy requires otherwise.
 
 ## Current integration boundary
 
