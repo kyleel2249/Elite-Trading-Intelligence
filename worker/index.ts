@@ -1258,7 +1258,8 @@ export default {
       const raw = await request.text(); if (raw.length > 1000000) return json({ error: "payload_too_large" }, 413);
       let body: any; try { body = JSON.parse(raw); } catch { return json({ error: "invalid_json" }, 400); }
       if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "object_payload_required" }, 400);
-      return json(advancedAssessment({ ...body, evidence: Array.isArray(body.evidence) ? body.evidence.slice(0, 300) : [], transactions: Array.isArray(body.transactions) ? body.transactions.slice(0, 200) : [] }));
+      const candles = Array.isArray(body.candles) ? body.candles.filter((row:any)=>Array.isArray(row)&&row.length>=6&&row.slice(0,6).every((v:any)=>Number.isFinite(Number(v)))).slice(-500).map((row:any)=>row.slice(0,6).map(Number)) : [];
+      return json(advancedAssessment({ ...body, candles, evidence: Array.isArray(body.evidence) ? body.evidence.slice(0, 300) : [], transactions: Array.isArray(body.transactions) ? body.transactions.slice(0, 200) : [] }));
     }
     if (url.pathname === "/api/trading-coach/predictions" && request.method === "GET") {
       const db = _env.ETI_PORTFOLIO_DB; if (!db || typeof db.prepare !== "function") return json({ error: "prediction_storage_unavailable", note: "ETI_PORTFOLIO_DB binding is required for persistent prediction records." }, 503);
