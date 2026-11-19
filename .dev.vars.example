@@ -91,9 +91,13 @@ ETI_PERP_MMR=0.005
 ETI_PERP_MAX_LEVERAGE=50
 ETI_PERP_MIN_NOTIONAL=5
 
-# LLM token management (optional; defaults shown)
+# Anthropic LLM Evidence Reviewer (optional; required for AI-assisted second opinions)
+# Store ANTHROPIC_API_KEY as a Cloudflare Worker secret; never commit the actual key.
+ANTHROPIC_API_KEY=
+ETI_LLM_MODEL=claude-sonnet-5-5
 ETI_LLM_MAX_INPUT_TOKENS=8000
 ETI_LLM_CACHE_TTL=900
+ETI_LLM_MAX_PER_HOUR=20
 
 # Corporate wallets (see docs/WALLETS.md). ETI never holds wallet private keys.
 # External execution is OFF unless this is exactly "enabled". Needs the D1 database (atomic exactly-once claim).

@@ -40,3 +40,15 @@ test("runtime status identifies the actual Worker provider order and paper-only 
   assert.equal(status.autopilot.mode, "internal_paper_only");
   assert.equal(status.autopilot.liveOrdersAllowed, false);
 });
+
+
+test("LLM review readiness requires the provider key, bearer token and KV usage binding", () => {
+  const configured = { ANTHROPIC_API_KEY: "key", ETI_EXECUTION_TOKEN: "token", ETI_EXECUTION_LOG: {} };
+  const ready = agentRuntimeStatus(configured);
+  assert.equal(ready.orchestration.llmAssistance, "configured_advisory_only");
+  assert.equal(ready.orchestration.llmReviewReady, true);
+  assert.deepEqual(ready.orchestration.llmReviewBlockers, []);
+  const missingKv = agentRuntimeStatus({ ANTHROPIC_API_KEY: "key", ETI_EXECUTION_TOKEN: "token" });
+  assert.equal(missingKv.orchestration.llmReviewReady, false);
+  assert.deepEqual(missingKv.orchestration.llmReviewBlockers, ["execution_kv_binding_missing"]);
+});

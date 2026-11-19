@@ -64,7 +64,7 @@ Profiles & methods: `GET /api/intelligence/traders`
 
 ## JARVIS agent intelligence layer
 
-JARVIS provides authenticated natural-language orchestration over the existing twelve-agent council, system/autopilot awareness, performance-audit retrieval, bounded operational memory and optional advisory deep review. It preserves the Commander and Risk Manager decision path and cannot execute live orders. See [docs/JARVIS.md](docs/JARVIS.md) for API usage, advanced capabilities and safety boundaries.
+ETI's optional Anthropic LLM Evidence Reviewer adds an authenticated, metered second opinion to the twelve-agent analysis. The AI Agents dashboard exposes the review and usage controls; configure the Anthropic Worker secret and KV binding as documented in [docs/LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md). Its output is advisory only and cannot change the Commander, Risk Manager or execution path.\n\nJARVIS provides authenticated natural-language orchestration over the existing twelve-agent council, system/autopilot awareness, performance-audit retrieval, bounded operational memory and optional advisory deep review. It preserves the Commander and Risk Manager decision path and cannot execute live orders. See [docs/JARVIS.md](docs/JARVIS.md) for API usage, advanced capabilities and safety boundaries.
 
 ## Key APIs
 

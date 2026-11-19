@@ -40,6 +40,8 @@ export function agentRuntimeStatus(env: RuntimeEnv) {
       agentCount: AGENT_ROSTER.length,
       decisionModel: "deterministic_specialist_modules",
       llmAssistance: env.ANTHROPIC_API_KEY ? "configured_advisory_only" : "not_configured",
+      llmReviewReady: !!env.ANTHROPIC_API_KEY && !!env.ETI_EXECUTION_TOKEN && !!env.ETI_EXECUTION_LOG,
+      llmReviewBlockers: [ ...(!env.ANTHROPIC_API_KEY ? ["anthropic_api_key_missing"] : []), ...(!env.ETI_EXECUTION_TOKEN ? ["execution_token_missing"] : []), ...(!env.ETI_EXECUTION_LOG ? ["execution_kv_binding_missing"] : []) ],
       note: "The specialist council is deterministic. Optional LLM review is advisory and does not replace the risk engine.",
     },
     agents: AGENT_ROSTER.map((agent) => ({
