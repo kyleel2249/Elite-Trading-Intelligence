@@ -1,5 +1,5 @@
 // /api/analysis/* : read-only analytical endpoints. No endpoint here can place orders, and no credential is ever returned.
-import { getMarketData, providerOrder, bitgetProductFor, type Kline, type MarketEnv } from "../market.ts";
+import { getMarketData, providerOrder, bitgetProductFor, BITGET_PRODUCT_TYPES, type BitgetProductType, type Kline, type MarketEnv } from "../market.ts";
 import { runOmnisignal } from "../algo/omnisignal.ts";
 import { analyzeFvgMtf, FVG_RULES } from "./fvg.ts";
 import { analyzeFvgPrecision } from "./fvg-precision.ts";
@@ -83,11 +83,11 @@ export async function cached<T>(key: string, ttlSeconds: number, fn: () => Promi
 }
 
 // ---- data loaders ----
-async function loadCandles(symbol: string, tfs: MtfTimeframe[], env: AnalysisApiEnv, provider?: string | null) {
+async function loadCandles(symbol: string, tfs: MtfTimeframe[], env: AnalysisApiEnv, provider?: string | null, productType?: BitgetProductType) {
   const order = providerOrder(env, provider), candles: Partial<Record<MtfTimeframe, Kline[]>> = {}, failures: Record<string, string> = {}, used = new Set<string>();
   const intervals = [...new Set(tfs.map(t => PROVIDER_INTERVAL[t]))];
   await Promise.all(intervals.map(async iv => {
-    try { const r = await getMarketData("klines", { symbol, interval: iv, limit: iv === "1M" ? 120 : 300 }, order); (candles as any)[iv] = r.data as Kline[]; used.add(r.provider); }
+    try { const r = await getMarketData("klines", { symbol, interval: iv, limit: iv === "1M" ? 120 : 300, ...(productType ? { productType } : {}) }, order); (candles as any)[iv] = r.data as Kline[]; used.add(r.provider); }
     catch (e) { failures[iv] = e instanceof Error ? e.message : "unknown"; }
   }));
   return { candles, failures, providers: [...used] };
@@ -345,6 +345,18 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
           if (!tfs.includes(t as MtfTimeframe)) return reply({ error: "invalid_timeframe", timeframe: t, timeframes: tfs }, 400);
           const sc = sanitizeCandles(v); if (sc.error) return reply({ error: "invalid_candles", timeframe: t, detail: sc.error }, 400);
           by[t as MtfTimeframe] = sc.rows;
+        }
+        // Keep the chart's exact execution-timeframe candles, but enrich the setup with two independently fetched higher timeframes.
+        const missingHigher = tfs.slice(1).filter(h => !by[h]);
+        if (missingHigher.length && cls === "crypto") {
+          const ptRaw = q("productType"), productType = BITGET_PRODUCT_TYPES.includes(ptRaw as BitgetProductType) ? ptRaw as BitgetProductType : undefined;
+          const higher = await loadCandles(symbol, missingHigher, env, q("provider"), productType);
+          by = { ...by, ...higher.candles }; failures = { ...failures, ...higher.failures };
+          provider = "supplied+" + (higher.providers.join("+") || "higher-timeframe-unavailable");
+        } else if (missingHigher.length && (cls === "stock" || cls === "fx")) {
+          const higher = await loadYahooCandles(symbol, cls, missingHigher, fetchFn);
+          by = { ...by, ...higher.candles as typeof by }; failures = { ...failures, ...higher.failures }; notes.push(...higher.notes);
+          provider = "supplied+yahoo-finance";
         }
       } else if (cls === "crypto") {
         const l = await loadCandles(symbol, tfs, env, q("provider")); by = l.candles; failures = l.failures; provider = l.providers.join("+") || "none";
