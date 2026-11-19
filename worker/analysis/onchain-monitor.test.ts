@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scanPublicAddress, isValidPublicAddress } from "./onchain-monitor.ts";
+import { scanPublicAddress, isValidPublicAddress, runOnchainWatchCycle } from "./onchain-monitor.ts";
 
 test("public chain address validator rejects malformed inputs and supports common formats", () => {
   assert.equal(isValidPublicAddress("bitcoin", "1BoatSLRHtKNngkdXEeobR76b53LETtpyT"), true);
@@ -45,3 +45,4 @@ test("EVM scan returns native movement and token transfers when supported", asyn
   assert.equal(r.events[1].amountNative, 2.5);
   assert.equal(r.events[1].nativeAsset, "USDC");
 });
+test("scheduled watch cycle rotates due addresses and records new hashes once",async()=>{const address="1BoatSLRHtKNngkdXEeobR76b53LETtpyT",due=[{owner_id:"u1",watch_id:"w1",chain:"bitcoin",address,label:"wallet A",min_amount_native:0},{owner_id:"u2",watch_id:"w2",chain:"bitcoin",address,label:"wallet B",min_amount_native:0}],inserted=new Set<string>();const fakeDb={prepare(sql:string){let args:any[]=[];return {bind(...a:any[]){args=a;return this;},async all(){return {results:sql.includes("SELECT owner_id,watch_id,chain,address,label,min_amount_native")?due:[]}},async first(){return null;},async run(){if(sql.includes("INSERT OR IGNORE INTO eti_onchain_alerts")){const id=String(args[0]);if(inserted.has(id))return {meta:{changes:0}};inserted.add(id);return {meta:{changes:1}}}return {meta:{changes:1}}}}}};const mockFetch=async()=>new Response(JSON.stringify([{txid:"tx-watch",vin:[{prevout:{scriptpubkey_address:"other",value:100000000}}],vout:[{scriptpubkey_address:address,value:20000000}],status:{confirmed:true,block_time:1700000000}}]),{status:200});const result=await runOnchainWatchCycle({ETI_PORTFOLIO_DB:fakeDb},1000,mockFetch as typeof fetch);assert.equal(result.scanned,2);assert.equal(result.events,2);assert.equal(result.failures,0);assert.equal(inserted.size,2);});
