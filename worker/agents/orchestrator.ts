@@ -43,7 +43,17 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   for (const d of delib.disputes) bus.send("commander", "all", "dispute", d, now);
   let proposal = null as ReturnType<typeof buildProposal>, risk: RiskDecision | null = null;
   if (delib.direction !== "none") {
-    proposal = buildProposal(input.market.symbol, delib.direction === "long" ? "buy" : "sell", input.market.candles);
+    const technical = reports.get("technical");
+    const evidence = technical?.evidence ?? [];
+    const evidenceValue = (label: string) => evidence.find((e) => e.label === label)?.value;
+    const eligible = evidenceValue("liquidity_fvg_autopilot_eligible") === true;
+    const setupDirection = evidenceValue("liquidity_fvg_direction");
+    const setupEntry = evidenceValue("liquidity_fvg_entry");
+    const setupStop = evidenceValue("liquidity_fvg_stop");
+    const expectedSide = delib.direction === "long" ? "BUY" : "SELL";
+    if (eligible && setupDirection === expectedSide && typeof setupEntry === "number" && Number.isFinite(setupEntry)) {
+      proposal = buildProposal(input.market.symbol, delib.direction === "long" ? "buy" : "sell", input.market.candles, { entry: setupEntry, ...(typeof setupStop === "number" && Number.isFinite(setupStop) ? { stop: setupStop } : {}) });
+    }
     if (proposal) {
       bus.send("commander", "risk", "proposal", proposal, now);
       risk = riskManager({ proposal, market: input.market, account: input.account, integrity: input.integrity, security: { severity: security.severity }, hazard: eventHazard(ctx.supplied.news, now), now });
@@ -61,7 +71,7 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   return {
     schema: "eti.analysis/1", id, symbol: m.symbol, interval: m.interval, generatedAt: new Date(now).toISOString(), decision, deliberation: delib,
     reports: AGENT_IDS.map((a) => reports.get(a)!), risk, security, execution, messages: bus.messages,
-    dataQuality: { provider: m.provider, candles: m.candles.length, lastCandleOpen: m.candles.length ? new Date(m.candles[m.candles.length - 1][0]).toISOString() : null, atr14: lastFinite(atrSeries(m.candles, 14)), orderBook: m.depth ? "rest_snapshot" : "unavailable", orderFlow: m.orderFlow ? { status: "available", provider: m.orderFlow.provider, trades: m.orderFlow.tape.trades, tradeAgeMs: m.orderFlow.dataQuality.tradeAgeMs } : "unavailable", priceCrossCheck: m.crossCheck ? m.crossCheck.provider : "not_performed", failures: m.failures },
+    dataQuality: { provider: m.provider, candles: m.candles.length, lastCandleOpen: m.candles.length ? new Date(m.candles[m.candles.length - 1][0]).toISOString() : null, atr14: lastFinite(atrSeries(m.candles, 14)), orderBook: m.depth ? "rest_snapshot" : "unavailable", orderFlow: m.orderFlow ? { status: "available", provider: m.orderFlow.provider, trades: m.orderFlow.tape.trades, tradeAgeMs: m.orderFlow.dataQuality.tradeAgeMs } : "unavailable", priceCrossCheck: m.crossCheck ? { status: "verified", provider: m.crossCheck.provider, price: m.crossCheck.price } : { status: "not_performed", reason: m.failures.cross_check ?? "No independent provider price was available." }, failures: m.failures },
     disclosures: ["Agents are deterministic statistical/rule-based modules, not language models.", "Fundamental, macro, news and on-chain agents analyse only provider data or data supplied with the request; absent data is reported as insufficient, never invented.", "Outputs are analytical and are not financial advice. No outcome, return or win rate is guaranteed."],
   };
 }
