@@ -406,6 +406,7 @@ jobs:
                 console.log("Primary Bybit 15m candles verified for "+process.env.SYMBOL+":",JSON.stringify(hosts.map(h=>({host:h.host,status:h.upstreamStatus,candles:h.candles,freshness:h.freshness}))));
               });
             '
+            if [ "$symbol" = "ETHUSDT" ]; then sleep 11; fi
           done
           cycle_ok=0
           for attempt in $(seq 1 72); do
