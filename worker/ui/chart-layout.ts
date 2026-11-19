@@ -16,6 +16,9 @@ export const CHART_LAYOUT_CSS = `
 .cbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 8px}.cbar select,.cbar button{padding:7px 12px;font-size:13px}
 .scroll{max-height:540px}.scroll th,.scroll td{padding:10px 10px;font-size:13px}
 @media(max-width:700px){.chart.big{height:440px}.paneBox{height:104px}.scroll{max-height:420px}}
+/* Live market chart (#liveChartFrame) is twice the viewport-fit height that #eti-chart-fill in worker/index.ts sets (100vh - 190px, min 720px; mobile 100dvh - 160px, min 560px). Two ID selectors outrank that block, so this is the effective height. Real fullscreen is excluded and still fits the screen. The chart follows through its ResizeObserver. */
+.chart-workspace:not(:fullscreen) #stack>.chart.big#liveChartFrame{height:calc((100vh - 190px) * 2);height:calc((100dvh - 190px) * 2);min-height:1440px;max-height:none}
+@media(max-width:700px){.chart-workspace:not(:fullscreen) #stack>.chart.big#liveChartFrame{height:calc((100dvh - 160px) * 2);min-height:1120px}}
 `;
 
 export const CHART_LAYOUT_JS = `
