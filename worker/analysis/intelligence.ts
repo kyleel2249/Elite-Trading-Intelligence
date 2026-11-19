@@ -10,7 +10,20 @@ export type Verdict = "BULLISH_CASE" | "BEARISH_CASE" | "NEUTRAL" | "CONFLICTED"
 export interface DomainView { domain: "technical" | "fundamental" | "sentiment"; stance: Stance; score: number; confidence: number; baseWeight: number; effectiveWeight: number; status: EngineReport["status"]; summary: string }
 export interface EngineConflict { between: [string, string]; detail: string; severity: "moderate" | "high" }
 export interface Veto { id: string; effect: "avoid" | "cap_bullish" | "downweight" | "warn"; reason: string }
+export interface TradingAdvice {
+  action: "DO_NOT_TRADE" | "WAIT_FOR_BULLISH_CONFIRMATION" | "WAIT_FOR_BEARISH_CONFIRMATION";
+  direction: "bullish" | "bearish" | "none";
+  summary: string;
+  why: string[];
+  entryWhen: string[];
+  doNotEnterWhen: string[];
+  exitWhen: string[];
+  invalidation: string[];
+  exactPriceLevelsAvailable: false;
+  executionAuthority: false;
+}
 export interface IntelligenceBrief {
+  tradingAdvice: TradingAdvice;
   symbol: string; assetClass: AssetClass; strategy: MtfStrategy; generatedAt: string;
   verdict: Verdict; netScore: number; confidence: number; confidenceType: "evidence_quality_not_probability";
   domains: DomainView[]; conflicts: EngineConflict[]; vetoes: Veto[]; coverage: { available: string[]; unavailable: string[] };
@@ -113,7 +126,22 @@ export function centralIntelligence(inp: IntelligenceInput): IntelligenceBrief {
   const names: Record<Verdict, string> = { BULLISH_CASE: "Evidence favours a bullish case", BEARISH_CASE: "Evidence favours a bearish case", NEUTRAL: "No clear directional edge", CONFLICTED: "Evidence conflicts: no direction is justified", AVOID: "Avoid: fundamental red flags outweigh any technical setup", INSUFFICIENT_DATA: "Insufficient evidence to conclude" };
   const sources = reports.flatMap(r => r.r?.sources ?? []);
   const ledger = [...new Map(sources.map(s => [`${s.name}|${s.publishedAt ?? ""}|${s.url ?? ""}`, s])).values()].slice(0, 40);
-  return { symbol: inp.symbol, assetClass: inp.assetClass, strategy: strat, generatedAt: new Date(now).toISOString(), verdict, netScore: round(net, 1), confidence: round(confidence, 0), confidenceType: "evidence_quality_not_probability", domains: views, conflicts, vetoes, coverage,
+  const directional = verdict === "BULLISH_CASE" || verdict === "BEARISH_CASE";
+  const crossDisagrees = cross?.agrees === false;
+  const blocked = !directional || conflicts.some(c => c.severity === "high") || crossDisagrees || vetoes.some(v => v.effect === "avoid");
+  const bias = verdict === "BULLISH_CASE" ? "bullish" : verdict === "BEARISH_CASE" ? "bearish" : "none";
+  const tradingAdvice: TradingAdvice = {
+    action: blocked ? "DO_NOT_TRADE" : bias === "bullish" ? "WAIT_FOR_BULLISH_CONFIRMATION" : "WAIT_FOR_BEARISH_CONFIRMATION",
+    direction: blocked ? "none" : bias,
+    summary: blocked ? "Do not open a new position. Evidence is neutral, conflicted, incomplete, vetoed, or disagrees with an independent signal. Reassess after fresh, closed-candle evidence." : `Evidence favours a ${bias} scenario, but this is not an entry trigger. Wait for setup-timeframe confirmation and a defined, cost-adjusted trade plan.`,
+    why: [`Integrated verdict: ${verdict}; net evidence score ${round(net, 1)} (not a probability of profit).`, `Evidence coverage: ${coverage.available.length}/3 domains available; unavailable: ${coverage.unavailable.join(", ") || "none"}.`, ...conflicts.map(c => c.detail), ...vetoes.map(v => v.reason), ...(crossDisagrees ? [cross!.note] : [])],
+    entryWhen: directional && !blocked ? [`Only consider a ${bias} entry after a completed setup-timeframe candle confirms the same direction; the broad bias alone is not enough.`, "Require a structural BOS/CHoCH trigger, then a controlled retest or retracement into a fresh FVG, order block or level when available.", "Require volume or momentum confirmation and no unresolved higher-timeframe conflict.", "Define entry, structural stop and target before placing an order; require positive net reward-to-risk after fees, spread and slippage.", "Recheck data freshness, spread, liquidity and scheduled-event risk immediately before entry."] : ["No entry is authorised. Wait until missing evidence, conflicts or vetoes are resolved, then rerun analysis.", "Require a completed-candle structure trigger, retest, explicit stop and cost-adjusted target."],
+    doNotEnterWhen: ["The signal relies on an unclosed candle, stale data or a single indicator.", "Higher and lower timeframes materially disagree, or independent engines point in opposite directions.", "Price has moved too far; the retest was missed or remaining reward no longer justifies risk.", "There is no defensible stop, the stop sits inside normal noise, or net reward-to-risk fails the strategy minimum.", "Spread, order-book liquidity, volatility, news blackout or account risk controls fail."],
+    exitWhen: ["Exit at the preplanned stop or confirmed structural invalidation; never widen a stop to avoid a loss.", "Take partial/full profit at preplanned liquidity or structure targets; trail only after continuation is confirmed and strategy rules permit it.", "Reduce or exit if an opposing CHoCH/BOS, strong opposing displacement or confirmed reversal invalidates the thesis.", "Exit or reassess when the setup expires, data becomes stale, or a high-impact event invalidates the assumptions."],
+    invalidation: change.length ? [...change] : ["A confirmed close through the structural swing supporting the thesis; use the actual timeframe swing, not an arbitrary percentage."],
+    exactPriceLevelsAvailable: false, executionAuthority: false,
+  };
+  return { tradingAdvice, symbol: inp.symbol, assetClass: inp.assetClass, strategy: strat, generatedAt: new Date(now).toISOString(), verdict, netScore: round(net, 1), confidence: round(confidence, 0), confidenceType: "evidence_quality_not_probability", domains: views, conflicts, vetoes, coverage,
     headline: `${names[verdict]}${verdict === "BULLISH_CASE" || verdict === "BEARISH_CASE" ? ` (net ${round(net, 0)}, confidence ${round(confidence, 0)})` : ""}`, reasoning, timing, risks: [...new Set(risks)].slice(0, 12), whatWouldChangeThisView: change,
     evidenceLedger: ledger, engineReports: reports.flatMap(r => (r.r ? [r.r] : [])), crossCheck: { omnisignal: cross }, disclaimer: DISCLAIMER, submitsOrder: false, liveExecutionAllowed: false };
 }

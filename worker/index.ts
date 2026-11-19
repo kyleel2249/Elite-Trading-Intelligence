@@ -32,6 +32,7 @@ import { handleTestnetExecute } from "./algo/testnet-api.ts";
 import { handleManage } from "./algo/manage.ts";
 import { handleAlerts } from "./algo/alerts-api.ts";
 import { handleAnalysis } from "./analysis/api.ts";
+import { handlePrecision } from "./precision/api.ts";
 import { handleExtremeForecast } from "./analysis/extremes.ts";
 import type { AnalysisEnv } from "./analysis/fundamental-sources.ts";
 import { handleKnowledge } from "./knowledge.ts";
@@ -1029,6 +1030,11 @@ async function runIntel(){
   let h='<div style="font-size:16px;margin-bottom:6px"><b>'+esc(j.headline)+'</b></div><div class="muted" style="margin-bottom:8px">Generated '+esc(j.generatedAt)+' | evidence quality '+esc(j.confidence)+'/100 (not a probability of profit)</div><table>';
   j.domains.forEach(function(d){h+=intelRow(d.domain,esc(d.stance)+(d.effectiveWeight>0?' | score '+esc(d.score)+' | confidence '+esc(d.confidence)+' | weight '+esc(Math.round(d.effectiveWeight*100))+'%':' | '+esc(d.summary)));});
   h+='</table>';
+  if(j.tradingAdvice){var a=j.tradingAdvice;h+='<section style="margin:12px 0;padding:12px;border:1px solid #34465f;border-radius:10px;background:#0b1422"><div style="font-weight:750;font-size:15px;margin-bottom:6px">ETI Trader Guidance · '+esc(a.action.replace(/_/g,' '))+'</div><div>'+esc(a.summary)+'</div>';
+   function adviceList(title,items){h+='<div style="margin-top:8px"><b>'+title+'</b><ul>'+(items||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';}
+   adviceList('Why ETI recommends this',a.why);adviceList('When to enter',a.entryWhen);adviceList('When NOT to enter',a.doNotEnterWhen);adviceList('When to exit / manage',a.exitWhen);adviceList('Invalidation',a.invalidation);
+   h+='<div class="muted">Read-only guidance. This layer does not invent exact prices or submit orders; use a supported trade planner for entry/SL/TP and pass all execution risk checks.</div></section>';
+  }
   if(j.vetoes.length)h+='<div style="margin-top:8px"><b>Vetoes and safeguards</b><ul>'+j.vetoes.map(function(v){return '<li>['+esc(v.effect)+'] '+esc(v.reason)+'</li>';}).join('')+'</ul></div>';
   if(j.conflicts.length)h+='<div style="margin-top:8px"><b>Engine conflicts (not averaged away)</b><ul>'+j.conflicts.map(function(c){return '<li>'+esc(c.detail)+'</li>';}).join('')+'</ul></div>';
   if(j.timing.length)h+='<div style="margin-top:8px"><b>Timeframe read</b><ul>'+j.timing.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
@@ -1178,6 +1184,7 @@ export default {
     if (url.pathname === "/omnisignal" || url.pathname === "/omnisignal.js") {
       return handleOmniUi(request) as Response;
     }
+    if (url.pathname.startsWith("/api/precision/")) return handlePrecision(request, _env as any);
     if (url.pathname === "/api/analysis/extremes") return handleExtremeForecast(request, _env);
     if (url.pathname === "/api/analysis" || url.pathname.startsWith("/api/analysis/")) {
       return handleAnalysis(request, _env);
