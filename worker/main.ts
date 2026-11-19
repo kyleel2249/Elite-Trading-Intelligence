@@ -156,7 +156,7 @@ export default {
     }
 
     // AOTI scans supported DEX networks and refreshes paper positions on the five-minute universe cadence.
-    // The module is disabled unless ETI_AOTI_ENABLED=true and always keeps live DEX signing disabled.
+    // AOTI follows ETI_OPERATIONAL_CONFIG.aoti.enabled (default on) and always keeps live DEX signing disabled.
     if (event.cron === UNIVERSE_CRON && isAotiEnabled(env) && env.ETI_PORTFOLIO_DB) ctx.waitUntil((async () => {
       const [discovery, positions] = await Promise.allSettled([runAotiCycle(env, Date.now()), manageAotiPaperPositions(env, Date.now())]);
       const result: any = { discovery: discovery.status === "fulfilled" ? discovery.value : { error: String(discovery.reason) }, positions: positions.status === "fulfilled" ? positions.value : { error: String(positions.reason) } };
