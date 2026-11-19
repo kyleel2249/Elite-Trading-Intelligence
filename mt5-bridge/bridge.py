@@ -238,6 +238,9 @@ def place_order(body: OrderRequest, _: None = Depends(auth)) -> dict:
     validate_volume(info, body.volume)
     is_buy = body.side == "buy"
     market = body.order_type == "market"
+    pending_sides = {"buy_limit": "buy", "buy_stop": "buy", "sell_limit": "sell", "sell_stop": "sell"}
+    if not market and pending_sides[body.order_type] != body.side:
+        raise HTTPException(400, "Order side does not match pending order type")
     order_type = (package.ORDER_TYPE_BUY if is_buy else package.ORDER_TYPE_SELL) if market else {
         "buy_limit": package.ORDER_TYPE_BUY_LIMIT, "sell_limit": package.ORDER_TYPE_SELL_LIMIT,
         "buy_stop": package.ORDER_TYPE_BUY_STOP, "sell_stop": package.ORDER_TYPE_SELL_STOP,
@@ -245,6 +248,14 @@ def place_order(body: OrderRequest, _: None = Depends(auth)) -> dict:
     price = (tick_data.ask if is_buy else tick_data.bid) if market else body.price
     if price is None:
         raise HTTPException(400, "Pending orders require a limit/stop price")
+    if body.order_type == "buy_limit" and price >= tick_data.ask:
+        raise HTTPException(400, "Buy Limit price must be below the current ask")
+    if body.order_type == "buy_stop" and price <= tick_data.ask:
+        raise HTTPException(400, "Buy Stop price must be above the current ask")
+    if body.order_type == "sell_limit" and price <= tick_data.bid:
+        raise HTTPException(400, "Sell Limit price must be above the current bid")
+    if body.order_type == "sell_stop" and price >= tick_data.bid:
+        raise HTTPException(400, "Sell Stop price must be below the current bid")
     if body.sl is None or body.tp is None:
         raise HTTPException(400, "ETI requires explicit Stop Loss and Take Profit")
     if is_buy and not (body.sl < price < body.tp):
@@ -252,17 +263,22 @@ def place_order(body: OrderRequest, _: None = Depends(auth)) -> dict:
     if not is_buy and not (body.tp < price < body.sl):
         raise HTTPException(400, "Sell order requires TP < price < SL")
     # Estimate cash risk using broker-calculated P/L for the stop distance.
-    pnl = package.order_calc_profit(order_type, body.symbol, body.volume, price, body.sl)
+    calc_type = package.ORDER_TYPE_BUY if is_buy else package.ORDER_TYPE_SELL
+    pnl = package.order_calc_profit(calc_type, body.symbol, body.volume, price, body.sl)
     if pnl is None or abs(float(pnl)) <= 0:
         raise HTTPException(400, "Unable to calculate stop-loss risk; order rejected")
     risk_pct = abs(float(pnl)) / float(account_info.equity) * 100 if account_info.equity else 999
     if risk_pct > _MAX_RISK_PERCENT:
         raise HTTPException(403, f"Risk {risk_pct:.3f}% exceeds bridge limit {_MAX_RISK_PERCENT:.3f}%")
+    filling = package.ORDER_FILLING_RETURN if not market else (
+        package.ORDER_FILLING_IOC if info.filling_mode & package.SYMBOL_FILLING_IOC
+        else package.ORDER_FILLING_FOK
+    )
     request = {"action": package.TRADE_ACTION_DEAL if market else package.TRADE_ACTION_PENDING,
                "symbol": body.symbol, "volume": body.volume, "type": order_type, "price": float(price),
                "sl": body.sl, "tp": body.tp, "deviation": body.deviation,
                "magic": 611050, "comment": body.comment,
-               "type_time": package.ORDER_TIME_GTC, "type_filling": info.filling_mode}
+               "type_time": package.ORDER_TIME_GTC, "type_filling": filling}
     checked = package.order_check(request)
     if checked is None or checked.retcode != 0:
         raise HTTPException(400, {"message": "Broker order_check rejected the request", "check": plain(checked)})
