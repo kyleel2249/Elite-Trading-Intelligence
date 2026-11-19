@@ -1,5 +1,5 @@
 import { authenticate } from "../auth/session.ts";
-import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, manageAotiPosition, type AotiEnv, type AotiPosition } from "./engine.ts";
+import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, scoreAotiCandidate, type AotiEnv, type AotiPosition } from "./engine.ts";
 import { AOTI_PAGE } from "./ui.ts";
 const H={"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"};
 const reply=(v:unknown,status=200)=>new Response(JSON.stringify(v),{status,headers:H});
@@ -37,7 +37,7 @@ async function openPaper(req:Request,env:any){
  if(!risk.allowed)return reply({error:"risk_gate_blocked",risk},409);
  const now=Date.now(),id="aoti_"+crypto.randomUUID().replace(/-/g,""),qty=risk.notionalUsd/c.priceUsd;
  const position:AotiPosition={id,candidateId,chain:c.chain,address:c.address,symbol:c.symbol,entryPrice:c.priceUsd,quantity:qty,notionalUsd:risk.notionalUsd,openedAt:now,remainingPct:100,realizedPnlUsd:0,status:"open",lastPrice:c.priceUsd};
- await db.prepare("INSERT INTO eti_aoti_positions(id,candidate_id,chain,address,symbol,status,entry_price,last_price,quantity,notional_usd,remaining_pct,realized_pnl_usd,opened_at,payload_json) VALUES(?,?,?,?,?,'open',?,?,?,?,100,0,?,?)").bind(id,candidateId,c.chain,c.address,c.symbol,c.priceUsd,c.priceUsd,qty,risk.notionalUsd,now,JSON.stringify({...position,takeProfit2xDone:false,takeProfit4xDone:false,highWaterPrice:c.priceUsd})).run();
+ await db.prepare("INSERT INTO eti_aoti_positions(id,candidate_id,chain,address,symbol,status,entry_price,last_price,quantity,notional_usd,remaining_pct,realized_pnl_usd,opened_at,payload_json) VALUES(?,?,?,?,?,'open',?,?,?,?,100,0,?,?)").bind(id,candidateId,c.chain,c.address,c.symbol,c.priceUsd,c.priceUsd,qty,risk.notionalUsd,now,JSON.stringify({...position,pairAddress:c.pairAddress,initialLiquidityUsd:c.liquidityUsd,takeProfit2xDone:false,takeProfit4xDone:false,highWaterPrice:c.priceUsd})).run();
  await db.prepare("INSERT INTO eti_aoti_events(id,event_type,candidate_id,position_id,reason,payload_json,created_at) VALUES(?,?,?,?,?,?,?)").bind("open:"+id,"PAPER_ENTER",candidateId,id,"all_market_and_security_gates_passed",JSON.stringify({risk,entryPrice:c.priceUsd,quantity:qty,notionalUsd:risk.notionalUsd}),now).run();
  return reply({ok:true,mode:"paper_only",position,risk,liveExecutionAllowed:false},201);
 }
@@ -69,6 +69,16 @@ export function withAoti<E extends Record<string,any>>(base:{fetch(request:Reque
     if(path==="/api/aoti/scan"){
      if(env.ETI_AOTI_ENABLED!=="true")return reply({error:"aoti_disabled",message:"Set ETI_AOTI_ENABLED=true to enable scheduled discovery."},423);
      const result=await scanAotiPairs(fetch,Date.now(),Number(env.ETI_AOTI_MAX_CANDIDATES||12));await persistAotiScan(db,result);return reply(result);
+    }
+    if(path==="/api/aoti/security"){
+     const body=await request.json().catch(()=>null),candidateId=String(body?.candidateId||""),raw=body?.evidence;
+     if(!candidateId||!raw||typeof raw!=="object")return reply({error:"candidate_and_evidence_required"},400);
+     const row=await db.prepare("SELECT payload_json FROM eti_aoti_candidates WHERE id=?").bind(candidateId).first();if(!row)return reply({error:"candidate_not_found"},404);
+     const c=JSON.parse(row.payload_json),bool=(v:any)=>typeof v==="boolean"?v:null,num=(v:any)=>Number.isFinite(Number(v))?Number(v):null;
+     const security={holderCount:num(raw.holderCount),mintAuthorityRevoked:bool(raw.mintAuthorityRevoked),freezeAuthorityRevoked:bool(raw.freezeAuthorityRevoked),lpLocked:bool(raw.lpLocked),lpLockDays:num(raw.lpLockDays),developerSupplyPct:num(raw.developerSupplyPct),top10SupplyPct:num(raw.top10SupplyPct),sellSimulationPassed:bool(raw.sellSimulationPassed),bundledLaunchClear:bool(raw.bundledLaunchClear),provider:"operator_attested",checkedAt:Date.now(),risks:Array.isArray(raw.risks)?raw.risks.map((x:any)=>String(x).slice(0,120)).slice(0,20):[]};
+     const next=scoreAotiCandidate({...c,security},Date.now());await db.prepare("UPDATE eti_aoti_candidates SET score=?,security_gate=?,eligible=?,payload_json=?,observed_at=? WHERE id=?").bind(next.score,next.securityGate,next.eligible?1:0,JSON.stringify(next),next.observedAt,candidateId).run();
+     await db.prepare("INSERT INTO eti_aoti_events(id,event_type,candidate_id,reason,payload_json,created_at) VALUES(?,?,?,?,?,?)").bind("security:"+candidateId+":"+next.observedAt,"SECURITY_EVIDENCE",candidateId,"operator_attested_security_review",JSON.stringify({securityGate:next.securityGate,risks:security.risks}),next.observedAt).run();
+     return reply({ok:true,securityGate:next.securityGate,eligible:next.eligible,reasons:next.reasons});
     }
     if(path==="/api/aoti/paper/open")return openPaper(request,env);
     if(path==="/api/aoti/paper/close")return closePaper(request,env);
