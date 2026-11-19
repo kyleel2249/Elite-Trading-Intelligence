@@ -10,6 +10,11 @@ import { ensureInit } from "../portfolio/engine.ts";
 import { openStore } from "../portfolio/store.ts";
 import type { ExecutionEnv } from "../execution.ts";
 
+/** Agreement is signed by direction; strength is its absolute magnitude. */
+export function agreementMagnitudeMeetsThreshold(agreement: number, minimum: number): boolean {
+  return Number.isFinite(agreement) && Number.isFinite(minimum) && minimum >= 0 && Math.abs(agreement) >= minimum;
+}
+
 export interface AgentAutopilotEnv extends ExecutionEnv {
   ETI_PORTFOLIO_DB?: any;
   ETI_AGENT_AUTOPILOT_ENABLED?: string;
@@ -161,7 +166,7 @@ export async function runAgentAutopilotCycle(env: AgentAutopilotEnv, app: App, n
       const analysis: any = await preflight.json().catch(() => ({}));
       const decision = analysis.decision, confidence = Number(decision?.confidence || 0), agreement = Number(decision?.consensus?.agreement || 0);
       const councilApproved = preflight.ok && decision?.action === expectedAction
-        && confidence >= minConfidence && agreement >= minAgreement
+        && confidence >= minConfidence && agreementMagnitudeMeetsThreshold(agreement, minAgreement)
         && analysis.risk?.approved === true && !["high", "critical"].includes(analysis.security?.severity);
       const councilDiagnostics = {
         rationale: decision?.rationale || [],
