@@ -83,7 +83,7 @@ export async function cached<T>(key: string, ttlSeconds: number, fn: () => Promi
 }
 
 // ---- data loaders ----
-async function loadCandles(symbol: string, tfs: MtfTimeframe[], env: AnalysisApiEnv, provider?: string | null, productType?: BitgetProductType, market?: "spot" | "futures", category?: string) {
+async function loadCandles(symbol: string, tfs: MtfTimeframe[], env: AnalysisApiEnv, provider?: string | null, productType?: BitgetProductType, market?: "spot" | "futures", category?: "spot" | "linear" | "inverse") {
   const order = providerOrder(env, provider), candles: Partial<Record<MtfTimeframe, Kline[]>> = {}, failures: Record<string, string> = {}, used = new Set<string>();
   const intervals = [...new Set(tfs.map(t => PROVIDER_INTERVAL[t]))];
   await Promise.all(intervals.map(async iv => {
