@@ -62,7 +62,7 @@ export function finalize(a: { id: string; deliberation: Deliberation; proposal: 
   let action: FinalDecision["action"] = "NO_TRADE", vetoedBy: AgentId | null = null;
   if (d.direction !== "none") {
     const candidate = d.direction === "long" ? "BUY" : "SELL";
-    if (!a.proposal || !a.risk) rationale.push(`Consensus favoured ${candidate} but no valid proposal could be built (ATR unavailable); standing aside.`);
+    if (!a.proposal || !a.risk) rationale.push(`Consensus favoured ${candidate}, but no confirmed actionable liquidity-sweep + structure + FVG-retest entry aligned with that direction was available; standing aside.`);
     else if (!a.risk.approved) {
       vetoedBy = "risk"; rationale.push(`Risk Manager VETO of ${candidate}: ${a.risk.vetoes.join(", ")}. The veto is binding.`);
       disputes.push({ topic: "risk_veto", between: ["commander", "risk"], positions: [{ agent: "commander", stance: d.direction === "long" ? "bullish" : "bearish", confidence: d.confidence, reason: `Consensus favoured ${candidate} (agreement ${d.agreement.toFixed(2)}).` }, { agent: "risk", stance: "neutral", confidence: 1, reason: a.risk.checks.filter((c) => !c.passed && c.severity === "veto").map((c) => c.detail).join(" ") }], explanation: "The analysts' directional consensus conflicts with the independent risk review.", resolution: "Risk veto prevails; no trade." });
