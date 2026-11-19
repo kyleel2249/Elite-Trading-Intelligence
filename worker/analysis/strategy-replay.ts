@@ -10,6 +10,6 @@ export function replayEmaStrategy(input:unknown,opts:{fast?:number;slow?:number;
   if(position!==0){const exitPrice=candles[i].close*(position>0?1-slip:1+slip),gross=position*(exitPrice-entry)/entry,net=gross-2*fee;equity*=Math.max(0,1+net);trades.push({entryTime,exitTime:candles[i].time,side:position>0?"long":"short",returnPct:net*100});peak=Math.max(peak,equity);maxDD=Math.max(maxDD,1-equity/peak);}
   position=next;entry=candles[i].close*(position>0?1+slip:1-slip);entryTime=candles[i].time;
  }
- const wins=trades.filter(t=>t.returnPct>0),losses=trades.filter(t=>t.returnPct<=0),grossWin=wins.reduce((a,t)=>a+t.returnPct,0),grossLoss=Math.abs(losses.reduce((a,t)=>a+t.returnPct,0);
+ const wins=trades.filter(t=>t.returnPct>0),losses=trades.filter(t=>t.returnPct<=0),grossWin=wins.reduce((a,t)=>a+t.returnPct,0),grossLoss=Math.abs(losses.reduce((a,t)=>a+t.returnPct,0));
  return {method:"EMA crossover replay",periods:{fast,slow},assumptions:{feeBps:fee*10000,slippageBps:slip*10000,startingEquity:1},trades:trades.length,wins:wins.length,losses:losses.length,winRatePct:trades.length?wins.length/trades.length*100:0,netReturnPct:(equity-1)*100,profitFactor:grossLoss?grossWin/grossLoss:grossWin>0?null:0,maxDrawdownPct:maxDD*100,averageTradePct:trades.length?trades.reduce((a,t)=>a+t.returnPct,0)/trades.length:0,openPosition:position?"unclosed_"+(position>0?"long":"short"):"flat",closedTrades:trades.slice(-200)};
 }
