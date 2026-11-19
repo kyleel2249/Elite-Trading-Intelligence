@@ -408,20 +408,22 @@ jobs:
             '
             if [ "$symbol" = "ETHUSDT" ]; then sleep 11; fi
           done
+          cycle_not_before="$(date -u +%s)"
           cycle_ok=0
           for attempt in $(seq 1 72); do
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
-            if printf '%s' "$response" | node -e '
+            if printf '%s' "$response" | CYCLE_NOT_BEFORE="$cycle_not_before" node -e '
               let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest;
-                const fresh=x.lastCycleFresh===true&&last&&typeof last.at==="string"&&Number.isFinite(Date.parse(last.at))&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
+                const cycleAt=last&&typeof last.at==="string"?Date.parse(last.at):NaN;
+                const fresh=x.lastCycleFresh===true&&Number.isFinite(cycleAt)&&cycleAt>=Number(process.env.CYCLE_NOT_BEFORE)*1000&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
                 if(!fresh)process.exit(1);
                 const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
-                console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
+                console.log("Post-deployment scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
               });
             '; then cycle_ok=1; break; fi
             sleep 5
           done
-          test "$cycle_ok" -eq 1 || { echo "::error::No fresh scheduled autopilot analysis cycle was observed within six minutes; inspect Worker cron delivery and /api/agents/autopilot"; exit 1; }
+          test "$cycle_ok" -eq 1 || { echo "::error::No post-deployment scheduled autopilot analysis cycle was observed within six minutes; inspect Worker cron delivery and /api/agents/autopilot"; exit 1; }
 
       - name: Verify live sports service and D1 readiness
         shell: bash
