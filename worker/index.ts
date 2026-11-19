@@ -1224,8 +1224,9 @@ export default {
     if (url.pathname === "/trading-coach" && request.method === "GET") return new Response(tradingCoachPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
     if (url.pathname === "/api/trading-coach/assess") {
       if (request.method !== "POST") return json({ error: "method_not_allowed", note: "Use POST with an evidence payload." }, 405);
-      const length = Number(request.headers.get("content-length") || 0); if (length > 1000000) return json({ error: "payload_too_large" }, 413);
-      let body: any; try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = rateLimited(ip, 2, Date.now(), 12); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
+      const raw = await request.text(); if (raw.length > 1000000) return json({ error: "payload_too_large" }, 413);
+      let body: any; try { body = JSON.parse(raw); } catch { return json({ error: "invalid_json" }, 400); }
       if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "object_payload_required" }, 400);
       const candles = Array.isArray(body.candles) ? body.candles.slice(-500) : [];
       const events = Array.isArray(body.events) ? body.events.slice(-200) : [];
@@ -1235,7 +1236,9 @@ export default {
     }
     if (url.pathname === "/api/trading-coach/transactions") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      let body: any; try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      const ip = request.headers.get("cf-connecting-ip") || "unknown", wait = rateLimited(ip, 1, Date.now(), 20); if (wait !== null) return json({ error: "rate_limited", retryAfterSeconds: wait }, 429);
+      const raw = await request.text(); if (raw.length > 1000000) return json({ error: "payload_too_large" }, 413);
+      let body: any; try { body = JSON.parse(raw); } catch { return json({ error: "invalid_json" }, 400); }
       if (!Array.isArray(body?.transactions)) return json({ error: "transactions_array_required" }, 400);
       return json({ count: Math.min(body.transactions.length, 200), records: body.transactions.slice(-200).map(classifyTransaction), note: "Classifications are descriptive. Wallet labels and entity attribution require independently verifiable evidence." });
     }
