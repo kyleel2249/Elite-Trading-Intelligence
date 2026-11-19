@@ -20,3 +20,9 @@ separate and requires supported venue credentials and a complete exchange snapsh
 
 The current multi-agent scheduled autopilot remains internal-paper only. The freshness policy does not activate live
 execution or bypass the existing execution, authentication, risk, or kill-switch controls.
+
+Bitget live-order freshness gate: when fresh data is required, the order request must include
+`referencePriceTimestamp` in Unix milliseconds (Unix seconds are also accepted). The caller must
+populate it from the original exchange market-data event timestamp, not from the time the order is
+constructed. The Worker rejects missing, future, or older-than-configured timestamps before contacting
+Bitget. This timestamp check is a freshness assertion, not cryptographic proof of the upstream feed.
