@@ -356,7 +356,7 @@ export async function handleAnalysis(req: Request, env: AnalysisApiEnv): Promise
           provider = "supplied+" + (higher.providers.join("+") || "higher-timeframe-unavailable");
         } else if (missingHigher.length && (cls === "stock" || cls === "fx")) {
           const higher = await loadYahooCandles(symbol, cls, missingHigher, fetchFn);
-          by = { ...by, ...higher.candles as typeof by }; failures = { ...failures, ...higher.failures }; notes.push(...higher.notes);
+          by = { ...by, ...higher.candles }; failures = { ...failures, ...higher.failures }; notes.push(...higher.notes);
           provider = "supplied+yahoo-finance";
         }
       } else if (cls === "crypto") {
