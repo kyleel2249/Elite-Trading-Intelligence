@@ -4,6 +4,7 @@
  * the global kill switch to be off, a unique clientOid, and riskConfirmed=true.
  */
 import { bitgetCreds, bitgetSign, bitgetGetSigned } from "./api.ts";
+import { readOperationalConfig, isMarketDataFresh } from "../operational-config.ts";
 
 type BitgetMarket = "spot" | "margin-crossed" | "margin-isolated" | "usdt-futures" | "usdc-futures" | "coin-futures";
 const MARKETS: BitgetMarket[] = ["spot","margin-crossed","margin-isolated","usdt-futures","usdc-futures","coin-futures"];
@@ -52,6 +53,8 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   if(!bitgetCreds(env as any).complete)return response({ok:false,error:"credentials_missing",missing:bitgetCreds(env as any).missing},503);
   if(!(MARKETS as string[]).includes(market)||!/^[A-Z0-9]{5,24}$/.test(symbol)||!["buy","sell"].includes(side)||!["market","limit"].includes(type)||!Number.isFinite(qty)||qty<=0||!Number.isFinite(maxQty)||maxQty<=0||qty>maxQty||!/^eti[a-f0-9]{8,32}$/i.test(clientOid)||body?.riskConfirmed!==true)
     return response({ok:false,error:"invalid_order",message:"Provide a valid Bitget market, symbol, side, market/limit type, quantity within ETI_MAX_ORDER_QUANTITY, unique clientOrderId and riskConfirmed:true."},400);
+  if(operationalConfig.dataQuality.requireFreshDataForLiveOrders && !isMarketDataFresh(referenceTimestamp,now,operationalConfig.dataQuality.maxAgeSeconds))
+    return response({ok:false,error:"market_data_stale",brokerContacted:false,maxAgeSeconds:operationalConfig.dataQuality.maxAgeSeconds,message:"Live orders require a valid, non-future market-data timestamp within ETI configured freshness window."},409);
   if(type==="limit"&&!(Number.isFinite(price)&&price>0))return response({ok:false,error:"invalid_limit_price"},400);
   if(type==="market"&&body?.limitPrice!==undefined)return response({ok:false,error:"unexpected_limit_price"},400);
   if(!source||!["manual_user","strategy","system","automation"].includes(source.actorType)||typeof source.actorId!=="string"||!source.actorId.trim()||typeof source.sourceName!=="string"||!source.sourceName.trim())
@@ -71,6 +74,10 @@ export async function placeBitgetLiveOrder(env:BitgetLiveEnv,body:any,deps:Bitge
   if(reduceOnly&&(!futures||tradeSide!=="close"))return response({ok:false,error:"invalid_reduce_only"},400);
   const quoteAmount=num(body?.quoteAmount);
   const referencePrice=num(body?.referencePrice);
+  const operationalConfig=readOperationalConfig(env as any);
+  const rawReferenceTimestamp=num(body?.referencePriceTimestamp);
+  const referenceTimestamp=Number.isFinite(rawReferenceTimestamp)&&rawReferenceTimestamp>0
+    ? (rawReferenceTimestamp<1e12?rawReferenceTimestamp*1000:rawReferenceTimestamp) : NaN;
   const stopPrice=num(body?.plan?.stop), takeProfit=num(body?.plan?.tp1);
   if(body?.plan&&!futures)return response({ok:false,error:"protective_levels_require_futures"},400);
   if(Number.isFinite(stopPrice)&&stopPrice>0&&(!(referencePrice>0)||(side==="buy"?stopPrice>=referencePrice:stopPrice<=referencePrice)))return response({ok:false,error:"invalid_stop_loss_direction",message:"For a long order, stop loss must be below entry; for a short order, it must be above entry."},400);
