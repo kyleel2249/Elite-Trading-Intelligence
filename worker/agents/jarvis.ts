@@ -200,7 +200,7 @@ export function formatJarvisResponse(result: any, command: JarvisCommand): strin
   } else if (result?.message) lines.push(String(result.message));
   else if (result?.error) lines.push("Request failed: " + String(result.error));
   else lines.push("No readable report is available for this response.");
-  return lines.join("\\n");
+  return lines.join("\n");
 }
 
 async function bearerOk(req: Request, env: JarvisEnv): Promise<boolean> {
