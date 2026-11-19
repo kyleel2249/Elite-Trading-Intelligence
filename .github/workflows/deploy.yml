@@ -113,6 +113,24 @@ jobs:
           # Record the actual successful Worker deployment time, not workflow start time.
           echo "ETI_WORKER_DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
+      - name: Verify deployed Cloudflare Cron Trigger registration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          response="$(curl --silent --show-error --fail \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/elite-trading-intelligence-eti/schedules")"
+          printf '%s' "$response" | node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),crons=(x.result||[]).map(v=>v.cron);
+              const required=["* * * * *","*/5 * * * *","*/15 * * * *"];
+              const missing=required.filter(v=>!crons.includes(v));
+              if(x.success!==true||missing.length){console.error("Cloudflare Worker Cron Trigger registration:",JSON.stringify({success:x.success,crons,missing}));process.exit(1);}
+              console.log("Cloudflare Worker Cron Triggers verified:",JSON.stringify(crons));
+            });'
+          
       - name: Sync DataX Pages integration secret and redeploy production
         shell: bash
         env:
