@@ -120,10 +120,16 @@ function renderAnalysisPlan(plan){
   return;
  }
  var s=plan.setup,side=s.direction,parts=['Qualified '+side+' setup · '+a.timeframe+' · evidence '+a.score+'/100','FVG '+px(s.fvg.lower)+'–'+px(s.fvg.upper)+' (CE '+px(s.entry)+')','Stop '+px(s.stopLoss),'Strategy TP1 '+px(plan.strategyTarget)];
+ if(a.higherTimeframesLoaded&&a.higherTimeframesLoaded.length)parts.push('higher-timeframe context '+a.higherTimeframesLoaded.join(', '));
+ if(a.dataQuality&&a.dataQuality.provider)parts.push('data '+a.dataQuality.provider);
+ if(best&&best.orderBlock)parts.push('order block '+px(best.orderBlock.lower)+'–'+px(best.orderBlock.upper));
+ if(best&&best.supportResistance)parts.push(best.supportResistance.kind+' '+px(best.supportResistance.price));
+ if(best&&best.dealingRange)parts.push(best.dealingRange.zone+' zone '+px(best.dealingRange.low)+'–'+px(best.dealingRange.high));
+ if(best&&best.passed&&best.passed.length)parts.push('confluence '+best.passed.slice(0,5).join(', '));
  if(plan.desired!==null&&isFinite(plan.desired)){parts.push('Profit-target price '+px(plan.desired));if(Math.abs(plan.desired-plan.strategyTarget)>Math.abs(plan.strategyTarget)*1e-10)parts.push('planned exit '+px(plan.chosen)+' is capped at TP1');}
  if(a.latestSweep)parts.push('latest sweep '+a.latestSweep.side.replace('_',' ')+' at '+px(a.latestSweep.level)+' · reclaimed '+(a.latestSweep.reclaimed?'yes':'no'));
  if(a.manipulation)parts.push('stop-run risk '+a.manipulation.level+' ('+a.manipulation.score+'/100)');
- if(a.pools&&a.pools.length)parts.push('nearest ranked liquidity '+a.pools[0].side.replace('_',' ')+' at '+px(a.pools[0].price));
+ if(a.pools&&a.pools.length)parts.push('highest-ranked liquidity pool '+a.pools[0].side.replace('_',' ')+' at '+px(a.pools[0].price));
  if(plan.desired!==null&&isFinite(plan.desired)&&plan.chosen===plan.strategyTarget&&((side==='BUY'&&plan.desired>plan.strategyTarget)||(side==='SELL'&&plan.desired<plan.strategyTarget)))status.textContent='QUALIFIED SETUP · requested profit target lies beyond the strategy TP1; ETI uses TP1 instead, so the requested amount may not be reached.';
  else status.textContent='QUALIFIED SETUP · entry, stop and exit are calculated from ETI analysis and your current capital / margin and profit target.';
  details.textContent=parts.join(' · ');
