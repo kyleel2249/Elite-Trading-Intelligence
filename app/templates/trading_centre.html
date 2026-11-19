@@ -179,7 +179,7 @@
   function ensureChart() {
     if (chart || !window.LightweightCharts) return !!chart;
     const box = $('#chart');
-    chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.06)' }, horzLines: { color: 'rgba(0,168,255,.06)' } }, crosshair: { mode: 0 }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
+    chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { type: 'solid', color: '#000000' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.10)' }, horzLines: { color: 'rgba(0,168,255,.10)' } }, crosshair: { mode: 0 }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
     cs = chart.addCandlestickSeries({ upColor: '#00e676', downColor: '#ff304f', borderVisible: false, wickUpColor: '#00e676', wickDownColor: '#ff304f' });
     vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol', color: 'rgba(0,168,255,.35)' });
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });

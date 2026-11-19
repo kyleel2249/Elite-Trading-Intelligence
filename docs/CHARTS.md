@@ -65,3 +65,24 @@ Each glossary item explains what it means, why it matters and what the trader sh
 ## Main dashboard Central Market Intelligence and chart explanations
 
 The root dashboard (`/`) surfaces the existing `/api/analysis/intelligence` engine as **Central Market Intelligence** and automatically runs it after validated chart-signal refreshes. It refreshes when the symbol, timeframe, strategy, venue or market changes and no more frequently than once per five minutes for the same selection unless manually refreshed. The selected exchange, spot/futures market and contract category are passed through to multi-timeframe candle loading. The adjacent Chart Signal Interpretation panel explains the current chart signal, CMI verdict, liquidity/FVG qualification, entry/no-entry conditions, exits, invalidation and data-quality state. Its searchable expandable glossary covers ORDER, entry/CE, stop, targets, BSL/SSL, sweeps, estimated sweep reach, FVG, order blocks, BOS/CHoCH, support/resistance, EMA, VWAP, Bollinger Bands, RSI, MACD, ADX, ATR, volume, order book, delta/CVD, spread/microprice, funding/open interest and volume profile. ORDER remains an unverified annotation unless matched to authenticated exchange order ID/status. The UI is read-only and never submits orders.
+
+## Chart background (deep black)
+
+Every market chart surface uses a pure black background (`#000000`) so candles, indicators, signals, FVG/SMC overlays and annotations keep maximum contrast:
+
+| Surface | Where |
+|---|---|
+| Main dashboard live chart, fallback canvas, RSI/MACD/ADX/Score panes, depth, gauge, score breakdown, trade ladder | `worker/index.ts` |
+| Pro Terminal chart and multi-timeframe panes | `worker/ui/trading-terminal.ts` |
+| Pro canvas chart and its price axis | `worker/pro/page.ts` |
+| Python app: Trading Terminal, Trading Centre, Intelligence Centre | `app/static/trading_terminal.js`, `app/static/trading_terminal.css`, `app/static/eti.css`, `app/templates/trading_centre.html`, `app/templates/intelligence_centre.html` |
+
+Grid lines are a faint `#141a22` and axis borders `#2a3342`, so the grid stays readable without competing with candles. Candle, signal and overlay colors are unchanged.
+
+## Black chart cards, edge-to-edge charts
+
+The card (panel) that holds each chart is pure black (`#000000`, border `#1d2a3e`) so the card and the chart read as one surface.
+The chart fills the card's full height and width: card padding is removed around the chart, the chart's own border and radius are removed,
+and only the title/controls/footer rows keep their padding. Covered: dashboard live chart workspace and depth chart (`worker/index.ts`),
+Pro Terminal main and multi-timeframe cards (`worker/ui/trading-terminal.ts`, `app/static/trading_terminal.css`),
+Pro advanced chart card (`worker/pro/page.ts`), Python-app `.panel` chart cards (`app/static/eti.css`).

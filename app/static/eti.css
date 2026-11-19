@@ -86,7 +86,7 @@ td.wrap{white-space:normal;min-width:180px}
 .list li{display:flex;gap:8px;justify-content:space-between;align-items:baseline;border-bottom:1px solid rgba(0,168,255,.1);padding-bottom:4px}
 
 /* stages (charts / 3D) */
-.chart{height:340px;width:100%}
+.chart{height:340px;width:100%;background:#000000;border-radius:10px}
 .chart.sm{height:220px}
 .stage{position:relative;min-height:280px;aspect-ratio:16/9;max-height:460px;border-radius:14px;overflow:hidden;background:radial-gradient(ellipse at 50% 80%,rgba(0,168,255,.18),transparent 65%)}
 .stage.sq{aspect-ratio:1/1;max-height:340px;min-height:240px}
@@ -118,3 +118,9 @@ pre.out{white-space:pre-wrap;background:#020817;border:1px solid var(--line);pad
 }
 @media(max-width:640px){.s2,.s3,.s4,.s5,.s6,.s7,.s8{grid-column:span 12}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.chart{height:280px}main{padding:12px}.tag{font-size:13px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+/* Black chart cards; chart runs edge to edge */
+.panel:has(>.chart){background:#000000;border-color:#1d2a3e;padding:0;overflow:hidden;backdrop-filter:none}
+.panel:has(>.chart)>*:not(.chart){margin-left:16px;margin-right:16px}
+.panel:has(>.chart)>h2{padding-top:14px}
+.panel:has(>.chart)>:last-child:not(.chart){margin-bottom:14px}
+.panel>.chart{border-radius:0;width:100%}

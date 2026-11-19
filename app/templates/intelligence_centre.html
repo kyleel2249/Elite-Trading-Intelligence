@@ -171,7 +171,7 @@
     if (!window.LightweightCharts) { note.append(unavailable('The charting library could not be loaded.', 'Chart')); return; }
     if (!chart) {
       const box = $('#ov-chart');
-      chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.06)' }, horzLines: { color: 'rgba(0,168,255,.06)' } }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
+      chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { type: 'solid', color: '#000000' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.10)' }, horzLines: { color: 'rgba(0,168,255,.10)' } }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
       OVS.forEach(([s, c]) => { series[s] = chart.addLineSeries({ color: c, lineWidth: 2, priceFormat: { type: 'custom', formatter: (v) => v.toFixed(1) + '%' } }); });
       new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight })).observe(box);
     }

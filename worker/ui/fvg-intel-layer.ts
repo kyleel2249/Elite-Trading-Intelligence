@@ -184,7 +184,7 @@ function paintBadges(st,list){
   var maxW=Math.max(60,h.x1-h.x0-8),txt=segs[0];
   for(var i=1;i<segs.length;i++){var t2=txt+' · '+segs[i];if(tw(x,t2)+10>maxW)break;txt=t2;}
   var w=Math.min(maxW,tw(x,txt)+10),bx=Math.max(h.x0+4,2),by=Math.max(h.y0-8,s.top+7);
-  x.fillStyle='rgba(8,14,26,0.88)';x.fillRect(bx,by-7,w,14);
+  x.fillStyle='rgba(0,0,0,0.88)';x.fillRect(bx,by-7,w,14);
   x.strokeStyle=hexRgba(c,0.7);x.lineWidth=1;x.strokeRect(bx+.5,by-6.5,w-1,13);
   x.fillStyle=hexRgba(c,1);x.fillText(txt,bx+5,by);
  });

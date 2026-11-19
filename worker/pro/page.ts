@@ -29,7 +29,7 @@ main{margin-left:max(220px,calc((100vw - 1920px)/2 + 220px));margin-right:0;padd
 .seg{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}.seg button,select{background:#081d37;border:1px solid #102f50;border-radius:8px;padding:6px 11px;font-size:12px}.seg button.on{background:#073b65;border-color:#23bfff;box-shadow:0 0 12px #008fff55}
 .tok{background:#081d37;border:1px solid #102f50;border-radius:8px;padding:6px 11px;font:inherit;font-size:12px;color:var(--txt);min-width:240px}
 .badge{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:1px 8px;font-size:11px}
-.chart{height:680px;min-height:560px;position:relative;width:100%;overflow:hidden;border:1px solid #123b5b;border-radius:12px;background:linear-gradient(180deg,#04152b,#020b19)}canvas{width:100%;height:100%;min-height:100%;display:block}
+.chart{height:680px;min-height:560px;position:relative;width:100%;overflow:hidden;border:1px solid #123b5b;border-radius:12px;background:#000000}.pro-advanced-chart{background:#000000;border-color:#123b5b;padding:0;overflow:hidden}.pro-advanced-chart>*{margin-left:14px;margin-right:14px}.pro-advanced-chart>:first-child{margin-top:14px}.pro-advanced-chart>#bm{margin:0}.pro-advanced-chart #bm>:not(.chart){margin-left:14px;margin-right:14px}.pro-advanced-chart>:last-child{margin-bottom:14px}.pro-advanced-chart .chart{border:0;border-radius:0}canvas{width:100%;height:100%;min-height:100%;display:block}
 .err{color:var(--warn);border:1px dashed rgba(255,194,71,.6);border-radius:10px;padding:10px}.empty{color:var(--mut);border:1px dashed #1b4a6a;border-radius:10px;padding:10px}
 .decision{font-size:30px;font-weight:800;letter-spacing:1px}.foot{margin-top:8px;font-size:11px;color:var(--mut)}
 table{width:100%;border-collapse:collapse}th,td{padding:7px 5px;border-bottom:1px solid #153047;text-align:left;vertical-align:top;font-size:12px}th{color:var(--mut)}.scroll{overflow-x:auto}.scroll table{min-width:640px}
@@ -110,7 +110,7 @@ function drawChart(c){
  var candleSpan=Math.max(hi-lo,Math.abs(hi)*0.000001,1e-12),active=(LV||[]).filter(function(l){return isFinite(l[2])&&l[2]>0&&l[2]>=lo-candleSpan*2.5&&l[2]<=hi+candleSpan*2.5;});active.forEach(function(l){hi=Math.max(hi,l[2]);lo=Math.min(lo,l[2]);});
  var pad=(hi-lo)*0.09||Math.max(Math.abs(hi)*0.0001,1e-8);hi+=pad;lo-=pad;
  var py=function(v){return 8+(hi-v)/(hi-lo)*ph;},bw=plotW/c.length;
- x.fillStyle='#031020';x.fillRect(plotW,0,w-plotW,h);x.strokeStyle='rgba(23,51,75,.9)';x.lineWidth=1;
+ x.fillStyle='#000000';x.fillRect(plotW,0,w-plotW,h);x.strokeStyle='rgba(23,51,75,.9)';x.lineWidth=1;
  for(var i=0;i<5;i++){var y=8+i*ph/4;x.beginPath();x.moveTo(0,y);x.lineTo(plotW,y);x.stroke();x.fillStyle='#91a9c4';x.font='10px sans-serif';x.textAlign='left';x.fillText(priceFmt(hi-(hi-lo)*i/4),plotW+7,y-3);}
  x.strokeStyle='#24425f';x.beginPath();x.moveTo(plotW,0);x.lineTo(plotW,h);x.stroke();
  (FVGZ||[]).filter(function(z){return !z.filled;}).slice(-6).forEach(function(z){x.globalAlpha=0.14;x.fillStyle=z.dir==='bull'?'#00f59b':'#ff365d';var y1=py(z.hi),y2=py(z.lo);x.fillRect(z.i*bw,y1,plotW-z.i*bw,Math.max(1,y2-y1));x.globalAlpha=1;});
@@ -122,7 +122,7 @@ function drawChart(c){
  var rowGap=Math.max(24,Math.min(34,(ph+10)/Math.max(1,all.length))),placed=all.map(function(l){return {l:l,y:Math.max(15,Math.min(ph-3,py(l[2])))};});
  for(var j=0;j<placed.length;j++){if(j&&placed[j].y<placed[j-1].y+rowGap)placed[j].y=placed[j-1].y+rowGap;}
  if(placed.length&&placed[placed.length-1].y>ph-3){placed[placed.length-1].y=ph-3;for(var z=placed.length-2;z>=0;z--)placed[z].y=Math.min(placed[z].y,placed[z+1].y-rowGap);}
- x.textAlign='left';placed.forEach(function(p){var l=p.l,yy=Math.max(14,Math.min(ph-3,p.y)),price=priceFmt(l[2]),label=l[0]+' '+l[1];x.fillStyle='#061426';x.fillRect(plotW+4,yy-11,axisW-8,22);x.fillStyle=l[3];x.font='bold 8px sans-serif';x.fillText(label,plotW+8,yy-2,axisW-16);x.font='10px ui-monospace,monospace';x.fillText(price,plotW+8,yy+8,axisW-16);});
+ x.textAlign='left';placed.forEach(function(p){var l=p.l,yy=Math.max(14,Math.min(ph-3,p.y)),price=priceFmt(l[2]),label=l[0]+' '+l[1];x.fillStyle='#000000';x.fillRect(plotW+4,yy-11,axisW-8,22);x.fillStyle=l[3];x.font='bold 8px sans-serif';x.fillText(label,plotW+8,yy-2,axisW-16);x.font='10px ui-monospace,monospace';x.fillText(price,plotW+8,yy+8,axisW-16);});
  x.fillStyle='#91a9c4';x.font='10px sans-serif';x.textAlign='left';x.fillText('EMA20',8,ph+15);x.fillStyle='#ffc247';x.fillText('EMA50',62,ph+15);x.fillStyle='#91a9c4';x.fillText('Volume',plotW-48,h-5);
 }
 async function loadMarket(){
