@@ -31,7 +31,6 @@
     "ETI_FX_CANDLES_URL": "https://api.twelvedata.com/time_series",
     "ETI_ANALYSIS_PLAN": "free",
     "ETI_LLM_MODEL": "claude-sonnet-5-5",
-    "ETI_LLM_MAX_INPUT_TOKENS": "8000",
     "ETI_LLM_CACHE_TTL": "900",
     "ETI_LLM_MAX_PER_HOUR": "20",
     "ETI_KILL_SWITCH": "false",
