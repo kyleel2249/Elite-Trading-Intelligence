@@ -67,7 +67,7 @@ test("kill switch, missing explicit confirmation, leverage limits and duplicate 
  const kv=store(),env={...baseEnv,ETI_EXECUTION_LOG:kv};
  assert.equal((await placeBitgetLiveOrder({...env,ETI_KILL_SWITCH:"true"},orderBody())).status,423);
  assert.equal((await placeBitgetLiveOrder(env,orderBody({riskConfirmed:false}))).status,400);
- assert.equal((await placeBitgetLiveOrder(env,orderBody({bitgetMarket:"usdt-futures",leverage:151}))).status,400);
+ assert.equal((await placeBitgetLiveOrder(env,orderBody({bitgetMarket:"usdt-futures",leverage:151}),{now:()=>1700000000000})).status,400);
  await placeBitgetLiveOrder(env,orderBody(),{now:()=>1700000000000,fetchImpl:(async()=>ok()) as any});
  assert.equal((await placeBitgetLiveOrder(env,orderBody(),{now:()=>1700000000000,fetchImpl:(async()=>ok()) as any})).status,409);
 });
