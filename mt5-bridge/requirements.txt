@@ -1,0 +1,6 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.8,<3
+MetaTrader5>=5.0.45; platform_system == 'Windows'
+pytest>=8,<9
+httpx>=0.27,<1
