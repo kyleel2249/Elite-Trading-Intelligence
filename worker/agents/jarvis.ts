@@ -12,7 +12,6 @@ import type { ExecutionEnv } from "../execution.ts";
 export interface JarvisEnv extends ExecutionEnv {
   ETI_EXECUTION_LOG?: any;
   ANTHROPIC_API_KEY?: string;
-  BRAVE_SEARCH_API_KEY?: string;
 }
 interface App<E> { fetch(request: Request, env: E): Promise<Response> | Response }
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -210,7 +209,7 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
         for (const key of ["braveApiKey", "googleApiKey", "googleCx"] as const) { if (input[key] === null || input[key] === "") delete next[key]; else if (typeof input[key] === "string") { if (input[key].length > 512) return reply({ error: "invalid_provider_credential", field: key }, 400); next[key] = input[key].trim(); } else if (input[key] !== undefined) return reply({ error: "invalid_provider_credential", field: key }, 400); }
         if (next.googleApiKey && !next.googleCx) return reply({ error: "google_cx_required" }, 400);
         if (next.googleCx && !next.googleApiKey) return reply({ error: "google_api_key_required" }, 400);
-        try { await saveSearchConfig(env, next); } catch { return reply({ error: "provider_config_storage_failed" }, 500); }
+        try { if (!(await saveSearchConfig(env, next))) return reply({ error: "provider_config_storage_unavailable" }, 503); } catch { return reply({ error: "provider_config_storage_failed" }, 500); }
         return reply({ schema: "eti.jarvis.search-providers/1", saved: true, configured: configuredSearchProviders(next), credentialsReturned: false });
       }
       if (path.endsWith("/memory")) {
@@ -220,7 +219,7 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       if (request.method === "GET") return reply({
         schema: "eti.jarvis/1", name: "JARVIS", role: "ETI agent orchestration and situational-awareness layer",
         capabilities: ["natural-language command routing", "existing-agent council coordination", "market analysis delegation", "read-only internet research with source links", "runtime and autopilot health checks", "performance audit retrieval", "optional advisory deep review", "bounded operational memory", "risk-aware explanations"],
-        tools: ["analyze", "web_search", "status", "audit", "deep_review", "help"], webSearchAvailable: !!env.BRAVE_SEARCH_API_KEY || !!env.ETI_EXECUTION_LOG, searchProviderSettingsAvailable: !!env.ETI_EXECUTION_LOG, memoryAvailable: !!env.ETI_EXECUTION_LOG,
+        tools: ["analyze", "web_search", "status", "audit", "deep_review", "help"], webSearchAvailable: !!env.ETI_EXECUTION_LOG, searchProviderSettingsAvailable: !!env.ETI_EXECUTION_LOG, memoryAvailable: !!env.ETI_EXECUTION_LOG,
         safety: { analysisReadOnly: true, liveExecutionAllowed: false, commanderAndRiskVetoPreserved: true, secretsStored: false },
       });
       if (request.method !== "POST") return reply({ error: "method_not_allowed" }, 405);
@@ -233,7 +232,6 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       if (command.intent === "web_search") {
         const query = command.message.replace(/\b(search (the )?(web|internet)|search online|look up|research (the )?web)\b/ig, "").replace(/^[\s:,-]+/, "").trim();
         const config = await readSearchConfig(env);
-        if (!config.braveApiKey && env.BRAVE_SEARCH_API_KEY) config.braveApiKey = env.BRAVE_SEARCH_API_KEY;
         result = await runWebSearch(query || command.message, config);
       } else if (command.intent === "analyze") {
         if (!/^[A-Z0-9]{5,20}$/.test(command.symbol)) return reply({ error: "invalid_symbol" }, 400);
