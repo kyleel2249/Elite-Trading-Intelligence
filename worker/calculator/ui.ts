@@ -111,6 +111,7 @@ function autoAnalysisLevels(){
 }
 function renderAnalysisPlan(plan){
  var status=g('clAnalysisStatus'),details=g('clAnalysisDetails'),a=activeEtiAnalysis;
+ if(!g('clAutoAnalysis').checked){status.textContent='Manual calculation mode · ETI analysis remains visible but does not overwrite your levels.';details.textContent='Enter your own entry and stop, or enable automatic ETI strategy levels.';return;}
  if(!a){status.textContent='Analysis unavailable: '+(plan&&plan.error||'waiting for market data');details.textContent='No entry or exit has been generated. Check the selected pair, chart timeframe and market-data feed.';return;}
  var best=a.precision&&a.precision.best;
  if(plan&&plan.blocked){status.textContent='WAIT · '+plan.blocked;details.textContent=(a.blocks||[]).join(' · ')||'No qualified setup.';return;}
@@ -141,7 +142,7 @@ function run(){
  var plan=autoAnalysisLevels();
  var r=computePosition(inputs());
  var msgs=g('clMsgs'),k=g('clKpis'),tb=g('clLadder').getElementsByTagName('tbody')[0];msgs.textContent='';k.textContent='';tb.textContent='';g('clUnits').textContent='';
- if(!r.ok){(r.errors||[]).forEach(function(e){msgs.appendChild(msg('clerr',e));});return;}
+ if(!r.ok){(r.errors||[]).forEach(function(e){msgs.appendChild(msg('clerr',e));});renderAnalysisPlan(plan);return;}
  (r.warnings||[]).forEach(function(w){msgs.appendChild(msg('clwarn',w));});
  g('clUnits').textContent=(spot?'Spot position: ':'Futures position: ')+px(r.units)+' units ('+px(r.quantity)+' quantity)';
  k.appendChild(kpi('Notional exposure',money(r.notional)));k.appendChild(kpi('Margin required',money(r.margin)));
@@ -156,6 +157,7 @@ function run(){
  r.ladder.forEach(function(l){var tr=document.createElement('tr');if(l.leverage===cur)tr.className='cur';if(l.immediate)tr.className+=' imm';
   var cells=[l.leverage+'x',money(l.margin),l.immediate?'liquidated at entry':l.liquidation===null?'none':px(l.liquidation),l.immediate||l.liquidationDistancePct===null?'-':pct(l.liquidationDistancePct),l.net===null?'-':money(l.net),l.roiPct===null?'-':pct(l.roiPct)];
   cells.forEach(function(c,i){var td=document.createElement('td');td.textContent=c;if(i===5&&l.roiPct!==null)td.className=sign(l.roiPct);tr.appendChild(td);});tb.appendChild(tr);});
+ renderAnalysisPlan(plan);
 }
 var IDS=['clSide','clInst','clCs','clEntry','clExit','clStop','clSizeBy','clQty','clMargin','clLev','clFee','clSlip','clFund','clMmr','clFx','clTp','clTpPct'];
 function applyPreset(){var p=P[g('clInst').value];if(!p)return;g('clCs').value=p.cs;g('clFee').value=p.fee;g('clSlip').value=p.slip;}
@@ -168,14 +170,14 @@ g('clInst').addEventListener('change',function(){applyPreset();run();});
 IDS.forEach(function(i){if(i!=='clLev'&&i!=='clInst'){g(i).addEventListener('input',run);g(i).addEventListener('change',run);}});
 g('clMarketMode').addEventListener('change',function(){applyMarketMode();run();});g('clTargetMode').addEventListener('change',function(){applyTargetMode();run();});
 g('clAutoAnalysis').addEventListener('change',function(){run();});
-$('symbol').addEventListener('change',function(){activeEtiAnalysis=null;activeEtiAnalysisSymbol='';activeEtiAnalysisTimeframe='';run();renderAnalysisPlan(null);});
-$('interval').addEventListener('change',function(){activeEtiAnalysis=null;activeEtiAnalysisSymbol='';activeEtiAnalysisTimeframe='';run();renderAnalysisPlan(null);});
+$('symbol').addEventListener('change',function(){activeEtiAnalysis=null;activeEtiAnalysisSymbol='';activeEtiAnalysisTimeframe='';run();});
+$('interval').addEventListener('change',function(){activeEtiAnalysis=null;activeEtiAnalysisSymbol='';activeEtiAnalysisTimeframe='';run();});
 window.addEventListener('eti-liquidity-fvg-updated',function(ev){
  var d=ev&&ev.detail||{},sym=$('symbol').value,tf=$('interval').value;
  if(d.symbol!==sym||d.timeframe!==tf)return;
  activeEtiAnalysis=d.analysis||null;activeEtiAnalysisSymbol=sym;activeEtiAnalysisTimeframe=tf;
- if(!activeEtiAnalysis){renderAnalysisPlan({error:d.error});run();return;}
- run();renderAnalysisPlan(autoAnalysisLevels());
+ if(!activeEtiAnalysis){run();return;}
+ run();
 });
 function lastPrice(){var t=$('last').textContent.replace(/,/g,'').trim(),v=Number(t);return isFinite(v)&&v>0?v:null;}
 g('clUseLast').addEventListener('click',function(){var v=lastPrice();if(v===null){g('clSym').textContent='No live chart price yet: type the entry price manually.';return;}if(!g('clAutoAnalysis').checked){g('clEntry').value=v;run();}});
