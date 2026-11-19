@@ -381,6 +381,9 @@ jobs:
 
       - name: Verify scheduled AI autopilot readiness and paper cycle
         shell: bash
+        env:
+          ETI_EXECUTION_TOKEN: ${{ secrets.ETI_EXECUTION_TOKEN }}
+          DEPLOY_STARTED_AT: ${{ github.run_started_at }}
         run: |
           set -euo pipefail
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
@@ -398,7 +401,18 @@ jobs:
           done
           test "$ready" -eq 1 || { echo "::error::Scheduled AI autopilot is not ready; inspect /api/agents/autopilot"; exit 1; }
           echo "Autopilot readiness verified: enabled, token configured, audit and portfolio storage bound, five-minute scheduler registered, paper-only mode."
-          for symbol in ETHUSDT SOLUSDT; do
+          # Exercise the exact authenticated, read-only council preflight used by the scheduler.
+          # This sends no order and does not persist a decision.
+          test -n "$ETI_EXECUTION_TOKEN" || { echo "::error::ETI_EXECUTION_TOKEN unavailable to diagnostic step"; exit 1; }
+          analysis_response="$(curl --silent --show-error --max-time 45 -w '__HTTP_CODE__%{http_code}' -X POST "$base/api/agents/analyze" -H "Authorization: Bearer $ETI_EXECUTION_TOKEN" -H 'content-type: application/json' --data '{"symbol":"BTCUSDT","interval":"15m","providers":false}')"
+          analysis_status="${analysis_response##*__HTTP_CODE__}"
+          analysis_body="${analysis_response%__HTTP_CODE__*}"
+          printf '%s' "$analysis_body" | HTTP_STATUS="$analysis_status" node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{let x={};try{x=JSON.parse(s)}catch{}
+              if(process.env.HTTP_STATUS!=="200"){console.error("Authenticated agent analysis preflight failed:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error||"unknown",detail:x.detail||x.message||null,decision:x.decision?.action||x.decision||null}));process.exit(1);}
+              console.log("Authenticated agent analysis preflight passed:",JSON.stringify({action:x.decision?.action||"unknown",confidence:x.decision?.confidence??null,agreement:x.decision?.consensus?.agreement??null,riskApproved:x.risk?.approved??null,provider:x.market?.provider||x.provider||"not_exposed"}));
+            });'
+          for symbol in BTCUSDT ETHUSDT SOLUSDT; do
             diagnostic="$(curl --silent --show-error --fail --max-time 20 "$base/api/market/diag?symbol=$symbol&interval=15m")" || { echo "::error::Could not read $symbol market-data diagnostics"; exit 1; }
             printf '%s' "$diagnostic" | SYMBOL="$symbol" node -e '
               let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),p=(x.providers||[]).find(v=>v.provider==="bybit"),hosts=p?.hosts||[],ok=hosts.some(h=>h.ok===true&&Number(h.candles)>0);
@@ -413,7 +427,7 @@ jobs:
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
             if printf '%s' "$response" | node -e '
               let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest;
-                const fresh=x.lastCycleFresh===true&&last&&typeof last.at==="string"&&Number.isFinite(Date.parse(last.at))&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
+                const cycleAt=last&&typeof last.at==="string"?Date.parse(last.at):NaN;const fresh=x.lastCycleFresh===true&&Number.isFinite(cycleAt)&&cycleAt>=Date.parse(process.env.DEPLOY_STARTED_AT)&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
                 if(!fresh)process.exit(1);
                 const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
                 console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
