@@ -21,7 +21,6 @@
     ]
   },
   "vars": {
-    // LLM model/cache/hourly-cap use code defaults to stay within Cloudflare Free 64-variable limit.
     "APP_ENV": "production",
     "BITGET_WS_PRIVATE_URL": "wss://ws.bitget.com/v3/ws/private",
     "BITGET_WS_PUBLIC_URL": "wss://ws.bitget.com/v3/ws/public",
