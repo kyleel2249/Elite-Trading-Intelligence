@@ -52,6 +52,7 @@
     "ETI_RISK_MAX_LEVERAGE": "1",
     "ETI_RISK_MIN_CASH_RESERVE": "0.5",
     "ETI_RISK_MAX_DRAWDOWN": "0.1",
+    "MTM_INTERVAL_SECONDS": "60",
     "PAPER_AUTOPILOT": "true",
     "MARKET_PROVIDER_ORDER": "bybit",
     "SEC_USER_AGENT": "ETI (Elite Trading Intelligence; contact: davinatirzah@gmail.com)"
