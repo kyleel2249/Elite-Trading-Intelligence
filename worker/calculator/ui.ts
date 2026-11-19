@@ -44,13 +44,13 @@ export const CALC_HTML = `
 <label>Stop price (optional)<input id="clStop" type="number" inputmode="decimal" min="0" step="any"></label>
 <label>Size by<select id="clSizeBy"><option value="quantity">Quantity</option><option value="margin">Margin (capital)</option></select></label>
 <label id="clQtyL">Quantity (contracts, lots or units)<input id="clQty" type="number" inputmode="decimal" min="0" step="any" value="1"></label>
-<label id="clMarginL" style="display:none">Margin to commit (account currency)<input id="clMargin" type="number" inputmode="decimal" min="0" step="any" value="100"></label>
-<label class="wide">Leverage <b id="clLevOut">10x</b><input id="clLevRange" type="range" min="1" max="125" step="1" value="10" aria-label="Leverage slider"></label>
-<label>Leverage (exact)<input id="clLev" type="number" inputmode="numeric" min="1" max="150" step="1" value="10"></label>
+<label id="clMarginL" style="display:none"><span id="clMarginTitle">Margin to commit (account currency)</span><input id="clMargin" type="number" inputmode="decimal" min="0" step="any" value="100"></label>
+<label class="wide" id="clLevRangeL">Leverage <b id="clLevOut">10x</b><input id="clLevRange" type="range" min="1" max="125" step="1" value="10" aria-label="Leverage slider"></label>
+<label id="clLevL">Leverage (exact)<input id="clLev" type="number" inputmode="numeric" min="1" max="150" step="1" value="10"></label>
 <label>Fee per side (%)<input id="clFee" type="number" inputmode="decimal" min="0" step="any" value="0.05"></label>
 <label>Slippage per side (%)<input id="clSlip" type="number" inputmode="decimal" min="0" step="any" value="0.02"></label>
-<label>Funding / financing, total (% of notional)<input id="clFund" type="number" inputmode="decimal" step="any" value="0" title="Positive = you pay, negative = you receive"></label>
-<label>Maintenance margin (%)<input id="clMmr" type="number" inputmode="decimal" min="0" step="any" value="0.5"></label>
+<label id="clFundL">Funding / financing, total (% of notional)<input id="clFund" type="number" inputmode="decimal" step="any" value="0" title="Positive = you pay, negative = you receive"></label>
+<label id="clMmrL">Maintenance margin (%)<input id="clMmr" type="number" inputmode="decimal" min="0" step="any" value="0.5"></label>
 <label>Quote to account rate<input id="clFx" type="number" inputmode="decimal" min="0" step="any" value="1" title="1 for USD/USDT quotes. For a GBP-quoted pair into a USD account, enter the GBP to USD rate."></label>
 <label>Target input<select id="clTargetMode"><option value="amount">Net profit amount</option><option value="pct">Net return (%)</option></select></label>
 <label id="clTpL">Target net profit amount<input id="clTp" type="number" inputmode="decimal" step="any" placeholder="e.g. 1.00"></label>
@@ -64,8 +64,8 @@ export const CALC_HTML = `
 </div>
 <div id="clMsgs" aria-live="polite"></div>
 <div class="clkpis" id="clKpis"></div>
-<h3 style="font-size:13px;margin:14px 0 6px">Leverage ladder <span class="muted" style="font-weight:400">same position size at other leverage levels</span></h3>
-<div class="clwrap"><table id="clLadder"><thead><tr><th>Leverage</th><th>Margin</th><th>Est. liquidation</th><th>Distance</th><th>Net at exit</th><th>ROI on margin</th></tr></thead><tbody></tbody></table></div>
+<div id="clLadderPanel"><h3 style="font-size:13px;margin:14px 0 6px">Leverage ladder <span class="muted" style="font-weight:400">same position size at other leverage levels</span></h3>
+<div class="clwrap"><table id="clLadder"><thead><tr><th>Leverage</th><th>Margin</th><th>Est. liquidation</th><th>Distance</th><th>Net at exit</th><th>ROI on margin</th></tr></thead><tbody></tbody></table></div></div>
 <p class="muted" style="font-size:11px;margin:8px 0 0">Liquidation is an estimate from a standard isolated-margin model (entry price, leverage and the maintenance margin you enter). The venue's own risk engine, mark price, margin tiers and funding decide the real figure. Fee, slippage and maintenance defaults are assumptions, not your account's rates. Linear contracts only; inverse contracts are not modelled. Spot paper and testnet orders are unleveraged and long-only: leverage here only changes the margin and liquidation estimates.</p>
 </section>
 `;
@@ -113,7 +113,7 @@ function run(){
 var IDS=['clSide','clInst','clCs','clEntry','clExit','clStop','clSizeBy','clQty','clMargin','clLev','clFee','clSlip','clFund','clMmr','clFx','clTp','clTpPct'];
 function applyPreset(){var p=P[g('clInst').value];if(!p)return;g('clCs').value=p.cs;g('clFee').value=p.fee;g('clSlip').value=p.slip;}
 function setLev(v){v=Math.max(1,Math.min(150,Math.round(Number(v)||1)));g('clLev').value=v;g('clLevRange').value=Math.min(v,125);g('clLevOut').textContent=v+'x';}
-function applyMarketMode(){var mode=g('clMarketMode').value,prev=g('clMarketMode').dataset.last||'futures';if(mode==='spot'&&prev!=='spot'){g('clMarketMode').dataset.futuresLev=g('clLev').value||'10';g('clSide').value='buy';setLev(1);}else if(mode==='futures'&&prev==='spot'){setLev(Number(g('clMarketMode').dataset.futuresLev)||10);}var spot=mode==='spot';g('clSide').disabled=spot;g('clLev').disabled=spot;g('clLevRange').disabled=spot;g('clFund').disabled=spot;g('clMmr').disabled=spot;g('clMarketNote').textContent=spot?'Spot mode: long-only, unleveraged (1x). Target return is calculated against invested capital.':'Futures mode: choose Long or Short and set leverage. Target return is calculated against allocated margin; estimated funding, fees and slippage are included.';g('clMarketMode').dataset.last=mode;}
+function applyMarketMode(){var mode=g('clMarketMode').value,prev=g('clMarketMode').dataset.last||'futures';if(mode==='spot'&&prev!=='spot'){g('clMarketMode').dataset.futuresLev=g('clLev').value||'10';g('clSide').value='buy';setLev(1);}else if(mode==='futures'&&prev==='spot'){setLev(Number(g('clMarketMode').dataset.futuresLev)||10);}var spot=mode==='spot';g('clSide').disabled=spot;g('clLev').disabled=spot;g('clLevRange').disabled=spot;g('clFund').disabled=spot;g('clMmr').disabled=spot;g('clMarketNote').textContent=spot?'Spot mode: long-only, unleveraged (1x). Target return is calculated against invested capital.':'Futures mode: choose Long or Short and set leverage. Target return is calculated against allocated margin; estimated funding, fees and slippage are included.';['clLevRangeL','clLevL','clFundL','clMmrL'].forEach(function(id){g(id).style.display=spot?'none':'';});g('clLadderPanel').style.display=spot?'none':'';g('clMarginTitle').textContent=spot?'Capital to invest (account currency)':'Margin to commit (account currency)';g('clMarketMode').dataset.last=mode;}
 function applyTargetMode(){var amount=g('clTargetMode').value==='amount';g('clTpL').style.display=amount?'':'none';g('clTpPctL').style.display=amount?'none':'';}
 g('clLevRange').addEventListener('input',function(){setLev(g('clLevRange').value);run();});
 g('clLev').addEventListener('input',function(){var v=Number(g('clLev').value);if(isFinite(v)&&v>=1){g('clLevRange').value=Math.min(Math.round(v),125);g('clLevOut').textContent=Math.round(v)+'x';}run();});
@@ -133,9 +133,9 @@ if($('stack'))$('stack').addEventListener('click',function(){
 function fire(id,type){var e=$(id);if(e)e.dispatchEvent(new Event(type,{bubbles:true}));}
 function say(t,cls){var m=g('clPlaceMsg');m.className=cls||'clinfo';m.textContent=t;}
 g('clPlace').addEventListener('click',function(){
- if(g('clSide').value!=='buy'){say('Spot paper and testnet trading is long-only, so a short plan cannot be placed here. Set Direction to Long, or keep this plan for reference.','clerr');return;}
- if(typeof submitOrder!=='function'||!$('orderType')||!$('orderQuantity')){say('The order panel is not available on this page.','clerr');return;}
  if(g('clMarketMode').value==='futures'){say('Futures order execution is not connected to this calculator. Use the dedicated futures order panel; this button only supports the existing spot paper/testnet order flow.','clerr');return;}
+ if(g('clSide').value!=='buy'){say('Spot paper and testnet trading is long-only. Set Direction to Long, or keep this plan for reference.','clerr');return;}
+ if(typeof submitOrder!=='function'||!$('orderType')||!$('orderQuantity')){say('The order panel is not available on this page.','clerr');return;}
  var mode=g('clMode').value,live=lastPrice(),entry=n('clEntry'),stop=n('clStop'),exit=n('clExit');
  if(mode==='market'){if(live===null){say('No live chart price yet: wait for the chart to load, or use a limit entry.','clerr');return;}entry=live;g('clEntry').value=entry;}
  if(entry===null||!(entry>0)){say('Enter the entry price first (or click the chart, or use the chart price).','clerr');return;}
