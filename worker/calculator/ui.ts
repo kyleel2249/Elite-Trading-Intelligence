@@ -33,7 +33,9 @@ export const CALC_HTML = `
 <section class="panel cl" id="calcPanel" aria-labelledby="calcTitle">
 <h2 id="calcTitle">Profit &amp; Leverage Calculator <span class="muted" style="font-size:12px;font-weight:400">anchored to your entry price · can place the order for you (paper / testnet)</span></h2>
 <div class="clinfo" id="clSym" aria-live="polite">Chart symbol: not loaded yet.</div>
+<div class="clinfo" id="clMarketNote" aria-live="polite">Futures mode: choose Long or Short and set leverage. Calculations include fees, slippage and funding assumptions.</div>
 <div class="clgrid">
+<label>Market type<select id="clMarketMode"><option value="futures">Futures / Perpetual</option><option value="spot">Spot</option></select></label>
 <label>Direction<select id="clSide"><option value="buy">Long (buy)</option><option value="sell">Short (sell)</option></select></label>
 <label>Instrument type<select id="clInst"><option value="crypto">Crypto / units (1)</option><option value="forex">Forex lots (100,000)</option><option value="gold">Gold lots (100 oz)</option><option value="silver">Silver lots (5,000 oz)</option><option value="stock">Stocks / shares (1)</option><option value="custom">Custom contract size</option></select></label>
 <label>Contract size (units per 1 quantity)<input id="clCs" type="number" inputmode="decimal" min="0" step="any" value="1"></label>
@@ -50,7 +52,9 @@ export const CALC_HTML = `
 <label>Funding / financing, total (% of notional)<input id="clFund" type="number" inputmode="decimal" step="any" value="0" title="Positive = you pay, negative = you receive"></label>
 <label>Maintenance margin (%)<input id="clMmr" type="number" inputmode="decimal" min="0" step="any" value="0.5"></label>
 <label>Quote to account rate<input id="clFx" type="number" inputmode="decimal" min="0" step="any" value="1" title="1 for USD/USDT quotes. For a GBP-quoted pair into a USD account, enter the GBP to USD rate."></label>
-<label>Target net profit (optional)<input id="clTp" type="number" inputmode="decimal" step="any" placeholder="amount, account currency"></label>
+<label>Target input<select id="clTargetMode"><option value="amount">Net profit amount</option><option value="pct">Net return (%)</option></select></label>
+<label id="clTpL">Target net profit amount<input id="clTp" type="number" inputmode="decimal" step="any" placeholder="e.g. 1.00"></label>
+<label id="clTpPctL" style="display:none">Target net return on capital / margin (%)<input id="clTpPct" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 2"></label>
 </div>
 <div class="clbar"><button type="button" id="clUseLast">Use chart price as entry</button><button type="button" id="clReset">Reset</button><label class="clchk muted" style="display:inline-flex;flex-direction:row;gap:6px;align-items:center;font-size:12px"><input type="checkbox" id="clLink" checked> Clicking the chart sets the entry</label><span class="muted" id="clUnits" style="font-size:12px"></span></div>
 <div class="clexec" id="clExec">
@@ -82,38 +86,43 @@ function kpi(label,val,cls){var d=document.createElement('div');d.className='clk
 function msg(cls,t){var d=document.createElement('div');d.className=cls;d.textContent=t;return d;}
 function sign(v){return v===null||!isFinite(v)?'':v>=0?'pos':'neg';}
 function inputs(){
- return {side:g('clSide').value,entry:n('clEntry'),exit:n('clExit'),stop:n('clStop'),sizeBy:g('clSizeBy').value,quantity:n('clQty'),margin:n('clMargin'),leverage:n('clLev'),feePct:n('clFee'),slippagePct:n('clSlip'),fundingPct:n('clFund'),mmrPct:n('clMmr'),contractSize:n('clCs'),fxRate:n('clFx'),targetProfit:n('clTp')};
+ var spot=g('clMarketMode').value==='spot',targetMode=g('clTargetMode').value;
+ return {side:spot?'buy':g('clSide').value,entry:n('clEntry'),exit:n('clExit'),stop:n('clStop'),sizeBy:g('clSizeBy').value,quantity:n('clQty'),margin:n('clMargin'),leverage:spot?1:n('clLev'),feePct:n('clFee'),slippagePct:n('clSlip'),fundingPct:spot?0:n('clFund'),mmrPct:n('clMmr'),contractSize:n('clCs'),fxRate:n('clFx'),targetProfit:targetMode==='amount'?n('clTp'):null,targetProfitPct:targetMode==='pct'?n('clTpPct'):null};
 }
 function run(){
- var sizeBy=g('clSizeBy').value;
+ var sizeBy=g('clSizeBy').value,spot=g('clMarketMode').value==='spot',targetMode=g('clTargetMode').value;
  g('clQtyL').style.display=sizeBy==='quantity'?'':'none';g('clMarginL').style.display=sizeBy==='margin'?'':'none';
+ g('clTpL').style.display=targetMode==='amount'?'':'none';g('clTpPctL').style.display=targetMode==='pct'?'none':'';
  var r=computePosition(inputs());
  var msgs=g('clMsgs'),k=g('clKpis'),tb=g('clLadder').getElementsByTagName('tbody')[0];msgs.textContent='';k.textContent='';tb.textContent='';g('clUnits').textContent='';
  if(!r.ok){(r.errors||[]).forEach(function(e){msgs.appendChild(msg('clerr',e));});return;}
  (r.warnings||[]).forEach(function(w){msgs.appendChild(msg('clwarn',w));});
- g('clUnits').textContent='Position: '+px(r.units)+' units ('+px(r.quantity)+' quantity)';
+ g('clUnits').textContent=(spot?'Spot position: ':'Futures position: ')+px(r.units)+' units ('+px(r.quantity)+' quantity)';
  k.appendChild(kpi('Notional exposure',money(r.notional)));k.appendChild(kpi('Margin required',money(r.margin)));
  k.appendChild(kpi('Est. liquidation price',r.liquidation===null?'none (unleveraged long)':px(r.liquidation)+' ('+pct(r.liquidationDistancePct)+' away)',r.liquidationDistancePct!==null&&r.liquidationDistancePct<5?'neg':''));
  k.appendChild(kpi('Break-even price',px(r.breakEven)));
  if(r.target){k.appendChild(kpi('Gross P&L at exit',money(r.target.gross),sign(r.target.gross)));k.appendChild(kpi('Fees + slippage',money(-r.target.fees)));if(r.fundingCost)k.appendChild(kpi('Funding / financing',money(-r.fundingCost)));k.appendChild(kpi('Net profit at exit',money(r.target.net),sign(r.target.net)));k.appendChild(kpi('ROI on margin',pct(r.target.roiPct),sign(r.target.roiPct)));k.appendChild(kpi('Price move to exit',pct(r.target.movePct)));}
  if(r.stopResult){k.appendChild(kpi('Net loss at stop',money(r.stopResult.net),sign(r.stopResult.net)));k.appendChild(kpi('Loss as % of margin',pct(r.stopResult.roiPct),sign(r.stopResult.roiPct)));}
  if(r.riskReward!==null)k.appendChild(kpi('Risk : reward','1 : '+r.riskReward.toFixed(2)));
- if(r.priceForTargetProfit!==null)k.appendChild(kpi('Exit price for target profit',px(r.priceForTargetProfit)));
+ if(r.priceForTargetProfit!==null){k.appendChild(kpi('Exit price for target profit',px(r.priceForTargetProfit)));k.appendChild(kpi('Favourable price move required',pct(Math.abs(r.targetProfitMovePct))));k.appendChild(kpi('Net profit target',money(r.targetProfitAmount)));}
  var cur=Number(g('clLev').value);
  r.ladder.forEach(function(l){var tr=document.createElement('tr');if(l.leverage===cur)tr.className='cur';if(l.immediate)tr.className+=' imm';
   var cells=[l.leverage+'x',money(l.margin),l.immediate?'liquidated at entry':l.liquidation===null?'none':px(l.liquidation),l.immediate||l.liquidationDistancePct===null?'-':pct(l.liquidationDistancePct),l.net===null?'-':money(l.net),l.roiPct===null?'-':pct(l.roiPct)];
   cells.forEach(function(c,i){var td=document.createElement('td');td.textContent=c;if(i===5&&l.roiPct!==null)td.className=sign(l.roiPct);tr.appendChild(td);});tb.appendChild(tr);});
 }
-var IDS=['clSide','clInst','clCs','clEntry','clExit','clStop','clSizeBy','clQty','clMargin','clLev','clFee','clSlip','clFund','clMmr','clFx','clTp'];
+var IDS=['clSide','clInst','clCs','clEntry','clExit','clStop','clSizeBy','clQty','clMargin','clLev','clFee','clSlip','clFund','clMmr','clFx','clTp','clTpPct'];
 function applyPreset(){var p=P[g('clInst').value];if(!p)return;g('clCs').value=p.cs;g('clFee').value=p.fee;g('clSlip').value=p.slip;}
 function setLev(v){v=Math.max(1,Math.min(150,Math.round(Number(v)||1)));g('clLev').value=v;g('clLevRange').value=Math.min(v,125);g('clLevOut').textContent=v+'x';}
+function applyMarketMode(){var mode=g('clMarketMode').value,prev=g('clMarketMode').dataset.last||'futures';if(mode==='spot'&&prev!=='spot'){g('clMarketMode').dataset.futuresLev=g('clLev').value||'10';g('clSide').value='buy';setLev(1);}else if(mode==='futures'&&prev==='spot'){setLev(Number(g('clMarketMode').dataset.futuresLev)||10);}var spot=mode==='spot';g('clSide').disabled=spot;g('clLev').disabled=spot;g('clLevRange').disabled=spot;g('clFund').disabled=spot;g('clMmr').disabled=spot;g('clMarketNote').textContent=spot?'Spot mode: long-only, unleveraged (1x). Target return is calculated against invested capital.':'Futures mode: choose Long or Short and set leverage. Target return is calculated against allocated margin; estimated funding, fees and slippage are included.';g('clMarketMode').dataset.last=mode;}
+function applyTargetMode(){var amount=g('clTargetMode').value==='amount';g('clTpL').style.display=amount?'':'none';g('clTpPctL').style.display=amount?'none':'';}
 g('clLevRange').addEventListener('input',function(){setLev(g('clLevRange').value);run();});
 g('clLev').addEventListener('input',function(){var v=Number(g('clLev').value);if(isFinite(v)&&v>=1){g('clLevRange').value=Math.min(Math.round(v),125);g('clLevOut').textContent=Math.round(v)+'x';}run();});
 g('clInst').addEventListener('change',function(){applyPreset();run();});
 IDS.forEach(function(i){if(i!=='clLev'&&i!=='clInst'){g(i).addEventListener('input',run);g(i).addEventListener('change',run);}});
+g('clMarketMode').addEventListener('change',function(){applyMarketMode();run();});g('clTargetMode').addEventListener('change',function(){applyTargetMode();run();});
 function lastPrice(){var t=$('last').textContent.replace(/,/g,'').trim(),v=Number(t);return isFinite(v)&&v>0?v:null;}
 g('clUseLast').addEventListener('click',function(){var v=lastPrice();if(v===null){g('clSym').textContent='No live chart price yet: type the entry price manually.';return;}g('clEntry').value=v;run();});
-g('clReset').addEventListener('click',function(){g('clSide').value='buy';g('clInst').value='crypto';applyPreset();['clEntry','clExit','clStop','clTp'].forEach(function(i){g(i).value='';});g('clSizeBy').value='quantity';g('clQty').value=1;g('clMargin').value=100;g('clFund').value=0;g('clMmr').value=0.5;g('clFx').value=1;setLev(10);run();});
+g('clReset').addEventListener('click',function(){g('clMarketMode').value='futures';g('clTargetMode').value='amount';applyMarketMode();applyTargetMode();g('clSide').value='buy';g('clInst').value='crypto';applyPreset();['clEntry','clExit','clStop','clTp','clTpPct'].forEach(function(i){g(i).value='';});g('clSizeBy').value='quantity';g('clQty').value=1;g('clMargin').value=100;g('clFund').value=0;g('clMmr').value=0.5;g('clFx').value=1;setLev(10);run();});
 /* Entry follows chart clicks: the chart ticket sets its price field first, then this listener copies it into the entry. */
 if($('stack'))$('stack').addEventListener('click',function(){
  if(!g('clLink').checked||!$('ctPrice'))return;
@@ -126,11 +135,13 @@ function say(t,cls){var m=g('clPlaceMsg');m.className=cls||'clinfo';m.textConten
 g('clPlace').addEventListener('click',function(){
  if(g('clSide').value!=='buy'){say('Spot paper and testnet trading is long-only, so a short plan cannot be placed here. Set Direction to Long, or keep this plan for reference.','clerr');return;}
  if(typeof submitOrder!=='function'||!$('orderType')||!$('orderQuantity')){say('The order panel is not available on this page.','clerr');return;}
+ if(g('clMarketMode').value==='futures'){say('Futures order execution is not connected to this calculator. Use the dedicated futures order panel; this button only supports the existing spot paper/testnet order flow.','clerr');return;}
  var mode=g('clMode').value,live=lastPrice(),entry=n('clEntry'),stop=n('clStop'),exit=n('clExit');
  if(mode==='market'){if(live===null){say('No live chart price yet: wait for the chart to load, or use a limit entry.','clerr');return;}entry=live;g('clEntry').value=entry;}
  if(entry===null||!(entry>0)){say('Enter the entry price first (or click the chart, or use the chart price).','clerr');return;}
  var r=computePosition(inputs());
  if(!r.ok){say('Fix the calculator first: '+(r.errors||[]).join(' | '),'clerr');return;}
+ if(exit===null&&r.priceForTargetProfit!==null){exit=r.priceForTargetProfit;g('clExit').value=exit;}
  var units=Math.floor(r.units*1e6)/1e6;
  if(!(units>0)){say('The position size rounds to zero. Increase the quantity or margin.','clerr');return;}
  if(stop!==null&&!(stop<entry)){say('For a long, the stop must be below the entry price.','clerr');return;}
@@ -158,6 +169,6 @@ async function symInfo(){
 }
 g('clInst').addEventListener('change',function(){g('clInst').dataset.auto='off';});
 $('symbol').addEventListener('change',symInfo);$('symMarket').addEventListener('change',function(){setTimeout(symInfo,400);});
-setLev(g('clLev').value);run();symInfo();
+applyMarketMode();applyTargetMode();setLev(g('clLev').value);run();symInfo();
 })();
 ` + CHART_LAYOUT_JS;
