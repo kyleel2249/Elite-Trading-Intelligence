@@ -142,7 +142,7 @@ test("usage endpoint: bearer required, aggregates the last seven days with measu
 
 
 test("agent dashboard exposes the authenticated LLM review and usage workflows", () => {
-  for (const item of ["Run LLM evidence review", "LLM usage", "/api/agents/brief", "/api/llm/usage", "renderLlmReview", "advisory review only"]) {
+  for (const item of ["Run LLM evidence review", "LLM usage", "/api/agents/brief", "/api/llm/usage", "renderLlmReview", "Advisory review only"]) {
     assert.ok(DASHBOARD_HTML.includes(item), "missing dashboard integration: " + item);
   }
 });
