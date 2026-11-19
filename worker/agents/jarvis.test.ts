@@ -111,3 +111,38 @@ test("JARVIS exposes web search as optional and reports missing provider configu
   assert.equal(data.result.status, "not_configured");
   assert.equal(data.safety.liveExecutionAllowed, false);
 });
+
+test("JARVIS encrypts provider keys in existing KV and exposes status without secrets", async () => {
+  const values = new Map<string, string>();
+  const env: any = {
+    ETI_EXECUTION_TOKEN: "jarvis-test-token",
+    ETI_EXECUTION_LOG: { async get(k: string) { return values.get(k) ?? null; }, async put(k: string, v: string) { values.set(k, v); } },
+  };
+  const app = withJarvis({ fetch: () => Response.json({}) });
+  const put = await app.fetch(new Request("https://eti.test/api/agents/jarvis/providers", {
+    method: "PUT", headers: { authorization: "Bearer jarvis-test-token", "content-type": "application/json" },
+    body: JSON.stringify({ braveApiKey: "brave-secret", googleApiKey: "google-secret", googleCx: "engine-id" }),
+  }), env);
+  const saved: any = await put.json();
+  assert.equal(saved.saved, true);
+  assert.deepEqual(saved.configured, { brave: true, google: true });
+  const stored = [...values.values()][0];
+  assert.ok(stored);
+  assert.equal(stored.includes("brave-secret"), false);
+  assert.equal(stored.includes("google-secret"), false);
+  const get = await app.fetch(new Request("https://eti.test/api/agents/jarvis/providers", { headers: { authorization: "Bearer jarvis-test-token" } }), env);
+  const status: any = await get.json();
+  assert.deepEqual(status.configured, { brave: true, google: true });
+  assert.equal(JSON.stringify(status).includes("google-secret"), false);
+});
+
+test("JARVIS requires Google engine ID with Google API key", async () => {
+  const env: any = { ETI_EXECUTION_TOKEN: "jarvis-test-token", ETI_EXECUTION_LOG: { async get() { return null; }, async put() {} } };
+  const app = withJarvis({ fetch: () => Response.json({}) });
+  const res = await app.fetch(new Request("https://eti.test/api/agents/jarvis/providers", {
+    method: "PUT", headers: { authorization: "Bearer jarvis-test-token", "content-type": "application/json" },
+    body: JSON.stringify({ googleApiKey: "google-secret" }),
+  }), env);
+  assert.equal(res.status, 400);
+  assert.equal((await res.json() as any).error, "google_cx_required");
+});
