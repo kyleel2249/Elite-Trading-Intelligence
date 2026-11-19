@@ -318,6 +318,8 @@ ${PERP_HTML}
 </main>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script><script src="/bitget-client.js"></script><script>
 const $=id=>document.getElementById(id);let socket=null, candles=[], book={bids:[],asks:[]}, trades=[],pricePrecision=2;
+// Pair-list state is read by symInfo()/mkt(), which top-level start-up calls reach, so it must be declared before any of them runs.
+const SYM={all:[],market:'spot',venue:'bybit',quote:'',cat:'',q:'',at:0,warn:''};
 const fmt=n=>Number(n).toLocaleString(undefined,{maximumFractionDigits:6});
 function decimalPlaces(v){if(v===null||v===undefined||v==='')return 0;let t=String(v).trim().toLowerCase(),e=0;if(t.indexOf('e')>=0){const p=t.split('e');t=p[0];e=Number(p[1])||0;}const f=(t.split('.')[1]||'').length;return Math.max(0,Math.min(20,f-e));}
 function capturePricePrecision(values){(values||[]).forEach(v=>{const n=Number(v);if(Number.isFinite(n)&&n>0)pricePrecision=Math.max(pricePrecision,decimalPlaces(v));});pricePrecision=Math.min(20,pricePrecision);}
@@ -1135,7 +1137,7 @@ setInterval(loadSignal,60000);
 ${PORTFOLIO_JS}
 ${CALC_JS}
 pfInit();
-${PERP_JS}const SYM={all:[],market:'spot',venue:'bybit',quote:'',cat:'',q:'',at:0,warn:''};
+${PERP_JS}
 function symRows(){let rows=SYM.market==='metals'?SYM.all.filter(r=>r[4]==='metals'):SYM.all.filter(r=>r[3]===SYM.market);if(SYM.venue)rows=rows.filter(r=>symV(r)===SYM.venue);const seen={};return rows.map((r,i)=>[r,(SYM.market==='metals'&&r[3]!=='spot'?2:0)+(symV(r)==='bybit'?0:1),i]).sort((a,b)=>a[1]-b[1]||a[2]-b[2]).map(x=>x[0]).filter(r=>{const k=r[0]+'|'+(r[6]||'');return seen[k]?false:(seen[k]=1);});}
 function symVisible(){const t=SYM.q.trim().toUpperCase();return symRows().filter(r=>(!SYM.quote||r[2]===SYM.quote)&&(!SYM.cat||(SYM.market==='futures'&&SYM.venue==='bitget'?String(r[6]||'')===SYM.cat:r[4]===SYM.cat))&&(!t||r[0].indexOf(t)>=0||r[1].indexOf(t)>=0));}
 function symFill(sel,first,values,label){sel.textContent='';const a=document.createElement('option');a.value='';a.textContent=first;sel.appendChild(a);values.forEach(v=>{const o=document.createElement('option');o.value=v[0];o.textContent=label(v);sel.appendChild(o);});}
