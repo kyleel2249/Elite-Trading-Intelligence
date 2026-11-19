@@ -166,7 +166,13 @@ export async function scanAotiPairs(fetcher:typeof fetch=fetch,now=Date.now(),li
   }
   return {schema:"eti.aoti.scan/1",observedAt:now,provider:"DexScreener + RugCheck/GoPlus",count:candidates.length,candidates:candidates.sort((a,b)=>b.score-a.score).slice(0,limit),coverage:{chains:AOTI_CHAINS,profileTokens:addresses.length,holders:"provider-dependent",smartWallets:"not connected unless an independently verified wallet feed is configured",kolBuys:"not inferred from mentions; verified trade feed required"},liveExecutionAllowed:false};
 }
-export interface AotiEnv {ETI_PORTFOLIO_DB?:any;ETI_AOTI_ENABLED?:string;ETI_AOTI_MAX_CANDIDATES?:string;ETI_AOTI_SESSION_START_UTC?:string;ETI_AOTI_SESSION_END_UTC?:string}
+export interface AotiEnv {ETI_PORTFOLIO_DB?:any;ETI_OPERATIONAL_CONFIG?:string}
+export function aotiConfig(env:AotiEnv){
+  let root:any={};try{root=JSON.parse(env.ETI_OPERATIONAL_CONFIG||"{}")}catch{}
+  const raw=root?.aoti||{},time=(v:any,fallback:string)=>typeof v==="string"&&/^(?:([01]\\d|2[0-3])):([0-5]\\d)$/.test(v)?v:fallback;
+  return {enabled:raw.enabled!==false,maxCandidates:clamp(Number(raw.maxCandidates)||12,1,30),sessionStartUtc:time(raw.sessionStartUtc,"23:00"),sessionEndUtc:time(raw.sessionEndUtc,"07:00")};
+}
+export const isAotiEnabled=(env:AotiEnv)=>aotiConfig(env).enabled;
 export function isAotiSessionOpen(now=Date.now(),start="23:00",end="07:00"){
   const parse=(v:string)=>{const m=/^(?:([01]\d|2[0-3])):([0-5]\d)$/.exec(v);return m?Number(m[1])*60+Number(m[2]):-1};
   const a=parse(start),b=parse(end);if(a<0||b<0)return false;if(a===b)return true;
@@ -192,15 +198,15 @@ export async function persistAotiScan(db:any,result:Awaited<ReturnType<typeof sc
   await db.prepare("INSERT INTO eti_aoti_events(id,event_type,reason,payload_json,created_at) VALUES(?,?,?,?,?)").bind("scan:"+result.observedAt,"SCAN","scheduled_market_scan",JSON.stringify({count:result.count,provider:result.provider}),result.observedAt).run().catch(()=>{});
 }
 export async function runAotiCycle(env:AotiEnv,now=Date.now(),fetcher:typeof fetch=fetch){
-  if(env.ETI_AOTI_ENABLED!=="true"||!env.ETI_PORTFOLIO_DB)return {enabled:false,scanned:0,eligible:0,reason:"AOTI disabled or D1 binding unavailable"};
-  const result=await scanAotiPairs(fetcher,now,Number(env.ETI_AOTI_MAX_CANDIDATES||12));
+  if(!aotiConfig(env).enabled||!env.ETI_PORTFOLIO_DB)return {enabled:false,scanned:0,eligible:0,reason:"AOTI disabled or D1 binding unavailable"};
+  const result=await scanAotiPairs(fetcher,now,aotiConfig(env).maxCandidates);
   await persistAotiScan(env.ETI_PORTFOLIO_DB,result);
   return {enabled:true,scanned:result.count,eligible:result.candidates.filter(c=>c.eligible).length,securityPending:result.candidates.filter(c=>c.securityGate==="PENDING").length,provider:result.provider};
 }
 
 /** Refreshes the two-slot paper book. A failed price/security refresh never creates a fictitious fill. */
 export async function manageAotiPaperPositions(env:AotiEnv,now=Date.now(),fetcher:typeof fetch=fetch){
-  const db=env.ETI_PORTFOLIO_DB;if(env.ETI_AOTI_ENABLED!=="true"||!db)return {checked:0,updated:0,closed:0,failures:0};
+  const db=env.ETI_PORTFOLIO_DB;if(!aotiConfig(env).enabled||!db)return {checked:0,updated:0,closed:0,failures:0};
   await ensureAotiSchema(db);
   const rows=(await db.prepare("SELECT * FROM eti_aoti_positions WHERE status='open' ORDER BY opened_at LIMIT 2").all()).results||[];
   let updated=0,closed=0,failures=0;
