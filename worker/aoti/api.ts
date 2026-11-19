@@ -1,5 +1,5 @@
 import { authenticate } from "../auth/session.ts";
-import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, scoreAotiCandidate, isAotiSessionOpen, type AotiEnv, type AotiPosition } from "./engine.ts";
+import { ensureAotiSchema, scanAotiPairs, persistAotiScan, sizeAotiPosition, scoreAotiCandidate, aotiConfig, type AotiEnv, type AotiPosition } from "./engine.ts";
 import { AOTI_PAGE } from "./ui.ts";
 const H={"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"};
 const reply=(v:unknown,status=200)=>new Response(JSON.stringify(v),{status,headers:H});
@@ -19,7 +19,7 @@ async function overview(db:any){
 }
 async function openPaper(req:Request,env:any){
  const db=dbOf(env);if(!db)return reply({error:"d1_unavailable"},503);
- const start=env.ETI_AOTI_SESSION_START_UTC||"23:00",end=env.ETI_AOTI_SESSION_END_UTC||"07:00";if(!isAotiSessionOpen(Date.now(),start,end))return reply({error:"outside_aoti_session",sessionUtc:{start,end}},423);
+ const config=aotiConfig(env),start=config.sessionStartUtc,end=config.sessionEndUtc;if(!isAotiSessionOpen(Date.now(),start,end))return reply({error:"outside_aoti_session",sessionUtc:{start,end}},423);
  const body:any=await req.json().catch(()=>null);const candidateId=String(body?.candidateId||"");
  if(!candidateId||candidateId.length>300)return reply({error:"candidate_id_required"},400);
  await ensureAotiSchema(db);
@@ -68,7 +68,7 @@ export function withAoti<E extends Record<string,any>>(base:{fetch(request:Reque
    try{
     await ensureAotiSchema(db);
     if(path==="/api/aoti/scan"){
-     if(env.ETI_AOTI_ENABLED!=="true")return reply({error:"aoti_disabled",message:"Set ETI_AOTI_ENABLED=true to enable scheduled discovery."},423);
+     if(!aotiConfig(env).enabled)return reply({error:"aoti_disabled",message:"AOTI is disabled in ETI_OPERATIONAL_CONFIG.aoti.enabled."},423);
      const result=await scanAotiPairs(fetch,Date.now(),Number(env.ETI_AOTI_MAX_CANDIDATES||12));await persistAotiScan(db,result);return reply(result);
     }
     if(path==="/api/aoti/security"){
