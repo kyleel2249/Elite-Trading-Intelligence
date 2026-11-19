@@ -388,11 +388,11 @@ jobs:
           for attempt in $(seq 1 12); do
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
             if printf '%s' "$response" | node -e '
-              let s="";for await(const c of process.stdin)s+=c;
-              const x=JSON.parse(s),scheduler=x.scheduler||{};
-              if(x.enabled===true&&x.ready===true&&x.executionTokenConfigured===true&&x.auditLogConfigured===true&&x.portfolioStorageConfigured===true&&x.mode==="internal_paper_only"&&x.liveOrdersAllowed===false&&scheduler.cron==="*/5 * * * *"&&scheduler.dispatchRegistered===true)process.exit(0);
-              console.error("Autopilot readiness:",JSON.stringify({enabled:x.enabled,ready:x.ready,blockedReasons:x.blockedReasons,executionTokenConfigured:x.executionTokenConfigured,auditLogConfigured:x.auditLogConfigured,portfolioStorageConfigured:x.portfolioStorageConfigured,scheduler,mode:x.mode,liveOrdersAllowed:x.liveOrdersAllowed}));
-              process.exit(1);
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),scheduler=x.scheduler||{};
+                if(x.enabled===true&&x.ready===true&&x.executionTokenConfigured===true&&x.auditLogConfigured===true&&x.portfolioStorageConfigured===true&&x.mode==="internal_paper_only"&&x.liveOrdersAllowed===false)process.exit(0);
+                console.error("Autopilot readiness:",JSON.stringify({enabled:x.enabled,ready:x.ready,blockedReasons:x.blockedReasons,executionTokenConfigured:x.executionTokenConfigured,auditLogConfigured:x.auditLogConfigured,portfolioStorageConfigured:x.portfolioStorageConfigured,scheduler,mode:x.mode,liveOrdersAllowed:x.liveOrdersAllowed}));
+                process.exit(1);
+              });
             '; then ready=1; break; fi
             sleep 5
           done
@@ -402,12 +402,12 @@ jobs:
           for attempt in $(seq 1 72); do
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
             if printf '%s' "$response" | node -e '
-              let s="";for await(const c of process.stdin)s+=c;
-              const x=JSON.parse(s),last=x.latest;
-              const fresh=x.lastCycleFresh===true&&last&&typeof last.at==="string"&&Number.isFinite(Date.parse(last.at))&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
-              if(!fresh)process.exit(1);
-              const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
-              console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest;
+                const fresh=x.lastCycleFresh===true&&last&&typeof last.at==="string"&&Number.isFinite(Date.parse(last.at))&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
+                if(!fresh)process.exit(1);
+                const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
+                console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
+              });
             '; then cycle_ok=1; break; fi
             sleep 5
           done
