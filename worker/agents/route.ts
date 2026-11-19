@@ -150,8 +150,20 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
 
       if (path === "/api/agents/autopilot") {
         if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
-        let latest: unknown = null;
-        try { latest = env.ETI_EXECUTION_LOG ? JSON.parse((await env.ETI_EXECUTION_LOG.get("agent-autopilot:last")) || "null") : null; } catch { latest = null; }
+        let latest: unknown = null, lastDispatch: unknown = null;
+        try {
+          if (env.ETI_EXECUTION_LOG) {
+            const [latestRaw, heartbeatRaw] = await Promise.all([
+              env.ETI_EXECUTION_LOG.get("agent-autopilot:last"),
+              env.ETI_EXECUTION_LOG.get("agent-autopilot:heartbeat"),
+            ]);
+            latest = latestRaw ? JSON.parse(latestRaw) : null;
+            lastDispatch = heartbeatRaw ? JSON.parse(heartbeatRaw) : null;
+          }
+        } catch { latest = null; lastDispatch = null; }
+        const dispatchAt = lastDispatch && typeof lastDispatch === "object" && typeof (lastDispatch as any).at === "string" ? Date.parse((lastDispatch as any).at) : NaN;
+        const lastDispatchAgeMs = Number.isFinite(dispatchAt) ? Math.max(0, clock() - dispatchAt) : null;
+        const lastDispatchFresh = lastDispatchAgeMs !== null && lastDispatchAgeMs <= 10 * 60_000;
         const config = readAutopilotConfig(env);
         const enabled = env.ETI_AGENT_AUTOPILOT_ENABLED === "true";
         const latestAt = latest && typeof latest === "object" && typeof (latest as any).at === "string" ? Date.parse((latest as any).at) : NaN;
@@ -180,6 +192,7 @@ function withAgentsCore<E extends AgentsEnv>(base: App<E>, deps: AgentsDeps = {}
             dispatchRegistered: true,
           },
           lastCycleAgeMs, lastCycleFresh,
+          lastDispatchAgeMs, lastDispatchFresh, lastDispatch,
           lastCycleStatus: latest && typeof latest === "object" ? ((latest as any).skipped || ((latest as any).submitted > 0 ? "paper_orders_submitted" : "completed_without_orders")) : "not_observed",
           lastCycleError: latest && typeof latest === "object" ? ((latest as any).error || null) : null,
           executionTokenConfigured: integrity.executionTokenConfigured, auditLogConfigured: integrity.auditLogConfigured,

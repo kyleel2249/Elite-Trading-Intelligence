@@ -110,6 +110,26 @@ jobs:
           else
             npx --yes wrangler@4.148.0 deploy --secrets-file "$secrets_file"
           fi
+          # Record the actual successful Worker deployment time, not workflow start time.
+          echo "ETI_WORKER_DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Verify deployed Cloudflare Cron Trigger registration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          response="$(curl --silent --show-error --fail \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/elite-trading-intelligence-eti/schedules")"
+          printf '%s' "$response" | node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),crons=(x.result?.schedules||[]).map(v=>v.cron);
+              const required=["* * * * *","*/5 * * * *","*/15 * * * *"];
+              const missing=required.filter(v=>!crons.includes(v));
+              if(x.success!==true||missing.length){console.error("Cloudflare Worker Cron Trigger registration:",JSON.stringify({success:x.success,crons,missing}));process.exit(1);}
+              console.log("Cloudflare Worker Cron Triggers verified:",JSON.stringify(crons));
+            });'
 
       - name: Sync DataX Pages integration secret and redeploy production
         shell: bash
@@ -383,7 +403,6 @@ jobs:
         shell: bash
         env:
           ETI_EXECUTION_TOKEN: ${{ secrets.ETI_EXECUTION_TOKEN }}
-          DEPLOY_STARTED_AT: ${{ github.run_started_at }}
         run: |
           set -euo pipefail
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
@@ -404,18 +423,19 @@ jobs:
           # Exercise the exact authenticated, read-only council preflight used by the scheduler.
           # This sends no order and does not persist a decision.
           test -n "$ETI_EXECUTION_TOKEN" || { echo "::error::ETI_EXECUTION_TOKEN unavailable to diagnostic step"; exit 1; }
-          analysis_response="$(curl --silent --show-error --max-time 45 -w '__HTTP_CODE__%{http_code}' -X POST "$base/api/agents/analyze" -H "Authorization: Bearer $ETI_EXECUTION_TOKEN" -H 'content-type: application/json' --data '{"symbol":"BTCUSDT","interval":"15m","providers":false}')"
+          analysis_response="$(curl --silent --show-error --max-time 45 -w '__HTTP_CODE__%{http_code}' -X POST "$base/api/agents/analyze" -H "Authorization: Bearer $ETI_EXECUTION_TOKEN" -H 'content-type: application/json' --data '{"symbol":"BTCUSDT","interval":"15m","account":{"equityUsd":10000,"availableUsd":10000,"positionQuantity":0,"dailyPnlPct":0,"drawdownPct":0,"openRiskPct":0}}')"
           analysis_status="${analysis_response##*__HTTP_CODE__}"
           analysis_body="${analysis_response%__HTTP_CODE__*}"
           printf '%s' "$analysis_body" | HTTP_STATUS="$analysis_status" node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{let x={};try{x=JSON.parse(s)}catch{}
               if(process.env.HTTP_STATUS!=="200"){console.error("Authenticated agent analysis preflight failed:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,error:x.error||"unknown",detail:x.detail||x.message||null,decision:x.decision?.action||x.decision||null}));process.exit(1);}
-              console.log("Authenticated agent analysis preflight passed:",JSON.stringify({
-                action:x.decision?.action||"unknown",confidence:x.decision?.confidence??null,agreement:x.decision?.consensus?.agreement??null,
-                consensus:x.decision?.consensus||null,rationale:x.decision?.rationale||[],vetoedBy:x.decision?.vetoedBy||null,
-                proposalAvailable:!!x.decision?.proposal,risk:x.risk?{decision:x.risk.decision,approved:x.risk.approved,vetoes:x.risk.vetoes||[],failedChecks:(x.risk.checks||[]).filter(c=>!c.passed).map(c=>({id:c.id,detail:c.detail}))}:null,
+              if(!x.decision||!Array.isArray(x.reports)||x.reports.length!==12||!x.risk){console.error("Authenticated agent analysis response is incomplete:",JSON.stringify({hasDecision:!!x.decision,reportCount:x.reports?.length??0,hasRisk:!!x.risk}));process.exit(1);}
+              console.log("Authenticated twelve-agent analysis preflight passed:",JSON.stringify({
+                action:x.decision.action||"unknown",confidence:x.decision.confidence??null,agreement:x.decision.consensus?.agreement??null,
+                consensus:x.decision.consensus||null,rationale:x.decision.rationale||[],vetoedBy:x.decision.vetoedBy||null,
+                proposalAvailable:!!x.decision.proposal,risk:x.risk?{decision:x.risk.decision,approved:x.risk.approved,vetoes:x.risk.vetoes||[],failedChecks:(x.risk.checks||[]).filter(c=>!c.passed).map(c=>({id:c.id,detail:c.detail}))}:null,
                 deliberation:x.deliberation?{direction:x.deliberation.direction,reason:x.deliberation.reason,coverage:x.deliberation.coverage,participating:x.deliberation.participating,abstaining:x.deliberation.abstaining}:null,
-                dataQuality:x.dataQuality||null,reports:(x.reports||[]).map(r=>({agent:r.agent,status:r.status,stance:r.stance,confidence:r.confidence,summary:r.summary,missingInputs:r.missingInputs||[]})),
+                dataQuality:x.dataQuality||null,reports:x.reports.map(r=>({agent:r.agent,status:r.status,stance:r.stance,confidence:r.confidence,summary:r.summary,missingInputs:r.missingInputs||[]})),
               }));
             });'
           for symbol in BTCUSDT ETHUSDT SOLUSDT; do
@@ -428,20 +448,30 @@ jobs:
             '
             if [ "$symbol" = "ETHUSDT" ]; then sleep 11; fi
           done
+          test -n "${ETI_WORKER_DEPLOYED_AT:-}" || { echo "::error::Worker deployment timestamp was not recorded"; exit 1; }
           cycle_ok=0
           for attempt in $(seq 1 72); do
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
-            if printf '%s' "$response" | node -e '
-              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest;
-                const cycleAt=last&&typeof last.at==="string"?Date.parse(last.at):NaN;const fresh=x.lastCycleFresh===true&&Number.isFinite(cycleAt)&&cycleAt>=Date.parse(process.env.DEPLOY_STARTED_AT)&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
+            if printf '%s' "$response" | DEPLOY_STARTED_AT="$ETI_WORKER_DEPLOYED_AT" node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest,dispatch=x.lastDispatch;
+                const deployedAt=Date.parse(process.env.DEPLOY_STARTED_AT);
+                const dispatchAt=dispatch&&typeof dispatch.at==="string"?Date.parse(dispatch.at):NaN;
+                const cycleAt=last&&typeof last.at==="string"?Date.parse(last.at):NaN;
+                const dispatched=dispatch&&dispatch.cron==="*/5 * * * *"&&Number.isFinite(dispatchAt)&&dispatchAt>=deployedAt&&dispatch.status==="completed"&&dispatch.liveOrdersAllowed===false;
+                const fresh=dispatched&&x.lastCycleFresh===true&&Number.isFinite(cycleAt)&&cycleAt>=deployedAt&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
                 if(!fresh)process.exit(1);
                 const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
-                console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
+                console.log("Post-deployment autopilot dispatch and cycle verified:",JSON.stringify({dispatch:dispatch.status,dispatchedAt:dispatch.at,completedAt:dispatch.completedAt,at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null,councilDiagnostics:o.councilDiagnostics||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
               });
             '; then cycle_ok=1; break; fi
             sleep 5
           done
-          test "$cycle_ok" -eq 1 || { echo "::error::No fresh scheduled autopilot analysis cycle was observed within six minutes; inspect Worker cron delivery and /api/agents/autopilot"; exit 1; }
+          if [ "$cycle_ok" -ne 1 ]; then
+            response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot" || printf '{}')"
+            printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{let x={};try{x=JSON.parse(s)}catch{};const d=x.lastDispatch||null,l=x.latest||null;console.error("Autopilot post-deployment scheduler diagnosis:",JSON.stringify({lastDispatch:d?{status:d.status,at:d.at,completedAt:d.completedAt,error:d.error||null}:null,lastDispatchFresh:x.lastDispatchFresh,lastCycle:l?{at:l.at,skipped:l.skipped||null,error:l.error||null,evaluated:l.evaluated,submitted:l.submitted}:null,lastCycleFresh:x.lastCycleFresh}));});'
+            echo "::error::No completed post-deployment autopilot cron cycle was observed within six minutes; distinguish missing dispatch from an unfinished or failed cycle using the heartbeat above."
+            exit 1
+          fi
 
       - name: Verify live sports service and D1 readiness
         shell: bash

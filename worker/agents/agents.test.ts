@@ -202,9 +202,16 @@ test("routes: dashboard, roster, providers feed agents, auth, and structural vet
     assert.equal(disabledAuto.liveOrdersAllowed, false);
     assert.equal(disabledAuto.ready, false);
     assert.ok(disabledAuto.blockedReasons.includes("autopilot_disabled"));
-    const autoEnv: any = { ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_EXECUTION_TOKEN: env.ETI_EXECUTION_TOKEN, ETI_EXECUTION_LOG: { get: async () => null } };
+    const heartbeat = { status: "started", cron: "*/5 * * * *", at: new Date().toISOString(), mode: "internal_paper_only", liveOrdersAllowed: false };
+    const autoEnv: any = {
+      ETI_AGENT_AUTOPILOT_ENABLED: "true", ETI_EXECUTION_TOKEN: env.ETI_EXECUTION_TOKEN,
+      ETI_EXECUTION_LOG: { get: async (key: string) => key === "agent-autopilot:heartbeat" ? JSON.stringify(heartbeat) : null },
+    };
     const readyAuto: any = await (await app.fetch(new Request("https://e.test/api/agents/autopilot"), autoEnv)).json();
     assert.equal(readyAuto.ready, true, "the scheduled paper controller should report ready when its gates and storage are configured");
+    assert.equal(readyAuto.lastDispatch.status, "started");
+    assert.equal(readyAuto.lastDispatch.cron, "*/5 * * * *");
+    assert.equal(readyAuto.lastDispatchFresh, true);
     assert.equal(readyAuto.councilRunsBeforeStrategyGates, true);
     assert.equal(readyAuto.recordsNoTradeDecisions, true);
     assert.equal((await app.fetch(new Request("https://e.test/api/agents/decisions"), env)).status, 401);
