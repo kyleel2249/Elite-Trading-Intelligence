@@ -63,6 +63,7 @@ import { withWallets } from "./wallets/routes.ts";
 import { withPerp, runPerpCycle } from "./perp/routes.ts";
 import { handleMarketsApi } from "./markets-api.ts";
 import { withSecurityHeaders } from "./security/headers.ts";
+import { SMC_INTELLIGENCE_CSS, SMC_INTELLIGENCE_JS } from "./ui/smc-intelligence.ts";
 import { withBybitAccount } from "./bybit/route.ts";
 import { withBitget } from "./bitget/route.ts";
 import { withDataX } from "./datax/integration.ts";
@@ -103,8 +104,22 @@ const inner: any = base;
 const MONITOR_CRON = "* * * * *";
 
 
+function withSmcIntelligence(request: Request, response: Response): Promise<Response> | Response {
+  const path = new URL(request.url).pathname;
+  if (path === "/smc-intelligence.js") return new Response(SMC_INTELLIGENCE_JS.replace(/^<script[^>]*>/, "").replace(/<[/]script>$/, ""), { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=60", "x-content-type-options": "nosniff" } });
+  if (path === "/smc-intelligence.css") return new Response(SMC_INTELLIGENCE_CSS.replace(/^<style[^>]*>/, "").replace(/<[/]style>$/, ""), { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
+  if (!["/", "/terminal", "/pro"].includes(path) || !/^text\/html/i.test(response.headers.get("content-type") || "")) return response;
+  return response.text().then(html => {
+    if (html.includes('id="eti-smci"')) return new Response(html, response);
+    const assets = '<link rel="stylesheet" href="/smc-intelligence.css"><script src="/smc-intelligence.js"></script>';
+    html = html.replace("</head>", '<link rel="stylesheet" href="/smc-intelligence.css"></head>');
+    html = html.replace("</body>", '<script src="/smc-intelligence.js"></script></body>');
+    return new Response(html, { status: response.status, statusText: response.statusText, headers: response.headers });
+  });
+}
+
 export default {
-  fetch: (request: Request, env: any) => app.fetch(request, env),
+  fetch: async (request: Request, env: any) => withSmcIntelligence(request, await app.fetch(request, env)),
   async scheduled(event: { cron?: string }, env: any, ctx: { waitUntil(p: Promise<unknown>): void }) {
     if (event.cron === "*/15 * * * *" && env.ETI_PORTFOLIO_DB) ctx.waitUntil(runV3AlphaTrackingCycle(env).then(r => { if (r.resolved) console.log("V3 Alpha forward outcomes resolved", r.resolved); }, e => console.error("V3 Alpha tracking failed", e instanceof Error ? e.message : e)));
     // Autonomous football scan and result-history collection are quota-throttled in D1 (scan >= 60 min, history >= 360 min),
