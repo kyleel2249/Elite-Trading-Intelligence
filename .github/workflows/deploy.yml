@@ -428,16 +428,25 @@ jobs:
           for attempt in $(seq 1 72); do
             response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot")" || { sleep 5; continue; }
             if printf '%s' "$response" | DEPLOY_STARTED_AT="$ETI_WORKER_DEPLOYED_AT" node -e '
-              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest;
-                const cycleAt=last&&typeof last.at==="string"?Date.parse(last.at):NaN;const fresh=x.lastCycleFresh===true&&Number.isFinite(cycleAt)&&cycleAt>=Date.parse(process.env.DEPLOY_STARTED_AT)&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const x=JSON.parse(s),last=x.latest,dispatch=x.lastDispatch;
+                const deployedAt=Date.parse(process.env.DEPLOY_STARTED_AT);
+                const dispatchAt=dispatch&&typeof dispatch.at==="string"?Date.parse(dispatch.at):NaN;
+                const cycleAt=last&&typeof last.at==="string"?Date.parse(last.at):NaN;
+                const dispatched=dispatch&&dispatch.cron==="*/5 * * * *"&&Number.isFinite(dispatchAt)&&dispatchAt>=deployedAt&&dispatch.status==="completed"&&dispatch.liveOrdersAllowed===false;
+                const fresh=dispatched&&x.lastCycleFresh===true&&Number.isFinite(cycleAt)&&cycleAt>=deployedAt&&Number(last.evaluated)>0&&Array.isArray(last.outcomes)&&last.liveOrdersAllowed===false;
                 if(!fresh)process.exit(1);
                 const counts={};for(const o of last.outcomes)counts[o.status]=(counts[o.status]||0)+1;
-                console.log("Fresh scheduled autopilot cycle verified:",JSON.stringify({at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
+                console.log("Post-deployment autopilot dispatch and cycle verified:",JSON.stringify({dispatch:dispatch.status,dispatchedAt:dispatch.at,completedAt:dispatch.completedAt,at:last.at,evaluated:last.evaluated,submitted:last.submitted,outcomes:counts,reasons:last.outcomes.filter(o=>o.reason).map(o=>({symbol:o.symbol,reason:o.reason,analysisFailure:o.analysisFailure||null})).slice(0,8),mode:last.mode,liveOrdersAllowed:last.liveOrdersAllowed}));
               });
             '; then cycle_ok=1; break; fi
             sleep 5
           done
-          test "$cycle_ok" -eq 1 || { echo "::error::No fresh scheduled autopilot analysis cycle was observed within six minutes; inspect Worker cron delivery and /api/agents/autopilot"; exit 1; }
+          if [ "$cycle_ok" -ne 1 ]; then
+            response="$(curl --silent --show-error --fail --max-time 15 "$base/api/agents/autopilot" || printf '{}')"
+            printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{let x={};try{x=JSON.parse(s)}catch{};const d=x.lastDispatch||null,l=x.latest||null;console.error("Autopilot post-deployment scheduler diagnosis:",JSON.stringify({lastDispatch:d?{status:d.status,at:d.at,completedAt:d.completedAt,error:d.error||null}:null,lastDispatchFresh:x.lastDispatchFresh,lastCycle:l?{at:l.at,skipped:l.skipped||null,error:l.error||null,evaluated:l.evaluated,submitted:l.submitted}:null,lastCycleFresh:x.lastCycleFresh}));});'
+            echo "::error::No completed post-deployment autopilot cron cycle was observed within six minutes; distinguish missing dispatch from an unfinished or failed cycle using the heartbeat above."
+            exit 1
+          fi
 
       - name: Verify live sports service and D1 readiness
         shell: bash
