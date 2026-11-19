@@ -165,7 +165,13 @@ export async function scanAotiPairs(fetcher:typeof fetch=fetch,now=Date.now(),li
   }
   return {schema:"eti.aoti.scan/1",observedAt:now,provider:"DexScreener + RugCheck/GoPlus",count:candidates.length,candidates:candidates.sort((a,b)=>b.score-a.score).slice(0,limit),coverage:{chains:AOTI_CHAINS,profileTokens:addresses.length,holders:"provider-dependent",smartWallets:"not connected unless an independently verified wallet feed is configured",kolBuys:"not inferred from mentions; verified trade feed required"},liveExecutionAllowed:false};
 }
-export interface AotiEnv {ETI_PORTFOLIO_DB?:any;ETI_AOTI_ENABLED?:string;ETI_AOTI_MAX_CANDIDATES?:string}
+export interface AotiEnv {ETI_PORTFOLIO_DB?:any;ETI_AOTI_ENABLED?:string;ETI_AOTI_MAX_CANDIDATES?:string;ETI_AOTI_SESSION_START_UTC?:string;ETI_AOTI_SESSION_END_UTC?:string}
+export function isAotiSessionOpen(now=Date.now(),start="23:00",end="07:00"){
+  const parse=(v:string)=>{const m=/^(?:([01]\\d|2[0-3])):([0-5]\\d)$/.exec(v);return m?Number(m[1])*60+Number(m[2]):-1};
+  const a=parse(start),b=parse(end);if(a<0||b<0)return false;if(a===b)return true;
+  const d=new Date(now),minute=d.getUTCHours()*60+d.getUTCMinutes();
+  return a<b?minute>=a&&minute<b:minute>=a||minute<b;
+}
 export async function ensureAotiSchema(db:any){
   await db.prepare(`CREATE TABLE IF NOT EXISTS eti_aoti_candidates(id TEXT PRIMARY KEY,chain TEXT NOT NULL,address TEXT NOT NULL,pair_address TEXT NOT NULL,symbol TEXT NOT NULL,score REAL NOT NULL,security_gate TEXT NOT NULL,eligible INTEGER NOT NULL,payload_json TEXT NOT NULL,observed_at INTEGER NOT NULL)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_aoti_candidates_observed ON eti_aoti_candidates(observed_at DESC,score DESC)`).run();
@@ -177,7 +183,11 @@ export async function ensureAotiSchema(db:any){
 }
 export async function persistAotiScan(db:any,result:Awaited<ReturnType<typeof scanAotiPairs>>){
   await ensureAotiSchema(db);
-  for(const c of result.candidates)await db.prepare("INSERT OR REPLACE INTO eti_aoti_candidates(id,chain,address,pair_address,symbol,score,security_gate,eligible,payload_json,observed_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(c.id,c.chain,c.address,c.pairAddress,c.symbol,c.score,c.securityGate,c.eligible?1:0,JSON.stringify(c),c.observedAt).run();
+  for(let c of result.candidates){
+    const previous=await db.prepare("SELECT payload_json FROM eti_aoti_candidates WHERE id=?").bind(c.id).first().catch(()=>null);
+    if(previous?.payload_json){try{const old=JSON.parse(previous.payload_json);if(old.security?.provider==="operator_attested"&&result.observedAt-Number(old.security.checkedAt)<=5*60_000){c=scoreAotiCandidate({...c,security:old.security},result.observedAt)}}catch{}}
+    await db.prepare("INSERT OR REPLACE INTO eti_aoti_candidates(id,chain,address,pair_address,symbol,score,security_gate,eligible,payload_json,observed_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(c.id,c.chain,c.address,c.pairAddress,c.symbol,c.score,c.securityGate,c.eligible?1:0,JSON.stringify(c),c.observedAt).run();
+  }
   await db.prepare("INSERT INTO eti_aoti_events(id,event_type,reason,payload_json,created_at) VALUES(?,?,?,?,?)").bind("scan:"+result.observedAt,"SCAN","scheduled_market_scan",JSON.stringify({count:result.count,provider:result.provider}),result.observedAt).run().catch(()=>{});
 }
 export async function runAotiCycle(env:AotiEnv,now=Date.now(),fetcher:typeof fetch=fetch){
