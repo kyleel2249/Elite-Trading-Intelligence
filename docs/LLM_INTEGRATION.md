@@ -11,6 +11,8 @@ ETI's optional LLM integration is an **advisory evidence-review layer** over the
    npx wrangler secret put ANTHROPIC_API_KEY
    ```
 
+   If ETI is deployed through GitHub Actions, also add the same value as the repository Actions secret named `ANTHROPIC_API_KEY`; the deployment workflow forwards it to the Worker without exposing it in logs or source files.
+
 3. Configure optional non-secret Worker variables as needed:
 
    Set `ETI_LLM_MODEL` as a non-secret Worker variable in `wrangler.jsonc` or the Cloudflare dashboard Variables and Secrets UI. The default model is `claude-sonnet-5-5`; use a model ID enabled for the Anthropic API account.
