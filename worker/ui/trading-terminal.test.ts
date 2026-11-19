@@ -44,6 +44,8 @@ test("terminal exposes recent trades, chart presentation and manual level tools"
   assert.match(TRADING_TERMINAL_JS, /function renderChartInterpretation\(/);
   assert.match(TRADING_TERMINAL_JS, /ORDER is only a chart reference unless ETI can match it to a live exchange order ID/);
   assert.match(TRADING_TERMINAL_JS, /SWEEP REACH HIGH \/ LOW/);
+  assert.match(TRADING_TERMINAL_JS, /!Number\.isFinite\(expiry\)/);
+  assert.match(TRADING_TERMINAL_JS, /omniConflict/);
   assert.match(TRADING_TERMINAL_HTML, /tt-draw-level/);
   assert.match(TRADING_TERMINAL_JS, /renderTrades/);
   assert.match(TRADING_TERMINAL_JS, /\/api\/market\/depth/);
