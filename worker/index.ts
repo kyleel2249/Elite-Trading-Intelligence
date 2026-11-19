@@ -44,6 +44,7 @@ import { handleAlpha, type AlphaEnv } from "./alpha/routes.ts";
 import { handleAuth } from "./auth/routes.ts";
 import { assessCoach, classifyTransaction } from "./analysis/trading-coach-engine.ts";
 import { tradingCoachPage } from "./ui/trading-coach.ts";
+import { advancedIntelligencePage } from "./ui/advanced-intelligence.ts";
 import { advancedAssessment, evaluateForecast, explainTransaction } from "./analysis/advanced-intelligence.ts";
 
 export interface Env extends ExecutionEnv, MarketEnv, ReadinessEnv, AlphaEnv, AnalysisEnv {
@@ -1229,6 +1230,7 @@ const page = withMotion(html);
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/trading-coach/advanced" && request.method === "GET") return new Response(advancedIntelligencePage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
     if (url.pathname === "/trading-coach" && request.method === "GET") return new Response(tradingCoachPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
     if (url.pathname === "/api/trading-coach/assess") {
       if (request.method !== "POST") return json({ error: "method_not_allowed", note: "Use POST with an evidence payload." }, 405);
