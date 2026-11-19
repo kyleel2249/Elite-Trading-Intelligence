@@ -149,7 +149,7 @@ form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}label{d
 let token=sessionStorage.getItem("eti_mt5_token")||"";const $=id=>document.getElementById(id);$("token").value=token;
 function auth(){return token?{"Authorization":"Bearer "+token,"Content-Type":"application/json"}:{"Content-Type":"application/json"}}
 async function api(path,options={}){const r=await fetch(path,{...options,headers:{...auth(),...(options.headers||{})}});let d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail?JSON.stringify(d.detail):d.message||d.error||("HTTP "+r.status));return d}
-function money(v,c){return Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+(c?" "+c:"")}
+function esc(v){return String(v??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]))}function money(v,c){return Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+(c?" "+esc(c):"")}
 function msg(t,bad=false){$("message").textContent=t;$("message").className=bad?"bad":"muted"}
 $("tokenForm").onsubmit=e=>{e.preventDefault();token=$("token").value.trim();sessionStorage.setItem("eti_mt5_token",token);load().catch(e=>msg(e.message,true))};
 $("loginForm").onsubmit=async e=>{e.preventDefault();try{const d=await api("/login",{method:"POST",body:JSON.stringify({login:Number($("login").value),server:$("server").value,password:$("password").value,terminal_path:$("path").value||null})});$("password").value="";msg("Connected to account "+d.account.login+" · "+d.account.server);await load()}catch(e){msg(e.message,true)}};
@@ -157,8 +157,8 @@ $("logout").onclick=async()=>{try{await api("/logout",{method:"POST"});msg("Acco
 $("refresh").onclick=()=>load().catch(e=>msg(e.message,true));
 async function load(){if(!token)throw Error("Enter the bridge token first");const a=await api("/account");$("state").textContent="Connected · "+a.login;$("state").className="status ok";$("balance").textContent=money(a.balance,a.currency);$("equity").textContent=money(a.equity,a.currency);$("margin").textContent=money(a.margin_free,a.currency);$("profit").textContent=money(a.profit,a.currency);
 const [s,p,o]=await Promise.all([api("/symbols?search="+encodeURIComponent($("search").value)),api("/positions"),api("/orders")]);
-$("symbols").innerHTML=s.symbols.slice(0,80).map(x=>"<tr><td>"+x.name+"</td><td>"+(x.bid||"—")+"</td><td>"+(x.ask||"—")+"</td><td>"+(x.spread||"—")+"</td><td>"+x.digits+"</td></tr>").join("");
-$("positions").innerHTML=p.positions.map(x=>"<tr><td>"+x.ticket+"</td><td>"+x.symbol+"</td><td>"+(x.type===0?"BUY":"SELL")+"</td><td>"+x.volume+"</td><td>"+x.price_open+"</td><td>"+x.sl+"</td><td>"+x.tp+"</td><td>"+money(x.profit,a.currency)+"</td><td><button data-close='"+x.ticket+"'>Close</button></td></tr>").join("")||"<tr><td colspan='9'>No open positions</td></tr>";
+$("symbols").innerHTML=s.symbols.slice(0,80).map(x=>"<tr><td>"+esc(x.name)+"</td><td>"+(x.bid||"—")+"</td><td>"+(x.ask||"—")+"</td><td>"+(x.spread||"—")+"</td><td>"+x.digits+"</td></tr>").join("");
+$("positions").innerHTML=p.positions.map(x=>"<tr><td>"+x.ticket+"</td><td>"+esc(x.symbol)+"</td><td>"+(x.type===0?"BUY":"SELL")+"</td><td>"+x.volume+"</td><td>"+x.price_open+"</td><td>"+x.sl+"</td><td>"+x.tp+"</td><td>"+money(x.profit,a.currency)+"</td><td><button data-close='"+x.ticket+"'>Close</button></td></tr>").join("")||"<tr><td colspan='9'>No open positions</td></tr>";
 $("orders").innerHTML=o.orders.map(x=>"<tr><td>"+x.ticket+"</td><td>"+x.symbol+"</td><td>"+x.type+"</td><td>"+x.volume_current+"</td><td>"+x.price_open+"</td><td>"+x.sl+"</td><td>"+x.tp+"</td></tr>").join("")||"<tr><td colspan='7'>No pending orders</td></tr>";
 }
 $("search").onchange=()=>load().catch(e=>msg(e.message,true));
