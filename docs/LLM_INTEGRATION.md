@@ -13,11 +13,7 @@ ETI's optional LLM integration is an **advisory evidence-review layer** over the
 
 3. Configure optional non-secret Worker variables as needed:
 
-   ```sh
-   npx wrangler secret put ETI_LLM_MODEL
-   ```
-
-   Prefer setting `ETI_LLM_MODEL` with `wrangler.jsonc` vars or the Cloudflare dashboard's Variables and Secrets UI (it is a non-secret setting). The default model is `claude-sonnet-5-5`; use a model ID enabled for the Anthropic API account.
+   Set `ETI_LLM_MODEL` as a non-secret Worker variable in `wrangler.jsonc` or the Cloudflare dashboard Variables and Secrets UI. The default model is `claude-sonnet-5-5`; use a model ID enabled for the Anthropic API account.
 
 4. Ensure the existing `ETI_EXECUTION_LOG` KV binding and `ETI_EXECUTION_TOKEN` secret are configured. KV is required for response caching, usage accounting and the hourly spend cap.
 5. Deploy the Worker, open **AI Agents** at `/agents`, enter the execution/audit bearer token, then choose **Run LLM evidence review**. The **LLM usage** control reports the last seven days.
