@@ -9,6 +9,7 @@ import { readUsage, stable } from "../llm/usage.ts";
 import { expandJson } from "../llm/compress.ts";
 import { withLlmBrief } from "./llm-route.ts";
 import { withAgents } from "./route.ts";
+import { DASHBOARD_HTML } from "./dashboard.ts";
 import { analyze } from "./orchestrator.ts";
 import type { Depth, Integrity, Kline, MarketInput } from "./types.ts";
 
@@ -137,4 +138,11 @@ test("usage endpoint: bearer required, aggregates the last seven days with measu
   assert.equal((await app.fetch(new Request("https://e.test/api/llm/usage"), env)).status, 401);
   const j: any = await (await app.fetch(new Request("https://e.test/api/llm/usage", { headers: { authorization: "Bearer " + env.ETI_EXECUTION_TOKEN } }), env)).json();
   assert.equal(j.last7Days.calls, 1); assert.equal(j.last7Days.actualInputTokens, 50); assert.ok(j.last7Days.estimatedSavingsPct > 0);
+});
+
+
+test("agent dashboard exposes the authenticated LLM review and usage workflows", () => {
+  for (const item of ["Run LLM evidence review", "LLM usage", "/api/agents/brief", "/api/llm/usage", "renderLlmReview", "advisory review only"]) {
+    assert.ok(DASHBOARD_HTML.includes(item), "missing dashboard integration: " + item);
+  }
 });
