@@ -159,7 +159,8 @@ export async function scanAotiPairs(fetcher:typeof fetch=fetch,now=Date.now(),li
     }));
     for(const rows of results)for(const row of rows){if(!row||row.ageMinutes<0||row.ageMinutes>360||row.liquidityUsd<40000||row.volume5mUsd<25000)continue;
       const security=await securityFor(row.chain,row.address,fetcher,now);
-      const candidate=scoreAotiCandidate({...row,security},now);
+      const profile=await loadPairProfile(row.chain,row.pairAddress,row.symbol,row.priceUsd,fetcher).catch(()=>undefined);
+      const candidate=scoreAotiCandidate({...row,security,profile},now);
       candidates.push(candidate);
     }
   }
