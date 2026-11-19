@@ -290,7 +290,7 @@ const goodCrypto = () => cryptoFundamentals({ symbol: "GOOD", now: NOW, asOf: "2
 test("bullish chart + legitimate fundamentals + constructive news = bullish case; engines are weighted, never forced", () => {
   const sent = assessSentiment("GOOD", [item("1", "GOOD network reports record growth and strong adoption", "Wire", "wire", 3)], NOW);
   const b = centralIntelligence({ symbol: "GOODUSDT", assetClass: "crypto", strategy: "swing", mtf: mtfUp(), fundamental: goodCrypto(), sentiment: sent, now: NOW });
-  assert.equal(b.verdict, "BULLISH_CASE"); assert.equal(b.submitsOrder, false); assert.equal(b.liveExecutionAllowed, false); assert.ok(Math.abs(b.domains.reduce((s, d) => s + d.effectiveWeight, 0) - 1) < 0.01); assert.ok(b.evidenceLedger.length > 0);
+  assert.equal(b.verdict, "BULLISH_CASE"); assert.equal(b.tradingAdvice.action, "WAIT_FOR_BULLISH_CONFIRMATION"); assert.equal(b.tradingAdvice.exactPriceLevelsAvailable, false); assert.equal(b.tradingAdvice.executionAuthority, false); assert.ok(b.tradingAdvice.entryWhen.length >= 3); assert.ok(b.tradingAdvice.exitWhen.length >= 3); assert.equal(b.submitsOrder, false); assert.equal(b.liveExecutionAllowed, false); assert.ok(Math.abs(b.domains.reduce((s, d) => s + d.effectiveWeight, 0) - 1) < 0.01); assert.ok(b.evidenceLedger.length > 0);
 });
 test("a bullish chart cannot lift a HIGH-RISK token: verdict is AVOID", () => {
   const bad = cryptoFundamentals({ symbol: "SHADY", now: NOW, holders: { top10Pct: 82 }, security: { audits: [], sourceVerified: false, upgradeable: true, singleAdminKey: true }, team: { publiclyIdentified: false } });
