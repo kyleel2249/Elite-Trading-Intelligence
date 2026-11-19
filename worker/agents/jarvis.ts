@@ -35,7 +35,8 @@ export function parseJarvisCommand(message: string): JarvisCommand {
   const intervalMatch = text.match(/\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|12h|1d|1w)\b/i);
   const lower = text.toLowerCase();
   let intent: JarvisIntent = "help";
-  if (/\b(deep review|llm review|second opinion|explain in depth)\b/.test(lower)) intent = "deep_review";
+  if (/\b(search (the )?(web|internet)|search online|look up|research (the )?web|latest news|current news)\b/.test(lower)) intent = "web_search";
+  else if (/\b(deep review|llm review|second opinion|explain in depth)\b/.test(lower)) intent = "deep_review";
   else if (/\b(audit|performance|accuracy|historical decisions|trade history)\b/.test(lower)) intent = "audit";
   else if (/\b(status|health|system check|autopilot|agent status|how are you)\b/.test(lower)) intent = "status";
   else if (symbolMatch || /\b(analy[sz]e|analysis|market|chart|signal|trade setup|should i buy|should i sell|opportunity)\b/.test(lower)) intent = "analyze";
@@ -137,7 +138,10 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.message !== "string" || !body.message.trim()) return reply({ error: "message_required" }, 400);
       const command = parseJarvisCommand(body.message), token = env.ETI_EXECUTION_TOKEN!;
       let result: any;
-      if (command.intent === "web_search") {\n        const query = command.message.replace(/\\b(search (the )?(web|internet)|search online|look up|research (the )?web)\\b/ig, "").replace(/^[\\s:,-]+/, "").trim();\n        result = env.BRAVE_SEARCH_API_KEY ? await searchJarvisWeb(query || command.message, env.BRAVE_SEARCH_API_KEY) : { kind: "web_research_unavailable", status: "not_configured", message: "Internet search is not configured. Add BRAVE_SEARCH_API_KEY as a Cloudflare Worker secret to enable JARVIS web research.", results: [] };\n      } else if (command.intent === "analyze") {
+      if (command.intent === "web_search") {
+        const query = command.message.replace(/\\b(search (the )?(web|internet)|search online|look up|research (the )?web)\\b/ig, "").replace(/^[\\s:,-]+/, "").trim();
+        result = env.BRAVE_SEARCH_API_KEY ? await searchJarvisWeb(query || command.message, env.BRAVE_SEARCH_API_KEY) : { kind: "web_research_unavailable", status: "not_configured", message: "Internet search is not configured. Add BRAVE_SEARCH_API_KEY as a Cloudflare Worker secret to enable JARVIS web research.", results: [] };
+      } else if (command.intent === "analyze") {
         if (!/^[A-Z0-9]{5,20}$/.test(command.symbol)) return reply({ error: "invalid_symbol" }, 400);
         const upstream = await invoke(base, env, url, "/api/agents/analyze", "POST", token, { symbol: command.symbol, interval: command.interval, providers: true });
         if (upstream.status !== 200) result = { error: upstream.data?.error ?? "analysis_failed", detail: upstream.data };
@@ -199,7 +203,8 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
       const summary = command.intent === "analyze" ? String(result?.decision?.action ?? result?.error ?? "analysis complete") :
         command.intent === "status" ? "runtime and autopilot status checked" :
         command.intent === "audit" ? "performance audit retrieved" :
-        command.intent === "deep_review" ? "advisory review requested" :\n        command.intent === "web_search" ? "internet research requested" : "help displayed";
+        command.intent === "deep_review" ? "advisory review requested" :
+        command.intent === "web_search" ? "internet research requested" : "help displayed";
       const memorySaved = await remember(env, { intent: command.intent, symbol: command.symbol, interval: command.interval, summary });
       return reply({ schema: "eti.jarvis.response/1", assistant: "JARVIS", command: { intent: command.intent, symbol: command.symbol, interval: command.interval }, result, memory: { saved: memorySaved, entries: memorySaved ? (await readMemory(env)).length : null }, safety: { readOnly: true, advisoryOnly: true, liveExecutionAllowed: false, riskVetoPreserved: true } });
     },
