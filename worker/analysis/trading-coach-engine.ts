@@ -42,8 +42,8 @@ export function analyzeIndicators(candles=[]) {
  if(cl.length<30)return {status:"insufficient_data",count:cl.length};
  const avg=a=>a.reduce((s,v)=>s+v,0)/a.length;
  const sma=(n)=>avg(cl.slice(-n));
- const changes=cl.slice(1).map((v,i)=>v-cl[i]),g=changes.slice(-14).filter(v=>v>0),l=changes.slice(-14).filter(v=>v<0).map(v=>-v),rs=avg(g.length?g:[0])/(avg(l.length?l:[1])||1e-12),rsi=100-100/(1+rs);
- const fast=avg(cl.slice(-12)),slow=avg(cl.slice(-26)),macd=fast-slow,signal=avg(cl.slice(-9)),hist=macd-signal;
+ const changes=cl.slice(1).map((v,i)=>v-cl[i]),g=changes.slice(-14).filter(v=>v>0),l=changes.slice(-14).filter(v=>v<0).map(v=>-v),avgGain=avg(g.length?g:[0]),avgLoss=avg(l.length?l:[0]),rs=avgLoss===0?(avgGain===0?1e-12:Infinity):avgGain/avgLoss,rsi=avgGain===0&&avgLoss===0?50:100-100/(1+rs);
+ const ema=(values,n)=>{const k=2/(n+1),out=[];let prev=null;for(const v of values){prev=prev===null?v:v*k+prev*(1-k);out.push(prev);}return out;},fastSeries=ema(cl,12),slowSeries=ema(cl,26),macdSeries=fastSeries.map((v,i)=>v-slowSeries[i]),signalSeries=ema(macdSeries,9),macd=macdSeries.at(-1),signal=signalSeries.at(-1),hist=macd-signal;
  const tr=r.slice(-14).map((x,i)=>i===0?x[2]-x[3]:Math.max(x[2]-x[3],Math.abs(x[2]-r[r.length-15+i][4]),Math.abs(x[3]-r[r.length-15+i][4]))),atr=avg(tr);
  const volAvg=avg(r.slice(-20).map(x=>x[5])),vol=r.at(-1)[5],vRatio=volAvg?vol/volAvg:null;
  return {status:"ok",rsi14:Number(rsi.toFixed(2)),macdApprox:Number(macd.toPrecision(8)),macdSignalApprox:Number(signal.toPrecision(8)),macdHistogramApprox:Number(hist.toPrecision(8)),atr14:Number(atr.toPrecision(8)),volumeRatio: vRatio===null?null:Number(vRatio.toFixed(3)),sma20:Number(sma(20).toPrecision(8)),sma50:Number(sma(50).toPrecision(8)),close:cl.at(-1),notes:["Approximate compact calculations for coach display only; ETI's existing indicator modules are authoritative.","This RSI/MACD approximation is not the canonical ETI indicator implementation."]};
