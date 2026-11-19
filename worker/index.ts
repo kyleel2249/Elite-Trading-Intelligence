@@ -113,18 +113,18 @@ header{padding:20px 4vw;border-bottom:1px solid var(--line);display:flex;justify
 .chart-workspace>h2,.chart-workspace>.meta,.chart-workspace>#legend,.chart-workspace>#overlayNote{margin-left:0;margin-right:0}
 .chart-workspace>h2{padding-top:0}
 .chart-workspace #stack{width:100%;max-width:100%;margin:0}
-.chart-workspace .chart.big{width:100%;height:clamp(520px,58vh,620px);min-height:520px;max-height:620px;border:1px solid #203b59;border-radius:10px}
+.chart-workspace .chart.big{width:100%;height:clamp(720px,82vh,1100px);min-height:720px;max-height:none;border:1px solid #203b59;border-radius:10px}
 .chart-workspace .paneBox{width:100%;height:54px}
 .chart-workspace:fullscreen{width:100%;height:100%;max-width:none;margin:0;padding:12px;background:#080d16;border:0;border-radius:0;overflow:auto}
-.chart-workspace:fullscreen .chart.big{height:calc(100vh - 180px);min-height:420px;max-height:none}
-@media(max-width:700px){.chart-workspace{padding:12px}.chart-workspace .chart.big{height:70svh;min-height:420px;max-height:620px}.chart-workspace .paneBox{height:64px}}
+.chart-workspace:fullscreen .chart.big{height:calc(100vh - 120px);min-height:calc(100vh - 120px);max-height:none}
+@media(max-width:700px){.chart-workspace{padding:12px}.chart-workspace .chart.big{height:82svh;min-height:700px;max-height:none}.chart-workspace .paneBox{height:64px}}
 /* Desktop layout tuned for a 1920 × 1080 workspace while remaining fluid. */
 @media(min-width:1440px) and (min-height:800px){
   header{min-height:72px;padding:12px 24px;gap:16px}
   main{width:100%;max-width:1920px;margin:0 auto;padding:12px 24px}
   .toolbar{gap:8px;margin-bottom:10px}
   .chart-workspace{padding:14px}
-  .chart-workspace .chart.big{height:min(58vh,620px);min-height:520px;max-height:620px}
+  .chart-workspace .chart.big{height:82vh;min-height:720px;max-height:none}
   .chart-workspace .paneBox{height:54px}
   .chart-workspace>h2{padding-top:0;margin-bottom:8px}
   .chart-workspace>.meta{margin-top:4px;margin-bottom:8px}
