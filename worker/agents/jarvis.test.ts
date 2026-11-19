@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseJarvisCommand, withJarvis } from "./jarvis.ts";
+import { parseJarvisCommand, searchJarvisWeb, withJarvis } from "./jarvis.ts";
 
 test("JARVIS routes natural-language market requests to the existing council", () => {
   assert.deepEqual(parseJarvisCommand("Please analyse ETHUSDT on 15m"), {
@@ -10,6 +10,11 @@ test("JARVIS routes natural-language market requests to the existing council", (
 
 test("an explicit trading symbol and timeframe are enough to request analysis", () => {
   assert.equal(parseJarvisCommand("BTCUSDT 15m").intent, "analyze");
+});
+
+test("JARVIS recognizes internet research requests", () => {
+  assert.equal(parseJarvisCommand("Search the internet for latest Bitcoin ETF news").intent, "web_search");
+  assert.equal(parseJarvisCommand("Look up current ETH regulation").intent, "web_search");
 });
 
 test("JARVIS recognizes status, audit and explicit deep-review intents", () => {
@@ -76,4 +81,33 @@ test("JARVIS analysis explains missing setup, account veto and verification gaps
   assert.ok(data.result.nextSteps.some((x: string) => x.includes("account equity")));
   assert.ok(data.result.nextSteps.some((x: string) => x.includes("drawdown")));
   assert.equal(data.safety.riskVetoPreserved, true);
+});
+
+test("JARVIS web search normalizes results and rejects non-http URLs", async () => {
+  const fakeFetch: any = async (url: string, init: any) => {
+    assert.match(url, /api\.search\.brave\.com/);
+    assert.equal(init.headers["x-subscription-token"], "test-key");
+    return Response.json({ web: { results: [
+      { title: "Bitcoin news", url: "https://example.com/story", description: "A useful <b>summary</b>" },
+      { title: "Bad URL", url: "javascript:alert(1)", description: "ignore" },
+    ] } });
+  };
+  const result = await searchJarvisWeb("latest Bitcoin news", "test-key", fakeFetch);
+  assert.equal(result.status, "complete");
+  assert.equal(result.resultCount, 1);
+  assert.equal(result.results[0].snippet, "A useful summary");
+  assert.equal(result.results[0].source, "example.com");
+});
+
+test("JARVIS exposes web search as optional and reports missing provider configuration", async () => {
+  const env: any = { ETI_EXECUTION_TOKEN: "jarvis-test-token" };
+  const app = withJarvis({ fetch: () => Response.json({}) });
+  const res = await app.fetch(new Request("https://eti.test/api/agents/jarvis", {
+    method: "POST", headers: { authorization: "Bearer jarvis-test-token", "content-type": "application/json" },
+    body: JSON.stringify({ message: "Search the internet for Bitcoin ETF news" }),
+  }), env);
+  const data: any = await res.json();
+  assert.equal(data.result.kind, "web_research_unavailable");
+  assert.equal(data.result.status, "not_configured");
+  assert.equal(data.safety.liveExecutionAllowed, false);
 });
