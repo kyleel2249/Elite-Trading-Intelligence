@@ -110,10 +110,11 @@ function withSmcIntelligence(request: Request, response: Response): Promise<Resp
   if (path === "/smc-intelligence.css") return new Response(SMC_INTELLIGENCE_CSS.replace(/^<style[^>]*>/, "").replace(/<[/]style>$/, ""), { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
   if (!["/", "/terminal", "/pro"].includes(path) || !/^text\/html/i.test(response.headers.get("content-type") || "")) return response;
   return response.text().then(html => {
-    if (html.includes('id="eti-smci"')) return response;
+    if (html.includes('id="eti-smci"')) { const headers = new Headers(response.headers); headers.delete("content-length"); return new Response(html, { status: response.status, statusText: response.statusText, headers }); }
     html = html.replace("</head>", '<link rel="stylesheet" href="/smc-intelligence.css"></head>');
     html = html.replace("</body>", '<script src="/smc-intelligence.js"></script></body>');
-    return new Response(html, { status: response.status, statusText: response.statusText, headers: response.headers });
+    const headers = new Headers(response.headers); headers.delete("content-length");
+    return new Response(html, { status: response.status, statusText: response.statusText, headers });
   });
 }
 
