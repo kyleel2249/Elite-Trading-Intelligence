@@ -6,7 +6,7 @@ import { SMC_INTELLIGENCE_CSS, SMC_INTELLIGENCE_JS } from "./smc-intelligence.ts
 test("SMC Intelligence script parses and contains confluence evidence UI", () => {
   const script = SMC_INTELLIGENCE_JS.replace(/^<script[^>]*>/, "").replace(/<[/]script>$/, "");
   assert.doesNotThrow(() => new vm.Script(script));
-  for (const token of ["api/analysis/confluence", "Directional evidence", "Liquidity targets", "Zone confluence", "evidence score", "cannot place orders"]) assert.ok(SMC_INTELLIGENCE_JS.includes(token), token);
+  for (const token of ["api/analysis/confluence", "Directional evidence", "Liquidity targets", "Zone confluence", "Evidence score", "cannot place orders"]) assert.ok(SMC_INTELLIGENCE_JS.includes(token), token);
   assert.ok(SMC_INTELLIGENCE_CSS.includes(".eti-smci-grid"));
   assert.doesNotMatch(SMC_INTELLIGENCE_JS, /fetch\(["']\/api\/orders/);
 });
