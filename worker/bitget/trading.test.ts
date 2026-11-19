@@ -78,3 +78,13 @@ test("network uncertainty retains the client order id reservation and never retr
  assert.equal(r.status,502);assert.equal((await r.json() as any).outcome,"unknown");
  assert.equal(kv.m.get("exec:live:id:eti1234567890abcdef"),"unknown");
 });
+
+test("Bitget live orders reject missing or stale market timestamps before exchange contact", async () => {
+ const env={...baseEnv,ETI_EXECUTION_LOG:store()};let calls=0;
+ const fetchImpl=(async()=>{calls++;return ok();}) as any;
+ const missing=await placeBitgetLiveOrder(env,orderBody({referencePriceTimestamp:undefined}),{now:()=>1700000000000,fetchImpl});
+ assert.equal(missing.status,409);assert.equal((await missing.json() as any).error,"market_data_stale");
+ const stale=await placeBitgetLiveOrder(env,orderBody({referencePriceTimestamp:1699999000000}),{now:()=>1700000000000,fetchImpl});
+ assert.equal(stale.status,409);assert.equal((await stale.json() as any).brokerContacted,false);
+ assert.equal(calls,0);
+});
