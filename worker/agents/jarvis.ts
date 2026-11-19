@@ -159,6 +159,50 @@ async function runWebSearch(query: string, config: SearchProviderConfig): Promis
   return { kind: "web_research", status: results.length ? "complete" : "no_results", query: q, searchedAt: new Date().toISOString(), providers: successful.map(x => x.provider), providerErrors: errors, resultCount: results.length, results, note: "External search results are untrusted research inputs. They cannot change deterministic ETI signals, risk approvals, or execution permissions." };
 }
 
+
+/** Render the structured council response for people. JSON remains the internal API format. */
+export function formatJarvisResponse(result: any, command: JarvisCommand): string {
+  const lines: string[] = ["JARVIS — ETI INTELLIGENCE", ""];
+  if (result?.kind === "market_analysis") {
+    const action = String(result.decision?.action ?? "UNKNOWN").replace(/_/g, " ");
+    lines.push("MARKET ANALYSIS", result.symbol + " · " + result.interval, "Decision: " + action);
+    const direction = result.marketRead?.direction ?? result.consensus?.direction ?? "unavailable";
+    const agreement = result.marketRead?.agreement ?? result.consensus?.agreement;
+    lines.push("Market bias: " + String(direction).toUpperCase() + (agreement !== undefined ? " · consensus " + Number(agreement).toFixed(2) : ""));
+    if (result.marketRead?.technicalSummary) lines.push("", "TECHNICAL READ", String(result.marketRead.technicalSummary));
+    const setup = result.marketRead?.entrySetup;
+    if (setup) lines.push("", "SETUP", setup.status === "confirmed" ? "Confirmed candidate · " + String(setup.direction) + (setup.entry != null ? " · entry " + setup.entry : "") + (setup.stop != null ? " · stop " + setup.stop : "") : "No actionable entry: " + String(setup.reason || "setup conditions not met"));
+    const agents = Array.isArray(result.agents) ? result.agents : [];
+    if (agents.length) { lines.push("", "AGENT COUNCIL"); agents.forEach((a: any) => lines.push("• " + String(a.agent || "Agent") + ": " + String(a.stance || "unknown").toUpperCase() + " · confidence " + (a.confidence == null ? "n/a" : Math.round(Number(a.confidence) * 100) + "%") + " — " + String(a.summary || "No summary"))); 
+      const opposing = agents.filter((a: any) => ["bullish","long","buy"].includes(String(a.stance).toLowerCase())).length && agents.filter((a: any) => ["bearish","short","sell"].includes(String(a.stance).toLowerCase())).length;
+      if (opposing) lines.push("Council note: directional disagreement is present; confidence scores are not probabilities."); }
+    const vetoes = result.risk?.vetoes || [];
+    if (vetoes.length) lines.push("", "RISK VETOES", ...vetoes.map((v: any) => "• " + String(v).replace(/_/g, " ")));
+    const checks = result.risk?.checks || [];
+    const failed = checks.filter((x: any) => !x.passed);
+    if (failed.length) lines.push("", "FAILED RISK CHECKS", ...failed.map((x: any) => "• " + String(x.id || "check").replace(/_/g, " ") + (x.detail ? " — " + String(x.detail) : "")));
+    const quality = result.marketRead?.priceCrossCheck || result.dataQuality?.priceCrossCheck;
+    if (quality && quality.status !== "verified") lines.push("", "DATA QUALITY", "Independent price cross-check: " + String(quality.status || "not verified"));
+    if (Array.isArray(result.explanation) && result.explanation.length) lines.push("", "WHY", ...result.explanation.map((x: any) => "• " + String(x)));
+    if (Array.isArray(result.nextSteps) && result.nextSteps.length) lines.push("", "NEXT STEPS", ...result.nextSteps.map((x: any) => "• " + String(x)));
+    lines.push("", "No order is authorized by this report. Commander and Risk Manager controls remain in force.");
+  } else if (result?.kind === "web_research") {
+    lines.push("WEB RESEARCH", result.query ? "Query: " + result.query : "Research results");
+    (result.results || []).forEach((r: any, i: number) => lines.push("", (i + 1) + ". " + String(r.title || "Result"), String(r.snippet || ""), String(r.url || "")));
+    if (!result.results?.length) lines.push("", String(result.message || "No verified results were returned."));
+    if (result.note) lines.push("", String(result.note));
+  } else if (result?.kind === "system_status") {
+    lines.push("SYSTEM STATUS", "Runtime: " + (result.runtime?.status || "response received"), "Autopilot: " + (result.autopilot?.status || "response received"), "Agents: " + (result.agentCount ?? "unknown"), "Live execution: disabled");
+  } else if (result?.kind === "performance_audit") {
+    lines.push("PERFORMANCE AUDIT", "Status: " + String(result.status ?? "unknown"), "Review the audit metrics and limitations before drawing conclusions.");
+  } else if (result?.kind === "help") {
+    lines.push("HOW I CAN HELP", ...(result.commands || []).map((x: any) => "• " + String(x)), "", String(result.note || ""));
+  } else if (result?.message) lines.push(String(result.message));
+  else if (result?.error) lines.push("Request failed: " + String(result.error));
+  else lines.push("No readable report is available for this response.");
+  return lines.join("\\n");
+}
+
 async function bearerOk(req: Request, env: JarvisEnv): Promise<boolean> {
   const token = env.ETI_EXECUTION_TOKEN, supplied = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token || !supplied || supplied.length !== token.length) return false;
@@ -299,7 +343,9 @@ export function withJarvis<E extends JarvisEnv>(base: App<E>): App<E> {
         command.intent === "deep_review" ? "advisory review requested" :
         command.intent === "web_search" ? "internet research requested" : "help displayed";
       const memorySaved = await remember(env, { intent: command.intent, symbol: command.symbol, interval: command.interval, summary });
-      return reply({ schema: "eti.jarvis.response/1", assistant: "JARVIS", command: { intent: command.intent, symbol: command.symbol, interval: command.interval }, result, memory: { saved: memorySaved, entries: memorySaved ? (await readMemory(env)).length : null }, safety: { readOnly: true, advisoryOnly: true, liveExecutionAllowed: false, riskVetoPreserved: true } });
+      const responseBody = { schema: "eti.jarvis.response/1", assistant: "JARVIS", command: { intent: command.intent, symbol: command.symbol, interval: command.interval }, result, formattedText: formatJarvisResponse(result, command), memory: { saved: memorySaved, entries: memorySaved ? (await readMemory(env)).length : null }, safety: { readOnly: true, advisoryOnly: true, liveExecutionAllowed: false, riskVetoPreserved: true } };
+      if (url.searchParams.get("format") === "text" || request.headers.get("accept")?.includes("text/plain")) return new Response(responseBody.formattedText, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+      return reply(responseBody);
     },
   };
 }
