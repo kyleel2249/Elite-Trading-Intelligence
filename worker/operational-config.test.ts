@@ -17,16 +17,17 @@ test("central operational defaults preserve the requested ETI values", () => {
 
 test("optional JSON overrides are validated field by field", () => {
   const config = readOperationalConfig({ ETI_OPERATIONAL_CONFIG: JSON.stringify({
-    monitoring: { mtmIntervalSeconds: 90, reconcileIntervalSeconds: -1, investorMonitorIntervalSeconds: 600 },
+    monitoring: { mtmIntervalSeconds: 180, reconcileIntervalSeconds: -1, investorMonitorIntervalSeconds: 600 },
     dataQuality: { maxAgeSeconds: 0, requireFreshDataForLiveOrders: false },
     timezone: "Invalid/Timezone",
   }) });
-  assert.equal(config.monitoring.mtmIntervalSeconds, 90);
+  assert.equal(config.monitoring.mtmIntervalSeconds, 180);
   assert.equal(config.monitoring.reconcileIntervalSeconds, 120);
   assert.equal(config.monitoring.investorMonitorIntervalSeconds, 600);
   assert.equal(config.dataQuality.maxAgeSeconds, 300);
   assert.equal(config.dataQuality.requireFreshDataForLiveOrders, false);
   assert.equal(config.timezone, "Africa/Accra");
+  assert.equal(readOperationalConfig({ ETI_OPERATIONAL_CONFIG: JSON.stringify({ monitoring: { mtmIntervalSeconds: 90 } }) }).monitoring.mtmIntervalSeconds, 60);
   assert.equal(readOperationalConfig({ ETI_OPERATIONAL_CONFIG: "{" }).timezone, "Africa/Accra");
 });
 
