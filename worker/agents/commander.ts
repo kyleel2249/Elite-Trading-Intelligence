@@ -29,7 +29,9 @@ export function deliberate(reports: AgentReport[], audit: AuditSummary | null): 
   let num = 0, den = 0;
   for (const r of part) { const w = weights[r.agent] * Math.max(r.confidence, 0.05); num += w * (r.stance === "bullish" ? 1 : r.stance === "bearish" ? -1 : 0); den += w; }
   const agreement = den > 0 ? num / den : 0;
-  const bulls = part.filter((r) => r.stance === "bullish" && r.confidence >= DISSENT_CONFIDENCE), bears = part.filter((r) => r.stance === "bearish" && r.confidence >= DISSENT_CONFIDENCE);
+  // Dissent visibility is separate from vote strength: low-confidence directional reports remain visible.
+  const bulls = part.filter((r) => r.stance === "bullish"), bears = part.filter((r) => r.stance === "bearish");
+  const strongBulls = bulls.filter((r) => r.confidence >= DISSENT_CONFIDENCE), strongBears = bears.filter((r) => r.confidence >= DISSENT_CONFIDENCE);
   let direction: Deliberation["direction"] = "none", reason: string;
   if (part.length < MIN_PARTICIPANTS) reason = `Only ${part.length} agent(s) produced a usable stance; at least ${MIN_PARTICIPANTS} are required for a consensus.`;
   else if (agreement >= AGREEMENT_THRESHOLD) { direction = "long"; reason = `Weighted agreement ${agreement.toFixed(2)} ≥ ${AGREEMENT_THRESHOLD}.`; }
@@ -40,7 +42,7 @@ export function deliberate(reports: AgentReport[], audit: AuditSummary | null): 
     const names = (l: AgentReport[]) => l.map((r) => `${r.agent} (${r.confidence.toFixed(2)})`).join(", ");
     disputes.push({
       topic: "direction", between: [...bulls, ...bears].map((r) => r.agent), positions: [...bulls, ...bears].map(pos),
-      explanation: `Bullish: ${names(bulls)}. Bearish: ${names(bears)}. Their evidence points in opposite directions; both camps are reported rather than averaged away.`,
+      explanation: `Bullish: ${names(bulls)}. Bearish: ${names(bears)}. Opposing directional reports are surfaced regardless of confidence; confidence affects weighting, not visibility. Strong opposing reports (>= ${DISSENT_CONFIDENCE}): ${strongBulls.length} bullish, ${strongBears.length} bearish.`,
       resolution: direction === "none" ? `Net weighted agreement ${agreement.toFixed(2)} did not clear the threshold, so the Commander stands aside.` : `Net weighted agreement ${agreement.toFixed(2)} favours ${direction}; the dissenting view is preserved below and the Risk Manager must still approve.`,
     });
   }
