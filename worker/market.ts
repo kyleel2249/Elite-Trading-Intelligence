@@ -887,6 +887,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     const venueQ = url.searchParams.get("venue") || "bybit";
     if (!(["binance", "bybit", "bitget", "okx"] as string[]).includes(venueQ)) return jsonResp({ error: "unsupported_venue", allowed: ["binance", "bybit", "bitget", "okx"] }, 400);
     const categoryQ = url.searchParams.get("category") || "";
+    if (want === "margin" && (venueQ === "binance" || venueQ === "okx")) return jsonResp({ error: "unsupported_market", detail: venueQ + " margin eligibility is not exposed by this public catalogue." }, 400);
     const rows: SymbolRow[] = [], sources: Record<string, unknown> = {}, warnings: unknown[] = [];
     if (venueQ === "binance") {
       const jobs = want === "all" ? (["spot", "futures"] as MarketKind[]) : [want === "margin" ? "spot" : want as MarketKind];
@@ -952,7 +953,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
     }
     if (!rows.length) return jsonResp({ error: "symbols_unavailable", detail: venueQ + " did not return the requested instrument list.", warnings }, 502);
     const categories = venueQ === "binance" ? (want === "all" ? ["spot", "futures"] : [want]) : venueQ === "okx" ? (want === "all" ? ["spot", "swap"] : [want === "futures" ? "swap" : want]) : venueQ === "bybit" ? (want === "margin" ? ["spot-margin"] : want === "all" ? ["spot", "linear", "inverse"] : [categoryQ || (want === "futures" ? "linear" : "spot")])
-      : venueQ === "okx" ? (want === "all" ? ["spot", "swap"] : [want === "futures" ? "swap" : want]) : want === "margin" ? ["MARGIN"] : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
+      : want === "margin" ? ["MARGIN"] : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
       symbols: rows.map(x => [x.s, x.b, x.q, want === "margin" ? "margin" : x.m, x.c, venueQ, ...(x.pt ? [x.pt] : []), ...(x.marginTrading ? [x.marginTrading] : []),
