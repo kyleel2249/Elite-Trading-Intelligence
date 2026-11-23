@@ -997,7 +997,8 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       if (venueParam === "bybit" || venueParam === "bitget") {
         const provider = selectedProvider;
         const result = await getMarketData("ticker", { symbol, interval, limit: 1, market: marketParam, category: categoryParam as Params["category"] }, providerOrder(env, provider), marketFetch);
-        return jsonResp({ provider: result.provider, fundingRate: result.data.fundingRate ?? null, openInterest: result.data.openInterest ?? null, markPrice: result.data.markPrice ?? null, indexPrice: result.data.indexPrice ?? null, nextFundingTime: result.data.nextFundingTime ?? null, timestamp: Date.now() }, 200, { "x-eti-provider": result.provider });
+        const ticker = result.data as Record<string, unknown>;
+        return jsonResp({ provider: result.provider, fundingRate: ticker.fundingRate ?? null, openInterest: ticker.openInterest ?? null, markPrice: ticker.markPrice ?? null, indexPrice: ticker.indexPrice ?? null, nextFundingTime: ticker.nextFundingTime ?? null, timestamp: Date.now() }, 200, { "x-eti-provider": result.provider });
       }
       const readJson = async (url: string) => {
         const response = await marketFetch(url, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(12000), cf: { cacheEverything: true, cacheTtl: 2 } } as RequestInit);
