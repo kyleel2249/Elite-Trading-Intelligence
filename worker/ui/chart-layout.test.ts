@@ -3,13 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CHART_LAYOUT_CSS } from "./chart-layout.ts";
 
-test("live market chart is twice the viewport-fit height and outranks the #eti-chart-fill block", () => {
-  // Desktop: 2 x (viewport - 190px), minimum 2 x 720px; mobile: 2 x (viewport - 160px), minimum 2 x 560px.
-  assert.match(CHART_LAYOUT_CSS, /#stack>\.chart\.big#liveChartFrame\{height:calc\(\(100vh - 190px\) \* 2\);height:calc\(\(100dvh - 190px\) \* 2\);min-height:1440px;max-height:none\}/);
-  assert.match(CHART_LAYOUT_CSS, /max-width:700px\)\{\.chart-workspace:not\(:fullscreen\) #stack>\.chart\.big#liveChartFrame\{height:calc\(\(100dvh - 160px\) \* 2\);min-height:1120px\}/);
-  // Two IDs (#stack, #liveChartFrame) beat the single-ID rule in #eti-chart-fill regardless of source order.
+test("dashboard live market chart uses the shared JPTI 2D dimensions", () => {
+  assert.match(CHART_LAYOUT_CSS, /\.chart\.big\{height:440px;min-height:440px;max-height:none\}/);
+  assert.match(CHART_LAYOUT_CSS, /max-width:700px\)\{\.chart\.big\{height:340px;min-height:340px;max-height:none\}/);
   const src = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
-  assert.ok(src.includes('.chart-workspace #stack>.chart.big{height:calc(100vh - 190px)'), "base viewport-fit rule is still the reference this 2x scales");
-  // Real fullscreen keeps fitting the screen instead of being doubled.
-  assert.ok(CHART_LAYOUT_CSS.includes(".chart-workspace:not(:fullscreen) #stack"));
+  assert.ok(src.includes(".chart-workspace #stack>.chart.big{height:440px;min-height:440px;max-height:none"), "dashboard chart matches the 440px desktop height");
+  assert.ok(src.includes(".chart-workspace #stack>.chart.big{height:340px;min-height:340px;max-height:none}") || src.includes("@media(max-width:700px){.chart-workspace #stack>.chart.big{height:340px;min-height:340px;max-height:none}}"), "mobile dashboard chart matches the 340px height");
+  assert.ok(src.includes(".panel.chart-workspace{background:#000000;border-color:#1d2a3e;padding:0;overflow:hidden;min-height:560px"), "chart parent uses the 560px desktop height");
+  assert.match(CHART_LAYOUT_CSS, /\.chart-workspace:not\(:fullscreen\) #stack/);
 });
