@@ -70,6 +70,19 @@ html,body{background:#0b0e11!important;color:#eaecef!important;font-family:Inter
 @media(max-width:1100px){.tt-chart{height:260px!important;min-height:230px!important;max-height:280px!important}}
 @media(max-width:760px){.tt-chart{height:230px!important;min-height:210px!important;max-height:250px!important}}
 
+/* Match the 24H High/Low forecast panel's full-width, compact parent footprint. */
+.tt-work{grid-template-columns:minmax(0,1fr)!important;align-items:start!important}
+.tt-chart-card{grid-column:1/-1!important;width:100%!important;max-width:none!important;min-width:0!important;height:auto!important;min-height:0!important;margin:8px 0 10px!important;border-radius:10px!important}
+.tt-chart-card>.tt-card-head{padding:12px 14px 0!important}
+.tt-chart{width:100%!important;height:150px!important;min-height:140px!important;max-height:170px!important}
+.tt-chart-card>.tt-foot,.tt-chart-card>.tt-chart-foot{padding:7px 14px 9px!important}
+.tt-chart-canvas-fallback{height:100%!important;min-height:140px!important}
+@media(max-width:760px){
+ .tt-shell{padding-left:10px;padding-right:10px}
+ .tt-chart-card{width:100%!important}
+ .tt-chart{height:150px!important;min-height:140px!important;max-height:170px!important}
+}
+
 `;
 
 export const TRADING_TERMINAL_HTML = String.raw`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#07111f"><title>ETI Professional Trading Terminal</title><style>${TRADING_TERMINAL_CSS}</style><script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script><script src="https://cdn.jsdelivr.net/npm/ccxt@4.5.26/dist/ccxt.browser.js"></script><script src="/bitget-client.js"></script></head><body>
