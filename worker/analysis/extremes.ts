@@ -342,6 +342,15 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv, f
       getMarketData("ticker", params, [provider], fetchImpl),
     ]);
     const required = [hourly, tick];
+    if (daily.status === "rejected") {
+      const error = daily.reason;
+      failures.push({
+        provider, endpoint: "daily",
+        attempts: error instanceof AllProvidersFailed
+          ? error.attempts.map(({ provider: id, host, status, errorClass, latencyMs }) => ({ provider: id, host, status, errorClass, latencyMs }))
+          : [{ error: error instanceof Error ? error.message : "unknown_error" }],
+      });
+    }
     if (required.some(x => x.status !== "fulfilled")) {
       for (const [endpoint, result] of [["hourly", hourly], ["ticker", tick]] as const) {
         if (result.status === "rejected") {
