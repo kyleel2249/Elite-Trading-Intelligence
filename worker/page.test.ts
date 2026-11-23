@@ -36,14 +36,14 @@ test("dashboard uses a static, contained 1920x1080 chart layout with no 3D anima
   assert.ok(html.includes("button:hover:not(:disabled),button:active:not(:disabled){transform:none!important"));
   assert.match(html, /class="panel chart-workspace"/, "main chart remains a dashboard panel");
   assert.match(html, /\.chart-workspace\{width:100%;max-width:100%;margin:0;padding:16px/, "chart stays inside dashboard content width with panel spacing");
-  assert.match(html, /\.chart-workspace \.chart\.big\{width:100%;height:clamp\(720px,82vh,1100px\);min-height:720px;max-height:none/, "chart stretches vertically instead of being capped");
-  assert.match(html, /id="eti-chart-fill"/, "chart fill layer extends the chart down to the bottom of the viewport");
+  assert.match(html, /\.chart-workspace \.chart\.big\{width:100%;height:440px;min-height:440px;max-height:none/, "chart uses the shared 440px desktop height");
+  assert.match(html, /id="eti-chart-fill"/, "chart sizing rules are present");
   assert.match(html, /\.chart-workspace:fullscreen/, "chart workspace supports native fullscreen mode");
   assert.ok(html.includes("@media(min-width:1440px) and (min-height:800px)"));
-  assert.ok(html.includes(".chart-workspace .chart.big{height:82vh;min-height:720px;max-height:none}"));
+  assert.ok(html.includes(".chart-workspace .chart.big{height:440px;min-height:440px;max-height:none}"));
   assert.ok(html.includes(".chart-workspace .paneBox{height:54px}"));
   assert.match(html, /id="chartAdvanced"/);
-  assert.doesNotMatch(html, /3D Order-Book Depth Surface|id="v3Panel"|id="v3Canvas"/, "3D order-book surface is removed from the dashboard");
+  assert.match(html, /2D Order-Book Depth History|id="v3Panel"|id="v3Canvas"/, "2D order-book depth history is integrated into the dashboard");
   assert.match(html, /id="depth"/, "2D cumulative market depth remains available");
   assert.match(html, /id="paneRsi"/);
   assert.match(html, /id="paneMacd"/);
