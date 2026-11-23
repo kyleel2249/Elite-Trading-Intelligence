@@ -39,8 +39,8 @@
       .then(function (j) {
         if (my !== S.symReq) return;
         var dl = el('symlist'); dl.textContent = '';
-        var items = unifiedVenue(prov) ? (j.symbols || []).map(function (r) { return { symbol:r[0], base:r[1], quote:r[2], market:r[3] }; }) : (j.items || []);
-        items.filter(function (it) { return !unifiedVenue(prov) || it.market === selectedMarket(prov, cat); }).filter(function (it) { return prov !== 'bybit' || !it.market || it.market === cat; }).forEach(function (it) {
+        var items = unifiedVenue(prov) ? (j.symbols || []).map(function (r) { return { symbol:r[0], base:r[1], quote:r[2], market:r[3], productType:r[6] }; }) : (j.items || []);
+        items.filter(function (it) { return !unifiedVenue(prov) || (it.market === selectedMarket(prov, cat) && (prov !== 'bitget' || it.market !== 'futures' || it.productType === cat)); }).filter(function (it) { return prov !== 'bybit' || !it.market || it.market === cat; }).forEach(function (it) {
           var o = document.createElement('option'); o.value = it.symbol;
           var lab = it.name ? it.name : (it.base && it.quote ? it.base + '/' + it.quote : '');
           o.label = (it.is_new ? 'NEW · ' : '') + lab + (it.exchange && prov === 'twelvedata' ? ' (' + it.exchange + ')' : '');
@@ -51,7 +51,8 @@
         if (src.status === 'not_configured' || src.status === 'unavailable') {
           hint.textContent = (src.message || 'Symbol list unavailable') + '. You can still type a symbol and press Load.';
         } else {
-          hint.textContent = j.total + ' matching symbol' + (j.total === 1 ? '' : 's') + ' in ' + (src.count || 0) + ' listed' +
+          var total = unifiedVenue(prov) ? (j.count || 0) : (j.total || 0);
+          hint.textContent = total + ' matching symbol' + (total === 1 ? '' : 's') + ' in ' + (src.count || total) + ' listed' +
             (src.status === 'stale' ? ' (STALE list: ' + src.message + ')' : (src.message ? ' (' + src.message + ')' : '')) + '. Showing up to 40.';
         }
       })
@@ -242,5 +243,16 @@
   });
 
   window.addEventListener('beforeunload', closeBybitStream);
+  el('prov').addEventListener('change', function () {
+    var p=el('prov').value, c=el('category');
+    if(p==='bitget') c.value='USDT-FUTURES';
+    else if(p==='okx') c.value='swap';
+    else if(p==='bybit') c.value='spot';
+    else c.value='linear';
+    el('sym').value=DEFAULT_SYMBOL[p]||'BTCUSDT'; searchSymbols(true); load();
+  });
+  el('category').addEventListener('change', function(){searchSymbols(true);load();});
+  el('sym').addEventListener('change', load);
+  el('int').addEventListener('change', load);
   resize(); searchSymbols(false); load(); schedule();
 })();
