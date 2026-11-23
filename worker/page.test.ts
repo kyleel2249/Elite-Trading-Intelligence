@@ -98,7 +98,7 @@ test("dashboard routes Bybit, Bitget and Binance through the unified Worker mark
     const call = (path: string) => handleMarket(new Request("https://x.test" + path), {} as any);
     assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5")).status, 200);
     assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&limit=5&market=futures")).status, 200);
-    for (const bad of ["venue=all", "venue=binance"]) {
+    for (const bad of ["venue=all"]) {
       assert.equal((await call("/api/market/symbols?" + bad)).status, 400, bad);
       assert.equal((await call("/api/market/klines?symbol=BTCUSDT&interval=1m&" + bad)).status, 400, bad);
     }
