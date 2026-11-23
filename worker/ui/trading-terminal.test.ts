@@ -170,7 +170,7 @@ test("Pro Terminal preserves USDT, USDC and Coin-M Bitget futures selections",()
 
 
 test("Pro Terminal sends the selected exchange provenance with supplied SMC candles",()=>{
- assert.ok(TRADING_TERMINAL_JS.includes('venue:provider,provider,candles:candles'));
+ assert.ok(TRADING_TERMINAL_JS.includes('venue:provider,provider,category:S.category,candles:candles'));
 });
 
 
@@ -182,6 +182,13 @@ test("terminal exposes Production UTA V3 JSON/SBE and private-feed controls",()=
  assert.match(TRADING_TERMINAL_JS,/toggleTerminalBitgetPrivateStream/);
 });
 
+
+test("all terminal analysis consumers preserve the selected futures product category", () => {
+  assert.match(TRADING_TERMINAL_JS, /provider:S\.venue,market:S\.market,category:S\.category,candles:candles/);
+  assert.match(TRADING_TERMINAL_JS, /venue:provider,category:S\.category/);
+  assert.match(TRADING_TERMINAL_JS, /category:S\.category\}\);const q=new URLSearchParams/);
+  assert.match(TRADING_TERMINAL_JS, /venue:S\.venue,provider:S\.venue,market:S\.market,category:S\.category/);
+});
 
 test("terminal uses the ETI unified exchange gateway for all supported venues and chart consumers", () => {
   assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{width:100%!important;height:440px!important;min-height:440px!important;max-height:none!important\}/);
