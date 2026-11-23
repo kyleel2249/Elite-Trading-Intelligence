@@ -379,7 +379,7 @@ The Worker now exposes a read-only `GET /api/signals?symbol=BTCUSDT&interval=1h`
 
 The displayed score is a **heuristic confluence score, not a probability**. The historical win rate is a walk-forward candle replay using non-overlapping samples and a conservative stop-first rule. It is withheld unless at least 20 samples are available. Simulation excludes fees, slippage, funding and market impact, so it is not a live expected win rate. A signal endpoint rejects stale candles and returns no recommendation if market data is unavailable.
 
-The trader directory records documented high-level public principles and maps only testable ideas to indicators. It explicitly does not claim access to private algorithms (including Renaissance Technologies / D. E. Shaw methods), undocumented entry rules, or unsupported win rates/returns. Fundamentals, macro event calendars, portfolio optimization, continuous self-learning, broad multi-asset provider coverage, 3D UI, and a complete production deployment are separate workstreams and are not represented as finished by this signal-engine increment.
+The trader directory records documented high-level public principles and maps only testable ideas to indicators. It explicitly does not claim access to private algorithms (including Renaissance Technologies / D. E. Shaw methods), undocumented entry rules, or unsupported win rates/returns. Fundamentals, macro event calendars, portfolio optimization, continuous self-learning, broad multi-asset provider coverage, 2D UI visualisations, and a complete production deployment are separate workstreams and are not represented as finished by this signal-engine increment.
 
 Example:
 ```bash
