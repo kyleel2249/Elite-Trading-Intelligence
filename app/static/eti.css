@@ -132,3 +132,11 @@ pre.out{white-space:pre-wrap;background:#020817;border:1px solid var(--line);pad
   #markets.panel{min-height:420px}
   #markets #chart.chart{height:340px;min-height:340px}
 }
+
+/* Unified ETI 2D chart sizing: JPTI terminal dimensions across chart panels */
+.chart,.chart.sm{height:440px;min-height:440px;width:100%;max-height:none}
+.panel:has(>.chart),.panel:has(>div>.chart){min-height:560px}
+.stage{height:440px;min-height:440px;max-height:none;aspect-ratio:auto}
+.stage.sq{height:440px;min-height:440px;max-height:none;aspect-ratio:auto}
+.stage canvas{width:100%;height:100%;display:block}
+@media(max-width:640px){.chart,.chart.sm{height:340px;min-height:340px}.panel:has(>.chart),.panel:has(>div>.chart){min-height:420px}.stage,.stage.sq{height:340px;min-height:340px;max-height:none}}
