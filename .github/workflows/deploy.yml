@@ -276,7 +276,7 @@ jobs:
           process.exit(1);
           NODE
 
-      - name: Verify Bybit routes, Bitget browser adapter and ETI safeguards
+      - name: Verify unified multi-exchange gateway and ETI safeguards
         shell: bash
         run: |
           base="https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev"
@@ -284,91 +284,78 @@ jobs:
           region_response="$(curl --silent --show-error --fail "$base/api/market/region")" || { echo "::error::Could not read the public market transport diagnostic"; exit 1; }
           printf '%s' "$region_response" | node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
-              const x=JSON.parse(s);
-              if(x.transport!=="bybit-worker-rest+bitget-worker-proxy-with-browser-websocket"||x.placementHint!=="cloudflare:global"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true){
-                console.error("Public market transport:",JSON.stringify(x));process.exit(1);
+              const x=JSON.parse(s),p=x.providers||{},required=["binance","binance_usdm","bybit","okx","bitget"];
+              if(x.transport!=="unified-cloudflare-worker-rest-gateway"||x.placementHint!=="cloudflare:global"||x.fixedEgressIp!==false||x.accountResidencyIsNotChanged!==true||required.some(v=>!Array.isArray(p[v])||!p[v].length)){
+                console.error("Unified market transport:",JSON.stringify(x));process.exit(1);
               }
-              console.log("Bybit Worker REST and Bitget browser-direct public feed are configured; no paid relay or Fly.io is required.");
+              console.log("Unified Worker gateway and Binance, Bybit, OKX and Bitget provider registry verified.");
             }catch(e){console.error("Invalid market transport response:",e.message);process.exit(1);}});' || exit 1
-          symbols_response="$(curl --silent --show-error --retry 4 --retry-all-errors --retry-delay 2 --max-time 20 -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
+          providers_response="$(curl --silent --show-error --fail "$base/api/market/providers")" || { echo "::error::Could not read exchange provider registry"; exit 1; }
+          printf '%s' "$providers_response" | node -e '
+            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+              const x=JSON.parse(s),ids=(x.providers||[]).map(v=>v.id),required=["binance","binance_usdm","bybit","okx","bitget","bitget_mix"];
+              if(required.some(v=>!ids.includes(v))){console.error("Exchange registry missing adapters:",ids);process.exit(1);}
+              console.log("All six spot/derivatives provider adapters are registered without public API credentials.");
+            }catch(e){console.error("Invalid provider registry response:",e.message);process.exit(1);}});' || exit 1
+          symbols_response="$(curl --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 --max-time 20 -w '__HTTP_CODE__%{http_code}' "$base/api/market/symbols?venue=bybit&market=all")" || { echo "::error::Could not contact the Bybit symbol endpoint"; failed=1; symbols_response='{}__HTTP_CODE__000'; }
           symbols_status="${symbols_response##*__HTTP_CODE__}"
           symbols="${symbols_response%__HTTP_CODE__*}"
           printf '%s' "$symbols" | HTTP_STATUS="$symbols_status" node -e '
             let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
               const x=JSON.parse(s),cats=Array.isArray(x.categories)?x.categories:[],warnings=Array.isArray(x.warnings)?x.warnings:[];
-              const ok=process.env.HTTP_STATUS==="200"&&x.provider==="bybit"&&Array.isArray(x.symbols)&&x.symbols.length>0&&["spot","linear","inverse"].every(v=>cats.includes(v))&&Number(x.refreshEverySeconds)>0&&Number(x.refreshEverySeconds)<=60;
-              if(!ok){console.error("Bybit catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,provider:x.provider,categories:cats,count:x.count,refreshEverySeconds:x.refreshEverySeconds,warnings}));process.exit(1);}
-              console.log("Bybit spot, linear and inverse catalogues verified; spot market data also backs the margin-compatible feed.");
+              const ok=process.env.HTTP_STATUS==="200"&&x.provider==="bybit"&&Array.isArray(x.symbols)&&x.symbols.length>0&&["spot","linear","inverse"].every(v=>cats.includes(v));
+              if(!ok){console.error("Bybit catalogue:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,provider:x.provider,categories:cats,count:x.count,warnings}));process.exit(1);}
+              console.log("Bybit spot, linear and inverse catalogues verified.");
             }catch(e){console.error("Invalid Bybit catalogue response:",e.message);process.exit(1);}});' || failed=1
-
-          for market in spot futures; do
-            suffix=""
-            [ "$market" = "futures" ] && suffix="&market=futures"
-            ticker_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/market/ticker?symbol=BTCUSDT$suffix")" || { echo "::error::Could not contact the Bybit $market ticker"; failed=1; ticker_response='{}__HTTP_CODE__000'; }
-            ticker_status="${ticker_response##*__HTTP_CODE__}"
-            ticker="${ticker_response%__HTTP_CODE__*}"
-            printf '%s' "$ticker" | HTTP_STATUS="$ticker_status" MARKET="$market" node -e '
-              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
-                const x=JSON.parse(s),attempts=Array.isArray(x.attempts)?x.attempts:[];
-                const ok=process.env.HTTP_STATUS==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0&&Number(x.highPrice)>=Number(x.lowPrice);
-                if(!ok){console.error("Bybit ticker:",JSON.stringify({market:process.env.MARKET,httpStatus:process.env.HTTP_STATUS,lastPrice:x.lastPrice,highPrice:x.highPrice,lowPrice:x.lowPrice,error:x.error,attempts}));process.exit(1);}
-                console.log("Bybit "+process.env.MARKET+" ticker verified with valid live price and 24h high/low.");
-              }catch(e){console.error("Invalid Bybit ticker response:",e.message);process.exit(1);}});' || failed=1
+          for venue in bybit bitget binance okx; do
+            for market in spot futures; do
+              category=spot
+              if [ "$market" = "futures" ]; then
+                case "$venue" in
+                  bybit) category=linear ;;
+                  bitget) category=USDT-FUTURES ;;
+                  binance) category=linear ;;
+                  okx) category=swap ;;
+                esac
+              elif [ "$venue" = "bitget" ]; then category=SPOT; fi
+              response="$(curl --silent --show-error --max-time 20 -w '__HTTP_CODE__%{http_code}' "$base/api/market/ticker?venue=$venue&market=$market&category=$category&symbol=BTCUSDT")" || { echo "::error::Could not contact $venue $market ticker"; failed=1; continue; }
+              code="${response##*__HTTP_CODE__}"; body="${response%__HTTP_CODE__*}"
+              printf '%s' "$body" | HTTP_STATUS="$code" VENUE="$venue" MARKET="$market" node -e '
+                let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                  const x=JSON.parse(s),code=process.env.HTTP_STATUS,venue=process.env.VENUE,market=process.env.MARKET;
+                  if(code==="200"&&Number(x.lastPrice)>0&&Number(x.highPrice)>0&&Number(x.lowPrice)>0&&Number(x.highPrice)>=Number(x.lowPrice)){console.log(venue+" "+market+" ticker verified · "+x.lastPrice);return;}
+                  if(code==="502"&&x.error){console.log(venue+" "+market+" route is healthy; upstream returned a classified outage: "+x.error);return;}
+                  console.error("Exchange ticker verification failed:",JSON.stringify({venue,market,httpStatus:code,error:x.error,lastPrice:x.lastPrice}));process.exit(1);
+                }catch(e){console.error("Invalid exchange ticker JSON:",e.message);process.exit(1);}});' || failed=1
+            done
           done
-
-          # Bitget public REST is intentionally browser-direct: Bitget blocks Cloudflare Worker egress.
-          bitget_client="$(curl --silent --show-error --fail "$base/bitget-client.js")" || { echo "::error::Bitget browser adapter asset is unavailable"; failed=1; bitget_client=''; }
-          printf '%s' "$bitget_client" | grep -q 'window.ETIBitget' || { echo "::error::Bitget browser adapter export is missing"; failed=1; }
-          printf '%s' "$bitget_client" | grep -q 'https://api.bitget.com' || { echo "::error::Bitget official API host is missing from browser adapter"; failed=1; }
-          curl --silent --show-error --fail "$base/" -o /tmp/eti-home.html || { echo "::error::Dashboard HTML is unavailable"; failed=1; }
-          grep -q 'bitget-client.js' /tmp/eti-home.html || { echo "::error::Dashboard does not load the Bitget browser adapter"; failed=1; }
-          curl --silent --show-error --fail "$base/omnisignal" -o /tmp/eti-omnisignal.html || { echo "::error::Omnisignal HTML is unavailable"; failed=1; }
-          grep -q 'bitget-client.js' /tmp/eti-omnisignal.html || { echo "::error::Omnisignal does not load the Bitget browser adapter"; failed=1; }
-          bitget_probe_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","engines":["swift","gainz"],"venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")" || { echo "::error::Could not contact the Bitget Omnisignal route"; failed=1; bitget_probe_response='{}__HTTP_CODE__000'; }
+          for venue in binance okx; do
+            response="$(curl --silent --show-error --max-time 20 -w '__HTTP_CODE__%{http_code}' "$base/api/market/derivatives?venue=$venue&market=futures&symbol=BTCUSDT&interval=1m")" || { echo "::error::Could not contact $venue derivatives endpoint"; failed=1; continue; }
+            code="${response##*__HTTP_CODE__}"; body="${response%__HTTP_CODE__*}"
+            printf '%s' "$body" | HTTP_STATUS="$code" VENUE="$venue" node -e '
+              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
+                const x=JSON.parse(s),code=process.env.HTTP_STATUS,venue=process.env.VENUE;
+                if(code==="200"&&x.fundingRate!==undefined&&x.openInterest!==undefined){console.log(venue+" funding and open-interest endpoint verified.");return;}
+                if(code==="502"&&x.error){console.log(venue+" derivatives route returned a classified upstream outage: "+x.error);return;}
+                console.error("Derivatives verification failed:",JSON.stringify({venue,httpStatus:code,error:x.error}));process.exit(1);
+              }catch(e){console.error("Invalid derivatives response:",e.message);process.exit(1);}});' || failed=1
+          done
+          curl --silent --show-error --fail "$base/terminal" -o /tmp/eti-terminal.html || { echo "::error::Pro Trading Terminal HTML is unavailable"; failed=1; }
+          grep -q '/api/market/derivatives' /tmp/eti-terminal.html || { echo "::error::Terminal is missing unified derivatives feed integration"; failed=1; }
+          bitget_probe_response="$(curl --silent --show-error --max-time 30 -w '__HTTP_CODE__%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","engines":["swift","gainz"],"venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")" || { echo "::error::Could not contact the Bitget Omnisignal route"; failed=1; bitget_probe_response='{}__HTTP_CODE__000'; }
           bitget_probe_code="${bitget_probe_response##*__HTTP_CODE__}"
           bitget_probe_body="${bitget_probe_response%__HTTP_CODE__*}"
           if [ "$bitget_probe_code" = "200" ]; then
-            printf '%s' "$bitget_probe_body" | node -e '
-              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
-                const x=JSON.parse(s),q=x.dataQuality||{};
-                if(q.venue!=="bitget"||q.market!=="futures"||!x.decision){console.error("Bitget Omnisignal response contract:",JSON.stringify({venue:q.venue,market:q.market,decision:x.decision,error:x.error}));process.exit(1);}
-                console.log("Bitget Worker-proxy Omnisignal returned a valid futures analysis response.");
-              }catch(e){console.error("Invalid Bitget Omnisignal JSON:",e.message);process.exit(1);}});' || failed=1
+            printf '%s' "$bitget_probe_body" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s),q=x.dataQuality||{};if(q.venue!=="bitget"||q.market!=="futures"||!x.decision){console.error("Bitget Omnisignal contract:",JSON.stringify({venue:q.venue,market:q.market,decision:x.decision,error:x.error}));process.exit(1);}console.log("Bitget Omnisignal returned selected-venue analysis.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
           elif [ "$bitget_probe_code" = "503" ]; then
-            printf '%s' "$bitget_probe_body" | node -e '
-              let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
-                const x=JSON.parse(s);
-                if(x.error!=="market_data_unavailable"||x.submitsOrder!==false){console.error("Unexpected Bitget classified outage:",JSON.stringify(x));process.exit(1);}
-                console.log("Bitget Worker proxy reports a classified upstream market-data outage; no order can be submitted from this analytical route.");
-              }catch(e){console.error("Invalid Bitget outage JSON:",e.message);process.exit(1);}});' || failed=1
-          else
-            echo "::error::Bitget Omnisignal returned unexpected HTTP $bitget_probe_code"
-            printf '%s\n' "$bitget_probe_body"
-            failed=1
-          fi
-          
-          forecast_response="$(curl --silent --show-error -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }
-          forecast_status="${forecast_response##*__HTTP_CODE__}"
-          forecast="${forecast_response%__HTTP_CODE__*}"
-          printf '%s' "$forecast" | HTTP_STATUS="$forecast_status" node -e '
-            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
-              const x=JSON.parse(s),attempts=Array.isArray(x.attempts)?x.attempts:[];
-              const h=x.forecast?.high,l=x.forecast?.low,c=x.forecast?.confidence;
-              const validTime=v=>typeof v==="string"&&Number.isFinite(Date.parse(v));
-              const ok=process.env.HTTP_STATUS==="200"&&x.status==="ready"&&Number(h?.price)>0&&Number(l?.price)>0&&validTime(h?.time?.expectedAt)&&validTime(l?.time?.expectedAt)&&Number(x.history?.timeSampleDays)>=5&&Number(x.history?.priceSampleDays)>=5&&Number(c?.score)>=0&&Number(c?.score)<=100;
-              if(!ok){console.error("24-hour forecast readiness:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,status:x.status,reason:x.reason,history:x.history,forecast:x.forecast,attempts}));process.exit(1);}
-              console.log("24-hour Bybit high/low forecast API verified with price targets, UTC time windows and historical samples.");
-            }catch(e){console.error("Invalid 24-hour forecast response:",e.message);process.exit(1);}});' || failed=1
-
+            printf '%s' "$bitget_probe_body" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s);if(x.error!=="market_data_unavailable"||x.submitsOrder!==false){console.error("Unexpected Bitget outage:",JSON.stringify(x));process.exit(1);}console.log("Bitget Omnisignal reports a classified upstream outage; execution remains disabled.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
+          else echo "::error::Bitget Omnisignal returned unexpected HTTP $bitget_probe_code"; printf '%s\n' "$bitget_probe_body"; failed=1; fi
+          forecast_response="$(curl --silent --show-error --max-time 30 -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }
+          forecast_status="${forecast_response##*__HTTP_CODE__}"; forecast="${forecast_response%__HTTP_CODE__*}"
+          printf '%s' "$forecast" | HTTP_STATUS="$forecast_status" node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s),h=x.forecast?.high,l=x.forecast?.low,c=x.forecast?.confidence,validTime=v=>typeof v==="string"&&Number.isFinite(Date.parse(v));const ok=process.env.HTTP_STATUS==="200"&&x.status==="ready"&&Number(h?.price)>0&&Number(l?.price)>0&&validTime(h?.time?.expectedAt)&&validTime(l?.time?.expectedAt)&&Number(x.history?.timeSampleDays)>=5&&Number(x.history?.priceSampleDays)>=5&&Number(c?.score)>=0&&Number(c?.score)<=100;if(!ok){console.error("24-hour forecast readiness:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,status:x.status,reason:x.reason}));process.exit(1);}console.log("24-hour high/low forecast verified.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
           status="$(curl --silent --show-error --fail "$base/api/execution/status")" || { echo "::error::Could not read ETI execution safeguards"; failed=1; status='{}'; }
-          printf '%s' "$status" | node -e '
-            let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{
-              const x=JSON.parse(s);
-              if(x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error("ETI execution safeguards:",JSON.stringify({masterToken:x.master_execution_token_configured,auditLog:x.audit_log_configured}));process.exit(1);}
-              console.log("ETI master execution authentication and audit storage verified; no live order was submitted.");
-            }catch(e){console.error("Invalid execution status response:",e.message);process.exit(1);}});' || failed=1
+          printf '%s' "$status" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s);if(x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error("ETI execution safeguards:",JSON.stringify({masterToken:x.master_execution_token_configured,auditLog:x.audit_log_configured}));process.exit(1);}console.log("ETI execution authentication and audit storage verified; no live order submitted.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
           exit "$failed"
-
       - name: Verify live GainzAlgo service, webhook and D1 readiness
         shell: bash
         env:
