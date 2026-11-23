@@ -33,11 +33,14 @@ def test_legacy_market3d_path_now_serves_2d_view(client):
 
 def test_market_selector_offers_every_supported_market(client):
     html = client.get("/static/market2d.html").text
-    for value in ("bybit", "alpaca", "oanda", "twelvedata"):
+    for value in ("bybit", "bitget", "binance", "okx", "alpaca", "oanda", "twelvedata"):
         assert f'<option value="{value}"' in html
     js = client.get("/static/market2d.js").text
-    for value in ("bybit", "alpaca", "oanda", "twelvedata"):
+    for value in ("bybit", "bitget", "binance", "okx", "alpaca", "oanda", "twelvedata"):
         assert value in js
+    assert "unifiedVenue(prov)" in js
+    assert "/api/market/klines?venue=" in js
+    assert "STALE: keeping the last verified" in js
 
 
 def test_script_reads_real_history_endpoint_and_never_invents_data(client):
