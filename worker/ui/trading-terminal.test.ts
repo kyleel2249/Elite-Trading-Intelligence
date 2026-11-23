@@ -188,7 +188,7 @@ test("terminal uses the ETI unified exchange gateway for all supported venues an
   assert.match(TRADING_TERMINAL_CSS, /@media\(max-width:760px\).*?\.tt-chart\{height:340px!important/s);
   assert.doesNotMatch(TRADING_TERMINAL_HTML, /ccxt@|jsdelivr\.net\/npm\/ccxt/);
   for (const venue of ["bitget", "bybit", "binance", "okx"]) assert.match(TRADING_TERMINAL_HTML, new RegExp('value="' + venue + '"'));
-  for (const endpoint of ["klines", "ticker", "trades", "depth"]) assert.match(TRADING_TERMINAL_JS, new RegExp('/api/market/' + endpoint));
+  for (const endpoint of ["klines", "ticker", "trades", "depth", "derivatives"]) assert.match(TRADING_TERMINAL_JS, new RegExp('/api/market/' + endpoint));
   assert.match(TRADING_TERMINAL_JS, /function setVenueOptions\(/);
   assert.match(TRADING_TERMINAL_JS, /ETI Exchange Gateway/);
   assert.match(TRADING_TERMINAL_JS, /loadMultiCharts/);
