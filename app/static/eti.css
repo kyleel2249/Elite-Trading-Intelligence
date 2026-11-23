@@ -85,7 +85,7 @@ td.wrap{white-space:normal;min-width:180px}
 .list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 .list li{display:flex;gap:8px;justify-content:space-between;align-items:baseline;border-bottom:1px solid rgba(0,168,255,.1);padding-bottom:4px}
 
-/* stages (charts / 3D) */
+/* stages (2D charts and canvas visualisations) */
 .chart{height:340px;width:100%;background:#000000;border-radius:10px}
 .chart.sm{height:220px}
 .stage{position:relative;min-height:280px;aspect-ratio:16/9;max-height:460px;border-radius:14px;overflow:hidden;background:radial-gradient(ellipse at 50% 80%,rgba(0,168,255,.18),transparent 65%)}
