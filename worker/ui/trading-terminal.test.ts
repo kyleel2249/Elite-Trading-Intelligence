@@ -184,8 +184,8 @@ test("terminal exposes Production UTA V3 JSON/SBE and private-feed controls",()=
 
 
 test("terminal uses a compact responsive chart and exposes CCXT multi-exchange futures", () => {
-  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{height:280px!important;min-height:240px!important;max-height:300px!important\}/);
-  assert.match(TRADING_TERMINAL_CSS, /@media\(max-width:760px\)\{\.tt-chart\{height:230px!important/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{width:100%!important;height:440px!important;min-height:440px!important;max-height:none!important\}/);
+  assert.match(TRADING_TERMINAL_CSS, /@media\(max-width:760px\)\{\.tt-shell\{padding-left:10px;padding-right:10px\}\.tt-chart-card\{width:100%!important;min-height:420px!important\}\.tt-chart\{height:340px!important/);
   assert.match(TRADING_TERMINAL_HTML, /ccxt@4\.5\.26\/dist\/ccxt\.browser\.js/);
   for (const venue of ["bitget", "bybit", "binance", "okx", "kucoin", "gateio", "kraken", "coinbase"]) {
     assert.match(TRADING_TERMINAL_HTML, new RegExp('value="' + venue + '"'));
@@ -202,7 +202,7 @@ test("terminal uses a compact responsive chart and exposes CCXT multi-exchange f
 
 test("trading chart container matches the 24H forecast panel's full-width compact footprint", () => {
   assert.match(TRADING_TERMINAL_CSS, /\.tt-work\{grid-template-columns:minmax\(0,1fr\)!important;align-items:start!important\}/);
-  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart-card\{grid-column:1\/-1!important;width:100%!important;max-width:none!important;min-width:0!important;height:auto!important;min-height:0!important/);
-  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{width:100%!important;height:150px!important;min-height:140px!important;max-height:170px!important\}/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart-card\{grid-column:1\/-1!important;width:100%!important;max-width:none!important;min-width:0!important;height:auto!important;min-height:560px!important/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{width:100%!important;height:440px!important;min-height:440px!important;max-height:none!important\}/);
   assert.match(TRADING_TERMINAL_CSS, /\.tt-chart-card>\.tt-card-head\{padding:12px 14px 0!important\}/);
 });
