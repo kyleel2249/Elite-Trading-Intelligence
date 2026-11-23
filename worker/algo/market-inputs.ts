@@ -1,5 +1,5 @@
 // Shared market-data loading for analytical and paper endpoints (read-only public data).
-import { getMarketData, providerOrder, bitgetProductFor, type Depth, type Kline, type MarketEnv, type Ticker, type ProviderId } from "../market.ts";
+import { bitgetAwareFetch, getMarketData, providerOrder, bitgetProductFor, type Depth, type Kline, type MarketEnv, type Ticker, type ProviderId } from "../market.ts";
 import type { DerivativesSnapshot } from "./derivatives.ts";
 import { DEFAULT_WEIGHTS, EXECUTION_TF, TIMEFRAMES, TF_SECONDS, type Strategy, type Timeframe } from "./timeframes.ts";
 
