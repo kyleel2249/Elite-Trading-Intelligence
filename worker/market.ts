@@ -991,6 +991,40 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       })),
     });
   }
+  if (endpoint === "derivatives") {
+    if (marketParam !== "futures") return jsonResp({ error: "unsupported_market", detail: "Derivatives snapshots require a futures or perpetual market." }, 400);
+    try {
+      if (venueParam === "bybit" || venueParam === "bitget") {
+        const provider = selectedProvider;
+        const result = await getMarketData("ticker", { symbol, interval, limit: 1, market: marketParam, category: categoryParam as Params["category"] }, providerOrder(env, provider), marketFetch);
+        return jsonResp({ provider: result.provider, fundingRate: result.data.fundingRate ?? null, openInterest: result.data.openInterest ?? null, markPrice: result.data.markPrice ?? null, indexPrice: result.data.indexPrice ?? null, nextFundingTime: result.data.nextFundingTime ?? null, timestamp: Date.now() }, 200, { "x-eti-provider": result.provider });
+      }
+      const readJson = async (url: string) => {
+        const response = await marketFetch(url, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(12000), cf: { cacheEverything: true, cacheTtl: 2 } } as RequestInit);
+        if (!response.ok) throw new Error("upstream_http_" + response.status);
+        const payload: any = await response.json();
+        return payload;
+      };
+      if (venueParam === "binance") {
+        const [premium, oi] = await Promise.all([
+          readJson("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=" + encodeURIComponent(symbol)),
+          readJson("https://fapi.binance.com/fapi/v1/openInterest?symbol=" + encodeURIComponent(symbol))
+        ]);
+        if (!premium || premium.lastFundingRate == null || !oi || oi.openInterest == null) throw new Error("binance_derivatives_payload_invalid");
+        return jsonResp({ provider: selectedProvider, fundingRate: num(premium.lastFundingRate), openInterest: num(oi.openInterest), markPrice: num(premium.markPrice), indexPrice: num(premium.indexPrice), nextFundingTime: num(premium.nextFundingTime), timestamp: num(oi.time) || Date.now() }, 200, { "x-eti-provider": selectedProvider });
+      }
+      const instId = okxSymbol(symbol, marketParam);
+      const [funding, oi] = await Promise.all([
+        readJson("https://www.okx.com/api/v5/public/funding-rate?instId=" + encodeURIComponent(instId)),
+        readJson("https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=" + encodeURIComponent(instId))
+      ]);
+      const f = funding?.code === "0" ? funding.data?.[0] : null, o = oi?.code === "0" ? oi.data?.[0] : null;
+      if (!f || !o) throw new Error("okx_derivatives_payload_invalid");
+      return jsonResp({ provider: selectedProvider, fundingRate: num(f.fundingRate), nextFundingTime: num(f.nextFundingTime), openInterest: num(o.oi), openInterestCurrency: o.oiCcy ?? null, markPrice: null, indexPrice: null, timestamp: num(o.ts) || Date.now() }, 200, { "x-eti-provider": selectedProvider });
+    } catch (e) {
+      return jsonResp({ error: "derivatives_data_unavailable", detail: e instanceof Error ? e.message : "upstream_unreachable", provider: selectedProvider }, 502);
+    }
+  }
   if (!["klines", "depth", "trades", "ticker"].includes(endpoint)) return jsonResp({ error: "not_found" }, 404);
 
   const defLimit = endpoint === "klines" ? "120" : endpoint === "depth" ? "20" : "50";
