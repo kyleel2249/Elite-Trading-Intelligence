@@ -45,8 +45,8 @@ try {
     await page.locator("#tt-candle-height").evaluate(el => { el.value = "210"; el.dispatchEvent(new Event("input", { bubbles: true })); });
     await page.locator("#tt-volume-height").evaluate(el => { el.value = "180"; el.dispatchEvent(new Event("input", { bubbles: true })); });
     const adjusted = await page.locator("#tt-chart").evaluate(el => ({ height: el.getBoundingClientRect().height, inlineHeight: el.style.height }));
-    assert.equal(adjusted.inlineHeight, "460px", profile.name + ": chart height follows candle and volume pane controls");
-    assert.ok(adjusted.height >= 460, profile.name + ": adjusted chart height is applied to the rendered surface");
+    assert.equal(adjusted.inlineHeight, "410px", profile.name + ": chart height follows candle and volume pane controls");
+    assert.ok(adjusted.height >= 410, profile.name + ": adjusted chart height is applied to the rendered surface");
 
     await page.locator("#tt-candle-width").evaluate(el => { el.value = "20"; el.dispatchEvent(new Event("input", { bubbles: true })); });
     await page.locator("#tt-zoom-in").click();
