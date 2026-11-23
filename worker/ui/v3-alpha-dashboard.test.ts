@@ -17,6 +17,8 @@ test("V3 Alpha dashboard includes live signal evidence, synchronized votes, rese
   for (const text of ["Signal plan", "Evidence contribution", "Multi-timeframe consensus", "AI agent research gates", "Monte Carlo risk research", "Recorded signal history"]) assert.ok(V3_ALPHA_DASHBOARD_JS.includes(text));
   assert.match(V3_ALPHA_DASHBOARD_JS, /base="\/api\/algo\/v3-alpha\/"/);
   assert.match(V3_ALPHA_DASHBOARD_JS, /base\+"intelligence"/);
+  assert.match(V3_ALPHA_DASHBOARD_JS, /venue=\x22\+encodeURIComponent\(venue\)/);
+  assert.match(V3_ALPHA_DASHBOARD_JS, /market=\x22\+encodeURIComponent\(market\)/);
   assert.match(V3_ALPHA_DASHBOARD_JS, /base\+"signals\?/);
   assert.match(V3_ALPHA_DASHBOARD_JS, /base\+"performance\?/);
   assert.match(V3_ALPHA_DASHBOARD_JS, /submitsOrder=false/);
