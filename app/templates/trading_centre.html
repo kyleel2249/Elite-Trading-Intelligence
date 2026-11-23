@@ -182,7 +182,7 @@
     if (chart) {
       chart.applyOptions({ width: box.clientWidth, height: box.clientHeight });
       chart.timeScale().applyOptions({ barSpacing: S.chartCandleWidth, minBarSpacing: 1 });
-      chart.priceScale('vol').applyOptions({ scaleMargins: { top: S.chartCandleHeight / (S.chartCandleHeight + S.chartVolumeHeight + 40), bottom: .02 } });
+      chart.priceScale('vol').applyOptions({ scaleMargins: { top: 1 - S.chartVolumeHeight / (S.chartCandleHeight + S.chartVolumeHeight + 40), bottom: .02 } });
     }
   }
   function bindMarketChartControls() {
