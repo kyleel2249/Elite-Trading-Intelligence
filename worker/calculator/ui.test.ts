@@ -30,7 +30,7 @@ test("calculator script compiles and wires the entry link and the automatic orde
 
 test("the chart is wide enough for large candles and scrolls horizontally", () => {
   assert.match(CHART_LAYOUT_CSS, /\.cscroll\{overflow-x:auto/);
-  assert.match(CHART_LAYOUT_CSS, /\.chart\.big\{height:560px\}/);
+  assert.match(CHART_LAYOUT_CSS, /\.chart\.big\{height:440px;min-height:440px;max-height:none\}/);
   assert.match(CHART_LAYOUT_JS, /\(n\+FUTURE\)\*cfg\.step\+PAD_R/);
   assert.match(CHART_LAYOUT_JS, /Extra large/);
 });
