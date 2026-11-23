@@ -118,7 +118,7 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
   const feeBps=Number(url.searchParams.get("feeBps")??10),slippageBps=Number(url.searchParams.get("slippageBps")??5),limit=Number(url.searchParams.get("limit")??500);
   if(!selected||!validSymbol(symbol)||!strategies.includes(strategy)||![feeBps,slippageBps,limit].every(Number.isFinite)||feeBps<0||slippageBps<0||feeBps>500||slippageBps>500||!Number.isInteger(limit)||limit<240||limit>1000)return reply({error:"invalid_parameters",limitRange:[240,1000]},400);
   const required=TIMEFRAMES.filter(tf=>DEFAULT_WEIGHTS[strategy][tf]>0||tf===tfFor(strategy)),candles:Partial<Record<Timeframe,Kline[]>>={},failures:Record<string,string>={};
-  for(const tf of required){try{candles[tf]=(await getMarketData("klines",{symbol,interval:tf,limit,market:selected.market,category:selected.category},providerOrder(env,selected.provider))).data as Kline[];}catch(e){failures[tf]=e instanceof Error?e.message:"market_data_unavailable";}}
+  for(const tf of required){try{candles[tf]=(await getMarketData("klines",{symbol,interval:tf,limit,market:selected.market,category:selected.category as any},providerOrder(env,selected.provider))).data as Kline[];}catch(e){failures[tf]=e instanceof Error?e.message:"market_data_unavailable";}}
   if(!candles[tfFor(strategy)])return reply({error:"execution_timeframe_unavailable",failures,submitsOrder:false},503);
   return reply({symbol,strategy,venue:selected.venue,market:selected.market,category:selected.category,provider:selected.provider,requestedLimit:limit,failures,report:backtestV3AlphaMtf(candles,{symbol,strategy,feeBps,slippageBps}),submitsOrder:false,liveExecutionAllowed:false});
  }
