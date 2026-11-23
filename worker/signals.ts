@@ -445,6 +445,8 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
   const interval = String(body.interval ?? url.searchParams.get("interval") ?? "1h");
   const requestedProvider = String(body.provider ?? url.searchParams.get("provider") ?? "");
   const market = (body.market ?? url.searchParams.get("market")) === "futures" ? "futures" : "spot";
+  const category = String(body.category ?? url.searchParams.get("category") ?? (market === "futures" ? (requestedProvider === "bitget" ? "USDT-FUTURES" : requestedProvider === "okx" ? "swap" : "linear") : (requestedProvider === "bitget" ? "SPOT" : "spot")));
+  const selectedProvider = requestedProvider === "binance" && market === "futures" ? "binance_usdm" : requestedProvider === "bitget" && market === "futures" ? "bitget_mix" : requestedProvider;
   if (!/^[A-Z0-9]{5,20}$/.test(symbol) || !INTERVALS.includes(interval)) return jsonError({ error: "invalid_symbol_or_interval" }, 400);
   const windowRaw = body.window ?? url.searchParams.get("window");
   let windowSize = DEFAULT_WINDOW;
@@ -460,7 +462,7 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
       rows = supplied;
       source = requestedProvider || "client-market-data";
     } else {
-      const result = await getMarketData("klines", { symbol, interval, limit: 1000, market }, providerOrder(env, requestedProvider));
+      const result = await getMarketData("klines", { symbol, interval, limit: 1000, market, category: category as any }, providerOrder(env, selectedProvider));
       rows = result.data as Kline[];
       source = result.provider;
     }
