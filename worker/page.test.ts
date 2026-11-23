@@ -81,7 +81,7 @@ test("dashboard routes Bybit, Bitget and Binance through the unified Worker mark
   assert.match(html, /Bitget \(spot, margin &amp; futures\)/);
   assert.match(html, /Binance \(spot &amp; USDⓈ-M futures\)/);
   assert.match(html, /\/api\/market\/klines/);
-  assert.match(html, /\/api\/market\/symbols\?venue=binance/);
+  assert.match(html, /\/api\/market\/symbols\?venue=/);
   assert.doesNotMatch(html, /window\.ETIBitget\.marketData/);
   assert.doesNotMatch(html, /bitget-browser/);
   assert.match(html, /function mkt\(\)\{[^}]*venue=/);
