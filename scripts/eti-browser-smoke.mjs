@@ -31,7 +31,8 @@ try {
         controlsScrollWidth: controls.scrollWidth,
         canvasCount: chart.querySelectorAll("canvas").length,
         bodyWidth: document.documentElement.clientWidth,
-        documentWidth: document.documentElement.scrollWidth
+        documentWidth: document.documentElement.scrollWidth,
+        multiPanes: [...document.querySelectorAll(".tt-multi-pane > div")].map(el => ({ width: el.getBoundingClientRect().width, parentWidth: el.parentElement.getBoundingClientRect().width }))
       };
     });
     assert.ok(initial.chartWidth > 250, profile.name + ": chart should have a visible width");
@@ -39,6 +40,7 @@ try {
     assert.ok(initial.chartHeight >= 260, profile.name + ": chart height must be responsive and visible");
     assert.ok(initial.canvasCount >= 1, profile.name + ": chart renderer must create a canvas");
     assert.ok(initial.controlsScrollWidth <= initial.controlsWidth + 2, profile.name + ": chart controls must not overflow horizontally");
+    assert.ok(initial.multiPanes.length === 4 && initial.multiPanes.every(x => x.width > 100 && x.width <= x.parentWidth + 1), profile.name + ": all synchronized timeframe charts must fit their parent panels");
 
     await page.locator("#tt-candle-width").evaluate(el => { el.value = "300"; el.dispatchEvent(new Event("input", { bubbles: true })); });
     assert.equal(await page.locator("#tt-candle-width-value").textContent(), "300px", profile.name + ": 300px candle width control");
