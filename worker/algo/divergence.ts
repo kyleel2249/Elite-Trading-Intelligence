@@ -37,14 +37,14 @@ export function detectDivergence(rows:Kline[],rsi:number[],options:{left?:number
   if(!Array.isArray(rows)||!Array.isArray(rsi)||rows.length!==rsi.length||rows.length<30)return empty("insufficient_data","At least 30 aligned closed candles and RSI observations are required.");
   const left=Math.max(2,Math.min(8,Math.floor(options.left??3))),right=Math.max(2,Math.min(8,Math.floor(options.right??3)));
   const lookback=Math.max(30,Math.min(200,Math.floor(options.lookback??80))),minPrice=Math.max(0.01,options.minimumPriceChangePct??0.1),minRsi=Math.max(0.5,options.minimumRsiChange??2);
-  const candidates:{kind:DivergenceKind;direction:-1|1;strength:number;previous:DivergencePivot;current:DivergencePivot}[]=[];
+  const candidates:{kind:DivergenceKind;direction:-1|0|1;strength:number;previous:DivergencePivot;current:DivergencePivot}[]=[];
   for(const side of ["low","high"] as const){
     const ps=pivots(rows,rsi,side,left,right,lookback);
     if(ps.length<2)continue;
     const current=ps[ps.length-1],previous=[...ps].reverse().slice(1).find(p=>current.index-p.index>=5&&current.index-p.index<=50);
     if(!previous)continue;
     const priceChangePct=(current.price/previous.price-1)*100,rsiChange=current.rsi-previous.rsi;
-    let kind:DivergenceKind="none",direction:-1|1=0;
+    let kind:DivergenceKind="none",direction:-1|0|1=0;
     if(side==="low"&&priceChangePct<=-minPrice&&rsiChange>=minRsi){kind="regular_bullish";direction=1;}
     else if(side==="low"&&priceChangePct>=minPrice&&rsiChange<=-minRsi){kind="hidden_bullish";direction=1;}
     else if(side==="high"&&priceChangePct>=minPrice&&rsiChange<=-minRsi){kind="regular_bearish";direction=-1;}

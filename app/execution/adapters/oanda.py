@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from ..domain import BrokerOrder, BrokerPosition, OrderStatus, OrderType, Quote, Side, utcnow
-from ..errors import OrderRejectedError, PermanentProviderError, TransientProviderError
+from ..errors import OrderRejectedError, TransientProviderError
 from .alpaca import raise_for
 from .base import BrokerAdapter
 from .transport import HttpxTransport

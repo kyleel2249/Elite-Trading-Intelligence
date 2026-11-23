@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from .detectors import unusual_volume, volatility_breakout
 from .regime import detect_regime
-from .stats import closes_of, pct_returns, stdev
+from .stats import closes_of
 
 
 def scan_symbol(symbol: str, klines: Sequence[dict[str, Any]]) -> dict[str, Any]:

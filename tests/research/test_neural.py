@@ -1,7 +1,7 @@
 import numpy as np
 
 from app.research.forecast import forecast
-from app.research.neural import Net, init_net, loss_and_grads, mlp, train, with_neural
+from app.research.neural import init_net, loss_and_grads, mlp, train, with_neural
 
 
 def test_backprop_matches_finite_differences():

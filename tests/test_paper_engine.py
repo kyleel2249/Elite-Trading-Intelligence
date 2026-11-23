@@ -6,6 +6,7 @@ import pytest
 
 # These suites target the standalone engine (app.paper.core / app.paper.modes) that was superseded by app/paper/engine.py,
 # service.py and mode.py. They are kept, not deleted, and skip until they are ported to the surviving engine.
+# Replacement coverage for the surviving engine lives in tests/test_paper_exchange_engine.py (engine) and tests/test_paper_exchange_service.py (service, stores, modes).
 pytest.importorskip("app.paper.core", reason="targets the superseded app.paper.core engine; port to app.paper.engine")
 
 import unittest

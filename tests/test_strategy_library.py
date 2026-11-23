@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _strategy_fixtures import synth, synth_pair  # noqa: E402
 from app.strategies import (CRITERIA, STRATEGY_CLASSES, Bars, CostModel, MissingData, Plan, RiskModel, get_strategy, latest_signal, list_specs, validate)  # noqa: E402
 from app.strategies import engine, indicators as ind  # noqa: E402
-from app.strategies.data import align_asof, align_bars, build_aux, events_to_indices  # noqa: E402
+from app.strategies.data import align_asof, align_bars, events_to_indices  # noqa: E402
 from app.strategies.validation import _phi, _phi_inv, deflated_sharpe  # noqa: E402
 
 EXPECTED = ["trend_following", "breakout", "pullback", "momentum", "mean_reversion", "swing_trading", "scalping", "position_trading",

@@ -1,7 +1,7 @@
 """SQLAlchemy implementation of the accounting Store."""
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError

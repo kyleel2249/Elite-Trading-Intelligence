@@ -49,7 +49,7 @@ export function analyzeMultiTimeframe(input:Record<string,unknown>){
  if(entries.length<1||entries.length>allowed.length)throw new Error("timeframes_missing_or_invalid");
  const results=entries.map(([tf,c])=>analyzeTimeframe(c,tf));
  const bullish=results.filter(x=>x.signal==="bullish").length,bearish=results.filter(x=>x.signal==="bearish").length,neutral=results.length-bullish-bearish;
- const overall=bullish>bearish?"bullish":bearish>bullish?"bearish":"neutral",aligned=results.filter(x=>x.trendBias===overall&&overall!=="neutral").length;
+ const overall=bullish>bearish?"bullish":bearish>bullish?"bearish":"neutral",aligned=results.filter(x=>overall!=="neutral"&&x.trendBias===overall).length;
  const score=Math.round(results.reduce((s,x)=>s+x.confidenceScore,0)/results.length);
  return {overallBias:overall,confluenceScore:score,alignmentPct:Math.round(aligned/results.length*100),bullishTimeframes:bullish,bearishTimeframes:bearish,neutralTimeframes:neutral,conflict:bullish>0&&bearish>0,timeframes:results,summary:overall==="neutral"?"Timeframes are mixed or lack sufficient structure. Wait for clearer confirmation.":aligned===results.length?"All submitted timeframes align; use execution-level confirmation and defined risk.":"Timeframes partially align; reduce confidence and wait for execution confirmation.",disclaimer:"Analytical signal only. Not financial advice and not an execution command."};
 }

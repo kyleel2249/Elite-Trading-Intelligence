@@ -4,7 +4,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.database import SessionLocal, init_db

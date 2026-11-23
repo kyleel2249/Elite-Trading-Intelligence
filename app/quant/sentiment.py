@@ -59,7 +59,7 @@ class SentimentResult:
 
 
 def _norm(t: str) -> str:
-    return hashlib.sha1(re.sub(r"\W+", " ", t.lower()).strip().encode()).hexdigest()
+    return hashlib.sha1(re.sub(r"\W+", " ", t.lower()).strip().encode(), usedforsecurity=False).hexdigest()
 
 
 def label_for(score: float) -> str:

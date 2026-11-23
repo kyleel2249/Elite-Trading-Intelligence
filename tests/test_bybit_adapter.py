@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 

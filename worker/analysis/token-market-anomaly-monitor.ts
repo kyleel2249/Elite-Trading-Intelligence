@@ -5,7 +5,7 @@
  */
 const CHAIN_IDS:Record<string,string>={ethereum:"ethereum",base:"base",arbitrum:"arbitrum",polygon:"polygon",optimism:"optimism",solana:"solana"};
 const asNum=(x:any)=>Number.isFinite(Number(x))?Number(x):0;
-export interface TokenMarketSnapshot {priceUsd:number;liquidityUsd:number;volume24hUsd:number;change24hPct:number;fdvUsd:number|null;marketCapUsd:number|null;pairAddress:string|null;source:string}
+export interface TokenMarketSnapshot {priceUsd:number;liquidityUsd:number;volume24hUsd:number;change24hPct?:number;fdvUsd:number|null;marketCapUsd:number|null;pairAddress:string|null;source:string}
 export function selectMarketSnapshot(pairs:any[]):TokenMarketSnapshot|null{
  const usable=(Array.isArray(pairs)?pairs:[]).filter(p=>p?.baseToken?.address&&p?.priceUsd&&p?.liquidity?.usd!=null);
  if(!usable.length)return null;

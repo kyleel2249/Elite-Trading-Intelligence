@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
 
 from app.accounting import events
 from app.accounting.domain import SCOPES, ValidationError, check_currency, parse_date

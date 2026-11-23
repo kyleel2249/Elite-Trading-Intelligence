@@ -2,10 +2,9 @@
 need X-MFA-Code. Nothing here returns a key, seed or passphrase except the one-time issuance responses, which are never stored."""
 from __future__ import annotations
 
-import json
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 

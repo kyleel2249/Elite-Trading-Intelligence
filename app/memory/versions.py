@@ -23,7 +23,7 @@ from app.config import Settings, get_settings
 from app.memory.models import MemoryBacktest, StrategyVersion
 from app.memory.partition import VALIDATION_PARTITIONS
 from app.memory.registry import get_or_create_registry
-from app.memory.util import as_utc, is_finite_number, iso, naive_utc, sha256_json, utcnow
+from app.memory.util import as_utc, is_finite_number, iso, sha256_json, utcnow
 
 # Mirrors StrategyPromotionAuthority.MIN_OOS_TRADES (kept local to avoid an import cycle).
 MIN_OOS_TRADES = 5

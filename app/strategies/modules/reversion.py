@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
 
 from app.strategies import indicators as ind
 from app.strategies.base import Strategy, ok, vol_ratio

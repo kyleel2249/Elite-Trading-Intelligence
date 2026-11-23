@@ -6,13 +6,11 @@ import asyncio
 import pytest
 from cryptography.fernet import Fernet
 
-from app.chain import service as chain_service
 from app.chain.broker import BrokerService
 from app.chain.broker_models import ChainFee, ChainFunding
 from app.chain.crypto import address_from_private
 from app.chain.rpc import RpcError
 from app.chain.service import ChainError
-from app.execution.vault import CredentialVault
 from tests.test_chain_service import DEST, FakeRpc, env, ready, run, setup_module, svc  # noqa: F401  (fixtures)
 
 BROKER = "0x" + "ab" * 20
@@ -37,7 +35,6 @@ def broker(env, monkeypatch):
 
 
 def put_tx(fake, h=H, frm=BROKER, to=None, value=10 ** 17, block=0x60, ok=True):
-    from app.chain.broker import to_checksum
     fake.txs[h] = {"from": frm, "to": to or fake.wallet, "value": hex(value)}
     fake.receipts[h] = {"status": "0x1" if ok else "0x0", "blockNumber": hex(block), "gasUsed": "0x5208"}
 

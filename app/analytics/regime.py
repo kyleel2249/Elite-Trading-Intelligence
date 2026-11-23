@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
-from .stats import closes_of, ema, pct_returns, percentile, stdev
+from .stats import closes_of, ema, pct_returns, stdev
 
 MIN_BARS = 60
 

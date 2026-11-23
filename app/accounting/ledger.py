@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Iterable, Optional
+from typing import Optional
 
 from app.accounting.coa import DEFAULT_ACCOUNTS, RETAINED
 from app.accounting.domain import (SCOPES, Account, DuplicateConflict, DuplicateReference, Entry, EntrySpec, Line,

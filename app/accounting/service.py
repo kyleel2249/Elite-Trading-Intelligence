@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import threading
-from typing import Optional
 
 from app.accounting import events
 from app.accounting.domain import ENVIRONMENTS

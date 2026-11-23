@@ -4,7 +4,6 @@ import importlib.util
 import json
 import pathlib
 
-import pytest
 
 from app.knowledge import registry, research_2026
 

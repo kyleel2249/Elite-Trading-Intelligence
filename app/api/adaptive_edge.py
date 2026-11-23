@@ -12,10 +12,8 @@ from app.security.auth import require_api_key
 from app.adaptive_edge.orchestrator import AdaptiveEdgeOrchestrator
 from app.adaptive_edge.edge_health import TradeSample
 from app.adaptive_edge.regime import MarketRegimeEngine
-from app.adaptive_edge.change_detection import MarketChangeDetector
 from app.adaptive_edge.edge_health import EdgeHealthMonitor
 from app.adaptive_edge.discovery import EdgeDiscoveryEngine
-from app.adaptive_edge.research_lab import StrategyResearchLab
 from app.adaptive_edge.promotion import StrategyPromotionAuthority
 from app.adaptive_edge.competition import StrategyCompetitionArena
 from app.knowledge.strategies import STRATEGY_MODULES

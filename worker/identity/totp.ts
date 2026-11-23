@@ -1,9 +1,9 @@
 /** RFC 6238 TOTP (HMAC-SHA1, 30 s, 6 digits) on WebCrypto, plus RFC 4648 base32 and single-use recovery codes. */
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 export function base32Encode(b: Uint8Array): string { let bits = 0, v = 0, o = ""; for (const x of b) { v = (v << 8) | x; bits += 8; while (bits >= 5) { o += B32[(v >>> (bits - 5)) & 31]; bits -= 5; } v &= (1 << bits) - 1; } if (bits > 0) o += B32[(v << (5 - bits)) & 31]; return o; }
-export function base32Decode(s: string): Uint8Array { s = s.replace(/=+$/, "").replace(/\s+/g, "").toUpperCase(); let bits = 0, v = 0; const out: number[] = []; for (const c of s) { const i = B32.indexOf(c); if (i < 0) throw new Error("invalid base32"); v = (v << 5) | i; bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; v &= (1 << bits) - 1; } } return Uint8Array.from(out); }
+export function base32Decode(s: string): Uint8Array<ArrayBuffer> { s = s.replace(/=+$/, "").replace(/\s+/g, "").toUpperCase(); let bits = 0, v = 0; const out: number[] = []; for (const c of s) { const i = B32.indexOf(c); if (i < 0) throw new Error("invalid base32"); v = (v << 5) | i; bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; v &= (1 << bits) - 1; } } return Uint8Array.from(out); }
 export const newTotpSecret = () => base32Encode(crypto.getRandomValues(new Uint8Array(20)));
-export async function hotp(secret: Uint8Array, counter: number, digits = 6): Promise<string> {
+export async function hotp(secret: Uint8Array<ArrayBuffer>, counter: number, digits = 6): Promise<string> {
   const msg = new Uint8Array(8); let c = counter; for (let i = 7; i >= 0; i--) { msg[i] = c & 255; c = Math.floor(c / 256); }
   const key = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
   const h = new Uint8Array(await crypto.subtle.sign("HMAC", key, msg)), o = h[h.length - 1] & 15;

@@ -12,7 +12,7 @@ from app.execution.adapters.registry import INFO
 from app.execution.domain import AccountPolicy, Mode, OrderIntent, OrderType, Side, utcnow
 from app.execution.errors import ExecutionError, PermissionPolicyError
 from app.execution.quote_sizing import QuoteSizingError, size_from_usdt
-from app.execution.service import (REQUIRED_CREDENTIALS, SUPPORTED_ENVIRONMENTS, adapter_for, get_engine, get_store,
+from app.execution.service import (REQUIRED_CREDENTIALS, adapter_for, get_engine, get_store,
                                    get_vault, vault_configured)
 from app.execution.store import AccountRecord
 from app.execution.vault import CredentialVault, VaultError

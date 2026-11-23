@@ -14,14 +14,14 @@ import asyncio
 import hashlib
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Awaitable, Callable, Optional
 
 from . import guards, protective
-from .domain import (AccountPolicy, BrokerOrder, BrokerPosition, ExecutionResult, Mode, OrderIntent, OrderStatus,
+from .domain import (AccountPolicy, BrokerOrder, ExecutionResult, Mode, OrderIntent, OrderStatus,
                      OrderType, Side, utcnow)
 from .errors import (OrderRejectedError, PermanentProviderError, PermissionPolicyError, ProviderUnavailableError,
-                     TransientProviderError, UnknownOutcomeError)
+                     TransientProviderError)
 from .health import CircuitBreaker, retry_async
 from .store import AccountRecord, OrderRow, ProposalRow
 

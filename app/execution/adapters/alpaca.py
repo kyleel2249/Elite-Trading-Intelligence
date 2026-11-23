@@ -7,9 +7,8 @@ Alpaca API keys cannot withdraw funds, so there is nothing to refuse there.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
 
-from ..domain import BrokerOrder, BrokerPosition, OrderStatus, OrderType, Quote, Side, utcnow
+from ..domain import BrokerOrder, BrokerPosition, OrderStatus, OrderType, Quote, utcnow
 from ..errors import (OrderRejectedError, PermanentProviderError, TransientProviderError)
 from .base import BrokerAdapter
 from .transport import HttpxTransport

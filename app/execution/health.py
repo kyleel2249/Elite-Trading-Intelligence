@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import random
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional, Type
 
 from .errors import TransientProviderError

@@ -151,7 +151,7 @@ export function present(L: Ledger, liveMarks: Record<string, number | null>, now
   const positions: PositionView[] = Object.values(L.positions).map(p => {
     const live = liveMarks[p.symbol], mark = typeof live === "number" && live > 0 ? live : null, stale = mark === null;
     const value = mark === null ? null : p.qty * mark, unreal = mark === null ? null : (mark - p.avgEntry) * p.qty;
-    return { ...p, markPrice: mark, markStale: stale || staleSymbols.includes(p.symbol), value, unrealized: unreal, unrealizedPct: mark === null ? null : (mark / p.avgEntry - 1) * 100, realizedNet: p.realizedGross - p.fees, holdingMs: now - p.openedAt, status: "open", reservedQty: reservedQty(L, p.symbol) };
+    return { ...p, markPrice: mark, markStale: stale || staleSymbols.includes(p.symbol), value, unrealized: unreal, unrealizedPct: mark === null ? null : (mark / p.avgEntry - 1) * 100, realizedNet: p.realizedGross - p.fees, holdingMs: now - p.openedAt, status: "open" as const, reservedQty: reservedQty(L, p.symbol) };
   }).sort((a, b) => b.openedAt - a.openedAt);
   const known = positions.every(p => p.value !== null), posValue = known ? positions.reduce((s, p) => s + (p.value ?? 0), 0) : null;
   const unreal = known ? positions.reduce((s, p) => s + (p.unrealized ?? 0), 0) : null;

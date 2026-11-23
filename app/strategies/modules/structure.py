@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app.strategies import indicators as ind
-from app.strategies.base import Strategy, ok, last_confirmed, swing_pivots, vol_ratio
+from app.strategies.base import Strategy, ok, last_confirmed, swing_pivots
 from app.strategies.types import Bars, Plan, StrategySpec
 
 NaN = float("nan")

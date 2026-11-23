@@ -8,7 +8,6 @@ import base64
 import os
 import re
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Optional
 from urllib.parse import urlparse
 

@@ -6,7 +6,7 @@ import os
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Optional, Protocol
 
 
 class StaleStateError(Exception):

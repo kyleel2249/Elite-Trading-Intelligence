@@ -125,7 +125,6 @@ class MarketService:
 
     async def get_order_book(self, symbol: str, depth: int = 20) -> dict[str, Any]:
         """Bybit public order book depth + liquidity metrics."""
-        import httpx
 
         symbol = symbol.upper()
         data = await self.bybit.get_order_book_raw(symbol, limit=depth)

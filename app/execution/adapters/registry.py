@@ -1,11 +1,10 @@
 """Adapter registry: what exists, what is honest about not existing, and how to build one from credentials."""
 from __future__ import annotations
 
-from typing import Optional
 
 from ..errors import ProviderUnavailableError
 from .alpaca import AlpacaAdapter
-from .base import AdapterInfo, BrokerAdapter, UnavailableAdapter
+from .base import AdapterInfo, BrokerAdapter
 from .binance import BinanceAdapter
 from .bybit import BybitAdapter
 from .oanda import OandaAdapter

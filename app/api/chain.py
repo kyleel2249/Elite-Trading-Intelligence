@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from app.chain.models import ChainEvent
 from app.chain.networks import NETWORKS, chain_enabled, load_limits, rpc_url
-from app.chain.policy import fmt_units
 from app.chain.service import ChainError, ChainService
 from app.config import Settings, get_settings
 from app.database import get_db

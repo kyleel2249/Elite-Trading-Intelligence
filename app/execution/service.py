@@ -12,7 +12,7 @@ from app.risk.protection_service import CapitalProtectionService
 
 from . import guards
 from .adapters.registry import build_adapter
-from .domain import Mode, OrderIntent, Side
+from .domain import Mode, OrderIntent
 from .engine import ExecutionEngine
 from .risk_marks import update_equity_marks
 from .sql_store import SqlStore

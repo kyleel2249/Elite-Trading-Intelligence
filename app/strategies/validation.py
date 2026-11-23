@@ -11,7 +11,7 @@ from dataclasses import asdict
 from typing import Any, Optional
 
 from app.strategies import engine, indicators as ind
-from app.strategies.base import Strategy, param_combos
+from app.strategies.base import param_combos
 from app.strategies.registry import get_strategy
 from app.strategies.types import Bars, CostModel, MissingData, Plan, RiskModel
 

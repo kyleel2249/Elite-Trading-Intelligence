@@ -5,13 +5,14 @@ import pytest
 
 # These suites target the standalone engine (app.paper.core / app.paper.modes) that was superseded by app/paper/engine.py,
 # service.py and mode.py. They are kept, not deleted, and skip until they are ported to the surviving engine.
+# Replacement coverage for the surviving engine lives in tests/test_paper_exchange_engine.py (engine) and tests/test_paper_exchange_service.py (service, stores, modes).
 pytest.importorskip("app.paper.core", reason="targets the superseded app.paper.core engine; port to app.paper.engine")
 
 import unittest
 from datetime import datetime, timedelta, timezone
 
 from app.paper.core import Book, OrderRequest, PaperError
-from app.paper.modes import (EXCHANGE_TESTNET, INTERNAL_PAPER, LIVE, LiveTradingDisabled, UnknownMode, resolve_mode)
+from app.paper.modes import (EXCHANGE_TESTNET, INTERNAL_PAPER, LiveTradingDisabled, UnknownMode, resolve_mode)
 from app.paper.service import PaperService, PaperSettings
 from app.paper.store import InMemoryPaperStore
 

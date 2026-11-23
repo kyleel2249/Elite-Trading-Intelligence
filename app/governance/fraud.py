@@ -63,7 +63,7 @@ def auth_failures(db: Session, minutes: int = 15) -> int:
 
 def evaluate_transfer(db: Session, *, network: str, to: str, notional: int, kind: str = "transfer", actor: str = "system") -> Verdict:
     v = Verdict()
-    hour_ago, day_ago = now() - timedelta(hours=1), now() - timedelta(days=1)
+    hour_ago = now() - timedelta(hours=1)
     if kind == "transfer":
         entry = allowlist.lookup(db, network, to)
         if entry is None:

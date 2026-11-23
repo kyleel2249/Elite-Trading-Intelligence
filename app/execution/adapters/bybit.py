@@ -9,7 +9,6 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Optional
 from urllib.parse import urlencode
 
 from ..domain import (BrokerOrder, BrokerPosition, InstrumentRules, OrderBook, OrderStatus, OrderType, Quote, Side, utcnow)

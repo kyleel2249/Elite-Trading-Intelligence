@@ -1,5 +1,4 @@
 """Offline execution lifecycle and routing regressions; no real credentials."""
-import math
 from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import create_engine

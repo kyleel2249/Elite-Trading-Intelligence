@@ -1,7 +1,6 @@
 """Walk-forward forecast accuracy tracking for Lars Hagen calibration."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session

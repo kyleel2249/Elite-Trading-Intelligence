@@ -7,7 +7,7 @@ as structured errors (never a fabricated empty success).
 import asyncio
 import hmac
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.accounting import coa, events, reconcile, reports, subledger
 from app.accounting.domain import (Account, AccountingError, DuplicateConflict, DuplicateReference, EntrySpec, Line,
-                                   NotFound, PeriodClosedError, ValidationError)
+                                   NotFound, PeriodClosedError)
 from app.accounting.money import fmt, to_units
 from app.accounting.service import get_ledger, sync_orders
 from app.security.auth import require_api_key

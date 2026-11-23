@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
-from ..domain import (BrokerOrder, BrokerPosition, InstrumentRules, OrderBook, OrderType, Quote, Side)
+from ..domain import (BrokerOrder, InstrumentRules, OrderBook, OrderType, Quote, Side)
 from ..errors import ProviderUnavailableError
 
 

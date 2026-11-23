@@ -5,7 +5,7 @@ import unittest
 from datetime import date, datetime, timezone
 
 from app.providers import fmp, intel, tokenomist
-from app.providers.base import Capability, ProviderClient, ProviderError
+from app.providers.base import Capability, ProviderError
 
 
 def run(coro):

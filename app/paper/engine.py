@@ -17,7 +17,7 @@ import copy
 import math
 import re
 import uuid
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 

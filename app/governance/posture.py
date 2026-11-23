@@ -5,7 +5,6 @@ observe from inside - e.g. disk encryption of a managed database volume - are re
 """
 from __future__ import annotations
 
-import os
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 

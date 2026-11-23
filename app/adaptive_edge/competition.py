@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 

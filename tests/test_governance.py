@@ -68,7 +68,6 @@ def env(monkeypatch):
     db.query(GovPrincipal).delete()
     db.commit()
     base = audit.head(db)["seq"]            # the audit log is append-only, so isolate each test by ignoring earlier failure signals
-    real = fraud.auth_failures
 
     def since_base(d, minutes=15):
         from sqlalchemy import select as _select

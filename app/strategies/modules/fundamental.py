@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 from app.strategies import indicators as ind
-from app.strategies.base import Strategy, ok, vol_ratio
+from app.strategies.base import Strategy, ok
 from app.strategies.types import Bars, MissingData, Plan, StrategySpec
 
 NaN = float("nan")

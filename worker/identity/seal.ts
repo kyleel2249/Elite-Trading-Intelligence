@@ -2,7 +2,7 @@
 const enc = new TextEncoder(), dec = new TextDecoder();
 const b64u = (u: Uint8Array) => btoa(String.fromCharCode(...u)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const unb64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
-async function aesKey(secret: string, salt: Uint8Array): Promise<CryptoKey> {
+async function aesKey(secret: string, salt: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
   const base = await crypto.subtle.importKey("raw", enc.encode(secret), "HKDF", false, ["deriveKey"]);
   return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt, info: enc.encode("eti-identity-seal-v1") }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }

@@ -108,7 +108,7 @@ const parseHHMM = (v: string) => { const [h, m] = v.split(":"); return +h * 60 +
       const hs = HOLIDAYS.get(key) ?? new Set<string>(); for (const d of cal.holidays) hs.add(String(d)); HOLIDAYS.set(key, hs);
       const em = EARLY.get(key) ?? new Map<string, number>(); for (const [d, v] of Object.entries<string>(cal.early_closes ?? {})) em.set(d, parseHHMM(v)); EARLY.set(key, em);
       const cy = CAL_YEARS.get(key) ?? new Map<number, string>(); for (const y of cal.years) cy.set(Number(y), ver); CAL_YEARS.set(key, cy);
-      const meta = CAL_META.get(key) ?? { name: cal.name ?? key, sources: [] };
+      const meta = CAL_META.get(key) ?? { name: cal.name ?? key, sources: [] as Json[] };
       meta.sources.push({ years: cal.years.map(Number), verification: ver, source: cal.source ?? null, notes: cal.notes ?? null });
       CAL_META.set(key, meta);
     } catch { /* a malformed entry must never take the session engine down */ }

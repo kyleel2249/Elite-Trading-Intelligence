@@ -8,7 +8,6 @@ from typing import Iterator, Optional
 from app.accounting import coa
 from app.accounting.domain import SCOPES, Entry, Line, ValidationError, parse_date
 from app.accounting.money import fmt
-from app.accounting.store import Store
 
 DEFAULT_CURRENCY = "USD"
 SIM_NOTE = "SIMULATED: paper/testnet results are not real money and are not evidence of profitability."

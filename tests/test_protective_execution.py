@@ -2,7 +2,6 @@
 fill verification, protective OCO orders, reconciliation and the failure paths. No network: the transport emulates the venue.
 The emulation follows Binance's documented REST shapes; it has not been run against the real testnet."""
 import asyncio
-import json
 from datetime import datetime, timezone
 
 from app.execution import protective
@@ -314,7 +313,7 @@ def test_failed_replacement_restores_the_original_levels():
     assert out["protection"]["failed"] >= 1
     assert store.list_logs("acc", event="protective_restored")
     live = [o for o in v.orders.values() if o["status"] == "NEW" and o["type"] == "STOP_LOSS_LIMIT"]
-    assert len(live) == 2 and any(abs(float(o["price"]) - 98.81) < 0.02 for o in live)        # the failed tranche is back at its original level; no tranche is left bare
+    assert len(live) == 2 and any(abs(float(o["price"]) - orig[0]) < 0.02 for o in live)        # the failed tranche is back at its original level; no tranche is left bare
 
 
 def test_unrecoverable_replacement_halts_the_account():

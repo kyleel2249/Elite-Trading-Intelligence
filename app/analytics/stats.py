@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 
 def closes_of(klines: Sequence[dict[str, Any]]) -> list[float]:

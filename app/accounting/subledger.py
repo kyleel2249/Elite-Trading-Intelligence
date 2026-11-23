@@ -2,7 +2,6 @@
 drift from the general ledger; `tie_out` proves it."""
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import date as _date
 from typing import Optional
 

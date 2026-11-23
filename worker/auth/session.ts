@@ -44,8 +44,8 @@ export async function sha256Hex(s: string): Promise<string> { return [...new Uin
 /** Short, non-reversible reference that is safe to log and store in audit records. */
 export const refOf = async (s: string) => (await sha256Hex("ref|" + s)).slice(0, 12);
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i]; return d === 0; }
-async function hmacKey(raw: Uint8Array, usage: KeyUsage) { return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, [usage]); }
-async function sign(raw: Uint8Array, msg: string): Promise<Uint8Array> { return new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(raw, "sign"), enc.encode(msg))); }
+async function hmacKey(raw: Uint8Array<ArrayBuffer>, usage: KeyUsage) { return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, [usage]); }
+async function sign(raw: Uint8Array<ArrayBuffer>, msg: string): Promise<Uint8Array<ArrayBuffer>> { return new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(raw, "sign"), enc.encode(msg))); }
 
 // ---------- key ring ----------
 interface RingKey { v: number; key: string; createdAt: number; retireAt?: number }

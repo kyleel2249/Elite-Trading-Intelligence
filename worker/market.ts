@@ -237,7 +237,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   binance: {
     // data-api.binance.vision is Binance's official market-data-only mirror.
     hosts: ["https://data-api.binance.vision", "https://api-gcp.binance.com", "https://api.binance.com"],
-    request(endpoint, p) {
+    request(endpoint, p): UpstreamRequest {
       if (endpoint === "klines") return { path: "/api/v3/klines", query: { symbol: p.symbol, interval: p.interval, limit: String(p.limit) } };
       if (endpoint === "depth") return { path: "/api/v3/depth", query: { symbol: p.symbol, limit: String(p.limit) } };
       if (endpoint === "trades") return { path: "/api/v3/trades", query: { symbol: p.symbol, limit: String(p.limit) } };
@@ -271,7 +271,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   // Binance USDⓈ-M futures (perpetual contracts, including equity/commodity/index perpetuals where listed). Same payload shapes as spot.
   binance_usdm: {
     hosts: ["https://fapi.binance.com"],
-    request(endpoint, p) {
+    request(endpoint, p): UpstreamRequest {
       if (endpoint === "klines") return { path: "/fapi/v1/klines", query: { symbol: p.symbol, interval: p.interval, limit: String(p.limit) } };
       if (endpoint === "depth") return { path: "/fapi/v1/depth", query: { symbol: p.symbol, limit: String(p.limit) } };
       if (endpoint === "trades") return { path: "/fapi/v1/trades", query: { symbol: p.symbol, limit: String(p.limit) } };
@@ -282,7 +282,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
 
   bybit: {
     hosts: ["https://api.bybit.com", "https://api.bytick.com"],
-    request(endpoint, p) {
+    request(endpoint, p): UpstreamRequest {
       if (endpoint === "klines") {
         const iv = BYBIT_INTERVAL[p.interval];
         if (!iv) throw new Unsupported("interval");
@@ -325,7 +325,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
 
   okx: {
     hosts: ["https://www.okx.com", "https://aws.okx.com"],
-    request(endpoint, p) {
+    request(endpoint, p): UpstreamRequest {
       const inst = okxSymbol(p.symbol);
       if (endpoint === "klines") {
         const bar = OKX_INTERVAL[p.interval];
@@ -366,7 +366,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   // granularity names differ. Used only when a request explicitly asks for venue=bitget.
   bitget: {
     hosts: ["https://api.bitget.com"],
-    request(endpoint, p) {
+    request(endpoint, p): UpstreamRequest {
       // Bitget's margin instrument list is distinct, but its documented candles,
       // order book and ticker use the underlying SPOT category. Margin fills accept MARGIN.
       const category = p.category === "MARGIN" && endpoint === "trades" ? "MARGIN" : "SPOT";
@@ -383,7 +383,7 @@ const PROVIDERS: Record<ProviderId, ProviderSpec> = {
   },
   bitget_mix: {
     hosts: ["https://api.bitget.com"],
-    request(endpoint, p) {
+    request(endpoint, p): UpstreamRequest {
       const category = p.productType ?? (p.category && BITGET_PRODUCT_TYPES.includes(p.category as BitgetProductType) ? p.category as BitgetProductType : bitgetProductFor(p.symbol));
       const candle = bitgetCandleRequest(p, BITGET_MIX_GRAN);
       if (endpoint === "klines") {

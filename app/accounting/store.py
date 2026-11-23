@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import threading
-from typing import Iterable, Optional, Protocol
+from typing import Optional, Protocol
 
-from app.accounting.domain import Account, Entry, NotFound, StoreConflict
+from app.accounting.domain import Account, Entry, StoreConflict
 
 
 class ExtTxn:

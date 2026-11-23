@@ -10,12 +10,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from datetime import datetime, timezone
-from typing import Optional
 from urllib.parse import urlencode
 
-from ..domain import (BrokerOrder, BrokerPosition, InstrumentRules, OrderBook, OrderStatus, OrderType, Quote, Side,
-                      utcnow)
+from ..domain import (BrokerOrder, BrokerPosition, InstrumentRules, OrderBook, OrderStatus, OrderType, Quote, utcnow)
 from ..errors import (OrderRejectedError, PermanentProviderError, PermissionPolicyError, TransientProviderError)
 from .base import BrokerAdapter
 from .transport import HttpxTransport

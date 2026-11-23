@@ -14,6 +14,10 @@ export interface SignalInputs {
   category: string;
   failures: Record<string, string>;
 }
+/** Every product category the market adapters understand. A caller-supplied value outside this set is rejected, never forwarded upstream. */
+const SUPPORTED_CATEGORIES = ["spot", "linear", "inverse", "option", "SPOT", "MARGIN", "USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"] as const;
+type SupportedCategory = typeof SUPPORTED_CATEGORIES[number];
+const isSupportedCategory = (v: string): v is SupportedCategory => (SUPPORTED_CATEGORIES as readonly string[]).includes(v);
 /** Only the timeframes the strategy weights plus its execution timeframe are fetched, keeping subrequests inside Workers limits. */
 export async function loadSignalInputs(
   env: MarketEnv, symbol: string, strategy: Strategy, providerParam: string | null,
@@ -22,6 +26,8 @@ export async function loadSignalInputs(
   const isBitget = providerParam === "bitget" || providerParam === "bitget_mix";
   const order: ProviderId[] = isBitget ? [market === "futures" ? "bitget_mix" : "bitget"] : providerOrder(env, providerParam);
   const category = categoryParam || (market === "futures" ? (isBitget ? "USDT-FUTURES" : "linear") : (isBitget ? "SPOT" : "spot"));
+  if (!isSupportedCategory(category))
+    return { error: "market_data_unavailable", executionTimeframe: EXECUTION_TF[strategy], failures: { category: "unsupported_category" } };
   if (isBitget && market === "futures" && !["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"].includes(category))
     return { error: "market_data_unavailable", executionTimeframe: EXECUTION_TF[strategy], failures: { category: "unsupported_bitget_product_type" } };
   if (!isBitget && market === "futures" && !["linear", "inverse"].includes(category))
