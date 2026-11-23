@@ -10,15 +10,16 @@
  * Nothing here draws a candle: it only decides how wide the existing canvases are, then lets drawChart() do the drawing.
  */
 export const CHART_LAYOUT_CSS = `
-.chart.big{height:560px}.paneBox{height:124px}
+.chart.big{height:440px;min-height:440px;max-height:none}.paneBox{height:124px}
 .cscroll{overflow-x:auto;overflow-y:hidden;border:1px solid #1d2a3e;border-radius:10px;background:#0a1220;padding-bottom:4px;scrollbar-width:auto;scrollbar-color:#4a6c9b #0f1a2b}
 .cscroll::-webkit-scrollbar{height:16px}.cscroll::-webkit-scrollbar-track{background:#0f1a2b;border-radius:8px}.cscroll::-webkit-scrollbar-thumb{background:#4a6c9b;border-radius:8px;border:3px solid #0f1a2b}.cscroll::-webkit-scrollbar-thumb:hover{background:#6b93c9}.cscroll:focus-visible{outline:2px solid var(--blue)}
 .cbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 8px}.cbar select,.cbar button{padding:7px 12px;font-size:13px}
 .scroll{max-height:540px}.scroll th,.scroll td{padding:10px 10px;font-size:13px}
-@media(max-width:700px){.chart.big{height:440px}.paneBox{height:104px}.scroll{max-height:420px}}
-/* Live market chart (#liveChartFrame) is twice the viewport-fit height that #eti-chart-fill in worker/index.ts sets (100vh - 190px, min 720px; mobile 100dvh - 160px, min 560px). Two ID selectors outrank that block, so this is the effective height. Real fullscreen is excluded and still fits the screen. The chart follows through its ResizeObserver. */
-.chart-workspace:not(:fullscreen) #stack>.chart.big#liveChartFrame{height:calc((100vh - 190px) * 2);height:calc((100dvh - 190px) * 2);min-height:1440px;max-height:none}
-@media(max-width:700px){.chart-workspace:not(:fullscreen) #stack>.chart.big#liveChartFrame{height:calc((100dvh - 160px) * 2);min-height:1120px}}
+@media(max-width:700px){.chart.big{height:340px;min-height:340px;max-height:none}.paneBox{height:104px}.scroll{max-height:420px}}
+/* Live market chart follows the shared 440px desktop / 340px mobile chart height. */
+.chart-workspace:not(:fullscreen) #stack>.chart.big#liveChartFrame{height:440px;min-height:440px;max-height:none}
+@media(max-width:700px){.chart-workspace:not(:fullscreen) #stack>.chart.big#liveChartFrame{height:340px;min-height:340px;max-height:none}}
+}
 `;
 
 export const CHART_LAYOUT_JS = `
