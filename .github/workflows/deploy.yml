@@ -341,7 +341,11 @@ jobs:
               }catch(e){console.error("Invalid derivatives response:",e.message);process.exit(1);}});' || failed=1
           done
           curl --silent --show-error --fail "$base/terminal" -o /tmp/eti-terminal.html || { echo "::error::Pro Trading Terminal HTML is unavailable"; failed=1; }
-          grep -q '/api/market/derivatives' /tmp/eti-terminal.html || { echo "::error::Terminal is missing unified derivatives feed integration"; failed=1; }
+          grep -q 'src="/terminal.js"' /tmp/eti-terminal.html || { echo "::error::Pro Trading Terminal script reference is missing"; failed=1; }
+          curl --silent --show-error --fail "$base/terminal.js" -o /tmp/eti-terminal.js || { echo "::error::Pro Trading Terminal JavaScript is unavailable"; failed=1; }
+          grep -q '/api/market/derivatives' /tmp/eti-terminal.js || { echo "::error::Terminal JavaScript is missing unified derivatives feed integration"; failed=1; }
+          grep -q '/api/market/klines' /tmp/eti-terminal.js || { echo "::error::Terminal JavaScript is missing unified candle feed integration"; failed=1; }
+          grep -q '/api/market/depth' /tmp/eti-terminal.js || { echo "::error::Terminal JavaScript is missing unified order-book feed integration"; failed=1; }
           bitget_probe_response="$(curl --silent --show-error --max-time 30 -w '__HTTP_CODE__%{http_code}' -H 'content-type: application/json' -d '{"symbol":"BTCUSDT","strategy":"intraday","engines":["swift","gainz"],"venue":"bitget","market":"futures","category":"USDT-FUTURES"}' "$base/api/omnisignal")" || { echo "::error::Could not contact the Bitget Omnisignal route"; failed=1; bitget_probe_response='{}__HTTP_CODE__000'; }
           bitget_probe_code="${bitget_probe_response##*__HTTP_CODE__}"
           bitget_probe_body="${bitget_probe_response%__HTTP_CODE__*}"
