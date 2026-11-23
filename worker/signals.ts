@@ -462,7 +462,7 @@ export async function handleSignals(req: Request, env: SignalEnv): Promise<Respo
       rows = supplied;
       source = requestedProvider || "client-market-data";
     } else {
-      const result = await getMarketData("klines", { symbol, interval, limit: 1000, market, category: category as any }, providerOrder(env, selectedProvider));
+      const result = await getMarketData("klines", { symbol, interval, limit: 1000, market, category: category as any }, providerOrder(env, selectedProvider), bitgetAwareFetch);
       rows = result.data as Kline[];
       source = result.provider;
     }
