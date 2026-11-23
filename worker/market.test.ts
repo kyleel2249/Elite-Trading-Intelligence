@@ -242,6 +242,8 @@ test("Binance spot and USD-M futures route through native Worker providers", asy
     if (u.pathname.endsWith("/klines")) return new Response(JSON.stringify([[String(now), "100", "103", "99", "102", "12"]]));
     if (u.pathname.endsWith("/depth")) return new Response(JSON.stringify({ bids: [["101", "2"]], asks: [["103", "3"]] }));
     if (u.pathname.endsWith("/trades")) return new Response(JSON.stringify([{ time: now, price: "102", qty: "1", isBuyerMaker: false }]));
+    if (u.pathname.endsWith("/premiumIndex")) return new Response(JSON.stringify({ lastFundingRate: "0.0001", markPrice: "102", indexPrice: "101", nextFundingTime: String(now + 3600000) }));
+    if (u.pathname.endsWith("/openInterest")) return new Response(JSON.stringify({ openInterest: "1234", time: now }));
     return new Response(JSON.stringify({ lastPrice: "102", priceChangePercent: "2", highPrice: "103", lowPrice: "99", volume: "100", quoteVolume: "10200" }));
   }) as any;
   const spot = await handleMarket(req("/api/market/klines?venue=binance&symbol=BTCUSDT&interval=1m"), {});
@@ -249,6 +251,8 @@ test("Binance spot and USD-M futures route through native Worker providers", asy
   const futures = await handleMarket(req("/api/market/klines?venue=binance&market=futures&symbol=BTCUSDT&interval=1m"), {});
   assert.equal(futures.status, 200); assert.equal(futures.headers.get("x-eti-provider"), "binance_usdm");
   assert.ok(urls.some(x => new URL(x).hostname === "fapi.binance.com"));
+  const derivatives = await handleMarket(req("/api/market/derivatives?venue=binance&market=futures&symbol=BTCUSDT&interval=1m"), {});
+  assert.equal(derivatives.status, 200); assert.equal((await derivatives.json() as any).openInterest, 1234);
   assert.deepEqual(providerOrder({}, "binance"), ["binance"]);
   assert.deepEqual(providerOrder({}, "binance_usdm"), ["binance_usdm"]);
 });
@@ -261,6 +265,8 @@ test("OKX spot and perpetual futures use their own instrument IDs", async () => 
       ? [[String(now), "100", "103", "99", "102", "12"]]
       : u.pathname.endsWith("/books") ? [{ bids: [["101", "2"]], asks: [["103", "3"]] }]
       : u.pathname.endsWith("/trades") ? [{ ts: String(now), px: "102", sz: "1", side: "buy" }]
+      : u.pathname.endsWith("/funding-rate") ? [{ fundingRate: "0.0002", nextFundingTime: String(now + 3600000) }]
+      : u.pathname.endsWith("/open-interest") ? [{ oi: "456", oiCcy: "BTC", ts: String(now) }]
       : [{ last: "102", open24h: "100", high24h: "103", low24h: "99", vol24h: "100", volCcy24h: "10200" }];
     return new Response(JSON.stringify({ code: "0", data }));
   }) as any;
@@ -268,6 +274,8 @@ test("OKX spot and perpetual futures use their own instrument IDs", async () => 
   assert.equal(spot.status, 200); assert.equal(spot.headers.get("x-eti-provider"), "okx");
   const swap = await handleMarket(req("/api/market/klines?venue=okx&market=futures&symbol=BTCUSDT&interval=1m"), {});
   assert.equal(swap.status, 200); assert.ok(urls.some(x => new URL(x).searchParams.get("instId") === "BTC-USDT-SWAP"));
+  const derivatives = await handleMarket(req("/api/market/derivatives?venue=okx&market=futures&symbol=BTCUSDT&interval=1m"), {});
+  assert.equal(derivatives.status, 200); assert.equal((await derivatives.json() as any).fundingRate, 0.0002);
   assert.ok(urls.some(x => new URL(x).searchParams.get("instId") === "BTC-USDT"));
 });
 
