@@ -163,7 +163,7 @@ test("free Cloudflare-only market routing does not require Fly.io or a fixed egr
   const response = await handleMarket(req("/api/market/region"), {});
   assert.equal(response.status, 200);
   const body = await response.json() as any;
-  assert.equal(body.transport, "bybit-worker-rest+bitget-worker-proxy-with-browser-websocket");
+  assert.equal(body.transport, "unified-cloudflare-worker-rest-gateway");
   assert.equal(body.fixedEgressIp, false);
   assert.equal(body.accountResidencyIsNotChanged, true);
   assert.equal(body.placementHint, "cloudflare:global");
@@ -218,10 +218,14 @@ test("Bitget category-scoped catalogue freshness is independent of failures in o
 });
 
 
-test("market diagnostics probe Bybit and Bitget spot and futures independently", async () => {
+test("market diagnostics probe every native exchange adapter independently", async () => {
   globalThis.fetch = (async (input: any) => {
-    const host = new URL(String(input)).hostname;
-    return new Response(JSON.stringify(host.includes("bitget.com") ? bitgetKline : bybitKline));
+    const u = new URL(String(input)), host = u.hostname;
+    if (host.includes("bitget.com")) return new Response(JSON.stringify(bitgetKline));
+    if (host.includes("bybit") || host.includes("bytick")) return new Response(JSON.stringify(bybitKline));
+    if (host.includes("okx.com")) return new Response(JSON.stringify({ code: "0", data: [[String(now), "100", "103", "99", "102", "12"]] }));
+    if (host.includes("binance")) return new Response(JSON.stringify([[String(now), "100", "103", "99", "102", "12"]]));
+    return new Response("unsupported host", { status: 502 });
   }) as any;
   const response = await handleMarket(req("/api/market/diag?symbol=BTCUSDT&interval=1m"), {});
   assert.equal(response.status, 200);
