@@ -182,3 +182,19 @@ test("terminal exposes Production UTA V3 JSON/SBE and private-feed controls",()=
  assert.match(TRADING_TERMINAL_JS,/toggleTerminalBitgetPrivateStream/);
 });
 
+
+test("terminal uses a compact responsive chart and exposes CCXT multi-exchange futures", () => {
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{height:280px!important;min-height:240px!important;max-height:300px!important\}/);
+  assert.match(TRADING_TERMINAL_CSS, /@media\(max-width:760px\)\{\.tt-chart\{height:230px!important/);
+  assert.match(TRADING_TERMINAL_HTML, /ccxt@4\.5\.26\/dist\/ccxt\.browser\.js/);
+  for (const venue of ["bitget", "bybit", "binance", "okx", "kucoin", "gateio", "kraken", "coinbase"]) {
+    assert.match(TRADING_TERMINAL_HTML, new RegExp('value="' + venue + '"'));
+  }
+  assert.match(TRADING_TERMINAL_HTML, /value="futures">Perpetual futures/);
+  assert.match(TRADING_TERMINAL_JS, /function ccxtClient\(/);
+  assert.match(TRADING_TERMINAL_JS, /function ccxtSymbol\(/);
+  assert.match(TRADING_TERMINAL_JS, /fetchCcxtMarket\(/);
+  assert.match(TRADING_TERMINAL_JS, /fetchCcxtCandles\(/);
+  assert.match(TRADING_TERMINAL_JS, /enableRateLimit:true/);
+  assert.match(TRADING_TERMINAL_JS, /S\.venue==="bitget"/);
+});
