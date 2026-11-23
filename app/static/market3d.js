@@ -1,20 +1,12 @@
-/* ETI 3D market view.
- * Dependency-free canvas renderer with a manual 3D projection (works offline, no CDN, CSP-friendly).
- * Data comes only from the ETI API: candles via GET /api/market/public-history?provider=... (Bybit, Alpaca,
- * OANDA, Twelve Data); symbols are discovered with GET /api/market/symbols.
- * Nothing is generated or simulated: on any failure the view shows an "unavailable" state with the server's reason, and
- * stale data is labelled stale.
- */
+/* ETI 2D multi-market chart. Canvas 2D only; real ETI market data, with explicit stale/unavailable states. */
 (function () {
   'use strict';
-  var cv = document.getElementById('m3d');
+  var cv = document.getElementById('market2d-chart');
   if (!cv || !cv.getContext) return;
   var ctx = cv.getContext('2d');
   var el = function (id) { return document.getElementById(id); };
-  var reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   var INTERVAL_MS = { '1m': 6e4, '5m': 3e5, '15m': 9e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
   var LIMIT = 60, REFRESH_MS = 30000;
-  var DEFAULT_VIEW = { yaw: -0.6, pitch: 0.45, zoom: 1 };
   var LABEL = { bybit: 'Bybit', alpaca: 'Alpaca', oanda: 'OANDA', twelvedata: 'Twelve Data' };
   var DEFAULT_SYMBOL = { bybit: 'BTCUSDT', alpaca: 'AAPL', oanda: 'EUR_USD', twelvedata: 'SAP:XETR' };
   var SYM_RE = {
@@ -23,8 +15,7 @@
   };
   var CRYPTO = { bybit: 1 };
 
-  var S = { candles: [], status: 'loading', ws: null, wsPing: 0, wsRetry: 0, category: 'spot', yaw: DEFAULT_VIEW.yaw, pitch: DEFAULT_VIEW.pitch, zoom: 1,
-            auto: false, drag: null, W: 300, H: 300, req: 0, timer: 0, raf: 0, prov: 'bybit', symReq: 0, symTimer: 0 };
+  var S = { candles: [], status: 'loading', ws: null, wsPing: 0, wsRetry: 0, category: 'spot', zoom: 1, offset: 0, drag: null, req: 0, timer: 0, prov: 'bybit', symReq: 0, symTimer: 0 };
 
   function setBanner(kind, text) {
     var b = el('banner');
@@ -165,7 +156,7 @@
         if (token !== S.req) return; // a newer request superseded this one
         var c = clean(rows);
         if (c.out.length < 5) throw new Error('too few valid candles (' + c.out.length + ')');
-        S.candles = c.out; S.sym = sym; S.iv = iv; S.bad = c.bad; S.prov = prov; S.category = category;
+        S.candles = c.out; S.sym = sym; S.iv = iv; S.bad = c.bad; S.prov = prov; S.category = category; S.offset = 0;
         if (prov === 'bybit') connectBybitStream(sym, category); else closeBybitStream();
         var last = c.out[c.out.length - 1];
         var lag = Date.now() - last.ct; // >0 means the newest candle already closed
@@ -202,166 +193,39 @@
     el('meta').textContent = S.sym + ' ' + S.iv + ' | ' + S.candles.length + ' candles';
   }
 
-  /* ---------- projection ---------- */
-  function proj(x, y, z, n) {
-    var cy = Math.cos(S.yaw), sy = Math.sin(S.yaw), cp = Math.cos(S.pitch), sp = Math.sin(S.pitch);
-    var x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
-    var y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
-    var D = n * 2.2, dist = D / S.zoom;
-    var F = D * S.W / (n * 1.25);
-    var d = Math.max(dist + z2, 0.1), s = F / d;
-    return { x: S.W / 2 + x1 * s, y: S.H / 2 - y2 * s, z: z2 };
-  }
-
-  function shade(hex, f) {
-    var r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-    return 'rgb(' + Math.round(r * f) + ',' + Math.round(g * f) + ',' + Math.round(b * f) + ')';
-  }
-
-  // faces: [vertex indices, brightness]
-  var FACES = [[[0, 1, 2, 3], 0.55], [[4, 5, 6, 7], 0.75], [[0, 1, 5, 4], 0.4], [[2, 3, 7, 6], 1.0], [[0, 3, 7, 4], 0.62], [[1, 2, 6, 5], 0.62]];
-
-  function pushBox(items, cx, cy, cz, w, h, d, hex, n) {
-    var x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - h / 2, y1 = cy + h / 2, z0 = cz - d / 2, z1 = cz + d / 2;
-    var V = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]
-      .map(function (p) { return proj(p[0], p[1], p[2], n); });
-    FACES.forEach(function (f) {
-      var pts = f[0].map(function (i) { return V[i]; });
-      var z = (pts[0].z + pts[1].z + pts[2].z + pts[3].z) / 4;
-      items.push({ z: z, draw: function () {
-        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-        for (var i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.closePath(); ctx.fillStyle = shade(hex, f[1]); ctx.fill();
-        ctx.strokeStyle = 'rgba(7,11,18,.55)'; ctx.lineWidth = 0.6; ctx.stroke();
-      } });
-    });
-  }
-
-  /* ---------- render ---------- */
+/* ---------- 2D candlestick + volume renderer ---------- */
   function render() {
-    var W = S.W, H = S.H;
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#0a1220'; ctx.fillRect(0, 0, W, H);
-    var cs = S.candles, n = cs.length;
-    if (!n) {
-      ctx.fillStyle = '#9aaac2'; ctx.font = '14px system-ui,sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(S.status === 'loading' ? 'Loading…' : 'No verified market data to display', W / 2, H / 2);
-      return;
-    }
-    var lo = Infinity, hi = -Infinity, vmax = 0;
-    cs.forEach(function (k) { if (k.l < lo) lo = k.l; if (k.h > hi) hi = k.h; if (k.v > vmax) vmax = k.v; });
-    var span = hi - lo || hi * 0.01 || 1;
-    var YS = n * 0.5, VS = n * 0.16, floor = -YS / 2;
-    var py = function (p) { return (p - lo) / span * YS - YS / 2; };
-    var items = [];
-
-    // floor outline + price grid on the left wall
-    var fx = n / 2 + 0.5, fz0 = -1.2, fz1 = 4.2;
-    var corners = [[-fx, floor, fz0], [fx, floor, fz0], [fx, floor, fz1], [-fx, floor, fz1]].map(function (p) { return proj(p[0], p[1], p[2], n); });
-    ctx.strokeStyle = 'rgba(56,189,248,.25)'; ctx.lineWidth = 1; ctx.beginPath();
-    ctx.moveTo(corners[0].x, corners[0].y);
-    for (var i = 1; i < 4; i++) ctx.lineTo(corners[i].x, corners[i].y);
-    ctx.closePath(); ctx.stroke();
-    ctx.fillStyle = '#9aaac2'; ctx.font = '11px system-ui,sans-serif'; ctx.textAlign = 'left';
-    for (var g = 0; g <= 4; g++) {
-      var price = lo + span * g / 4, a = proj(-fx, py(price), fz0, n), b = proj(-fx, py(price), fz1, n);
-      ctx.strokeStyle = 'rgba(56,189,248,.12)'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.fillText(fmt(price), Math.max(4, Math.min(W - 70, a.x + 4)), a.y - 3);
-    }
-
-    cs.forEach(function (k, i) {
-      var x = i - (n - 1) / 2, up = k.c >= k.o, hex = up ? '#22c55e' : '#ef4444';
-      var top = py(Math.max(k.o, k.c)), bot = py(Math.min(k.o, k.c));
-      var bh = Math.max(bot === top ? YS * 0.004 : top - bot, YS * 0.004);
-      pushBox(items, x, (top + bot) / 2, 0, 0.7, bh, 0.7, hex, n);
-      // wick as a thin line
-      var w0 = proj(x, py(k.l), 0, n), w1 = proj(x, py(k.h), 0, n);
-      items.push({ z: (w0.z + w1.z) / 2, draw: function () {
-        ctx.strokeStyle = shade(hex, 0.9); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(w0.x, w0.y); ctx.lineTo(w1.x, w1.y); ctx.stroke();
-      } });
-      // volume bar in the front row
-      var vh = Math.max(k.v / (vmax || 1) * VS, VS * 0.01);
-      pushBox(items, x, floor + vh / 2, 3, 0.7, vh, 0.9, '#3b82f6', n);
-    });
-
-    items.sort(function (a, b) { return b.z - a.z; }); // far to near
-    items.forEach(function (it) { it.draw(); });
-
-    ctx.fillStyle = S.status === 'stale' ? '#ef4444' : '#9aaac2'; ctx.font = '11px system-ui,sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText((S.status === 'stale' ? 'STALE ' : '') + S.sym + ' ' + S.iv, W - 8, H - 8);
+    var r=cv.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2),W=Math.max(320,r.width),H=Math.max(260,r.height);
+    if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);}
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);ctx.fillStyle='#0a1220';ctx.fillRect(0,0,W,H);
+    var all=S.candles,count=Math.max(12,Math.min(all.length,Math.round(all.length/(S.zoom||1)))),end=Math.max(0,all.length-(S.offset||0)),start=Math.max(0,end-count),cs=all.slice(start,end),n=cs.length;
+    if(!n){ctx.fillStyle='#9cb2cc';ctx.font='14px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(S.status==='loading'?'Loading…':'No verified market data to display',W/2,H/2);return;}
+    var lo=Infinity,hi=-Infinity,vmax=0;cs.forEach(function(k){lo=Math.min(lo,k.l);hi=Math.max(hi,k.h);vmax=Math.max(vmax,k.v);});
+    if(hi<=lo){hi=lo*1.01;lo*=.99;}var span=hi-lo,left=76,right=14,top=20,bottom=42,plotW=W-left-right,plotH=H-top-bottom,priceH=plotH*.78,volH=plotH*.16,baseY=top+priceH;
+    function y(p){return top+(hi-p)/span*priceH;}
+    ctx.font='10px system-ui,sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
+    for(var g=0;g<=5;g++){var p=lo+span*g/5,yy=y(p);ctx.strokeStyle='rgba(56,189,248,.14)';ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(W-right,yy);ctx.stroke();ctx.fillStyle='#9cb2cc';ctx.fillText(fmt(p),left-7,yy);}
+    var step=plotW/n,cw=Math.max(2,Math.min(13,step*.68));
+    cs.forEach(function(k,i){var x=left+i*step+step/2,up=k.c>=k.o,col=up?'#22c55e':'#ef4444';ctx.strokeStyle=col;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,y(k.h));ctx.lineTo(x,y(k.l));ctx.stroke();ctx.fillStyle=col;ctx.fillRect(x-cw/2,y(Math.max(k.o,k.c)),cw,Math.max(1,y(Math.min(k.o,k.c))-y(Math.max(k.o,k.c))));var vh=k.v/(vmax||1)*volH;ctx.globalAlpha=.5;ctx.fillRect(x-cw/2,baseY+volH-vh,cw,vh);ctx.globalAlpha=1;});
+    ctx.strokeStyle='rgba(56,189,248,.25)';ctx.beginPath();ctx.moveTo(left,baseY);ctx.lineTo(W-right,baseY);ctx.stroke();
+    ctx.fillStyle='#9cb2cc';ctx.textAlign='center';ctx.textBaseline='top';
+    for(var t=0;t<=4;t++){var ix=Math.min(n-1,Math.round(t*(n-1)/4));ctx.fillText(new Date(cs[ix].ct).toLocaleString([], {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}),left+(ix+.5)*step,baseY+volH+7);}
+    ctx.textAlign='right';ctx.fillStyle=S.status==='stale'?'#ef4444':'#9cb2cc';ctx.fillText((S.status==='stale'?'STALE · ':'')+(S.sym||'')+' '+(S.iv||''),W-right,top);
   }
 
-  /* ---------- interaction ---------- */
-  function clampPitch() { S.pitch = Math.max(-0.2, Math.min(1.3, S.pitch)); }
-  function clampZoom() { S.zoom = Math.max(0.5, Math.min(3, S.zoom)); }
-  function nudge(dy, dp, dz) { S.yaw += dy; S.pitch += dp; S.zoom *= dz; clampPitch(); clampZoom(); render(); }
-
-  cv.addEventListener('pointerdown', function (e) {
-    S.drag = { x: e.clientX, y: e.clientY };
-    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
-  });
-  cv.addEventListener('pointermove', function (e) {
-    if (!S.drag) return;
-    S.yaw += (e.clientX - S.drag.x) * 0.01;
-    S.pitch += (e.clientY - S.drag.y) * 0.008;
-    S.drag = { x: e.clientX, y: e.clientY };
-    clampPitch(); render();
-  });
-  var endDrag = function () { S.drag = null; };
-  cv.addEventListener('pointerup', endDrag);
-  cv.addEventListener('pointercancel', endDrag);
-  cv.addEventListener('wheel', function (e) {
-    if (!e.ctrlKey && !e.metaKey) return; // plain scroll keeps scrolling the page
-    e.preventDefault(); nudge(0, 0, e.deltaY < 0 ? 1.08 : 0.92);
-  }, { passive: false });
-  cv.addEventListener('keydown', function (e) {
-    var k = e.key, handled = true;
-    if (k === 'ArrowLeft') nudge(-0.1, 0, 1);
-    else if (k === 'ArrowRight') nudge(0.1, 0, 1);
-    else if (k === 'ArrowUp') nudge(0, 0.08, 1);
-    else if (k === 'ArrowDown') nudge(0, -0.08, 1);
-    else if (k === '+' || k === '=') nudge(0, 0, 1.1);
-    else if (k === '-') nudge(0, 0, 0.9);
-    else handled = false;
-    if (handled) e.preventDefault();
-  });
-
-  el('rl').onclick = function () { nudge(-0.15, 0, 1); };
-  el('rr').onclick = function () { nudge(0.15, 0, 1); };
-  el('tu').onclick = function () { nudge(0, 0.1, 1); };
-  el('td').onclick = function () { nudge(0, -0.1, 1); };
-  el('zi').onclick = function () { nudge(0, 0, 1.15); };
-  el('zo').onclick = function () { nudge(0, 0, 0.87); };
-  el('rst').onclick = function () { S.yaw = DEFAULT_VIEW.yaw; S.pitch = DEFAULT_VIEW.pitch; S.zoom = 1; render(); };
-  el('go').onclick = load;
-  el('reload').onclick = function () { searchSymbols(true); };
-  el('sym').addEventListener('keydown', function (e) { if (e.key === 'Enter') { load(); } });
-  el('sym').addEventListener('input', searchLater);
-  el('sym').addEventListener('change', load);   // picking an item from the suggestion list loads it
-  el('int').addEventListener('change', load);
-  el('category').addEventListener('change', function () { searchSymbols(false); load(); });
-  el('prov').addEventListener('change', function () {
-    el('sym').value = DEFAULT_SYMBOL[el('prov').value];
-    searchSymbols(false); load();
-  });
-
-  var autoBtn = el('auto');
-  if (reduced) { autoBtn.disabled = true; autoBtn.title = 'Disabled: reduced-motion preference'; }
-  autoBtn.onclick = function () {
-    S.auto = !S.auto; autoBtn.setAttribute('aria-pressed', String(S.auto));
-    if (S.auto) spin(); else cancelAnimationFrame(S.raf);
-  };
-  function spin() {
-    if (!S.auto || document.hidden) return;
-    S.yaw += 0.004; render(); S.raf = requestAnimationFrame(spin);
-  }
+  S.zoom=1;S.offset=0;S.drag=null;
+  el('zoom-in').onclick=function(){S.zoom=Math.min(5,S.zoom*1.25);render();};
+  el('zoom-out').onclick=function(){S.zoom=Math.max(1,S.zoom/1.25);render();};
+  el('fit-chart').onclick=function(){S.zoom=1;S.offset=0;render();};
+  cv.addEventListener('wheel',function(e){if(!e.shiftKey)return;e.preventDefault();S.offset=Math.max(0,Math.min(S.candles.length-10,(S.offset||0)+(e.deltaY>0?5:-5)));render();},{passive:false});
+  cv.addEventListener('pointerdown',function(e){S.drag={x:e.clientX,offset:S.offset||0};try{cv.setPointerCapture(e.pointerId);}catch(_){}});
+  cv.addEventListener('pointermove',function(e){if(!S.drag)return;var step=cv.clientWidth/Math.max(1,Math.round(S.candles.length/(S.zoom||1)));S.offset=Math.max(0,Math.min(S.candles.length-10,S.drag.offset-Math.round((e.clientX-S.drag.x)/Math.max(1,step))));render();});
+  var endDrag=function(){S.drag=null;};cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
 
   /* ---------- sizing + refresh ---------- */
   function resize() {
     var r = cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
-    S.W = Math.max(r.width, 200); S.H = Math.max(r.height, 200);
-    cv.width = Math.round(S.W * dpr); cv.height = Math.round(S.H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); render();
+    cv.width = Math.round(Math.max(r.width,320) * dpr); cv.height = Math.round(Math.max(r.height,260) * dpr); render();
   }
   if (window.ResizeObserver) new ResizeObserver(resize).observe(cv); else window.addEventListener('resize', resize);
 
@@ -370,7 +234,7 @@
     S.timer = setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);
   }
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) { load(); if (S.auto) spin(); }
+    if (!document.hidden) load();
   });
 
   window.addEventListener('beforeunload', closeBybitStream);
