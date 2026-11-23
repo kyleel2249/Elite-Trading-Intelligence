@@ -124,3 +124,11 @@ pre.out{white-space:pre-wrap;background:#020817;border:1px solid var(--line);pad
 .panel:has(>.chart)>h2{padding-top:14px}
 .panel:has(>.chart)>:last-child:not(.chart){margin-bottom:14px}
 .panel>.chart{border-radius:0;width:100%}
+
+/* ETI Live Market chart: match the JPTI institutional terminal footprint */
+#markets.panel{min-height:560px}
+#markets #chart.chart{height:440px;min-height:440px;width:100%;max-height:none}
+@media(max-width:640px){
+  #markets.panel{min-height:420px}
+  #markets #chart.chart{height:340px;min-height:340px}
+}
