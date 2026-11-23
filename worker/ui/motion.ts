@@ -13,16 +13,16 @@ import { withV3AlphaDashboard } from "./v3-alpha-dashboard.ts";
  * or number-flash animations. Data, controls and analysis layers are untouched.
  */
 export const MOTION_CSS = `<style id="eti-motion">
-html{background:#080d16;overflow-x:clip}
+html{background:#0b0e11;overflow-x:clip}
 body{overflow-x:clip;background:transparent!important}
-main{width:100%;max-width:none;margin:0;padding:22px clamp(12px,2vw,32px)}
-.panel{min-width:0;backdrop-filter:none;-webkit-backdrop-filter:none;transform:none!important;transition:none!important;box-shadow:0 8px 24px rgba(0,0,0,.22)}
+main{width:100%;max-width:none;margin:0;padding:22px clamp(12px,2vw,32px);background:#0b0e11}
+.panel{min-width:0;backdrop-filter:none;-webkit-backdrop-filter:none;transform:none!important;transition:none!important;box-shadow:none;border-radius:4px;border-color:#2b3139;background:#161a1e}
 .panel::before{content:none!important}
 .panel h2{letter-spacing:.2px;text-shadow:none}
 .panel>h2,.panel>.meta{transform:none!important}
 button{transition:none!important}
 button:hover:not(:disabled),button:active:not(:disabled){transform:none!important;filter:none;box-shadow:none}
-button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #5aa9ff;outline-offset:2px}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #f0b90b;outline-offset:2px}
 @media(max-width:700px){main{padding:14px 10px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 </style>`;
