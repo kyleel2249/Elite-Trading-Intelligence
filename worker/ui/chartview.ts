@@ -11,12 +11,12 @@ export const CHARTVIEW_CSS = `<style id="eti-chartview">
 #stack{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#2c4a73 #0b1422;padding-bottom:4px}
 #stack:focus-visible{outline:2px solid #5aa9ff;outline-offset:2px}
 #stack>.chart.big,#stack>.paneBox{width:var(--stackw,100%);min-width:100%}
-.chart.big{height:clamp(460px,72vh,720px)}
+.chart.big{height:440px;min-height:440px;max-height:none}
 .paneBox{height:128px}
 .cvbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:12px;color:var(--muted)}
 .cvbar button{padding:4px 10px;font-size:12px}
 .cvbar output{min-width:5em;text-align:center;font-variant-numeric:tabular-nums}
-@media(max-width:700px){.chart.big{height:clamp(360px,62vh,520px)}.paneBox{height:104px}}
+@media(max-width:700px){.chart.big{height:340px;min-height:340px;max-height:none}.paneBox{height:104px}}
 </style>`;
 
 export const CHARTVIEW_JS = `<script id="eti-chartview-js">
