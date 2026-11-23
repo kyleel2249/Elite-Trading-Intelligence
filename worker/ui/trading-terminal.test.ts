@@ -35,7 +35,9 @@ test("Cloudflare Worker serves the terminal and its assets without a backend", a
   assert.match(await home.text(), /href="\/terminal"/);
 });
 
-test("terminal exposes adjustable 1–300px candle width, chart/volume sizing and native wheel/pinch zoom",()=>{assert.match(TRADING_TERMINAL_HTML,/id="tt-candle-width" type="range" min="1" max="300"/);assert.match(TRADING_TERMINAL_HTML,/id="tt-candle-height" type="range" min="100" max="300"/);assert.match(TRADING_TERMINAL_HTML,/id="tt-volume-height" type="range" min="20" max="300"/);assert.match(TRADING_TERMINAL_JS,/handleScale:\{mouseWheel:true,pinch:true/);assert.match(TRADING_TERMINAL_JS,/handleScroll:\{mouseWheel:true,pressedMouseMove:true/);assert.match(TRADING_TERMINAL_JS,/barSpacing:S\.chartCandleWidth/);assert.match(TRADING_TERMINAL_JS,/function applyChartSizing\(/);assert.match(TRADING_TERMINAL_CSS,/@media\(max-width:760px\)\{\.tt-chart-controls/);});\n\ntest("terminal exposes recent trades, chart presentation and manual level tools", () => {
+test("terminal exposes adjustable 1–300px candle width, chart/volume sizing and native wheel/pinch zoom",()=>{assert.match(TRADING_TERMINAL_HTML,/id="tt-candle-width" type="range" min="1" max="300"/);assert.match(TRADING_TERMINAL_HTML,/id="tt-candle-height" type="range" min="100" max="300"/);assert.match(TRADING_TERMINAL_HTML,/id="tt-volume-height" type="range" min="20" max="300"/);assert.match(TRADING_TERMINAL_JS,/handleScale:\{mouseWheel:true,pinch:true/);assert.match(TRADING_TERMINAL_JS,/handleScroll:\{mouseWheel:true,pressedMouseMove:true/);assert.match(TRADING_TERMINAL_JS,/barSpacing:S\.chartCandleWidth/);assert.match(TRADING_TERMINAL_JS,/function applyChartSizing\(/);assert.match(TRADING_TERMINAL_CSS,/@media\(max-width:760px\)\{\.tt-chart-controls/);});
+
+test("terminal exposes recent trades, chart presentation and manual level tools", () => {
   assert.match(TRADING_TERMINAL_HTML, /Recent trades/);
   assert.doesNotMatch(TRADING_TERMINAL_HTML, /Order book|tt-book|tt-spread|tt-bids|tt-asks/);
   assert.match(TRADING_TERMINAL_HTML, /tt-chart-style/);
