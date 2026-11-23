@@ -17,7 +17,7 @@ test("terminal keeps order placement inside the existing guarded execution flow"
 });
 
 test("terminal exposes Bybit venue-specific market data requests", () => {
-  assert.match(TRADING_TERMINAL_JS, /venue:"bybit"/);
+  assert.match(TRADING_TERMINAL_JS, /venue:S\.venue/);
   assert.match(TRADING_TERMINAL_JS, /\/api\/market\/klines/);
   assert.match(TRADING_TERMINAL_JS, /\/api\/market\/depth/);
 });
@@ -98,7 +98,7 @@ test("advanced terminal chart preserves exchange tick precision for tiny-priced 
   assert.match(TRADING_TERMINAL_JS, /minimumFractionDigits:S\.pricePrecision/);
   assert.match(TRADING_TERMINAL_JS, /maximumFractionDigits:S\.pricePrecision/);
   assert.match(TRADING_TERMINAL_JS, /precision:S\.pricePrecision/);
-  assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(\(d\.candles\|\|\[\]\)\.flatMap/);
+  assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(raw\.flatMap/);
   assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(\(results\[0\]\.value\|\|\[\]\)\.flatMap/);
   assert.match(TRADING_TERMINAL_JS, /v\.toFixed\(S\.pricePrecision\)/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /maximumFractionDigits:8/);
@@ -156,11 +156,11 @@ test("Pro Terminal invalidates stale exchange loads and exposes time coordinates
 
 
 test("Pro Terminal starts Bitget streaming before REST and retains recent cached candles on temporary REST failure",()=>{
- const stream=TRADING_TERMINAL_JS.indexOf("ensureTerminalBitgetStream();const d=await window.ETIBitget.marketData");
+ const stream=TRADING_TERMINAL_JS.indexOf("if(S.venue===\"bitget\")ensureTerminalBitgetStream();");
  assert.ok(stream>=0);
  assert.ok(TRADING_TERMINAL_JS.includes("function restoreMarketCache()"));
  assert.ok(TRADING_TERMINAL_JS.includes("function saveMarketCache()"));
- assert.ok(TRADING_TERMINAL_JS.includes("WebSocket live recovery"));
+ assert.ok(TRADING_TERMINAL_JS.includes("Production UTA V3") && TRADING_TERMINAL_JS.includes("REST snapshots active"));
 });
 
 
@@ -170,7 +170,7 @@ test("Pro Terminal preserves USDT, USDC and Coin-M Bitget futures selections",()
 
 
 test("Pro Terminal sends the selected exchange provenance with supplied SMC candles",()=>{
- assert.ok(TRADING_TERMINAL_JS.includes('venue:provider,provider,candles:d.candles'));
+ assert.ok(TRADING_TERMINAL_JS.includes('venue:provider,provider,candles:candles'));
 });
 
 
