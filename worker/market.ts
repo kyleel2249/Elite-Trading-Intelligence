@@ -36,7 +36,7 @@ interface Params {
   /** "bitget" routes the request to Bitget (spot, or its perpetual futures when market=futures). Default Binance. */
   venue?: Venue;
   /** Bybit spot/linear/inverse or Bitget SPOT/MARGIN/futures product category. */
-  category?: "spot" | "linear" | "inverse" | "option" | "SPOT" | "MARGIN" | BitgetProductType;
+  category?: "spot" | "linear" | "inverse" | "option" | "swap" | "SPOT" | "MARGIN" | BitgetProductType;
   productType?: BitgetProductType;
 }
 
