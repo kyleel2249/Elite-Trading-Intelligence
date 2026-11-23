@@ -341,7 +341,6 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv, f
       getMarketData("klines", { ...params, interval: "1d" }, [provider], fetchImpl),
       getMarketData("ticker", params, [provider], fetchImpl),
     ]);
-    const required = [hourly, tick];
     if (daily.status === "rejected") {
       const error = daily.reason;
       failures.push({
@@ -351,7 +350,7 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv, f
           : [{ error: error instanceof Error ? error.message : "unknown_error" }],
       });
     }
-    if (required.some(x => x.status !== "fulfilled")) {
+    if (hourly.status !== "fulfilled" || tick.status !== "fulfilled") {
       for (const [endpoint, result] of [["hourly", hourly], ["ticker", tick]] as const) {
         if (result.status === "rejected") {
           const error = result.reason;
