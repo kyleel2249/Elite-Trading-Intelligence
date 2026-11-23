@@ -370,6 +370,14 @@ jobs:
           ETI_BROWSER_BASE_URL: https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev
         run: node scripts/eti-browser-smoke.mjs
 
+      - name: Upload desktop and mobile chart screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eti-live-chart-browser-screenshots
+          path: /tmp/eti-terminal-*.png
+          if-no-files-found: ignore
+
       - name: Verify live GainzAlgo service, webhook and D1 readiness
         shell: bash
         env:
