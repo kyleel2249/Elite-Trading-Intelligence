@@ -7,13 +7,15 @@
   var el = function (id) { return document.getElementById(id); };
   var INTERVAL_MS = { '1m': 6e4, '5m': 3e5, '15m': 9e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
   var LIMIT = 60, REFRESH_MS = 30000;
-  var LABEL = { bybit: 'Bybit', alpaca: 'Alpaca', oanda: 'OANDA', twelvedata: 'Twelve Data' };
-  var DEFAULT_SYMBOL = { bybit: 'BTCUSDT', alpaca: 'AAPL', oanda: 'EUR_USD', twelvedata: 'SAP:XETR' };
+  var LABEL = { bybit: 'Bybit', bitget: 'Bitget', binance: 'Binance', okx: 'OKX', alpaca: 'Alpaca', oanda: 'OANDA', twelvedata: 'Twelve Data' };
+  var DEFAULT_SYMBOL = { bybit: 'BTCUSDT', bitget: 'BTCUSDT', binance: 'BTCUSDT', okx: 'BTCUSDT', alpaca: 'AAPL', oanda: 'EUR_USD', twelvedata: 'SAP:XETR' };
   var SYM_RE = {
-    bybit: /^[A-Z0-9]{3,20}$/, alpaca: /^[A-Z0-9.\-]{1,12}$/, oanda: /^[A-Z0-9_]{3,20}$/,
+    bybit: /^[A-Z0-9]{3,20}$/, bitget: /^[A-Z0-9]{3,20}$/, binance: /^[A-Z0-9]{3,20}$/, okx: /^[A-Z0-9]{3,20}$/, alpaca: /^[A-Z0-9.\-]{1,12}$/, oanda: /^[A-Z0-9_]{3,20}$/,
     twelvedata: /^([A-Z0-9.\-]{1,12}(:[A-Z0-9]{3,6})?|[A-Z]{3}\/[A-Z]{3})$/
   };
-  var CRYPTO = { bybit: 1 };
+  var CRYPTO = { bybit: 1, bitget: 1, binance: 1, okx: 1 };
+  function unifiedVenue(v) { return ['bybit','bitget','binance','okx'].indexOf(v) >= 0; }
+  function selectedMarket(v, cat) { return v === 'bitget' ? (cat === 'SPOT' ? 'spot' : 'futures') : (cat === 'spot' ? 'spot' : 'futures'); }
 
   var S = { candles: [], status: 'loading', ws: null, wsPing: 0, wsRetry: 0, category: 'spot', zoom: 1, offset: 0, drag: null, req: 0, timer: 0, prov: 'bybit', symReq: 0, symTimer: 0 };
 
@@ -31,24 +33,26 @@
   /* ---------- symbol discovery ---------- */
   function searchSymbols(refresh) {
     var prov = el('prov').value, cat = el('category') ? el('category').value : 'spot', q = (el('sym').value || '').trim().toUpperCase(), my = ++S.symReq;
-    var url = '/api/market/symbols?provider=' + encodeURIComponent(prov) + '&q=' + encodeURIComponent(q) + '&limit=40' + (refresh ? '&refresh=true' : '');
+    var url = unifiedVenue(prov) ? '/api/market/symbols?venue=' + encodeURIComponent(prov) + '&market=' + encodeURIComponent(selectedMarket(prov, cat)) + (prov === 'bitget' && cat !== 'SPOT' ? '&category=' + encodeURIComponent(cat) : '') : '/api/market/symbols?provider=' + encodeURIComponent(prov) + '&q=' + encodeURIComponent(q) + '&limit=40' + (refresh ? '&refresh=true' : '');
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (j) {
         if (my !== S.symReq) return;
         var dl = el('symlist'); dl.textContent = '';
-        (j.items || []).filter(function (it) { return prov !== 'bybit' || !it.market || it.market === cat; }).forEach(function (it) {
+        var items = unifiedVenue(prov) ? (j.symbols || []).map(function (r) { return { symbol:r[0], base:r[1], quote:r[2], market:r[3], productType:r[6] }; }) : (j.items || []);
+        items.filter(function (it) { return !unifiedVenue(prov) || (it.market === selectedMarket(prov, cat) && (prov !== 'bitget' || it.market !== 'futures' || it.productType === cat)); }).filter(function (it) { return prov !== 'bybit' || !it.market || it.market === cat; }).forEach(function (it) {
           var o = document.createElement('option'); o.value = it.symbol;
           var lab = it.name ? it.name : (it.base && it.quote ? it.base + '/' + it.quote : '');
           o.label = (it.is_new ? 'NEW · ' : '') + lab + (it.exchange && prov === 'twelvedata' ? ' (' + it.exchange + ')' : '');
           dl.appendChild(o);
         });
-        var src = (j.sources || {})[prov] || {};
+        var src = (j.sources || {})[prov] || (j.sources || {})[cat] || {};
         var hint = el('symhint');
         if (src.status === 'not_configured' || src.status === 'unavailable') {
           hint.textContent = (src.message || 'Symbol list unavailable') + '. You can still type a symbol and press Load.';
         } else {
-          hint.textContent = j.total + ' matching symbol' + (j.total === 1 ? '' : 's') + ' in ' + (src.count || 0) + ' listed' +
+          var total = unifiedVenue(prov) ? (j.count || 0) : (j.total || 0);
+          hint.textContent = total + ' matching symbol' + (total === 1 ? '' : 's') + ' in ' + (src.count || total) + ' listed' +
             (src.status === 'stale' ? ' (STALE list: ' + src.message + ')' : (src.message ? ' (' + src.message + ')' : '')) + '. Showing up to 40.';
         }
       })
@@ -143,8 +147,8 @@
       render(); return;
     }
     var token = ++S.req;
-    var url = '/api/market/public-history?provider=' + encodeURIComponent(prov) + '&symbol=' + encodeURIComponent(sym) +
-              '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT + (prov === 'bybit' ? '&category=' + encodeURIComponent(category) : '');
+    var unified = unifiedVenue(prov), market = selectedMarket(prov, category);
+    var url = unified ? '/api/market/klines?venue=' + encodeURIComponent(prov) + '&market=' + encodeURIComponent(market) + '&symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT + '&category=' + encodeURIComponent(category) : '/api/market/public-history?provider=' + encodeURIComponent(prov) + '&symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=' + LIMIT + (prov === 'bybit' ? '&category=' + encodeURIComponent(category) : '');
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(function (r) {
         if (r.ok) return r.json();
@@ -154,6 +158,7 @@
       })
       .then(function (rows) {
         if (token !== S.req) return; // a newer request superseded this one
+        if (unified) rows = (rows || []).map(function (r) { var start=Number(r[0]), span=INTERVAL_MS[iv]||60000; return {open:Number(r[1]),high:Number(r[2]),low:Number(r[3]),close:Number(r[4]),volume:Number(r[5]||0),close_time:start+span-1,data_status:'valid'}; });
         var c = clean(rows);
         if (c.out.length < 5) throw new Error('too few valid candles (' + c.out.length + ')');
         S.candles = c.out; S.sym = sym; S.iv = iv; S.bad = c.bad; S.prov = prov; S.category = category; S.offset = 0;
@@ -170,8 +175,8 @@
       })
       .catch(function (e) {
         if (token !== S.req) return;
-        S.candles = []; S.status = 'unavailable';
-        setBanner('bad', 'Market data unavailable for ' + sym + ' (' + e.message + '). No chart is shown rather than showing unverified data.');
+        if (S.sym === sym && S.iv === iv && S.prov === prov && S.candles.length) { S.status = 'stale'; setBanner('bad', 'STALE: keeping the last verified ' + LABEL[prov] + ' candles from the previous successful refresh. ' + e.message); }
+        else { S.candles = []; S.status = 'unavailable'; setBanner('bad', 'Market data unavailable for ' + sym + ' (' + e.message + '). No unverified data is shown.'); }
         table(); render();
       });
   }
@@ -238,5 +243,16 @@
   });
 
   window.addEventListener('beforeunload', closeBybitStream);
+  el('prov').addEventListener('change', function () {
+    var p=el('prov').value, c=el('category');
+    if(p==='bitget') c.value='USDT-FUTURES';
+    else if(p==='okx') c.value='swap';
+    else if(p==='bybit') c.value='spot';
+    else c.value='linear';
+    el('sym').value=DEFAULT_SYMBOL[p]||'BTCUSDT'; searchSymbols(true); load();
+  });
+  el('category').addEventListener('change', function(){searchSymbols(true);load();});
+  el('sym').addEventListener('change', load);
+  el('int').addEventListener('change', load);
   resize(); searchSymbols(false); load(); schedule();
 })();
