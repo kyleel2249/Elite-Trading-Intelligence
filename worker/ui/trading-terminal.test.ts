@@ -99,7 +99,7 @@ test("advanced terminal chart preserves exchange tick precision for tiny-priced 
   assert.match(TRADING_TERMINAL_JS, /maximumFractionDigits:S\.pricePrecision/);
   assert.match(TRADING_TERMINAL_JS, /precision:S\.pricePrecision/);
   assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(raw\.flatMap/);
-  assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(\(results\[0\]\.value\|\|\[\]\)\.flatMap/);
+  assert.match(TRADING_TERMINAL_JS, /capturePricePrecision\(raw\.flatMap/);
   assert.match(TRADING_TERMINAL_JS, /v\.toFixed\(S\.pricePrecision\)/);
   assert.doesNotMatch(TRADING_TERMINAL_JS, /maximumFractionDigits:8/);
 });
