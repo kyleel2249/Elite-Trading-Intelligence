@@ -162,6 +162,27 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,t
 ${PORTFOLIO_CSS}
 ${CALC_CSS}
 ${PERP_CSS}
+
+/* ETI default dashboard — flat Bitget-inspired 2D system */
+:root{color-scheme:dark;--bg:#0b0e11;--panel:#161a1e;--line:#2b3139;--muted:#848e9c;--green:#0ecb81;--red:#f6465d;--blue:#f0b90b}
+html,body{background:#0b0e11!important;color:#eaecef!important;font-family:Inter,Arial,system-ui,sans-serif}
+body{background:#0b0e11!important}
+header{background:#161a1e!important;border-bottom:1px solid #2b3139!important;box-shadow:none!important}
+main{background:#0b0e11!important}
+.toolbar{gap:6px}
+input,select,button{background:#0b0e11!important;color:#eaecef!important;border:1px solid #353d46!important;border-radius:3px!important;box-shadow:none!important}
+button:hover:not(:disabled){border-color:#f0b90b!important;color:#f0b90b!important}
+button.active{border-color:#f0b90b!important;color:#f0b90b!important;background:#292317!important}
+.panel{background:#161a1e!important;border:1px solid #2b3139!important;border-radius:4px!important;box-shadow:none!important;backdrop-filter:none!important}
+.panel h2{color:#eaecef}
+.chart.big,.chart-workspace .chart.big{background:#0b0e11!important;border:1px solid #2b3139!important;border-radius:3px!important;box-shadow:none!important}
+.chart-workspace{background:#161a1e!important;border:1px solid #2b3139!important;border-radius:4px!important;box-shadow:none!important}
+.chart-workspace:fullscreen{background:#0b0e11!important}
+.grid{gap:8px}
+table th,table td{border-bottom:1px solid #2b3139!important}
+a{color:#f0b90b}
+small,.muted{color:#848e9c!important}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style></head><body>
 <header><div><h1>ETI <span style="color:var(--blue)">Elite Trading Intelligence</span></h1><small>Market structure • Liquidity • Price discovery</small></div><a href="/terminal" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">PRO TRADING TERMINAL →</a><a href="/trading-coach" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">TRADING COACH ↗</a><a href="/trading-coach/advanced" style="color:#9ed7ff;border:1px solid #31577c;border-radius:9px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:700">ADVANCED INTELLIGENCE ↗</a><a href="#chartInterpretationPanel" style="color:#9ed7ff">Chart Interpretation</a><a href="#intelPanel" style="color:#9ed7ff">Central Intelligence</a><div style="display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;min-width:0"><a href="/gainz" style="color:var(--blue)">GainzAlgo Intelligence</a><a href="/alpha" style="color:var(--blue)">Global Alpha Center</a><a href="/journal" style="color:var(--blue)">Trade Journal</a><a href="/elite" style="color:var(--blue)">Elite UI</a><a href="/sports" style="color:var(--blue)">Sports Betting Intelligence</a><a href="/jarvis" style="color:var(--cyan)">JARVIS Command Centre</a><a href="/agents" style="color:var(--blue)">AI Agents</a><div id="connection" class="status">Connecting…</div></div></header>
 <main>
