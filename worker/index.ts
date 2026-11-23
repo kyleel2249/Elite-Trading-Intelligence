@@ -966,8 +966,8 @@ async function loadSignal(){
  const sym=$('symbol').value, iv=$('interval').value, seq=++sigSeq;
  $('signalAction').textContent='ANALYSING…';$('signalAction').style.color='#8fa3bd';
  try{
-  const directBitget=symInfo().venue==='bitget';
-  const r=directBitget?await fetch('/api/signals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol:sym,interval:iv,window:BARS,provider:'bitget-browser',market:symInfo().market,candles:candles}),cache:'no-store'}):await fetch('/api/signals?symbol='+encodeURIComponent(sym)+mkt()+'&interval='+encodeURIComponent(iv)+'&window='+BARS+(provider&&!mkt()?'&provider='+encodeURIComponent(provider):''),{cache:'no-store'});
+  const info=symInfo();
+  const r=await fetch('/api/signals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol:sym,interval:iv,window:BARS,provider:provider||info.venue,market:info.market,candles:candles}),cache:'no-store'});
   const d=await r.json();
   if(seq!==sigSeq)return;
   if(!r.ok)throw Error(d.error||('HTTP '+r.status));
@@ -1383,7 +1383,7 @@ export default {
       return handleMarket(request, _env);
     }
     if (url.pathname === "/__eti/status" || url.pathname === "/api/system/health") {
-      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Bybit and Bitget public REST via ETI Worker proxy with browser-native Bitget WebSocket streaming", market_data_transport: { bybit: "cloudflare-worker-rest", bitget: "same-origin-worker-proxy", bitget_live_orders: "gated-until-private-egress-verified" }, time: new Date().toISOString() });
+      return json({ service: "Elite Trading Intelligence", role: "cloudflare-worker", status: "ok", backend_required: false, market_data: "Unified same-origin ETI exchange gateway: Binance Spot/USD-M, Bybit V5, OKX V5 and Bitget V3; public reads require no exchange credentials", market_data_transport: { binance: "cloudflare-worker-rest", bybit: "cloudflare-worker-rest", okx: "cloudflare-worker-rest", bitget: "cloudflare-worker-rest-with-capi-v2-recovery", live_orders: "separately-authenticated-and-risk-gated" }, time: new Date().toISOString() });
     }
     if (url.pathname === "/") {
       return new Response(page.replace("</head>", '<link rel="stylesheet" href="/liquidity.css"></head>').replace("</body>", '<script src="/liquidity.js"></script></body>'), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
