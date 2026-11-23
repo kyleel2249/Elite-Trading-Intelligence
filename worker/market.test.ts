@@ -227,7 +227,7 @@ test("market diagnostics probe Bybit and Bitget spot and futures independently",
   assert.equal(response.status, 200);
   const body = await response.json() as any;
   const ids = body.providers.map((p: any) => p.provider);
-  assert.deepEqual(ids, ["bybit", "bitget", "bitget_mix"]);
+  assert.deepEqual(ids, ["binance", "binance_usdm", "bybit", "okx", "bitget", "bitget_mix"]);
   assert.ok(body.providers.every((p: any) => p.connectionStatus === "connected"));
 });
 
