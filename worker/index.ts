@@ -967,7 +967,7 @@ async function loadSignal(){
  $('signalAction').textContent='ANALYSING…';$('signalAction').style.color='#8fa3bd';
  try{
   const info=symInfo();
-  const r=await fetch('/api/signals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol:sym,interval:iv,window:BARS,provider:provider||info.venue,market:info.market,candles:candles}),cache:'no-store'});
+  const r=await fetch('/api/signals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol:sym,interval:iv,window:BARS,provider:provider||info.venue,market:info.market,category:info.productType||info.category,candles:candles}),cache:'no-store'});
   const d=await r.json();
   if(seq!==sigSeq)return;
   if(!r.ok)throw Error(d.error||('HTTP '+r.status));
