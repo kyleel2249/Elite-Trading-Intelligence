@@ -47,12 +47,15 @@ try {
     const adjusted = await page.locator("#tt-chart").evaluate(el => ({ height: el.getBoundingClientRect().height, inlineHeight: el.style.height }));
     assert.equal(adjusted.inlineHeight, "410px", profile.name + ": chart height follows candle and volume pane controls");
     assert.ok(adjusted.height >= 410, profile.name + ": adjusted chart height is applied to the rendered surface");
+    const chartState = await page.evaluate(() => window.ETIProTerminalChart.getChartState());
+    assert.deepEqual(chartState, { candleWidth: 300, pricePaneHeight: 210, volumePaneHeight: 180, chartHeight: 410 }, profile.name + ": chart engine receives the requested dimensions");
 
     await page.locator("#tt-candle-width").evaluate(el => { el.value = "20"; el.dispatchEvent(new Event("input", { bubbles: true })); });
     await page.locator("#tt-zoom-in").click();
     assert.equal(await page.locator("#tt-candle-width-value").textContent(), "25px", profile.name + ": zoom-in increases candle spacing");
     await page.locator("#tt-zoom-out").click();
     assert.equal(await page.locator("#tt-candle-width-value").textContent(), "20px", profile.name + ": zoom-out restores candle spacing");
+    assert.equal((await page.evaluate(() => window.ETIProTerminalChart.getChartState())).candleWidth, 20, profile.name + ": zoom controls update chart-engine candle spacing");
     await page.locator("#tt-chart").hover();
     await page.mouse.wheel(0, -360);
     await page.waitForTimeout(150);
