@@ -360,6 +360,16 @@ jobs:
           status="$(curl --silent --show-error --fail "$base/api/execution/status")" || { echo "::error::Could not read ETI execution safeguards"; failed=1; status='{}'; }
           printf '%s' "$status" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s);if(x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error("ETI execution safeguards:",JSON.stringify({masterToken:x.master_execution_token_configured,auditLog:x.audit_log_configured}));process.exit(1);}console.log("ETI execution authentication and audit storage verified; no live order submitted.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
           exit "$failed"
+      - name: Install Chromium for production chart verification
+        run: |
+          npm install --no-save --no-package-lock playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: Verify live charts in desktop and mobile Chromium
+        env:
+          ETI_BROWSER_BASE_URL: https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev
+        run: node scripts/eti-browser-smoke.mjs
+
       - name: Verify live GainzAlgo service, webhook and D1 readiness
         shell: bash
         env:
