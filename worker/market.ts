@@ -876,10 +876,10 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   const endpoint = url.pathname.slice("/api/market/".length);
   const marketFetch = (input: RequestInfo | URL, init?: RequestInit) => bitgetAwareFetch(input, init, fetch);
   if (endpoint === "region") return jsonResp({
-    service: "eti-public-market-data", transport: "bybit-worker-rest+bitget-worker-proxy-with-browser-websocket", placementHint: "cloudflare:global",
-    providers: { bybit: PROVIDERS.bybit.hosts, bitget: PROVIDERS.bitget.hosts },
+    service: "eti-public-market-data", transport: "unified-cloudflare-worker-rest-gateway", placementHint: "cloudflare:global",
+    providers: { binance: PROVIDERS.binance.hosts, binance_usdm: PROVIDERS.binance_usdm.hosts, bybit: PROVIDERS.bybit.hosts, okx: PROVIDERS.okx.hosts, bitget: PROVIDERS.bitget.hosts },
     fixedEgressIp: false, accountResidencyIsNotChanged: true,
-    note: "Bybit and Bitget REST reads are routed through the same-origin Worker API. Bitget WebSocket market streams remain browser-native. The Worker retries the global and CAPI hosts plus documented V2 routes; if all Worker egress paths are blocked, the API reports a classified outage rather than exposing browser CORS errors. Worker placement does not change exchange account-country eligibility."
+    note: "Binance Spot/USD-M, Bybit V5, OKX V5 and Bitget V3 public reads are routed through the same-origin Worker API. Bitget REST uses CAPI and documented V2 recovery. Public market data requires no exchange credentials. Each venue is isolated: an outage never silently substitutes another venue. WebSocket streaming is an optional acceleration; REST polling and recovery remain available. Worker placement does not change exchange account-country eligibility."
   });
   if (endpoint === "symbols") {
     const want = url.searchParams.get("market") || "all";
