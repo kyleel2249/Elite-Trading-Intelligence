@@ -271,3 +271,22 @@ test("OKX spot and perpetual futures use their own instrument IDs", async () => 
   assert.ok(urls.some(x => new URL(x).searchParams.get("instId") === "BTC-USDT"));
 });
 
+
+test("OKX symbol catalogue separates live spot instruments from perpetual swaps", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(String(input));
+    const spot = u.searchParams.get("instType") === "SPOT";
+    const data = spot
+      ? [{ instId: "BTC-USDT", baseCcy: "BTC", quoteCcy: "USDT", state: "live" }]
+      : [{ instId: "BTC-USDT-SWAP", baseCcy: "BTC", quoteCcy: "USDT", state: "live" }];
+    return new Response(JSON.stringify({ code: "0", data }));
+  }) as any;
+  const response = await handleMarket(req("/api/market/symbols?venue=okx&market=all"), {});
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.ok(body.symbols.some((x: any[]) => x[0] === "BTCUSDT" && x[3] === "spot"));
+  assert.ok(body.symbols.some((x: any[]) => x[0] === "BTCUSDT" && x[3] === "futures"));
+  assert.equal((await handleMarket(req("/api/market/symbols?venue=okx&market=margin"), {})).status, 400);
+  assert.equal((await handleMarket(req("/api/market/symbols?venue=binance&market=margin"), {})).status, 400);
+});
+
