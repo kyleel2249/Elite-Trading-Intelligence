@@ -21,7 +21,7 @@ const isSupportedCategory = (v: string): v is SupportedCategory => (SUPPORTED_CA
 /** Only the timeframes the strategy weights plus its execution timeframe are fetched, keeping subrequests inside Workers limits. */
 export async function loadSignalInputs(
   env: MarketEnv, symbol: string, strategy: Strategy, providerParam: string | null,
-  now: number = Date.now(), market: SignalMarket = "spot", categoryParam?: string, fetchImpl: typeof fetch = fetch,
+  now: number = Date.now(), market: SignalMarket = "spot", categoryParam?: string, fetchImpl: typeof fetch = bitgetAwareFetch,
 ): Promise<SignalInputs | { error: "market_data_unavailable"; executionTimeframe: Timeframe; failures: Record<string, string> }> {
   const isBitget = providerParam === "bitget" || providerParam === "bitget_mix";
   const isBinance = providerParam === "binance" || providerParam === "binance_usdm";
@@ -86,7 +86,7 @@ export async function loadSignalInputs(
 export async function loadMinuteBars(env: MarketEnv, symbol: string, providerParam: string | null, now: number, market: "spot" | "futures" = "spot"): Promise<{ bars: Kline[]; price: number | null; provider: string }> {
   const selected = providerParam === "bitget" && market === "futures" ? "bitget_mix" : providerParam === "binance" && market === "futures" ? "binance_usdm" : providerParam;
   const category = selected === "bitget_mix" ? bitgetProductFor(symbol) : selected === "okx" && market === "futures" ? "swap" : undefined;
-  const r = await getMarketData("klines", { symbol, interval: "1m", limit: 300, market, category }, providerOrder(env, selected)), rows = r.data as Kline[], ms = TF_SECONDS["1m"] * 1000;
+  const r = await getMarketData("klines", { symbol, interval: "1m", limit: 300, market, category }, providerOrder(env, selected), bitgetAwareFetch), rows = r.data as Kline[], ms = TF_SECONDS["1m"] * 1000;
   const closed = rows.filter(k => k[0] + ms <= now), last = rows.at(-1);
   const fresh = last && now - last[0] <= 3 * ms && now - last[0] >= -60_000;
   return { bars: closed, price: fresh && last![4] > 0 ? last![4] : null, provider: r.provider };
