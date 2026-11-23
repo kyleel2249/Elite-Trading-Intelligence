@@ -402,3 +402,27 @@ Discovery, independent validation, strategy competition, investor-disclosure ana
 ETI now includes a local Windows MT5 connector and browser terminal in `mt5-bridge/`. It uses the official MetaTrader5 Python package to connect to broker demo or live accounts on the Windows PC. Start with `mt5-bridge/start-mt5-bridge.ps1`, then open `http://127.0.0.1:8765/`. Credentials remain local and live order placement is disabled by default. See [the Windows bridge setup](docs/MT5_WINDOWS_BRIDGE.md).
 
 **Integration boundary:** this release supplies the local terminal/adapter, not yet cloud-to-PC pairing or the remote ETI account selector. Do not expose the local bridge port to the public internet. Cloud pairing requires a signed outbound bridge channel and durable command queue.
+
+## Unified multi-exchange market gateway
+
+ETI public market data is served through its same-origin Cloudflare Worker API. The browser does not need a CCXT CDN bundle, an API gateway URL, or exchange credentials for public market reads. Native exchange adapters normalize responses into a common CCXT-style market contract while retaining the original venue and market category.
+
+Supported public feeds:
+
+- **Binance:** Spot and USDⓈ-M perpetual futures.
+- **Bybit:** Spot, linear and inverse perpetual futures; margin instrument discovery.
+- **Bitget:** Spot, margin, USDT-margined, USDC-margined and coin-margined futures.
+- **OKX:** Spot and perpetual swaps.
+
+Core routes:
+
+- `GET /api/market/providers` — supported adapters and provider health.
+- `GET /api/market/region` — gateway transport and provider hosts.
+- `GET /api/market/symbols?venue=...&market=...` — venue-scoped instrument catalogue.
+- `GET /api/market/klines?venue=...&market=...&symbol=...&interval=...` — normalized OHLCV candles.
+- `GET /api/market/ticker?... `, `/api/market/depth?... `, and `/api/market/trades?... ` — quote, order-book and trade snapshots.
+- `GET /api/market/diag` — provider connection diagnostics.
+
+The main dashboard, Pro Trading Terminal, synchronized timeframe panes and 2D market chart use the same gateway and selected venue context. ETIAlgo signal, Omnisignal, SMC and V3 Alpha analysis receive the selected market's candles rather than silently analysing a different exchange. Provider failures remain visible; data from another venue is never substituted under the selected venue's name.
+
+Public endpoints require no exchange API keys. Private balances, authenticated account streams and order execution remain separate and require their existing operator credentials and safeguards. REST polling and stale-snapshot labels provide recovery when a WebSocket or exchange host is unavailable. Exchange-side outages, regional restrictions and network failures can still interrupt live updates; ETI reports those conditions rather than claiming uninterrupted exchange availability.
