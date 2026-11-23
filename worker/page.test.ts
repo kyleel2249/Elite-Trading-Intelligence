@@ -75,7 +75,7 @@ test("/elite is served, loads no external script, and carries none of the refere
 // Regression: the dashboard explicitly loads Bybit and Bitget catalogs and routes chart requests to the selected venue/product.
 test("dashboard routes Bybit, Bitget and Binance through the unified Worker market gateway", async () => {
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
-  assert.match(html, /venue=bybit/);
+  assert.match(html, /venue:'bybit'/);
   assert.match(html, /market=margin/);
   assert.match(html, /usdt-futures/);
   assert.match(html, /Bitget \(spot, margin &amp; futures\)/);
