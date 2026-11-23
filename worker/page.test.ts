@@ -73,16 +73,17 @@ test("/elite is served, loads no external script, and carries none of the refere
 });
 
 // Regression: the dashboard explicitly loads Bybit and Bitget catalogs and routes chart requests to the selected venue/product.
-test("dashboard supports Bybit Worker routes and Bitget browser-direct spot, margin and futures", async () => {
+test("dashboard routes Bybit, Bitget and Binance through the unified Worker market gateway", async () => {
   const { default: app } = await import("./index.ts"), html = await (await app.fetch(new Request("https://x.test/"), {} as any)).text();
   assert.match(html, /venue=bybit/);
   assert.match(html, /market=margin/);
   assert.match(html, /usdt-futures/);
   assert.match(html, /Bitget \(spot, margin &amp; futures\)/);
-  assert.match(html, /window\.ETIBitget\.symbols\('all'\)/);
-  assert.match(html, /window\.ETIBitget\.symbols\('margin'\)/);
-  assert.match(html, /window\.ETIBitget\.marketData/);
-  assert.match(html, /bitget-browser/);
+  assert.match(html, /Binance \(spot &amp; USDⓈ-M futures\)/);
+  assert.match(html, /\/api\/market\/klines/);
+  assert.match(html, /\/api\/market\/symbols\?venue=binance/);
+  assert.doesNotMatch(html, /window\.ETIBitget\.marketData/);
+  assert.doesNotMatch(html, /bitget-browser/);
   assert.match(html, /function mkt\(\)\{[^}]*venue=/);
   assert.match(html, /const SYM=\{all:\[\],market:'spot',venue:'bybit'/);
 
