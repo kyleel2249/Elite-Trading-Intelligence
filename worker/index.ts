@@ -1189,21 +1189,13 @@ function symRebuild(want){
  const dl=$('symbolList');if(dl&&dl.dataset.n!==String(SYM.at)){dl.textContent='';SYM.all.filter(r=>r[3]==='spot').forEach(r=>{const o=document.createElement('option');o.value=r[0];dl.appendChild(o);});dl.dataset.n=String(SYM.at);}
 }
 async function loadSymbols(){
+ const requests=[{venue:'bybit',market:'all'},{venue:'bitget',market:'all'},{venue:'bitget',market:'margin'},{venue:'bybit',market:'margin'},{venue:'binance',market:'all'}];
  try{
-  const results=await Promise.allSettled([
-   getJson('/api/market/symbols?venue=bybit&market=all'),
-   window.ETIBitget.symbols('all'),
-   window.ETIBitget.symbols('margin'),
-   getJson('/api/market/symbols?venue=bybit&market=margin')
-  ]);
-  const prevAll=SYM.all||[];SYM.all=[];
-  const warnings=[];
-  results.forEach((r,i)=>{if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push((i===0||i===3?'Bybit':'Bitget')+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{const src=j.sources[k]||{};if(src.stale){const stamp=typeof src.fetchedAt==="number"?src.fetchedAt:Date.parse(String(src.fetchedAt));const age=Number.isFinite(stamp)?Math.max(0,Math.round((Date.now()-stamp)/1000)):null;warnings.push('Bitget '+k+' catalogue is stale'+(age!==null?' · last success '+age+'s ago':' · no successful refresh recorded'));}});}else{const venue=(i===0||i===3?'bybit':'bitget'),isMargin=(i===2||i===3),kept=prevAll.filter(x=>symV(x)===venue&&(x[3]==='margin')===isMargin);SYM.all.push(...kept);warnings.push((venue==='bybit'?'Bybit':'Bitget')+(kept.length?' refresh failed; keeping the last known list':' catalogue unavailable'));}});
-  try{const binance=await getJson('/api/market/symbols?venue=binance&market=all');SYM.all.push(...(binance.data.symbols||[]));Object.keys(binance.data.sources||{}).forEach(k=>{if(binance.data.sources[k].stale)warnings.push('Binance '+k+' catalogue is stale');});}catch(e){const kept=prevAll.filter(x=>symV(x)==='binance');SYM.all.push(...kept);warnings.push('Binance catalogue unavailable'+(kept.length?' · last known pairs retained':''));}
-  SYM.at=Date.now();
-  SYM.warn=warnings.join('; ');
-  if(!SYM.all.some(r=>symV(r)==='bybit'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bybit pairs unavailable.';
-  if(!SYM.all.some(r=>symV(r)==='bitget'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Bitget pairs unavailable.';if(!SYM.all.some(r=>symV(r)==='binance'))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+'Binance pairs unavailable.';
+  const results=await Promise.allSettled(requests.map(x=>getJson('/api/market/symbols?venue='+x.venue+'&market='+x.market)));
+  const prevAll=SYM.all||[];SYM.all=[];const warnings=[];
+  results.forEach((r,i)=>{const request=requests[i];if(r.status==='fulfilled'){const j=r.value.data||{};SYM.all.push(...(j.symbols||[]));if((j.warnings||[]).length)warnings.push(request.venue+' '+request.market+' catalogue partially unavailable');Object.keys(j.sources||{}).forEach(k=>{const src=j.sources[k]||{};if(src.stale){const stamp=typeof src.fetchedAt==='number'?src.fetchedAt:Date.parse(String(src.fetchedAt));const age=Number.isFinite(stamp)?Math.max(0,Math.round((Date.now()-stamp)/1000)):null;warnings.push(request.venue+' '+k+' catalogue is stale'+(age!==null?' · last success '+age+'s ago':' · no successful refresh recorded'));}});}else{const kept=prevAll.filter(x=>symV(x)===request.venue&&(x[3]==='margin')===(request.market==='margin'));SYM.all.push(...kept);warnings.push(request.venue+' '+request.market+' refresh failed'+(kept.length?' · last known pairs retained':''));}});
+  SYM.at=Date.now();SYM.warn=warnings.join('; ');
+  ['bybit','bitget','binance'].forEach(venue=>{if(!SYM.all.some(r=>symV(r)===venue))SYM.warn=(SYM.warn?SYM.warn+'; ':'')+venue+' pairs unavailable.';});
   symFilters();symRebuild();
  }catch(e){$('symCount').textContent=(SYM.all.length?'Pair list refresh failed ('+(e&&e.message?e.message:'error')+'); keeping the last list. ':'Full pair list unavailable ('+(e&&e.message?e.message:'error')+'); showing the default pairs. ')+'Type any valid exchange symbol in Order Execution.';}
 }
