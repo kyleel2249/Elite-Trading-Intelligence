@@ -356,10 +356,28 @@ jobs:
           else echo "::error::Bitget Omnisignal returned unexpected HTTP $bitget_probe_code"; printf '%s\n' "$bitget_probe_body"; failed=1; fi
           forecast_response="$(curl --silent --show-error --max-time 30 -w '__HTTP_CODE__%{http_code}' "$base/api/analysis/extremes?symbol=BTCUSDT")" || { echo "::error::Could not contact the 24-hour forecast endpoint"; failed=1; forecast_response='{}__HTTP_CODE__000'; }
           forecast_status="${forecast_response##*__HTTP_CODE__}"; forecast="${forecast_response%__HTTP_CODE__*}"
-          printf '%s' "$forecast" | HTTP_STATUS="$forecast_status" node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s),h=x.forecast?.high,l=x.forecast?.low,c=x.forecast?.confidence,validTime=v=>typeof v==="string"&&Number.isFinite(Date.parse(v));const ok=process.env.HTTP_STATUS==="200"&&x.status==="ready"&&Number(h?.price)>0&&Number(l?.price)>0&&validTime(h?.time?.expectedAt)&&validTime(l?.time?.expectedAt)&&Number(x.history?.timeSampleDays)>=5&&Number(x.history?.priceSampleDays)>=5&&Number(c?.score)>=0&&Number(c?.score)<=100;if(!ok){console.error("24-hour forecast readiness:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,status:x.status,reason:x.reason}));process.exit(1);}console.log("24-hour high/low forecast verified.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
+          printf '%s' "$forecast" | HTTP_STATUS="$forecast_status" node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s),h=x.forecast?.high,l=x.forecast?.low,c=x.forecast?.confidence,validTime=v=>typeof v==="string"&&Number.isFinite(Date.parse(v));const ok=process.env.HTTP_STATUS==="200"&&x.status==="ready"&&Number(h?.price)>0&&Number(l?.price)>0&&validTime(h?.time?.expectedAt)&&validTime(l?.time?.expectedAt)&&Number(x.history?.timeSampleDays)>=5&&Number(x.history?.priceSampleDays)>=5&&Number(c?.score)>=0&&Number(c?.score)<=100;if(!ok){console.error("24-hour forecast readiness:",JSON.stringify({httpStatus:process.env.HTTP_STATUS,status:x.status,error:x.error,detail:x.detail,reason:x.reason,provider:x.provider,failover:x.failover,providerFailures:x.providerFailures,history:x.history}));process.exit(1);}console.log("24-hour high/low forecast verified.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
           status="$(curl --silent --show-error --fail "$base/api/execution/status")" || { echo "::error::Could not read ETI execution safeguards"; failed=1; status='{}'; }
           printf '%s' "$status" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const x=JSON.parse(s);if(x.master_execution_token_configured!==true||x.audit_log_configured!==true){console.error("ETI execution safeguards:",JSON.stringify({masterToken:x.master_execution_token_configured,auditLog:x.audit_log_configured}));process.exit(1);}console.log("ETI execution authentication and audit storage verified; no live order submitted.");}catch(e){console.error(e.message);process.exit(1);}});' || failed=1
           exit "$failed"
+      - name: Install Chromium for production chart verification
+        run: |
+          npm install --no-save --no-package-lock playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: Verify live charts in desktop and mobile Chromium
+        env:
+          ETI_BROWSER_BASE_URL: https://elite-trading-intelligence-eti.cintexatechnologies.workers.dev
+        run: node scripts/eti-browser-smoke.mjs
+
+      - name: Upload desktop and mobile chart screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eti-live-chart-browser-screenshots
+          path: /tmp/eti-terminal-*.png
+          if-no-files-found: ignore
+
       - name: Verify live GainzAlgo service, webhook and D1 readiness
         shell: bash
         env:

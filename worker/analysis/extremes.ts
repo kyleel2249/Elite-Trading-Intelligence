@@ -6,7 +6,7 @@
  * are reported as observed context, never substituted for a forward forecast.
  * This is a read-only statistical estimate, not a trade signal.
  */
-import { AllProvidersFailed, getMarketData, type Kline, type MarketEnv, type Ticker } from "../market.ts";
+import { AllProvidersFailed, bitgetProductFor, getMarketData, type Kline, type MarketEnv, type ProviderId, type Ticker } from "../market.ts";
 import { analyzeStructure, findPivots } from "./structure.ts";
 
 const DAY_MS = 86_400_000;
@@ -311,8 +311,8 @@ export function backtest24hExtremes(hourlyRows: Kline[], dailyRows: Kline[], now
 const jsonHeaders = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 
-/** Read-only API route: /api/analysis/extremes?symbol=BTCUSDT[&market=futures]. */
-export async function handleExtremeForecast(request: Request, _env: MarketEnv): Promise<Response> {
+/** Read-only API route with exchange-consistent provider failover. */
+export async function handleExtremeForecast(request: Request, _env: MarketEnv, fetchImpl: typeof fetch = fetch): Promise<Response> {
   const url = new URL(request.url);
   if (request.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
   const symbol = (url.searchParams.get("symbol") || "BTCUSDT").trim().toUpperCase();
@@ -322,28 +322,84 @@ export async function handleExtremeForecast(request: Request, _env: MarketEnv): 
   const category = url.searchParams.get("category") || inferBybitCategory(symbol, market);
   if (!(["spot", "linear", "inverse"] as string[]).includes(category) || (market === "spot" && category !== "spot") || (market === "futures" && category === "spot"))
     return reply({ error: "invalid_category" }, 400);
-  const params = { symbol, interval: "1h", limit: 1000, market: market as "spot" | "futures", category: category as "spot" | "linear" | "inverse" };
-  const [hourly, daily, tick] = await Promise.allSettled([
-    getMarketData("klines", params, ["bybit"]),
-    getMarketData("klines", { ...params, interval: "1d" }, ["bybit"]),
-    getMarketData("ticker", params, ["bybit"]),
-  ]);
-  if (hourly.status !== "fulfilled" || tick.status !== "fulfilled") {
-    const failure = hourly.status === "rejected" ? hourly.reason : tick.status === "rejected" ? tick.reason : null;
-    const attempts = failure instanceof AllProvidersFailed ? failure.attempts.map(({ provider, host, status, errorClass, latencyMs }) => ({ provider, host, status, errorClass, latencyMs })) : [];
-    return reply({ error: "market_data_unavailable", detail: failure instanceof Error ? failure.message : "Bybit history or ticker unavailable.", provider: "bybit", attempts }, 502);
+
+  // Keep all three inputs on one exchange. Never mix OHLC or ticker prices across venues.
+  const providers: ProviderId[] = market === "spot"
+    ? ["bybit", "binance", "okx", "bitget"]
+    : ["bybit", "binance_usdm", "okx", "bitget_mix"];
+  const failures: Array<{ provider: ProviderId; endpoint: string; attempts: unknown[] }> = [];
+  let selected: { provider: ProviderId; hourly: Kline[]; daily: Kline[]; ticker: Ticker; dailyUnavailable: boolean } | null = null;
+
+  for (const provider of providers) {
+    const params = {
+      symbol, interval: "1h", limit: 1000, market: market as "spot" | "futures",
+      ...(provider === "bybit" ? { category: category as "spot" | "linear" | "inverse" } : {}),
+      ...(provider === "bitget_mix" ? { productType: bitgetProductFor(symbol) } : {}),
+    };
+    const [hourly, daily, tick] = await Promise.allSettled([
+      getMarketData("klines", params, [provider], fetchImpl),
+      getMarketData("klines", { ...params, interval: "1d" }, [provider], fetchImpl),
+      getMarketData("ticker", params, [provider], fetchImpl),
+    ]);
+    if (daily.status === "rejected") {
+      const error = daily.reason;
+      failures.push({
+        provider, endpoint: "daily",
+        attempts: error instanceof AllProvidersFailed
+          ? error.attempts.map(({ provider: id, host, status, errorClass, latencyMs }) => ({ provider: id, host, status, errorClass, latencyMs }))
+          : [{ error: error instanceof Error ? error.message : "unknown_error" }],
+      });
+    }
+    if (hourly.status !== "fulfilled" || tick.status !== "fulfilled") {
+      for (const [endpoint, result] of [["hourly", hourly], ["ticker", tick]] as const) {
+        if (result.status === "rejected") {
+          const error = result.reason;
+          failures.push({
+            provider, endpoint,
+            attempts: error instanceof AllProvidersFailed
+              ? error.attempts.map(({ provider: id, host, status, errorClass, latencyMs }) => ({ provider: id, host, status, errorClass, latencyMs }))
+              : [{ error: error instanceof Error ? error.message : "unknown_error" }],
+          });
+        }
+      }
+      continue;
+    }
+    selected = {
+      provider,
+      hourly: Array.isArray(hourly.value.data) ? hourly.value.data as Kline[] : [],
+      daily: daily.status === "fulfilled" && Array.isArray(daily.value.data) ? daily.value.data as Kline[] : [],
+      ticker: tick.value.data as Ticker,
+      dailyUnavailable: daily.status === "rejected",
+    };
+    break;
   }
-  const hourRows = Array.isArray(hourly.value.data) ? hourly.value.data as Kline[] : [];
-  const dayRows = daily.status === "fulfilled" && Array.isArray(daily.value.data) ? daily.value.data as Kline[] : [];
-  const ticker = tick.value.data as Ticker;
+
+  if (!selected) return reply({
+    error: "market_data_unavailable",
+    detail: "No single exchange returned both hourly candles and a valid 24-hour ticker; no cross-exchange data was combined.",
+    symbol, market, failures,
+  }, 502);
+
   const now = Date.now();
-  const result = forecast24hExtremes(hourRows, dayRows, ticker, now);
-  if (result.status !== "ready") return reply({ ...result, marketContext: buildExtremeMarketContext(hourRows, dayRows, ticker, now), backtest: backtest24hExtremes(hourRows, dayRows, now), historyWarning: daily.status === "rejected" ? "Long-range daily candles unavailable; retry after data recovers." : null });
-  const historyFallback = result.history.priceSampleSource === "1h_fallback";
+  const result = forecast24hExtremes(selected.hourly, selected.daily, selected.ticker, now);
+  const sourceNames: Record<ProviderId, string> = {
+    bybit: "Bybit V5", binance: "Binance Spot", binance_usdm: "Binance USDⓈ-M",
+    okx: "OKX V5", bitget: "Bitget Spot", bitget_mix: "Bitget Mix Futures",
+  };
+  const source = sourceNames[selected.provider] + " public market data";
+  const context = buildExtremeMarketContext(selected.hourly, selected.daily, selected.ticker, now);
+  const backtest = backtest24hExtremes(selected.hourly, selected.daily, now);
+  const historyWarning = selected.dailyUnavailable || (result.status === "ready" && result.history.priceSampleSource === "1h_fallback")
+    ? "Long-range daily candles unavailable from the selected exchange; this estimate uses available completed hourly sessions."
+    : null;
   return reply({
     ...result,
-    marketContext: buildExtremeMarketContext(hourRows, dayRows, ticker, now),
-    backtest: backtest24hExtremes(hourRows, dayRows, now),
-    historyWarning: daily.status === "rejected" || historyFallback ? "Long-range daily candles unavailable; this estimate uses the available completed hourly sessions." : null,
+    source,
+    provider: selected.provider,
+    marketContext: context,
+    backtest,
+    historyWarning,
+    failover: selected.provider !== providers[0],
+    providerFailures: failures,
   });
 }
