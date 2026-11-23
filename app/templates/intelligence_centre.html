@@ -78,7 +78,7 @@
   function scenes() {
     if (!window.ETIScenes) { $('#crawler-fallback').hidden = false; $('#globe-fallback').hidden = false; return; }
     cr = ETIScenes.crawler($('#crawler-canvas'));
-    gl = ETIScenes.globe($('#globe-canvas'), { onSelect: showNode });
+    gl = ETIScenes.providerMap($('#globe-canvas'), { onSelect: showNode });
     $('#gz-in').onclick = () => gl && gl.zoom(-0.25); $('#gz-out').onclick = () => gl && gl.zoom(0.25);
   }
 
