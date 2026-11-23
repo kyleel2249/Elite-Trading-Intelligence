@@ -10,6 +10,7 @@
  * Worker answers unknown routes with a JSON 404, exactly as before.
  */
 import { withMotion } from "./ui/motion.ts";
+import { VIZ_CSS, VIZ_HTML, VIZ_JS } from "./viz2d/ui.ts";
 import { BITGET_CLIENT_JS } from "./ui/bitget-client.ts";
 import { COMMAND_CENTRE_HTML, COMMAND_CENTRE_JS } from "./ui/command-centre.ts";
 import { LIQUIDITY_CSS, LIQUIDITY_JS } from "./ui/liquidity-intelligence.ts";
@@ -1250,7 +1251,7 @@ function coachRateLimited(ip: string, cost: number, now = Date.now(), limit = 30
   if (!b || b.reset <= now) { coachRateBuckets.set(ip, { count: cost, reset: now + 60000 }); if (coachRateBuckets.size > 5000) for (const [k, v] of coachRateBuckets) if (v.reset <= now) coachRateBuckets.delete(k); return null; }
   b.count += cost; return b.count > limit ? Math.ceil((b.reset - now) / 1000) : null;
 }
-const page = withMotion(html);
+const page = withMotion(html.replace("</style>", VIZ_CSS + "</style>").replace("</main>", VIZ_HTML + "</main>").replace("</body>", "<script>" + VIZ_JS + "</script></body>"));
 
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
