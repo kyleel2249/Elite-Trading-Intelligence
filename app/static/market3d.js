@@ -40,7 +40,7 @@
         if (my !== S.symReq) return;
         var dl = el('symlist'); dl.textContent = '';
         var items = unifiedVenue(prov) ? (j.symbols || []).map(function (r) { return { symbol:r[0], base:r[1], quote:r[2], market:r[3], productType:r[6] }; }) : (j.items || []);
-        items.filter(function (it) { return !unifiedVenue(prov) || (it.market === selectedMarket(prov, cat) && (prov !== 'bitget' || it.market !== 'futures' || it.productType === cat)); }).filter(function (it) { return prov !== 'bybit' || !it.market || it.market === cat; }).forEach(function (it) {
+        items.filter(function (it) { return !unifiedVenue(prov) || (it.market === selectedMarket(prov, cat) && (prov !== 'bitget' || it.market !== 'futures' || it.productType === cat)); }).filter(function (it) { return unifiedVenue(prov) || prov !== 'bybit' || !it.market || it.market === cat; }).forEach(function (it) {
           var o = document.createElement('option'); o.value = it.symbol;
           var lab = it.name ? it.name : (it.base && it.quote ? it.base + '/' + it.quote : '');
           o.label = (it.is_new ? 'NEW · ' : '') + lab + (it.exchange && prov === 'twelvedata' ? ' (' + it.exchange + ')' : '');
