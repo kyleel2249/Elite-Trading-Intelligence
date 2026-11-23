@@ -991,6 +991,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       })),
     });
   }
+  const selectedProvider: ProviderId = venueParam === "bitget" ? (marketParam === "futures" ? "bitget_mix" : "bitget") : venueParam === "binance" ? (marketParam === "futures" ? "binance_usdm" : "binance") : venueParam === "okx" ? "okx" : "bybit";
   if (endpoint === "derivatives") {
     if (marketParam !== "futures") return jsonResp({ error: "unsupported_market", detail: "Derivatives snapshots require a futures or perpetual market." }, 400);
     try {
@@ -1033,7 +1034,6 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   const max = endpoint === "depth" ? 100 : 1000;
   if (!/^\d+$/.test(limitRaw) || Number(limitRaw) < 1 || Number(limitRaw) > max) return jsonResp({ error: "invalid_limit" }, 400);
 
-  const selectedProvider: ProviderId = venueParam === "bitget" ? (marketParam === "futures" ? "bitget_mix" : "bitget") : venueParam === "binance" ? (marketParam === "futures" ? "binance_usdm" : "binance") : venueParam === "okx" ? "okx" : "bybit";
   const order = providerOrder(env, selectedProvider);
   try {
     const r = await getMarketData(endpoint as Endpoint, { symbol, interval, limit: Number(limitRaw), market: marketParam, category: categoryParam as Params["category"], productType: ptParam ? ptParam as BitgetProductType : undefined }, order, marketFetch);
