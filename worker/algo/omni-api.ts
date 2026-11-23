@@ -102,12 +102,14 @@ export async function handleOmnisignal(req: Request, env: MarketEnv): Promise<Re
   const engines = String(body.engines ?? url.searchParams.get("engines") ?? "swift,gainz").toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
   const venue = String(body.venue ?? url.searchParams.get("venue") ?? url.searchParams.get("provider") ?? "bybit");
   const market = String(body.market ?? url.searchParams.get("market") ?? "spot");
-  const category = String(body.category ?? url.searchParams.get("category") ?? (market === "futures" ? (venue === "bitget" ? "USDT-FUTURES" : "linear") : (venue === "bitget" ? "SPOT" : "spot")));
+  const category = String(body.category ?? url.searchParams.get("category") ?? (market === "futures" ? (venue === "bitget" ? "USDT-FUTURES" : venue === "okx" ? "swap" : "linear") : (venue === "bitget" ? "SPOT" : "spot")));
   if (!/^[A-Z0-9]{5,20}$/.test(symbol) || !STRATEGIES.includes(strategy) || !engines.length || engines.some(e => e !== "swift" && e !== "gainz") ||
-      !["bybit", "bitget"].includes(venue) || !["spot", "futures"].includes(market))
-    return reply({ error: "invalid_symbol_strategy_engine_or_market", strategies: STRATEGIES, engines: ["swift", "gainz"], venues: ["bybit", "bitget"], markets: ["spot", "futures"] }, 400);
+      !["bybit", "bitget", "binance", "okx"].includes(venue) || !["spot", "futures"].includes(market))
+    return reply({ error: "invalid_symbol_strategy_engine_or_market", strategies: STRATEGIES, engines: ["swift", "gainz"], venues: ["bybit", "bitget", "binance", "okx"], markets: ["spot", "futures"] }, 400);
   if ((venue === "bybit" && market === "futures" && !["linear", "inverse"].includes(category)) ||
-      (venue === "bitget" && market === "futures" && !["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"].includes(category)))
+      (venue === "bitget" && market === "futures" && !["USDT-FUTURES", "USDC-FUTURES", "COIN-FUTURES"].includes(category)) ||
+      (venue === "binance" && market === "futures" && category !== "linear") ||
+      (venue === "okx" && market === "futures" && category !== "swap"))
     return reply({ error: "invalid_market_category", venue, market, category }, 400);
   const equity = body.equity === undefined ? undefined : Number(body.equity);
   const riskFraction = body.riskFraction === undefined ? undefined : Number(body.riskFraction);
