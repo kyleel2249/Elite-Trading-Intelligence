@@ -421,6 +421,7 @@ Core routes:
 - `GET /api/market/symbols?venue=...&market=...` — venue-scoped instrument catalogue.
 - `GET /api/market/klines?venue=...&market=...&symbol=...&interval=...` — normalized OHLCV candles.
 - `GET /api/market/ticker?... `, `/api/market/depth?... `, and `/api/market/trades?... ` — quote, order-book and trade snapshots.
+- `GET /api/market/derivatives?... ` — perpetual funding rate, mark/index price and open-interest snapshot.
 - `GET /api/market/diag` — provider connection diagnostics.
 
 The main dashboard, Pro Trading Terminal, synchronized timeframe panes and 2D market chart use the same gateway and selected venue context. ETIAlgo signal, Omnisignal, SMC and V3 Alpha analysis receive the selected market's candles rather than silently analysing a different exchange. Provider failures remain visible; data from another venue is never substituted under the selected venue's name.
