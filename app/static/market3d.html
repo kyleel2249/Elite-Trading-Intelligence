@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ETI | 3D Market View</title>
+<title>ETI | 2D Market View</title>
 <link rel="stylesheet" href="/static/eti.css">
 <style>
-#m3d{width:100%;height:clamp(300px,62vh,640px);display:block;background:#0a1220;border-radius:8px;touch-action:pan-y;cursor:grab}
+#m3d{width:100%;height:440px;min-height:440px;display:block;background:#0a1220;border-radius:8px;touch-action:pan-y;cursor:grab}
 #m3d:active{cursor:grabbing}
 .legend span{display:inline-block;margin-right:1rem;font-size:.78rem;color:var(--muted)}
 .sw{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;margin-right:.3rem;vertical-align:middle}
+@media(max-width:640px){#market2d-chart{height:340px;min-height:340px}}
 </style>
 </head>
 <body>
 <header>
   <div>
-    <h1>ETI &middot; 3D Market View</h1>
+    <h1>ETI &middot; 2D Market View</h1>
     <div class="sub">Real exchange candles via ETI &middot; read-only &middot; not a trade signal</div>
   </div>
   <nav aria-label="ETI pages">
@@ -57,23 +58,18 @@
       <div class="sub" id="symhint" role="status" style="margin-top:.4rem">Type to search symbols.</div>
     </div>
     <div class="pb">
-      <canvas id="m3d" tabindex="0" role="img" aria-label="3D candlestick and volume chart. Use arrow keys to rotate, plus and minus to zoom. A table of recent candles follows."></canvas>
+      <canvas id="market2d-chart" tabindex="0" role="img" aria-label="2D candlestick and volume chart. Use zoom and fit controls to inspect verified exchange candles."></canvas>
       <div class="row" style="margin-top:.6rem">
-        <button class="btn" id="rl" type="button" aria-label="Rotate left">&#8634;</button>
-        <button class="btn" id="rr" type="button" aria-label="Rotate right">&#8635;</button>
-        <button class="btn" id="tu" type="button" aria-label="Tilt up">&#9650;</button>
-        <button class="btn" id="td" type="button" aria-label="Tilt down">&#9660;</button>
-        <button class="btn" id="zi" type="button" aria-label="Zoom in">+</button>
-        <button class="btn" id="zo" type="button" aria-label="Zoom out">&minus;</button>
-        <button class="btn" id="auto" type="button" aria-pressed="false">Auto-rotate</button>
-        <button class="btn" id="rst" type="button">Reset view</button>
+        <button class="btn" id="zoom-in" type="button">Zoom in</button>
+        <button class="btn" id="zoom-out" type="button">Zoom out</button>
+        <button class="btn" id="fit-chart" type="button">Fit chart</button>
       </div>
       <div class="legend">
         <span><i class="sw" style="background:#22c55e"></i>Close &ge; open</span>
         <span><i class="sw" style="background:#ef4444"></i>Close &lt; open</span>
-        <span><i class="sw" style="background:#3b82f6"></i>Volume (front row)</span>
+        <span><i class="sw" style="background:#3b82f6"></i>Volume histogram</span>
       </div>
-      <p class="note">Drag (or use arrow keys) to rotate. Candles are plotted from exchange data; nothing is simulated. If data cannot be loaded or is stale the chart says so instead of showing old values as live. Stock and forex candles are older than expected outside market hours and will be labelled stale. OANDA, Alpaca and Twelve Data need their credentials configured on the server; without them the market says so. Non-US stocks are listed as TICKER:EXCHANGE (for example SAP:XETR).</p>
+      <p class="note">Use zoom controls to inspect price action; hold Shift and scroll over the chart to move through candle history. Candles are plotted from exchange data; nothing is simulated. If data cannot be loaded or is stale the chart says so instead of showing old values as live. Stock and forex candles are older than expected outside market hours and will be labelled stale. OANDA, Alpaca and Twelve Data need their credentials configured on the server; without them the market says so. Non-US stocks are listed as TICKER:EXCHANGE (for example SAP:XETR).</p>
     </div>
   </section>
 
@@ -88,6 +84,6 @@
   </section>
 </main>
 <footer>Research visualisation only. It places no orders and is not investment advice.</footer>
-<script src="/static/market3d.js"></script>
+<script src="/static/market2d.js"></script>
 </body>
 </html>
