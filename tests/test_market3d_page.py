@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,3 +56,16 @@ def test_script_reads_real_history_endpoint_and_never_invents_data(client):
 def test_history_endpoint_the_view_depends_on_is_registered(client):
     paths = app.openapi()["paths"]
     assert "/api/market/public-history" in paths and "/api/market/symbols" in paths
+
+
+def test_intelligence_visuals_are_canvas_2d_only():
+    root = Path(__file__).resolve().parents[1]
+    scenes = (root / "app" / "static" / "scenes.js").read_text()
+    template = (root / "app" / "templates" / "intelligence_centre.html").read_text()
+    assert "getContext('2d')" in scenes
+    assert "function providerMap(" in scenes
+    assert "ETIScenes.providerMap(" in template
+    assert "THREE.WebGLRenderer" not in scenes
+    assert "getContext('webgl')" not in scenes
+    assert "three.min.js" not in template.lower()
+    assert "WebGLRenderer" not in template
