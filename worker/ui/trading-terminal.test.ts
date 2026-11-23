@@ -7,7 +7,7 @@ test("terminal is served as a self-contained responsive workspace", () => {
   assert.match(TRADING_TERMINAL_HTML, /Professional Trading Terminal/);
   assert.match(TRADING_TERMINAL_HTML, /\/bitget-client\.js/);
   assert.match(TRADING_TERMINAL_CSS, /@media\(max-width:650px\)/);
-  assert.match(TRADING_TERMINAL_JS, /ETIBitget\.marketData/);
+  assert.match(TRADING_TERMINAL_JS, /\/api\/market\/klines/);
 });
 
 test("terminal keeps order placement inside the existing guarded execution flow", () => {
@@ -183,20 +183,15 @@ test("terminal exposes Production UTA V3 JSON/SBE and private-feed controls",()=
 });
 
 
-test("terminal uses a compact responsive chart and exposes CCXT multi-exchange futures", () => {
+test("terminal uses the ETI unified exchange gateway for all supported venues and chart consumers", () => {
   assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{width:100%!important;height:440px!important;min-height:440px!important;max-height:none!important\}/);
-  assert.match(TRADING_TERMINAL_CSS, /@media\(max-width:760px\)\{\.tt-shell\{padding-left:10px;padding-right:10px\}\.tt-chart-card\{width:100%!important;min-height:420px!important\}\.tt-chart\{height:340px!important/);
-  assert.match(TRADING_TERMINAL_HTML, /ccxt@4\.5\.26\/dist\/ccxt\.browser\.js/);
-  for (const venue of ["bitget", "bybit", "binance", "okx", "kucoin", "gateio", "kraken", "coinbase"]) {
-    assert.match(TRADING_TERMINAL_HTML, new RegExp('value="' + venue + '"'));
-  }
-  assert.match(TRADING_TERMINAL_HTML, /value="futures">Perpetual futures/);
-  assert.match(TRADING_TERMINAL_JS, /function ccxtClient\(/);
-  assert.match(TRADING_TERMINAL_JS, /function ccxtSymbol\(/);
-  assert.match(TRADING_TERMINAL_JS, /fetchCcxtMarket\(/);
-  assert.match(TRADING_TERMINAL_JS, /fetchCcxtCandles\(/);
-  assert.match(TRADING_TERMINAL_JS, /enableRateLimit:true/);
-  assert.match(TRADING_TERMINAL_JS, /S\.venue==="bitget"/);
+  assert.match(TRADING_TERMINAL_CSS, /@media\(max-width:760px\).*?\.tt-chart\{height:340px!important/s);
+  assert.doesNotMatch(TRADING_TERMINAL_HTML, /ccxt@|jsdelivr\.net\/npm\/ccxt/);
+  for (const venue of ["bitget", "bybit", "binance", "okx"]) assert.match(TRADING_TERMINAL_HTML, new RegExp('value="' + venue + '"'));
+  for (const endpoint of ["klines", "ticker", "trades", "depth"]) assert.match(TRADING_TERMINAL_JS, new RegExp('/api/market/' + endpoint));
+  assert.match(TRADING_TERMINAL_JS, /function setVenueOptions\(/);
+  assert.match(TRADING_TERMINAL_JS, /ETI Exchange Gateway/);
+  assert.match(TRADING_TERMINAL_JS, /loadMultiCharts/);
 });
 
 
