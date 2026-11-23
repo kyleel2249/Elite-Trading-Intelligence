@@ -1,4 +1,4 @@
-import { getMarketData, providerOrder, INTERVALS, INTERVAL_SECONDS, type Kline, type MarketEnv } from "./market.ts";
+import { bitgetAwareFetch, getMarketData, providerOrder, INTERVALS, INTERVAL_SECONDS, type Kline, type MarketEnv } from "./market.ts";
 import { runModules, attributionFor, stanceCounts, statEdge, edgeAttribution, kellySizing, type AttributionEntry, type Regime, type StatEdge, type PositionSizing } from "./strategies.ts";
 
 export interface SignalEnv extends MarketEnv {}
