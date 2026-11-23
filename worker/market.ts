@@ -502,11 +502,11 @@ async function runDiagnostics(env: MarketEnv, symbol: string, interval: string, 
   const order: ProviderId[] = ["bybit", "binance", "okx", "bitget", "bitget_mix"];
   const intervalSec = INTERVAL_SECONDS[interval] || 60;
   const providers = await Promise.all((["binance", "binance_usdm", "bybit", "okx", "bitget", "bitget_mix"] as ProviderId[]).map(async (id) => {
-    const params: Params = id === "bybit"
-      ? { symbol, interval, limit: 5, market: "spot", category: "spot" }
-      : id === "bitget_mix"
-        ? { symbol, interval, limit: 5, market: "futures", category: "USDT-FUTURES" }
-        : { symbol, interval, limit: 5, market: "spot", category: "SPOT" };
+    const params: Params = id === "bybit" ? { symbol, interval, limit: 5, market: "spot", category: "spot" }
+      : id === "bitget_mix" || id === "binance_usdm" ? { symbol, interval, limit: 5, market: "futures", category: id === "bitget_mix" ? "USDT-FUTURES" : "linear" }
+      : id === "okx" ? { symbol, interval, limit: 5, market: "spot", category: "spot" }
+      : id === "binance" ? { symbol, interval, limit: 5, market: "spot", category: "spot" }
+      : { symbol, interval, limit: 5, market: "spot", category: "SPOT" };
     const spec = PROVIDERS[id];
     let req: UpstreamRequest;
     try { req = spec.request("klines", params); } catch (e) {
@@ -892,6 +892,10 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       const jobs = want === "all" ? (["spot", "futures"] as MarketKind[]) : [want === "margin" ? "spot" : want as MarketKind];
       const settled = await Promise.allSettled(jobs.map(m => listBinanceSymbols(m)));
       settled.forEach((r, i) => { const market = jobs[i]; if (r.status === "fulfilled") { const eligible = want === "margin" ? [] : r.value.rows; rows.push(...eligible.map(x => ({ ...x, v: "binance" as const }))); sources[market] = { host: r.value.host.replace("https://", ""), count: eligible.length, fetchedAt: new Date(r.value.fetchedAt).toISOString(), cached: r.value.cached, stale: r.value.stale }; } else warnings.push({ market, venue: "binance", error: "unavailable" }); });
+    } else if (venueQ === "okx") {
+      const jobs = want === "all" ? [{ type: "SPOT", market: "spot" as MarketKind }, { type: "SWAP", market: "futures" as MarketKind }] : [{ type: want === "futures" ? "SWAP" : "SPOT", market: (want === "futures" ? "futures" : "spot") as MarketKind }];
+      const settled = await Promise.allSettled(jobs.map(async job => { const response = await fetch("https://www.okx.com/api/v5/public/instruments?instType=" + job.type, { headers: { accept: "application/json", "user-agent": UA }, signal: AbortSignal.timeout(12000) }); if (!response.ok) throw new Error("okx_http_" + response.status); const payload: any = await response.json(); if (payload.code !== "0" || !Array.isArray(payload.data)) throw new Error("okx_invalid_catalogue"); const mapped: SymbolRow[] = payload.data.filter((x: any) => x.state === "live" && x.baseCcy && x.quoteCcy && (job.type === "SPOT" || String(x.instId).endsWith("-SWAP"))).map((x: any) => ({ s: String(x.instId).replace(/-/g, "").replace(/SWAP$/, ""), b: String(x.baseCcy), q: String(x.quoteCcy), m: job.market, c: "crypto", v: "okx" as Venue })); return { job, mapped }; }));
+      settled.forEach((result, index) => { if (result.status === "fulfilled") { rows.push(...result.value.mapped); sources[result.value.job.type] = { host: "www.okx.com", count: result.value.mapped.length, cached: false, stale: false }; } else warnings.push({ market: jobs[index].market, venue: "okx", error: "unavailable" }); });
     } else if (venueQ === "bybit") {
       const jobs = want === "all" ? [{ m: "spot" as MarketKind, c: "spot" as const }, { m: "futures" as MarketKind, c: "linear" as const }, { m: "futures" as MarketKind, c: "inverse" as const }]
         : want === "margin" ? [{ m: "spot" as MarketKind, c: "spot" as const }]
@@ -947,7 +951,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
       }
     }
     if (!rows.length) return jsonResp({ error: "symbols_unavailable", detail: venueQ + " did not return the requested instrument list.", warnings }, 502);
-    const categories = venueQ === "binance" ? (want === "all" ? ["spot", "futures"] : [want]) : venueQ === "bybit" ? (want === "margin" ? ["spot-margin"] : want === "all" ? ["spot", "linear", "inverse"] : [categoryQ || (want === "futures" ? "linear" : "spot")])
+    const categories = venueQ === "binance" ? (want === "all" ? ["spot", "futures"] : [want]) : venueQ === "okx" ? (want === "all" ? ["spot", "swap"] : [want === "futures" ? "swap" : want]) : venueQ === "bybit" ? (want === "margin" ? ["spot-margin"] : want === "all" ? ["spot", "linear", "inverse"] : [categoryQ || (want === "futures" ? "linear" : "spot")])
       : venueQ === "okx" ? (want === "all" ? ["spot", "swap"] : [want === "futures" ? "swap" : want]) : want === "margin" ? ["MARGIN"] : want === "all" ? ["SPOT", ...BITGET_PRODUCT_TYPES] : want === "spot" ? ["SPOT"] : categoryQ ? [categoryQ] : BITGET_PRODUCT_TYPES;
     return jsonResp({ provider: venueQ, venues: [venueQ], markets: want === "all" ? ["spot", "futures"] : [want], categories,
       refreshEverySeconds: 60, refreshIntervalsSeconds: { [venueQ]: 60 }, count: rows.length, generatedAt: new Date().toISOString(), sources, warnings,
