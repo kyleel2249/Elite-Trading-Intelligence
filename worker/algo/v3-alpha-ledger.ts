@@ -72,7 +72,7 @@ async function trackOpen(db:DB,env:MarketEnv,now:number){
  for(const [key,items] of [...grouped].slice(0,20)){
   const [symbol,interval]=key.split("|");
   let candles:Kline[];
-  try{candles=(await getMarketData("klines",{symbol,interval,limit:1000},providerOrder(env))).data as Kline[];}catch{continue}
+  try{candles=(await getMarketData("klines",{symbol,interval,limit:1000},providerOrder(env),bitgetAwareFetch)).data as Kline[];}catch{continue}
   for(const r of items){
    const o=advanceSignalLifecycle(r,candles),previous=String(r.lifecycle_status??"confirmed");
    if(o.status===previous&&!o.outcome)continue;
@@ -129,7 +129,7 @@ export async function handleV3AlphaLedger(req:Request,env:Env):Promise<Response>
   const required=TIMEFRAMES.filter(tf=>DEFAULT_WEIGHTS[strategy][tf]>0||tf===tfFor(strategy));
   const candles:Partial<Record<Timeframe,Kline[]>>={},fetchFailures:Record<string,string>={};
   for(const tf of required){
-   try{candles[tf]=(await getMarketData("klines",{symbol,interval:tf,limit:300,market:selected.market,category:selected.category},providerOrder(env,selected.provider))).data as Kline[];}
+   try{candles[tf]=(await getMarketData("klines",{symbol,interval:tf,limit:300,market:selected.market,category:selected.category},providerOrder(env,selected.provider),bitgetAwareFetch)).data as Kline[];}
    catch(e){fetchFailures[tf]=e instanceof Error?e.message:"market_data_unavailable";}
   }
   const snapshot=evaluateSynchronizedV3Alpha({symbol,strategy,candles,now:nowMs()});
