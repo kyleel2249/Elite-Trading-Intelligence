@@ -15,7 +15,7 @@ const validSymbol=(s:string)=>/^[A-Z0-9]{5,20}$/.test(s);
 const strategies:Strategy[]=["scalp","intraday","swing","position"];
 const tfFor=(s:Strategy)=>EXECUTION_TF[s];
 function selectedMarket(url:URL){
- const venue=url.searchParams.get("venue")||"bybit",market=(url.searchParams.get("market")==="futures"?"futures":"spot");
+ const venue=url.searchParams.get("venue")||"bybit",market:"spot"|"futures"=url.searchParams.get("market")==="futures"?"futures":"spot";
  const category=url.searchParams.get("category")||(market==="futures"?(venue==="bitget"?"USDT-FUTURES":venue==="okx"?"swap":"linear"):(venue==="bitget"?"SPOT":"spot"));
  const validVenue=["bybit","bitget","binance","okx"].includes(venue);
  const validCategory=venue==="bybit"?(market==="spot"?category==="spot":["linear","inverse"].includes(category))
