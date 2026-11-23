@@ -198,3 +198,11 @@ test("terminal uses a compact responsive chart and exposes CCXT multi-exchange f
   assert.match(TRADING_TERMINAL_JS, /enableRateLimit:true/);
   assert.match(TRADING_TERMINAL_JS, /S\.venue==="bitget"/);
 });
+
+
+test("trading chart container matches the 24H forecast panel's full-width compact footprint", () => {
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-work\{grid-template-columns:minmax\(0,1fr\)!important;align-items:start!important\}/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart-card\{grid-column:1\/-1!important;width:100%!important;max-width:none!important;min-width:0!important;height:auto!important;min-height:0!important/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart\{width:100%!important;height:150px!important;min-height:140px!important;max-height:170px!important\}/);
+  assert.match(TRADING_TERMINAL_CSS, /\.tt-chart-card>\.tt-card-head\{padding:12px 14px 0!important\}/);
+});
