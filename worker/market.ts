@@ -967,6 +967,7 @@ export async function handleMarket(request: Request, env: MarketEnv): Promise<Re
   if (!["spot", "futures", "margin"].includes(marketInput)) return jsonResp({ error: "invalid_market", allowed: ["spot", "futures", "margin"] }, 400);
   const venueParam = url.searchParams.get("venue") || "bybit";
   if (!(["binance", "bybit", "bitget", "okx"] as string[]).includes(venueParam)) return jsonResp({ error: "unsupported_venue", allowed: ["binance", "bybit", "bitget", "okx"] }, 400);
+  if (marketInput === "margin" && (venueParam === "binance" || venueParam === "okx")) return jsonResp({ error: "unsupported_market", detail: venueParam + " does not expose a supported margin market through this gateway." }, 400);
   const marketParam: MarketKind = marketInput === "futures" ? "futures" : "spot";
   const categoryParam = url.searchParams.get("category") || (venueParam === "bitget" ? (marketInput === "margin" ? "MARGIN" : marketInput === "futures" ? bitgetProductFor(symbol) : "SPOT") : venueParam === "bybit" ? (marketInput === "futures" ? "linear" : "spot") : marketInput === "futures" ? "swap" : "spot");
   if (venueParam === "bybit" && (!(["spot", "linear", "inverse"] as string[]).includes(categoryParam) || (marketParam === "spot" && categoryParam !== "spot") || (marketParam === "futures" && categoryParam === "spot")))
