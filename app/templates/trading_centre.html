@@ -16,7 +16,7 @@
       <div class="tabs" id="tf-tabs" role="group" aria-label="Timeframe" style="align-self:end"></div>
       <div class="tabs" id="ov-tabs" role="group" aria-label="Indicator overlays" style="align-self:end"></div>
     </div>
-    <div id="chart" class="chart" role="img" aria-label="Candlestick chart"></div>
+    <div class="market-chart-controls" aria-label="Market chart sizing controls"><label>Candle width <output id="mk-candle-width-value">8px</output><input id="mk-candle-width" type="range" min="1" max="300" value="8"></label><label>Candle / price height <output id="mk-candle-height-value">260px</output><input id="mk-candle-height" type="range" min="100" max="300" value="260"></label><label>Volume height <output id="mk-volume-height-value">90px</output><input id="mk-volume-height" type="range" min="20" max="300" value="90"></label><button class="btn sm" id="mk-zoom-in" type="button">Zoom +</button><button class="btn sm" id="mk-zoom-out" type="button">Zoom −</button><button class="btn sm" id="mk-chart-fit" type="button">Fit chart</button></div><div id="chart" class="chart" role="img" aria-label="Interactive candlestick chart"></div>
     <div id="mk-note"></div>
     <div class="row" id="readout" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px"></div>
   </section>
@@ -55,7 +55,7 @@
 <script>
 (function () {
   const { $, el, fmt, api, toast, busy, modal, confirmTyped, prompt, kv, table, autoTable, unavailable, gauge, area, enc } = ETI;
-  const S = { range: '1M', cat: 'crypto', symbol: 'BTCUSDT', tf: '1h', d: null, sig: null, flags: {}, live: null, ov: { sma20: true, sma50: true, bb: false, vwap: false } };
+  const S = { range: '1M', cat: 'crypto', symbol: 'BTCUSDT', tf: '1h', d: null, sig: null, flags: {}, live: null, chartCandleWidth: 8, chartCandleHeight: 260, chartVolumeHeight: 90, ov: { sma20: true, sma50: true, bb: false, vwap: false } };
   const CATS = {
     crypto: { label: 'Crypto', provider: 'binance', symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'] },
     stocks: { label: 'Stocks', provider: 'alpaca', symbols: ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY'], needs: 'alpaca_configured', why: 'Alpaca market data is not configured (ALPACA_API_KEY / ALPACA_SECRET_KEY).' },
@@ -176,16 +176,41 @@
   function macd(v) { if (v.length < 35) return null; const e12 = ema(v, 12), e26 = ema(v, 26), line = v.map((_, i) => e12[i] - e26[i]), sig = ema(line, 9), i = v.length - 1; return { line: line[i], signal: sig[i], hist: line[i] - sig[i] }; }
   function vwap(c) { let pv = 0, vv = 0; return c.map((x) => { pv += ((x.high + x.low + x.close) / 3) * x.vol; vv += x.vol; return vv ? pv / vv : null; }); }
 
+  function applyMarketChartSizing() {
+    const box = $('#chart'); if (!box) return;
+    box.style.height = (S.chartCandleHeight + S.chartVolumeHeight + 70) + 'px';
+    if (chart) {
+      chart.applyOptions({ width: box.clientWidth, height: box.clientHeight });
+      chart.timeScale().applyOptions({ barSpacing: S.chartCandleWidth, minBarSpacing: 1 });
+      chart.priceScale('vol').applyOptions({ scaleMargins: { top: 1 - S.chartVolumeHeight / (S.chartCandleHeight + S.chartVolumeHeight + 40), bottom: .02 } });
+    }
+  }
+  function bindMarketChartControls() {
+    [['mk-candle-width','chartCandleWidth',1,300],['mk-candle-height','chartCandleHeight',100,300],['mk-volume-height','chartVolumeHeight',20,300]].forEach(([id,key,min,max]) => {
+      const input = $('#'+id), output = $('#'+id+'-value'); if (!input || input.dataset.bound) return;
+      input.dataset.bound = '1';
+      const sync = () => { S[key] = Math.max(min,Math.min(max,Number(input.value)||min)); if(output) output.textContent = S[key]+'px'; applyMarketChartSizing(); };
+      input.addEventListener('input',sync); sync();
+    });
+    $('#mk-zoom-in')?.addEventListener('click',()=>chart?.timeScale().zoomIn());
+    $('#mk-zoom-out')?.addEventListener('click',()=>chart?.timeScale().zoomOut());
+    $('#mk-chart-fit')?.addEventListener('click',()=>{
+      S.chartCandleWidth=8;S.chartCandleHeight=260;S.chartVolumeHeight=90;
+      [['mk-candle-width',8],['mk-candle-height',260],['mk-volume-height',90]].forEach(([id,v])=>{const n=$('#'+id);if(n)n.value=v;});
+      ['mk-candle-width','mk-candle-height','mk-volume-height'].forEach(id=>$('#'+id)?.dispatchEvent(new Event('input')));
+      chart?.timeScale().fitContent();
+    });
+  }
   function ensureChart() {
     if (chart || !window.LightweightCharts) return !!chart;
     const box = $('#chart');
-    chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { type: 'solid', color: '#000000' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.10)' }, horzLines: { color: 'rgba(0,168,255,.10)' } }, crosshair: { mode: 0 }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
+    chart = LightweightCharts.createChart(box, { width: box.clientWidth, height: box.clientHeight, handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: true } }, handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true }, layout: { background: { type: 'solid', color: '#000000' }, textColor: '#9cb2cc' }, grid: { vertLines: { color: 'rgba(0,168,255,.10)' }, horzLines: { color: 'rgba(0,168,255,.10)' } }, crosshair: { mode: 0 }, rightPriceScale: { borderColor: 'rgba(0,168,255,.25)' }, timeScale: { borderColor: 'rgba(0,168,255,.25)', timeVisible: true } });
     cs = chart.addCandlestickSeries({ upColor: '#00e676', downColor: '#ff304f', borderVisible: false, wickUpColor: '#00e676', wickDownColor: '#ff304f' });
     vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol', color: 'rgba(0,168,255,.35)' });
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     const mk = (color, dash) => chart.addLineSeries({ color, lineWidth: 1, lineStyle: dash ? 2 : 0, priceLineVisible: false, lastValueVisible: false, visible: false });
     lines.sma20 = mk('#00a8ff'); lines.sma50 = mk('#ffc247'); lines.bbU = mk('#a970ff', true); lines.bbL = mk('#a970ff', true); lines.vwap = mk('#00e5ff');
-    new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight })).observe(box);
+    new ResizeObserver(() => applyMarketChartSizing()).observe(box); bindMarketChartControls(); applyMarketChartSizing();
     return true;
   }
   function applyOverlays() { lines.sma20?.applyOptions({ visible: S.ov.sma20 }); lines.sma50?.applyOptions({ visible: S.ov.sma50 }); lines.bbU?.applyOptions({ visible: S.ov.bb }); lines.bbL?.applyOptions({ visible: S.ov.bb }); lines.vwap?.applyOptions({ visible: S.ov.vwap }); }
